@@ -478,7 +478,10 @@ mod tests {
 
     #[test]
     fn truncate_read_output_caps_lines_and_bytes() {
-        let many_lines = (0..2_100).map(|i| format!("line-{i}")).collect::<Vec<_>>().join("\n");
+        let many_lines = (0..2_100)
+            .map(|i| format!("line-{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let truncated = truncate_read_output(&many_lines);
         assert_eq!(truncated.lines().count(), 2_000);
 

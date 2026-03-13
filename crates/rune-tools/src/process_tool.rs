@@ -250,9 +250,8 @@ fn parse_hex_byte(token: &str) -> Result<u8, ToolError> {
         .strip_prefix("0x")
         .or_else(|| trimmed.strip_prefix("0X"))
         .unwrap_or(trimmed);
-    u8::from_str_radix(normalized, 16).map_err(|_| {
-        ToolError::InvalidArgument(format!("invalid send-keys hex byte: {token}"))
-    })
+    u8::from_str_radix(normalized, 16)
+        .map_err(|_| ToolError::InvalidArgument(format!("invalid send-keys hex byte: {token}")))
 }
 
 /// Tool executor that handles `process` tool calls.
@@ -376,9 +375,8 @@ impl ProcessToolExecutor {
                 })
             }
             "paste" => {
-                let pid = process_id.ok_or_else(|| {
-                    ToolError::InvalidArgument("paste requires sessionId".into())
-                })?;
+                let pid = process_id
+                    .ok_or_else(|| ToolError::InvalidArgument("paste requires sessionId".into()))?;
                 let text = call
                     .arguments
                     .get("text")

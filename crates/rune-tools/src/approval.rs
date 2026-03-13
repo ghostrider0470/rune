@@ -172,7 +172,10 @@ mod tests {
         let exec_call = make_call("exec", serde_json::json!({"command": "ls"}));
         assert_eq!(classify_risk("exec", &exec_call), RiskLevel::Medium);
 
-        let elevated_call = make_call("exec", serde_json::json!({"command": "rm -rf /", "elevated": true}));
+        let elevated_call = make_call(
+            "exec",
+            serde_json::json!({"command": "rm -rf /", "elevated": true}),
+        );
         assert_eq!(classify_risk("exec", &elevated_call), RiskLevel::High);
 
         let gw_status = make_call("gateway", serde_json::json!({"action": "status"}));

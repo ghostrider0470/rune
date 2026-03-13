@@ -21,11 +21,26 @@ async fn init_workspace(path: &std::path::Path) -> Result<()> {
     tokio::fs::create_dir_all(path.join("memory")).await?;
 
     let files: &[(&str, &str)] = &[
-        ("AGENTS.md", "# AGENTS.md - Your Workspace\n\nAdd your agent configuration here.\n"),
-        ("SOUL.md", "# SOUL.md - Who You Are\n\nDefine your assistant's personality and style.\n"),
-        ("USER.md", "# USER.md - About Your Human\n\n- **Name:**\n- **Timezone:**\n- **Notes:**\n"),
-        ("TOOLS.md", "# TOOLS.md - Local Notes\n\nAdd environment-specific tool notes here.\n"),
-        ("MEMORY.md", "# MEMORY.md\n\nLong-term memory — curated and updated over time.\n"),
+        (
+            "AGENTS.md",
+            "# AGENTS.md - Your Workspace\n\nAdd your agent configuration here.\n",
+        ),
+        (
+            "SOUL.md",
+            "# SOUL.md - Who You Are\n\nDefine your assistant's personality and style.\n",
+        ),
+        (
+            "USER.md",
+            "# USER.md - About Your Human\n\n- **Name:**\n- **Timezone:**\n- **Notes:**\n",
+        ),
+        (
+            "TOOLS.md",
+            "# TOOLS.md - Local Notes\n\nAdd environment-specific tool notes here.\n",
+        ),
+        (
+            "MEMORY.md",
+            "# MEMORY.md\n\nLong-term memory — curated and updated over time.\n",
+        ),
     ];
 
     let mut created = 0;
@@ -40,7 +55,10 @@ async fn init_workspace(path: &std::path::Path) -> Result<()> {
         }
     }
 
-    println!("\nWorkspace initialized at {} ({created} files created)", path.display());
+    println!(
+        "\nWorkspace initialized at {} ({created} files created)",
+        path.display()
+    );
     Ok(())
 }
 
@@ -84,10 +102,14 @@ pub async fn run(cli: Cli) -> Result<()> {
             let ws_root = dirs::home_dir()
                 .map(|h| h.join(".rune/workspace"))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let results = doctor::run_all_checks(None, Some(&cli.gateway_url), Some(&ws_root)).await;
+            let results =
+                doctor::run_all_checks(None, Some(&cli.gateway_url), Some(&ws_root)).await;
             let output = doctor::format_results(&results);
             if matches!(format, OutputFormat::Json) {
-                println!("{}", serde_json::to_string_pretty(&results).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&results).unwrap_or_default()
+                );
             } else {
                 print!("{output}");
             }

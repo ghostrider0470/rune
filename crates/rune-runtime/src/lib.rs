@@ -7,6 +7,7 @@ mod error;
 mod executor;
 pub mod memory;
 pub mod scheduler;
+pub mod session_loop;
 mod usage;
 pub mod workspace;
 

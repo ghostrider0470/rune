@@ -13,8 +13,9 @@ use rune_store::StoreError;
 use rune_store::models::*;
 use rune_store::repos::*;
 use rune_tools::{
+    ToolCall, ToolDefinition as RtToolDefinition, ToolError, ToolExecutor, ToolRegistry,
+    ToolResult,
     approval::{ApprovalRequest, RiskLevel},
-    ToolCall, ToolDefinition as RtToolDefinition, ToolError, ToolExecutor, ToolRegistry, ToolResult,
 };
 
 use crate::compaction::NoOpCompaction;
@@ -669,10 +670,12 @@ async fn approval_required_is_attributed_in_transcript() {
     let tool_result_payload = &transcript[4].payload;
     assert_eq!(tool_result_payload["kind"], "tool_result");
     assert_eq!(tool_result_payload["is_error"], true);
-    assert!(tool_result_payload["output"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("Approval required for tool exec"));
+    assert!(
+        tool_result_payload["output"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Approval required for tool exec")
+    );
 }
 
 #[tokio::test]

@@ -66,34 +66,27 @@ impl EmbeddedPg {
 
         let mut pg = PostgreSQL::new(settings);
 
-        pg.setup().await.map_err(|e| {
-            StoreError::Database(format!("embedded PG setup failed: {e}"))
-        })?;
+        pg.setup()
+            .await
+            .map_err(|e| StoreError::Database(format!("embedded PG setup failed: {e}")))?;
 
-        pg.start().await.map_err(|e| {
-            StoreError::Database(format!("embedded PG start failed: {e}"))
-        })?;
+        pg.start()
+            .await
+            .map_err(|e| StoreError::Database(format!("embedded PG start failed: {e}")))?;
 
         // Create the application database if it doesn't exist yet.
         let db_exists = pg.database_exists(database_name).await.unwrap_or(false);
         if !db_exists {
             info!(database = database_name, "creating application database");
             pg.create_database(database_name).await.map_err(|e| {
-                StoreError::Database(format!(
-                    "failed to create database '{database_name}': {e}"
-                ))
+                StoreError::Database(format!("failed to create database '{database_name}': {e}"))
             })?;
         }
 
-        let database_url = format!(
-            "postgresql://{username}:{password}@{host}:{port}/{database_name}"
-        );
+        let database_url =
+            format!("postgresql://{username}:{password}@{host}:{port}/{database_name}");
 
-        info!(
-            port,
-            database = database_name,
-            "embedded PostgreSQL ready"
-        );
+        info!(port, database = database_name, "embedded PostgreSQL ready");
 
         Ok(Self { pg, database_url })
     }
@@ -108,8 +101,9 @@ impl EmbeddedPg {
     /// Also called automatically on drop, but explicit stop lets you
     /// handle errors.
     pub async fn stop(&self) -> Result<(), StoreError> {
-        self.pg.stop().await.map_err(|e| {
-            StoreError::Database(format!("embedded PG stop failed: {e}"))
-        })
+        self.pg
+            .stop()
+            .await
+            .map_err(|e| StoreError::Database(format!("embedded PG stop failed: {e}")))
     }
 }

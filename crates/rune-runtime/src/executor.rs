@@ -4,7 +4,9 @@ use chrono::Utc;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
-use rune_core::{ApprovalDecision, ApprovalId, NormalizedMessage, ToolCallId, TranscriptItem, TurnId, TurnStatus};
+use rune_core::{
+    ApprovalDecision, ApprovalId, NormalizedMessage, ToolCallId, TranscriptItem, TurnId, TurnStatus,
+};
 use rune_models::{CompletionRequest, ModelProvider};
 use rune_store::models::{NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
 use rune_store::repos::{TranscriptRepo, TurnRepo};
@@ -51,6 +53,11 @@ impl TurnExecutor {
             compaction,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
         }
+    }
+
+    /// Access the transcript repo (used by session loop to read replies).
+    pub fn transcript_repo(&self) -> &Arc<dyn TranscriptRepo> {
+        &self.transcript_repo
     }
 
     /// Override the max tool iterations limit.
@@ -144,9 +151,9 @@ impl TurnExecutor {
             // Load transcript and assemble prompt
             let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;
 
-            let messages = self
-                .context_assembler
-                .assemble(&transcript_rows, self.compaction.as_ref(), None);
+            let messages =
+                self.context_assembler
+                    .assemble(&transcript_rows, self.compaction.as_ref(), None);
 
             // Build tool definitions for the request
             let tool_defs: Vec<rune_models::ToolDefinition> = self

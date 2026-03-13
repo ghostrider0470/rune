@@ -22,7 +22,9 @@ impl WorkspaceContext {
             return String::new();
         }
 
-        let mut out = String::from("# Project Context\n\nThe following project context files have been loaded:\n");
+        let mut out = String::from(
+            "# Project Context\n\nThe following project context files have been loaded:\n",
+        );
 
         for (name, content) in &self.files {
             out.push_str(&format!("\n## {name}\n{content}\n"));
@@ -103,9 +105,15 @@ mod tests {
 
     async fn setup() -> TempDir {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::write(tmp.path().join("AGENTS.md"), "# Agents\nBe helpful.").await.unwrap();
-        tokio::fs::write(tmp.path().join("SOUL.md"), "# Soul\nBe genuine.").await.unwrap();
-        tokio::fs::write(tmp.path().join("USER.md"), "# User\nName: Hamza").await.unwrap();
+        tokio::fs::write(tmp.path().join("AGENTS.md"), "# Agents\nBe helpful.")
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("SOUL.md"), "# Soul\nBe genuine.")
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("USER.md"), "# User\nName: Hamza")
+            .await
+            .unwrap();
         tmp
     }
 
@@ -145,7 +153,9 @@ mod tests {
     #[tokio::test]
     async fn custom_files() {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::write(tmp.path().join("CUSTOM.md"), "custom content").await.unwrap();
+        tokio::fs::write(tmp.path().join("CUSTOM.md"), "custom content")
+            .await
+            .unwrap();
 
         let loader = WorkspaceLoader::with_files(tmp.path(), vec!["CUSTOM.md".into()]);
         let ctx = loader.load().await;

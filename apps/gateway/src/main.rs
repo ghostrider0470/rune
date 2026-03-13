@@ -25,12 +25,12 @@ use rune_runtime::{
 };
 use rune_store::EmbeddedPg;
 use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
+use rune_tools::approval::{ApprovalRequest, RiskLevel};
 use rune_tools::exec_tool::ExecToolExecutor;
 use rune_tools::file_tools::FileToolExecutor;
 use rune_tools::memory_tool::MemoryToolExecutor;
 use rune_tools::process_tool::{ProcessManager, ProcessToolExecutor};
 use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolRegistry};
-use rune_tools::approval::{ApprovalRequest, RiskLevel};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -130,15 +130,12 @@ async fn build_services(config: AppConfig) -> Result<(Services, Option<EmbeddedP
     }
 
     // Build connection pool.
-    let pool = rune_store::pool::create_pool(
-        &database_url,
-        config.database.max_connections as usize,
-    )?;
+    let pool =
+        rune_store::pool::create_pool(&database_url, config.database.max_connections as usize)?;
 
     let session_repo: Arc<dyn SessionRepo> =
         Arc::new(rune_store::pg::PgSessionRepo::new(pool.clone()));
-    let turn_repo: Arc<dyn TurnRepo> =
-        Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone()));
+    let turn_repo: Arc<dyn TurnRepo> = Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone()));
     let transcript_repo: Arc<dyn TranscriptRepo> =
         Arc::new(rune_store::pg::PgTranscriptRepo::new(pool));
 
@@ -148,7 +145,12 @@ async fn build_services(config: AppConfig) -> Result<(Services, Option<EmbeddedP
     let scheduler = Arc::new(Scheduler::new());
 
     let process_manager = ProcessManager::new();
-    let workspace_root = config.paths.config_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let workspace_root = config
+        .paths
+        .config_dir
+        .parent()
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
     let mut registry = ToolRegistry::new();
     register_real_tool_definitions(&mut registry);
     let tool_count = registry.len();
@@ -222,8 +224,9 @@ struct AppToolExecutor {
 impl ToolExecutor for AppToolExecutor {
     async fn execute(&self, call: ToolCall) -> Result<rune_tools::ToolResult, ToolError> {
         match call.tool_name.as_str() {
-            "read" | "read_file" | "write" | "write_file" | "edit" | "edit_file"
-            | "list_files" => self.file.execute(call).await,
+            "read" | "read_file" | "write" | "write_file" | "edit" | "edit_file" | "list_files" => {
+                self.file.execute(call).await
+            }
             "exec" | "execute_command" => {
                 let details = serde_json::to_string_pretty(&ApprovalRequest {
                     tool_name: call.tool_name.clone(),
@@ -244,7 +247,10 @@ impl ToolExecutor for AppToolExecutor {
                     },
                 }).unwrap_or_else(|_| call.arguments.to_string());
 
-                let approval_bypassed = matches!(call.arguments.get("ask").and_then(|v| v.as_str()), Some("off"));
+                let approval_bypassed = matches!(
+                    call.arguments.get("ask").and_then(|v| v.as_str()),
+                    Some("off")
+                );
                 if !approval_bypassed {
                     return Err(ToolError::ApprovalRequired {
                         tool: call.tool_name.clone(),

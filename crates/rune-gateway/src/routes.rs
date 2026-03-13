@@ -481,7 +481,12 @@ pub async fn create_session(
 
     let row = state
         .session_engine
-        .create_session_full(kind, body.workspace_root, body.requester_session_id, body.channel_ref)
+        .create_session_full(
+            kind,
+            body.workspace_root,
+            body.requester_session_id,
+            body.channel_ref,
+        )
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 

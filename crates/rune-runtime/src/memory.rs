@@ -142,7 +142,8 @@ mod tests {
 
         let today = Utc::now().date_naive();
         tokio::fs::write(
-            tmp.path().join(format!("memory/{}.md", today.format("%Y-%m-%d"))),
+            tmp.path()
+                .join(format!("memory/{}.md", today.format("%Y-%m-%d"))),
             "# Today\n\n- Working on Rune\n",
         )
         .await
@@ -168,7 +169,10 @@ mod tests {
         let loader = MemoryLoader::new(tmp.path());
 
         let ctx = loader.load(SessionKind::Channel).await;
-        assert!(ctx.long_term.is_none(), "MEMORY.md should be excluded for channel sessions");
+        assert!(
+            ctx.long_term.is_none(),
+            "MEMORY.md should be excluded for channel sessions"
+        );
         assert!(ctx.today.is_some());
     }
 

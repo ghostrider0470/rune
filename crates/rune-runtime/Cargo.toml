@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+rune-channels = { path = "../rune-channels" }
 rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
 rune-store = { path = "../rune-store" }

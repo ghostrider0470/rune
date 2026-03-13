@@ -146,7 +146,10 @@ impl ModelProvider for AnthropicProvider {
             }
         }
 
-        let model_name = request.model.as_deref().unwrap_or("claude-sonnet-4-20250514");
+        let model_name = request
+            .model
+            .as_deref()
+            .unwrap_or("claude-sonnet-4-20250514");
         let body = AnthropicRequest {
             model: model_name,
             max_tokens: request.max_tokens.unwrap_or(4096),
@@ -209,7 +212,11 @@ impl ModelProvider for AnthropicProvider {
         });
 
         Ok(CompletionResponse {
-            content: if content.is_empty() { None } else { Some(content) },
+            content: if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            },
             usage: Usage {
                 prompt_tokens: api_resp.usage.input_tokens,
                 completion_tokens: api_resp.usage.output_tokens,

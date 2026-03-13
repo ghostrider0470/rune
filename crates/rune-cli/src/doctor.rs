@@ -157,7 +157,9 @@ fn check_single_path(name: &str, path: &Path, required_persistent: bool) -> Chec
             category,
             status: CheckStatus::Warn,
             message: format!("{} is present but appears read-only", path.display()),
-            hint: Some("Doctor expects writable persistent mounts for parity-critical paths".into()),
+            hint: Some(
+                "Doctor expects writable persistent mounts for parity-critical paths".into(),
+            ),
         };
     }
 
@@ -282,7 +284,9 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
             name: "models.providers".into(),
             category: "models".into(),
             status: CheckStatus::Warn,
-            message: "No model providers configured; runtime will be limited to fallback/demo behavior".into(),
+            message:
+                "No model providers configured; runtime will be limited to fallback/demo behavior"
+                    .into(),
             hint: Some("Configure Azure OpenAI/OpenAI-compatible providers for parity work".into()),
         });
         return results;
@@ -292,7 +296,10 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
         name: "models.providers".into(),
         category: "models".into(),
         status: CheckStatus::Pass,
-        message: format!("{} model provider(s) configured", config.models.providers.len()),
+        message: format!(
+            "{} model provider(s) configured",
+            config.models.providers.len()
+        ),
         hint: None,
     });
 
@@ -325,7 +332,10 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
         });
 
         let looks_azure = provider.endpoint.contains("openai.azure.com")
-            || provider.provider_name.to_ascii_lowercase().contains("azure");
+            || provider
+                .provider_name
+                .to_ascii_lowercase()
+                .contains("azure");
         results.push(CheckResult {
             name: format!("{prefix}.auth"),
             category: "models".into(),
@@ -344,7 +354,10 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
             hint: if api_key_state.is_some() {
                 None
             } else {
-                Some("Configure an API-key env var reference and ensure it is populated at runtime".into())
+                Some(
+                    "Configure an API-key env var reference and ensure it is populated at runtime"
+                        .into(),
+                )
             },
         });
 
@@ -657,11 +670,22 @@ pub fn format_results(results: &[CheckResult]) -> String {
         }
     }
 
-    let pass = results.iter().filter(|r| r.status == CheckStatus::Pass).count();
-    let warn = results.iter().filter(|r| r.status == CheckStatus::Warn).count();
-    let fail = results.iter().filter(|r| r.status == CheckStatus::Fail).count();
+    let pass = results
+        .iter()
+        .filter(|r| r.status == CheckStatus::Pass)
+        .count();
+    let warn = results
+        .iter()
+        .filter(|r| r.status == CheckStatus::Warn)
+        .count();
+    let fail = results
+        .iter()
+        .filter(|r| r.status == CheckStatus::Fail)
+        .count();
 
-    out.push_str(&format!("\n{pass} passed, {warn} warnings, {fail} failed\n"));
+    out.push_str(&format!(
+        "\n{pass} passed, {warn} warnings, {fail} failed\n"
+    ));
     out
 }
 
@@ -704,23 +728,45 @@ mod tests {
     #[tokio::test]
     async fn workspace_full_passes() {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::write(tmp.path().join("AGENTS.md"), "# Agents").await.unwrap();
-        tokio::fs::write(tmp.path().join("SOUL.md"), "# Soul").await.unwrap();
-        tokio::fs::write(tmp.path().join("USER.md"), "# User").await.unwrap();
-        tokio::fs::write(tmp.path().join("MEMORY.md"), "# Memory").await.unwrap();
-        tokio::fs::create_dir_all(tmp.path().join("memory")).await.unwrap();
+        tokio::fs::write(tmp.path().join("AGENTS.md"), "# Agents")
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("SOUL.md"), "# Soul")
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("USER.md"), "# User")
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("MEMORY.md"), "# Memory")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory"))
+            .await
+            .unwrap();
 
         let results = check_workspace(tmp.path()).await;
-        let pass_count = results.iter().filter(|r| r.status == CheckStatus::Pass).count();
-        assert!(pass_count >= 4, "expected at least 4 passes, got {pass_count}");
+        let pass_count = results
+            .iter()
+            .filter(|r| r.status == CheckStatus::Pass)
+            .count();
+        assert!(
+            pass_count >= 4,
+            "expected at least 4 passes, got {pass_count}"
+        );
     }
 
     #[tokio::test]
     async fn workspace_empty_warns() {
         let tmp = TempDir::new().unwrap();
         let results = check_workspace(tmp.path()).await;
-        let warn_count = results.iter().filter(|r| r.status == CheckStatus::Warn).count();
-        assert!(warn_count >= 3, "expected warnings for missing required files");
+        let warn_count = results
+            .iter()
+            .filter(|r| r.status == CheckStatus::Warn)
+            .count();
+        assert!(
+            warn_count >= 3,
+            "expected warnings for missing required files"
+        );
     }
 
     #[tokio::test]
@@ -729,14 +775,17 @@ mod tests {
         create_path_layout(tmp.path()).await;
 
         let mut config = test_config_with_paths(tmp.path());
-        config.models.providers.push(rune_config::ModelProviderConfig {
-            provider_name: "azure-openai".into(),
-            endpoint: "https://example.openai.azure.com".into(),
-            deployment_name: Some("gpt-4.1".into()),
-            api_version: Some("2024-10-21".into()),
-            api_key_env: Some("RUNE_TEST_AZURE_KEY".into()),
-            model_alias: Some("default".into()),
-        });
+        config
+            .models
+            .providers
+            .push(rune_config::ModelProviderConfig {
+                provider_name: "azure-openai".into(),
+                endpoint: "https://example.openai.azure.com".into(),
+                deployment_name: Some("gpt-4.1".into()),
+                api_version: Some("2024-10-21".into()),
+                api_key_env: Some("RUNE_TEST_AZURE_KEY".into()),
+                model_alias: Some("default".into()),
+            });
         config.channels.enabled.push("telegram".into());
         config.channels.telegram_token = Some("123:abc".into());
 
@@ -754,10 +803,26 @@ mod tests {
         ]
         .concat();
 
-        assert!(results.iter().any(|r| r.name == "models.providers" && r.status == CheckStatus::Pass));
-        assert!(results.iter().any(|r| r.name == "channels.telegram.auth" && r.status == CheckStatus::Pass));
-        assert!(results.iter().any(|r| r.name == "memory.dir" && r.status == CheckStatus::Pass));
-        assert!(results.iter().any(|r| r.name == "scheduler.storage" && r.status == CheckStatus::Pass));
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "models.providers" && r.status == CheckStatus::Pass)
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "channels.telegram.auth" && r.status == CheckStatus::Pass)
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "memory.dir" && r.status == CheckStatus::Pass)
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "scheduler.storage" && r.status == CheckStatus::Pass)
+        );
 
         unsafe {
             std::env::remove_var("RUNE_TEST_AZURE_KEY");
@@ -769,22 +834,33 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         create_path_layout(tmp.path()).await;
         let mut config = test_config_with_paths(tmp.path());
-        config.models.providers.push(rune_config::ModelProviderConfig {
-            provider_name: "azure-openai".into(),
-            endpoint: "https://example.openai.azure.com".into(),
-            deployment_name: None,
-            api_version: None,
-            api_key_env: Some("RUNE_TEST_MISSING_KEY".into()),
-            model_alias: None,
-        });
+        config
+            .models
+            .providers
+            .push(rune_config::ModelProviderConfig {
+                provider_name: "azure-openai".into(),
+                endpoint: "https://example.openai.azure.com".into(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("RUNE_TEST_MISSING_KEY".into()),
+                model_alias: None,
+            });
 
         unsafe {
             std::env::remove_var("RUNE_TEST_MISSING_KEY");
         }
 
         let results = check_models_config(&config).await;
-        assert!(results.iter().any(|r| r.name.ends_with(".auth") && r.status == CheckStatus::Warn));
-        assert!(results.iter().any(|r| r.name.ends_with(".azure") && r.status == CheckStatus::Warn));
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name.ends_with(".auth") && r.status == CheckStatus::Warn)
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name.ends_with(".azure") && r.status == CheckStatus::Warn)
+        );
     }
 
     #[test]
