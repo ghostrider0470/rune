@@ -5,6 +5,7 @@ mod error;
 pub mod exec_tool;
 mod executor;
 pub mod file_tools;
+pub mod memory_tool;
 mod registry;
 mod stubs;
 
