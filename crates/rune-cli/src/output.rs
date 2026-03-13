@@ -327,6 +327,33 @@ pub struct ModelStatusResponse {
     pub providers: Vec<ModelProviderDetail>,
 }
 
+/// Result of updating local model routing configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSetResponse {
+    pub changed: bool,
+    pub config_path: String,
+    pub previous_model: Option<String>,
+    pub default_model: String,
+    pub note: String,
+}
+
+impl fmt::Display for ModelSetResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Default model set to {} in {}",
+            self.default_model, self.config_path
+        )?;
+        if let Some(previous) = &self.previous_model {
+            write!(f, "\nPrevious: {previous}")?;
+        }
+        if !self.note.is_empty() {
+            write!(f, "\nNote: {}", self.note)?;
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for ModelStatusResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Models")?;
@@ -728,6 +755,20 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Default model:       gpt-5.4"));
         assert!(out.contains("credential_source: api_key"));
+    }
+
+    #[test]
+    fn render_model_set_response() {
+        let response = ModelSetResponse {
+            changed: true,
+            config_path: "config.toml".into(),
+            previous_model: Some("oc-01-openai/gpt-5.4".into()),
+            default_model: "hamza-eastus2/grok-4-fast-reasoning".into(),
+            note: "Local config updated; restart gateway to apply new default sessions.".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Default model set to hamza-eastus2/grok-4-fast-reasoning"));
+        assert!(out.contains("Previous: oc-01-openai/gpt-5.4"));
     }
 
     #[test]

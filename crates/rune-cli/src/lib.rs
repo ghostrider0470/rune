@@ -17,12 +17,97 @@ use cli::{
 use client::{GatewayClient, show_config, validate_config};
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelStatusResponse,
-    ModelListResponse, ModelProviderDetail, ModelStatusResponse, OutputFormat, render,
+    ModelListResponse, ModelProviderDetail, ModelSetResponse, ModelStatusResponse, OutputFormat,
+    render,
 };
 
 /// Initialize a workspace directory with default files.
 fn load_config() -> rune_config::AppConfig {
     rune_config::AppConfig::load(None::<&std::path::Path>).unwrap_or_default()
+}
+
+fn discover_local_config_path() -> std::path::PathBuf {
+    std::env::var_os("RUNE_CONFIG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"))
+}
+
+fn set_default_model(model_ref: &str) -> Result<ModelSetResponse> {
+    let config_path = discover_local_config_path();
+    let config = rune_config::AppConfig::load(Some(&config_path)).with_context(|| {
+        format!(
+            "failed to load config from {} before updating default model",
+            config_path.display()
+        )
+    })?;
+
+    let resolved = config.models.resolve_model(model_ref).with_context(|| {
+        format!("model `{model_ref}` is not resolvable from configured inventory")
+    })?;
+    let canonical = resolved.canonical_model_id();
+    let inventory = config.models.model_ids();
+    if !inventory.is_empty() && !inventory.iter().any(|entry| entry == &canonical) {
+        anyhow::bail!("model `{model_ref}` is not present in configured inventory");
+    }
+    let previous = config.models.default_model.clone();
+
+    let original = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+
+    let mut lines = original
+        .lines()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>();
+
+    let mut in_models = false;
+    let mut replaced = false;
+    let mut insert_at = None;
+
+    for (idx, line) in lines.iter_mut().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section = trimmed.trim_matches(&['[', ']'][..]);
+            if section == "models" {
+                in_models = true;
+                insert_at = Some(idx + 1);
+                continue;
+            }
+            if in_models {
+                insert_at = Some(idx);
+                break;
+            }
+        }
+
+        if in_models && trimmed.starts_with("default_model") {
+            *line = format!("default_model = \"{canonical}\"");
+            replaced = true;
+            break;
+        }
+    }
+
+    if !replaced {
+        if let Some(idx) = insert_at {
+            lines.insert(idx, format!("default_model = \"{canonical}\""));
+        } else {
+            if !lines.is_empty() && !lines.last().is_some_and(|line| line.is_empty()) {
+                lines.push(String::new());
+            }
+            lines.push("[models]".to_string());
+            lines.push(format!("default_model = \"{canonical}\""));
+        }
+    }
+
+    let updated = format!("{}\n", lines.join("\n"));
+    std::fs::write(&config_path, updated)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+
+    Ok(ModelSetResponse {
+        changed: previous.as_deref() != Some(canonical.as_str()),
+        config_path: config_path.display().to_string(),
+        previous_model: previous,
+        default_model: canonical,
+        note: "Local config updated; restart gateway to apply new default sessions.".to_string(),
+    })
 }
 
 fn channel_details() -> Vec<ChannelDetail> {
@@ -359,6 +444,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                     };
                     println!("{}", render(&status, format));
                 }
+                ModelsAction::Set { model } => {
+                    let result = set_default_model(&model)?;
+                    println!("{}", render(&result, format));
+                }
             }
         }
         Command::Memory { action } => match action {
@@ -392,4 +481,111 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{LazyLock, Mutex};
+    use tempfile::TempDir;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn set_default_model_updates_existing_models_section() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[models]
+default_model = "oc-01-openai/gpt-5.4"
+
+[[models.providers]]
+name = "oc-01-openai"
+kind = "openai"
+base_url = "https://example.test/openai/v1"
+api_key = "test-key"
+models = ["gpt-5.4", "gpt-5.4-pro"]
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let response = set_default_model("oc-01-openai/gpt-5.4-pro").unwrap();
+        assert!(response.changed);
+        assert_eq!(response.previous_model.as_deref(), Some("oc-01-openai/gpt-5.4"));
+        assert_eq!(response.default_model, "oc-01-openai/gpt-5.4-pro");
+
+        let updated = std::fs::read_to_string(&config_path).unwrap();
+        assert!(updated.contains("default_model = \"oc-01-openai/gpt-5.4-pro\""));
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn set_default_model_accepts_unambiguous_short_name() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[[models.providers]]
+name = "hamza-eastus2"
+kind = "openai"
+base_url = "https://example.test/openai/v1"
+api_key = "test-key"
+models = ["grok-4-fast-reasoning"]
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let response = set_default_model("grok-4-fast-reasoning").unwrap();
+        assert_eq!(response.default_model, "hamza-eastus2/grok-4-fast-reasoning");
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn set_default_model_rejects_unknown_inventory_entry() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[[models.providers]]
+name = "oc-01-openai"
+kind = "openai"
+base_url = "https://example.test/openai/v1"
+api_key = "test-key"
+models = ["gpt-5.4"]
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let err = set_default_model("not-a-real-model").unwrap_err();
+        assert!(
+            err.to_string().contains("not present in configured inventory")
+                || err.to_string().contains("not resolvable")
+        );
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
+    }
 }

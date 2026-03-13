@@ -76,7 +76,7 @@ Interpretation rules:
 ### Models CLI
 - [x] `models list`
 - [x] `models status`
-- [ ] `models set`
+- [x] `models set`
 - [ ] `models set-image`
 - [ ] `models aliases`
 - [ ] `models auth`

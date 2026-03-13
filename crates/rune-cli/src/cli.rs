@@ -187,6 +187,11 @@ pub enum ModelsAction {
     List,
     /// Show resolved default-model and credential readiness status.
     Status,
+    /// Set the default model in local config.toml after validating against configured inventory.
+    Set {
+        /// Model id to set. Accepts canonical `provider/model` ids and unambiguous short names.
+        model: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -331,6 +336,23 @@ mod tests {
                 action: ModelsAction::Status
             }
         ));
+    }
+
+    #[test]
+    fn parse_models_set() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "models",
+            "set",
+            "hamza-eastus2/gpt-5.4",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Models {
+                action: ModelsAction::Set { model },
+            } => assert_eq!(model, "hamza-eastus2/gpt-5.4"),
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]
