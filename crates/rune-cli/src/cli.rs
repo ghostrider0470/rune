@@ -30,6 +30,11 @@ pub enum Command {
         #[command(subcommand)]
         action: GatewayAction,
     },
+    /// Manage the daemon lifecycle using OpenClaw-style naming.
+    Daemon {
+        #[command(subcommand)]
+        action: GatewayAction,
+    },
     /// Query gateway status.
     Status,
     /// Run a health check against the gateway.
@@ -279,6 +284,28 @@ mod tests {
             cli.command,
             Command::Gateway {
                 action: GatewayAction::Health
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_daemon_status() {
+        let cli = Cli::try_parse_from(["rune", "daemon", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Daemon {
+                action: GatewayAction::Status
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_daemon_restart() {
+        let cli = Cli::try_parse_from(["rune", "daemon", "restart"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Daemon {
+                action: GatewayAction::Restart
             }
         ));
     }

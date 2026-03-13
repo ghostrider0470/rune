@@ -36,12 +36,12 @@ Interpretation rules:
 - [x] `openclaw gateway health`
 - [ ] `openclaw gateway probe`
 - [ ] `openclaw gateway discover`
-- [ ] `openclaw daemon status`
+- [x] `openclaw daemon status`
 - [ ] `openclaw daemon install`
 - [ ] `openclaw daemon uninstall`
-- [ ] `openclaw daemon start`
-- [ ] `openclaw daemon stop`
-- [ ] `openclaw daemon restart`
+- [x] `openclaw daemon start`
+- [x] `openclaw daemon stop`
+- [x] `openclaw daemon restart`
 - [x] `openclaw doctor`
 - [x] `openclaw health`
 - [x] `openclaw status`

@@ -281,7 +281,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     let client = GatewayClient::new(&cli.gateway_url);
 
     match cli.command {
-        Command::Gateway { action } => match action {
+        Command::Gateway { action } | Command::Daemon { action } => match action {
             GatewayAction::Status => {
                 let result = client.gateway_status().await?;
                 println!("{}", render(&result, format));
