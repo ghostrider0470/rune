@@ -21,6 +21,10 @@ pub enum StoreError {
     #[error("migration error: {0}")]
     Migration(String),
 
+    /// Embedded PostgreSQL bootstrap or lifecycle error.
+    #[error("embedded postgres error: {0}")]
+    EmbeddedPg(String),
+
     /// Serialization/deserialization of stored JSON payloads.
     #[error("serialization error: {0}")]
     Serialization(String),

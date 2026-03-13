@@ -118,7 +118,7 @@ Holds persistence adapters and repository interfaces for:
 - plugin metadata
 - memory metadata
 
-Start with SQLite-backed implementations.
+Start with PostgreSQL-backed implementations via Diesel + `diesel-async`, with embedded PostgreSQL fallback for zero-config local development when no external connection string is configured.
 
 Important rule: `rune-store` should not own business workflows; it should own persistence concerns.
 

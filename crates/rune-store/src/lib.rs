@@ -1,5 +1,6 @@
 #![doc = "Persistence layer for Rune: Diesel repos, migrations, and embedded PostgreSQL fallback."]
 
+pub mod embedded;
 pub mod error;
 pub mod models;
 pub mod pg;
@@ -7,4 +8,5 @@ pub mod pool;
 pub mod repos;
 pub mod schema;
 
+pub use embedded::EmbeddedPg;
 pub use error::StoreError;

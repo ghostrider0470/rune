@@ -155,10 +155,9 @@ These should be durable by default.
 ### `/data/db`
 Use for:
 
-- SQLite database files
-- embedded search metadata
-- migration state
-- operational metadata in local-first mode
+- embedded PostgreSQL data directory when no external `DATABASE_URL` is configured
+- migration state and local database runtime artifacts
+- embedded search/index metadata that intentionally lives alongside the local operational database
 
 Persistence requirement: **yes**
 
@@ -370,7 +369,7 @@ Best when:
 
 Caution:
 
-SQLite on network-backed storage can be acceptable for conservative single-instance deployments, but it should be validated carefully. If concurrency, HA, or storage semantics become concerning, move operational metadata to Azure Database for PostgreSQL.
+Embedded PostgreSQL on network-backed storage still needs validation for latency, fsync behavior, backup posture, and restart semantics. If concurrency, HA, or managed-service operability become the priority, move operational metadata to Azure Database for PostgreSQL.
 
 ---
 
@@ -473,7 +472,7 @@ Good targets:
 
 Use caution for:
 
-- `/data/db` if SQLite is write-heavy
+- `/data/db` if embedded PostgreSQL is expected to absorb heavy write bursts over high-latency network storage
 - high-churn search index paths
 
 ## 11.2 Azure Blob Storage
@@ -501,7 +500,7 @@ Best target for:
 - channel/provider state
 - operational indexes/pointers
 
-Use this when hosted reliability and managed DB posture matter more than full SQLite symmetry.
+Use this when hosted reliability and managed DB posture matter more than full embedded-database symmetry with zero-config local mode.
 
 ## 11.4 Cosmos DB and Azure SQL
 
@@ -532,7 +531,7 @@ Container deployment must make backup/restore straightforward.
 ### Local-first Docker
 
 - filesystem snapshot of mounted paths
-- SQLite-consistent backup/export for `/data/db`
+- PostgreSQL-consistent backup/export for `/data/db` when running embedded PostgreSQL
 - optional archive bundles into `/data/backups`
 
 ### Hosted Azure with mounted filesystem
@@ -574,12 +573,12 @@ This is fine for parity-first OpenClaw-style operation.
 
 ## 14.2 When to move beyond embedded storage
 
-Move from SQLite to managed PostgreSQL when:
+Move from embedded PostgreSQL to managed PostgreSQL when:
 
 - multi-instance runtime becomes necessary
 - scheduler/job state coordination becomes multi-node
 - write concurrency grows materially
-- backup/restore/HA requirements exceed comfort with embedded DB
+- backup/restore/HA requirements exceed comfort with embedded local DB management
 
 Do **not** switch storage just because the runtime is on Azure.
 
@@ -648,7 +647,7 @@ This should be the default documentation path for parity-first deployment.
 Use:
 
 - single runtime container
-- Azure Database for PostgreSQL if managed DB is desired, otherwise SQLite on persistent volume for conservative single-instance mode
+- Azure Database for PostgreSQL if managed DB is desired, otherwise embedded PostgreSQL on persistent volume for conservative single-instance mode
 - Azure Files for mount-style durable paths
 - Azure Blob Storage for archives/backups/media offload
 - Key Vault for managed secrets
