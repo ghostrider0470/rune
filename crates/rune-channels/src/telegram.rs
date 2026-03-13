@@ -302,10 +302,7 @@ impl ChannelAdapter for TelegramAdapter {
                 reply_to,
                 content,
                 ..
-            } => {
-                self.send_message(&chat_id, &content, Some(&reply_to))
-                    .await
-            }
+            } => self.send_message(&chat_id, &content, Some(&reply_to)).await,
             OutboundAction::Edit {
                 chat_id,
                 message_id,
@@ -382,12 +379,7 @@ impl ChannelAdapter for TelegramAdapter {
                     "action": "typing",
                 });
 
-                let _ = self
-                    .client
-                    .post(&url)
-                    .json(&params)
-                    .send()
-                    .await;
+                let _ = self.client.post(&url).json(&params).send().await;
 
                 Ok(DeliveryReceipt {
                     provider_message_id: String::new(),

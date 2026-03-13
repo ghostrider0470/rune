@@ -66,6 +66,21 @@ pub enum Command {
         #[command(subcommand)]
         action: MemoryAction,
     },
+    /// Emit system events and inspect heartbeat presence.
+    System {
+        #[command(subcommand)]
+        action: SystemAction,
+    },
+    /// Manage tool approval policies (allow-always / deny).
+    Approvals {
+        #[command(subcommand)]
+        action: ApprovalsAction,
+    },
+    /// Manage reminders (one-shot scheduled messages).
+    Reminders {
+        #[command(subcommand)]
+        action: RemindersAction,
+    },
     /// Initialize a new workspace with default files.
     Init {
         /// Directory to initialize (defaults to current directory).
@@ -241,9 +256,112 @@ pub enum MemoryAction {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum SystemAction {
+    /// Queue a system event/wake for the runtime.
+    Event {
+        /// Text to inject.
+        #[arg(long)]
+        text: String,
+        /// Delivery timing mode (`next-heartbeat` or `now`).
+        #[arg(long, default_value = "next-heartbeat")]
+        mode: String,
+        /// Optional number of recent context messages to attach.
+        #[arg(long = "context-messages")]
+        context_messages: Option<u64>,
+    },
+    /// Show whether HEARTBEAT.md exists and when it last changed.
+    Heartbeat {
+        #[command(subcommand)]
+        action: SystemHeartbeatAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SystemHeartbeatAction {
+    /// Show HEARTBEAT.md presence and metadata.
+    Presence,
+    /// Show HEARTBEAT.md last-modified metadata.
+    Last,
+    /// Enable the heartbeat runner.
+    Enable,
+    /// Disable the heartbeat runner.
+    Disable,
+    /// Show heartbeat runner status (enabled, interval, counters).
+    Status,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RemindersAction {
+    /// Add a one-shot reminder.
+    Add {
+        /// Reminder message text.
+        message: String,
+        /// Duration from now (e.g. "30m", "2h", "1d").
+        #[arg(long = "in")]
+        duration: String,
+        /// Target session or channel (defaults to "main").
+        #[arg(long, default_value = "main")]
+        target: String,
+    },
+    /// List pending reminders.
+    List {
+        /// Include delivered reminders.
+        #[arg(long)]
+        include_delivered: bool,
+    },
+    /// Cancel a reminder by ID.
+    Cancel {
+        /// Reminder ID to cancel.
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ApprovalsAction {
+    /// List all tool approval policies.
+    List,
+    /// Get the approval policy for a specific tool.
+    Get {
+        /// Tool name to query.
+        tool: String,
+    },
+    /// Set the approval policy for a tool.
+    Set {
+        /// Tool name.
+        tool: String,
+        /// Decision: allow-always or deny.
+        decision: String,
+    },
+    /// Clear (remove) the approval policy for a tool.
+    Clear {
+        /// Tool name.
+        tool: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ConfigAction {
     /// Dump the resolved configuration.
     Show,
+    /// Show the config file path that will be used for local mutations.
+    File,
+    /// Read a specific config key from the local TOML file.
+    Get {
+        /// Dot-separated config key path.
+        key: String,
+    },
+    /// Set a specific config key in the local TOML file.
+    Set {
+        /// Dot-separated config key path.
+        key: String,
+        /// TOML value to write (for example `true`, `8787`, `"text"`, `["a"]`).
+        value: String,
+    },
+    /// Remove a specific config key from the local TOML file.
+    Unset {
+        /// Dot-separated config key path.
+        key: String,
+    },
     /// Validate the configuration file.
     Validate {
         /// Path to config file (default: rune.toml).
@@ -428,13 +546,7 @@ mod tests {
 
     #[test]
     fn parse_models_set() {
-        let cli = Cli::try_parse_from([
-            "rune",
-            "models",
-            "set",
-            "hamza-eastus2/gpt-5.4",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["rune", "models", "set", "hamza-eastus2/gpt-5.4"]).unwrap();
         match cli.command {
             Command::Models {
                 action: ModelsAction::Set { model },
@@ -499,6 +611,63 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_system_event() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "system",
+            "event",
+            "--text",
+            "Reminder: check Rune",
+            "--mode",
+            "now",
+            "--context-messages",
+            "2",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::System {
+                action:
+                    SystemAction::Event {
+                        text,
+                        mode,
+                        context_messages,
+                    },
+            } => {
+                assert_eq!(text, "Reminder: check Rune");
+                assert_eq!(mode, "now");
+                assert_eq!(context_messages, Some(2));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_system_heartbeat_presence() {
+        let cli = Cli::try_parse_from(["rune", "system", "heartbeat", "presence"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::System {
+                action: SystemAction::Heartbeat {
+                    action: SystemHeartbeatAction::Presence
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_system_heartbeat_last() {
+        let cli = Cli::try_parse_from(["rune", "system", "heartbeat", "last"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::System {
+                action: SystemAction::Heartbeat {
+                    action: SystemHeartbeatAction::Last
+                }
+            }
+        ));
     }
 
     #[test]
@@ -712,6 +881,53 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_file() {
+        let cli = Cli::try_parse_from(["rune", "config", "file"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Config {
+                action: ConfigAction::File
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_config_get() {
+        let cli = Cli::try_parse_from(["rune", "config", "get", "gateway.port"]).unwrap();
+        match &cli.command {
+            Command::Config {
+                action: ConfigAction::Get { key },
+            } => assert_eq!(key, "gateway.port"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_config_set() {
+        let cli = Cli::try_parse_from(["rune", "config", "set", "gateway.port", "9090"]).unwrap();
+        match &cli.command {
+            Command::Config {
+                action: ConfigAction::Set { key, value },
+            } => {
+                assert_eq!(key, "gateway.port");
+                assert_eq!(value, "9090");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_config_unset() {
+        let cli = Cli::try_parse_from(["rune", "config", "unset", "gateway.auth_token"]).unwrap();
+        match &cli.command {
+            Command::Config {
+                action: ConfigAction::Unset { key },
+            } => assert_eq!(key, "gateway.auth_token"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_config_validate() {
         let cli = Cli::try_parse_from(["rune", "config", "validate"]).unwrap();
         assert!(matches!(
@@ -729,6 +945,162 @@ mod tests {
             Command::Config {
                 action: ConfigAction::Validate { file },
             } => assert_eq!(file.as_deref(), Some("custom.toml")),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_approvals_list() {
+        let cli = Cli::try_parse_from(["rune", "approvals", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Approvals {
+                action: ApprovalsAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_approvals_get() {
+        let cli = Cli::try_parse_from(["rune", "approvals", "get", "exec"]).unwrap();
+        match cli.command {
+            Command::Approvals {
+                action: ApprovalsAction::Get { tool },
+            } => assert_eq!(tool, "exec"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_approvals_set() {
+        let cli =
+            Cli::try_parse_from(["rune", "approvals", "set", "exec", "allow-always"]).unwrap();
+        match cli.command {
+            Command::Approvals {
+                action: ApprovalsAction::Set { tool, decision },
+            } => {
+                assert_eq!(tool, "exec");
+                assert_eq!(decision, "allow-always");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_approvals_clear() {
+        let cli = Cli::try_parse_from(["rune", "approvals", "clear", "exec"]).unwrap();
+        match cli.command {
+            Command::Approvals {
+                action: ApprovalsAction::Clear { tool },
+            } => assert_eq!(tool, "exec"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_system_heartbeat_enable() {
+        let cli = Cli::try_parse_from(["rune", "system", "heartbeat", "enable"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::System {
+                action: SystemAction::Heartbeat {
+                    action: SystemHeartbeatAction::Enable
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_system_heartbeat_disable() {
+        let cli = Cli::try_parse_from(["rune", "system", "heartbeat", "disable"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::System {
+                action: SystemAction::Heartbeat {
+                    action: SystemHeartbeatAction::Disable
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_system_heartbeat_status() {
+        let cli = Cli::try_parse_from(["rune", "system", "heartbeat", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::System {
+                action: SystemAction::Heartbeat {
+                    action: SystemHeartbeatAction::Status
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_reminders_add() {
+        let cli = Cli::try_parse_from([
+            "rune", "reminders", "add", "Buy milk", "--in", "30m",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Reminders {
+                action: RemindersAction::Add { message, duration, target },
+            } => {
+                assert_eq!(message, "Buy milk");
+                assert_eq!(duration, "30m");
+                assert_eq!(target, "main");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_reminders_add_with_target() {
+        let cli = Cli::try_parse_from([
+            "rune", "reminders", "add", "Check PR", "--in", "2h", "--target", "discord",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Reminders {
+                action: RemindersAction::Add { message, duration, target },
+            } => {
+                assert_eq!(message, "Check PR");
+                assert_eq!(duration, "2h");
+                assert_eq!(target, "discord");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_reminders_list() {
+        let cli = Cli::try_parse_from(["rune", "reminders", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Reminders {
+                action: RemindersAction::List { include_delivered: false }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_reminders_list_include_delivered() {
+        let cli = Cli::try_parse_from(["rune", "reminders", "list", "--include-delivered"]).unwrap();
+        match cli.command {
+            Command::Reminders {
+                action: RemindersAction::List { include_delivered },
+            } => assert!(include_delivered),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_reminders_cancel() {
+        let cli = Cli::try_parse_from(["rune", "reminders", "cancel", "abc-123"]).unwrap();
+        match cli.command {
+            Command::Reminders {
+                action: RemindersAction::Cancel { id },
+            } => assert_eq!(id, "abc-123"),
             other => panic!("unexpected command: {other:?}"),
         }
     }

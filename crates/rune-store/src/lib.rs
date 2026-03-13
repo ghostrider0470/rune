@@ -10,3 +10,5 @@ pub mod schema;
 
 pub use embedded::EmbeddedPg;
 pub use error::StoreError;
+pub use pg::PgToolApprovalPolicyRepo;
+pub use repos::ToolApprovalPolicy;

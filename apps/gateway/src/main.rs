@@ -23,7 +23,8 @@ use rune_models::{
     RoutedModelProvider, Usage,
 };
 use rune_runtime::{
-    ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor, scheduler::Scheduler,
+    ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor,
+    heartbeat::HeartbeatRunner, scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
 use rune_store::EmbeddedPg;
@@ -154,7 +155,9 @@ async fn build_services(
         Arc::new(rune_store::pg::PgSessionRepo::new(pool.clone()));
     let turn_repo: Arc<dyn TurnRepo> = Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone()));
     let transcript_repo: Arc<dyn TranscriptRepo> =
-        Arc::new(rune_store::pg::PgTranscriptRepo::new(pool));
+        Arc::new(rune_store::pg::PgTranscriptRepo::new(pool.clone()));
+    let tool_approval_repo: Arc<dyn rune_store::repos::ToolApprovalPolicyRepo> =
+        Arc::new(rune_store::pg::PgToolApprovalPolicyRepo::new(pool));
 
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
@@ -168,6 +171,9 @@ async fn build_services(
         .parent()
         .unwrap_or(Path::new("."))
         .to_path_buf();
+
+    let heartbeat = Arc::new(HeartbeatRunner::new(workspace_root.clone()));
+    let reminder_store = Arc::new(ReminderStore::new());
     let mut registry = ToolRegistry::new();
     register_real_tool_definitions(&mut registry);
     let tool_count = registry.len();
@@ -243,6 +249,9 @@ async fn build_services(
         transcript_repo,
         model_provider,
         scheduler,
+        heartbeat,
+        reminder_store,
+        tool_approval_repo,
         tool_count,
     };
 

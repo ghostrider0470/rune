@@ -74,7 +74,11 @@ rune sessions show <id>        # Session details
 rune cron list                 # Scheduled jobs
 rune cron add --text "..." --at "2026-01-01T09:00:00"
 
-rune config show               # Current config
+rune config show               # Current effective config
+rune config file               # Local config file path used for mutations
+rune config get gateway.port   # Read a TOML key from local config
+rune config set gateway.port 9090
+rune config unset gateway.auth_token
 rune config validate           # Validate config file
 ```
 

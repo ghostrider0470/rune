@@ -95,12 +95,13 @@ Interpretation rules:
 ### Security / access CLI
 - [ ] `approvals` command family
 - [ ] `config` no-subcommand setup-wizard behavior or explicit compatibility decision
-- [ ] `config get|set|unset|file|validate`
+- [x] `config get|set|unset|file|validate`
 - [ ] `configure` command family
 - [ ] `secrets reload|audit|configure|apply`
 - [ ] `security audit`
-- [ ] `system event`
-- [ ] `system heartbeat last|enable|disable|presence`
+- [x] `system event`
+- [ ] `system heartbeat enable|disable`
+- [x] `system heartbeat last|presence`
 - [ ] `sandbox` command family
 - [ ] `logs` command family
 
@@ -153,7 +154,7 @@ Interpretation rules:
 - [x] structured error envelopes
 - [x] durable IDs returned by create/mutate flows
 
-Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs|wake`), `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|start|stop|restart`, with human and `--json` output modes. This is still not full parity, but it is now runnable instead of planning-only.
+Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs|wake`), `system event`, `system heartbeat last|presence`, `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|start|stop|restart`, with human and `--json` output modes. This is still not full parity, but it is now runnable instead of planning-only.
 
 ---
 

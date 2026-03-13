@@ -432,8 +432,7 @@ impl fmt::Display for ModelAliasDetail {
             "{} -> {}{} [{}] creds={}",
             self.alias,
             self.provider,
-            self
-                .target_model
+            self.target_model
                 .as_deref()
                 .map(|model| format!("/{model}"))
                 .unwrap_or_default(),
@@ -635,11 +634,113 @@ impl fmt::Display for ConfigValidationResult {
     }
 }
 
+/// Location of the local config file used for mutations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigFileResponse {
+    pub path: String,
+    pub exists: bool,
+}
+
+impl fmt::Display for ConfigFileResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Config file")?;
+        writeln!(f, "  Path:   {}", self.path)?;
+        write!(f, "  Exists: {}", self.exists)
+    }
+}
+
+/// Result of reading a config key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigGetResponse {
+    pub key: String,
+    pub found: bool,
+    pub value: Option<serde_json::Value>,
+    pub source_path: String,
+}
+
+impl fmt::Display for ConfigGetResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Config key: {}", self.key)?;
+        writeln!(f, "  File:   {}", self.source_path)?;
+        writeln!(f, "  Found:  {}", self.found)?;
+        if let Some(value) = &self.value {
+            write!(
+                f,
+                "  Value:  {}",
+                serde_json::to_string_pretty(value).unwrap_or_default()
+            )
+        } else {
+            write!(f, "  Value:  <unset>")
+        }
+    }
+}
+
+/// Result of mutating a config key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigMutationResponse {
+    pub key: String,
+    pub changed: bool,
+    pub action: String,
+    pub source_path: String,
+    pub value: Option<serde_json::Value>,
+    pub note: Option<String>,
+}
+
+impl fmt::Display for ConfigMutationResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Config {}", self.action)?;
+        writeln!(f, "  Key:     {}", self.key)?;
+        writeln!(f, "  File:    {}", self.source_path)?;
+        writeln!(f, "  Changed: {}", self.changed)?;
+        if let Some(value) = &self.value {
+            writeln!(
+                f,
+                "  Value:   {}",
+                serde_json::to_string_pretty(value).unwrap_or_default()
+            )?;
+        }
+        if let Some(note) = &self.note {
+            write!(f, "  Note:    {note}")?;
+        }
+        Ok(())
+    }
+}
+
 /// Simple action acknowledgment (gateway start/stop).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResult {
     pub success: bool,
     pub message: String,
+}
+
+/// HEARTBEAT.md presence/metadata response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatPresenceResponse {
+    pub workspace_root: String,
+    pub path: String,
+    pub present: bool,
+    pub modified_at: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub note: Option<String>,
+}
+
+impl fmt::Display for HeartbeatPresenceResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Heartbeat")?;
+        writeln!(f, "  Workspace: {}", self.workspace_root)?;
+        writeln!(f, "  Path:      {}", self.path)?;
+        writeln!(f, "  Present:   {}", self.present)?;
+        if let Some(modified_at) = &self.modified_at {
+            writeln!(f, "  Modified:  {modified_at}")?;
+        }
+        if let Some(size_bytes) = self.size_bytes {
+            writeln!(f, "  Size:      {size_bytes} bytes")?;
+        }
+        if let Some(note) = &self.note {
+            write!(f, "  Note:      {note}")?;
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for ActionResult {
@@ -867,6 +968,22 @@ mod tests {
         let out = render(&a, OutputFormat::Json);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["success"], true);
+    }
+
+    #[test]
+    fn render_heartbeat_presence() {
+        let response = HeartbeatPresenceResponse {
+            workspace_root: "/workspace".into(),
+            path: "/workspace/HEARTBEAT.md".into(),
+            present: true,
+            modified_at: Some("2026-03-13T19:00:00Z".into()),
+            size_bytes: Some(42),
+            note: Some("Scheduled sessions load this file at startup.".into()),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Heartbeat"));
+        assert!(out.contains("Present:   true"));
+        assert!(out.contains("Scheduled sessions load this file at startup."));
     }
 
     #[test]

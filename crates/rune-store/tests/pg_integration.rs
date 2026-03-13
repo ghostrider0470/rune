@@ -1,20 +1,54 @@
 //! Integration tests for PostgreSQL-backed repositories.
 //!
-//! These tests require a running PostgreSQL instance. Set `TEST_DATABASE_URL`
-//! and run: `cargo test -p rune-store -- --ignored`
+//! When `TEST_DATABASE_URL` is set the tests use that instance; otherwise an
+//! embedded PostgreSQL server is started automatically (first test pays the
+//! startup cost, subsequent tests reuse the same instance).
+//!
+//! Because the tests share a single database they **must** run sequentially:
+//! `cargo test -p rune-store -- --test-threads=1`
 
 use chrono::Utc;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use rune_store::StoreError;
+use rune_store::embedded::EmbeddedPg;
 use rune_store::models::*;
 use rune_store::pg::*;
 use rune_store::pool::{PgPool, create_pool, run_migrations};
 use rune_store::repos::*;
 
+use std::sync::OnceLock;
+use tokio::sync::OnceCell;
+
+/// Shared embedded PG handle kept alive for the entire test binary.
+/// Using `OnceLock<OnceCell<..>>` so we can do async init exactly once.
+/// A unique directory per test-run avoids stale cluster conflicts.
+static EMBEDDED: OnceLock<OnceCell<(EmbeddedPg, String)>> = OnceLock::new();
+
+async fn database_url() -> String {
+    if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
+        return url;
+    }
+
+    let cell = EMBEDDED.get_or_init(OnceCell::new);
+    let (_, url) = cell
+        .get_or_init(|| async {
+            let tmp = std::env::temp_dir()
+                .join(format!("rune-store-test-pg-{}", Uuid::now_v7()));
+            let epg = EmbeddedPg::start(&tmp, "rune_test")
+                .await
+                .expect("failed to start embedded PostgreSQL");
+            let url = epg.database_url().to_string();
+            (epg, url)
+        })
+        .await;
+
+    url.clone()
+}
+
 async fn setup() -> PgPool {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL must be set");
+    let url = database_url().await;
     run_migrations(&url).expect("migrations failed");
     let pool = create_pool(&url, 5).expect("pool creation failed");
 
@@ -33,7 +67,6 @@ async fn setup() -> PgPool {
 // ── Session tests ────────────────────────────────────────────────────
 
 #[tokio::test]
-#[ignore]
 async fn session_create_and_find() {
     let pool = setup().await;
     let repo = PgSessionRepo::new(pool);
@@ -66,7 +99,6 @@ async fn session_create_and_find() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn session_list_and_update_status() {
     let pool = setup().await;
     let repo = PgSessionRepo::new(pool);
@@ -104,7 +136,6 @@ async fn session_list_and_update_status() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn session_not_found() {
     let pool = setup().await;
     let repo = PgSessionRepo::new(pool);
@@ -116,7 +147,6 @@ async fn session_not_found() {
 // ── Turn tests ───────────────────────────────────────────────────────
 
 #[tokio::test]
-#[ignore]
 async fn turn_create_find_list_update() {
     let pool = setup().await;
     let session_repo = PgSessionRepo::new(pool.clone());
@@ -184,7 +214,6 @@ async fn turn_create_find_list_update() {
 // ── Transcript tests ─────────────────────────────────────────────────
 
 #[tokio::test]
-#[ignore]
 async fn transcript_append_and_list_ordered() {
     let pool = setup().await;
     let session_repo = PgSessionRepo::new(pool.clone());
@@ -244,7 +273,6 @@ async fn transcript_append_and_list_ordered() {
 // ── Job tests ────────────────────────────────────────────────────────
 
 #[tokio::test]
-#[ignore]
 async fn job_create_find_list_record_run() {
     let pool = setup().await;
     let repo = PgJobRepo::new(pool);
@@ -281,7 +309,6 @@ async fn job_create_find_list_record_run() {
 // ── Approval tests ───────────────────────────────────────────────────
 
 #[tokio::test]
-#[ignore]
 async fn approval_create_find_decide() {
     let pool = setup().await;
     let repo = PgApprovalRepo::new(pool);
@@ -316,7 +343,6 @@ async fn approval_create_find_decide() {
 // ── Tool execution tests ─────────────────────────────────────────────
 
 #[tokio::test]
-#[ignore]
 async fn tool_execution_create_find_complete() {
     let pool = setup().await;
     let session_repo = PgSessionRepo::new(pool.clone());
@@ -371,7 +397,6 @@ async fn tool_execution_create_find_complete() {
 // ── Duplicate ID conflict ────────────────────────────────────────────
 
 #[tokio::test]
-#[ignore]
 async fn duplicate_session_returns_conflict() {
     let pool = setup().await;
     let repo = PgSessionRepo::new(pool);

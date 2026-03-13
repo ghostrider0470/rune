@@ -329,6 +329,119 @@ pub struct JobUpdate {
     pub payload: Option<JobPayload>,
 }
 
+// ── Reminders ─────────────────────────────────────────────────────────────────
+
+/// A one-shot reminder: fire-at timestamp, message, and target.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Reminder {
+    pub id: JobId,
+    pub message: String,
+    /// Target session or channel identifier.
+    pub target: String,
+    /// When to fire.
+    pub fire_at: DateTime<Utc>,
+    /// Whether the reminder has been delivered.
+    pub delivered: bool,
+    /// When the reminder was created.
+    pub created_at: DateTime<Utc>,
+    /// When the reminder was delivered (if at all).
+    pub delivered_at: Option<DateTime<Utc>>,
+}
+
+impl Reminder {
+    /// Create a new reminder.
+    pub fn new(message: impl Into<String>, target: impl Into<String>, fire_at: DateTime<Utc>) -> Self {
+        Self {
+            id: JobId::new(),
+            message: message.into(),
+            target: target.into(),
+            fire_at,
+            delivered: false,
+            created_at: Utc::now(),
+            delivered_at: None,
+        }
+    }
+
+    /// Check whether this reminder is due.
+    pub fn is_due(&self) -> bool {
+        !self.delivered && self.fire_at <= Utc::now()
+    }
+}
+
+/// In-memory reminder store managed by the scheduler.
+pub struct ReminderStore {
+    reminders: Arc<Mutex<Vec<Reminder>>>,
+}
+
+impl ReminderStore {
+    /// Create a new empty reminder store.
+    pub fn new() -> Self {
+        Self {
+            reminders: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Add a reminder. Returns its ID.
+    pub async fn add(&self, reminder: Reminder) -> JobId {
+        let id = reminder.id;
+        info!(reminder_id = %id, fire_at = %reminder.fire_at, "adding reminder");
+        self.reminders.lock().await.push(reminder);
+        id
+    }
+
+    /// List all reminders, optionally including delivered ones.
+    pub async fn list(&self, include_delivered: bool) -> Vec<Reminder> {
+        let reminders = self.reminders.lock().await;
+        let mut result: Vec<Reminder> = if include_delivered {
+            reminders.clone()
+        } else {
+            reminders.iter().filter(|r| !r.delivered).cloned().collect()
+        };
+        result.sort_by_key(|r| r.fire_at);
+        result
+    }
+
+    /// Get a specific reminder.
+    pub async fn get(&self, id: &JobId) -> Option<Reminder> {
+        self.reminders.lock().await.iter().find(|r| r.id == *id).cloned()
+    }
+
+    /// Cancel (remove) a reminder. Returns the removed reminder if found.
+    pub async fn cancel(&self, id: &JobId) -> Option<Reminder> {
+        let mut reminders = self.reminders.lock().await;
+        if let Some(pos) = reminders.iter().position(|r| r.id == *id) {
+            info!(reminder_id = %id, "cancelling reminder");
+            Some(reminders.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    /// Get all due (unfired) reminders.
+    pub async fn get_due(&self) -> Vec<Reminder> {
+        let reminders = self.reminders.lock().await;
+        reminders.iter().filter(|r| r.is_due()).cloned().collect()
+    }
+
+    /// Mark a reminder as delivered.
+    pub async fn mark_delivered(&self, id: &JobId) -> Option<Reminder> {
+        let mut reminders = self.reminders.lock().await;
+        if let Some(reminder) = reminders.iter_mut().find(|r| r.id == *id) {
+            reminder.delivered = true;
+            reminder.delivered_at = Some(Utc::now());
+            Some(reminder.clone())
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for ReminderStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,6 +674,78 @@ mod tests {
         let job = scheduler.get_job(&id).await.unwrap();
         assert!(!job.enabled);
         assert!(job.next_run_at.is_none());
+    }
+
+    // ── Reminder tests ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn reminder_add_and_list() {
+        let store = ReminderStore::new();
+        let reminder = Reminder::new("Buy milk", "main", Utc::now() + chrono::Duration::hours(1));
+        let id = store.add(reminder).await;
+
+        let list = store.list(false).await;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, id);
+        assert_eq!(list[0].message, "Buy milk");
+    }
+
+    #[tokio::test]
+    async fn reminder_cancel() {
+        let store = ReminderStore::new();
+        let reminder = Reminder::new("Cancel me", "main", Utc::now() + chrono::Duration::hours(1));
+        let id = store.add(reminder).await;
+
+        let cancelled = store.cancel(&id).await;
+        assert!(cancelled.is_some());
+        assert_eq!(store.list(false).await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn reminder_cancel_nonexistent() {
+        let store = ReminderStore::new();
+        let fake_id = JobId::new();
+        assert!(store.cancel(&fake_id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn reminder_get_due() {
+        let store = ReminderStore::new();
+        // Due (fire_at in the past)
+        let due = Reminder::new("Due now", "main", Utc::now() - chrono::Duration::seconds(10));
+        store.add(due).await;
+
+        // Not due (fire_at in the future)
+        let future = Reminder::new("Later", "main", Utc::now() + chrono::Duration::hours(1));
+        store.add(future).await;
+
+        let due_list = store.get_due().await;
+        assert_eq!(due_list.len(), 1);
+        assert_eq!(due_list[0].message, "Due now");
+    }
+
+    #[tokio::test]
+    async fn reminder_mark_delivered() {
+        let store = ReminderStore::new();
+        let reminder = Reminder::new("Deliver me", "main", Utc::now() - chrono::Duration::seconds(10));
+        let id = store.add(reminder).await;
+
+        let delivered = store.mark_delivered(&id).await.unwrap();
+        assert!(delivered.delivered);
+        assert!(delivered.delivered_at.is_some());
+
+        // Should not appear in non-delivered list
+        assert_eq!(store.list(false).await.len(), 0);
+        // But should appear in full list
+        assert_eq!(store.list(true).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reminder_is_due_checks_delivered() {
+        let mut reminder = Reminder::new("Done", "main", Utc::now() - chrono::Duration::seconds(10));
+        assert!(reminder.is_due());
+        reminder.delivered = true;
+        assert!(!reminder.is_due());
     }
 
     #[tokio::test]

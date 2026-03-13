@@ -13,8 +13,9 @@ use tracing::info;
 use uuid::Uuid;
 
 use rune_core::{JobId, SessionKind};
+use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
-    Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Schedule, SessionTarget,
+    Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, Schedule, SessionTarget,
 };
 
 use crate::error::GatewayError;
@@ -832,7 +833,233 @@ fn run_to_response(run: JobRun) -> CronRunResponse {
     }
 }
 
+// ── Approvals ─────────────────────────────────────────────────────────
+
+/// Response for a single tool approval policy.
+#[derive(Serialize)]
+pub struct ApprovalPolicyResponse {
+    pub tool_name: String,
+    pub decision: String,
+    pub decided_at: String,
+}
+
+/// Request body for `PUT /approvals/{tool}`.
+#[derive(Deserialize)]
+pub struct SetApprovalPolicyRequest {
+    pub decision: String,
+}
+
+/// `GET /approvals` — list all tool approval policies.
+pub async fn list_approval_policies(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ApprovalPolicyResponse>>, GatewayError> {
+    let policies = state
+        .tool_approval_repo
+        .list_policies()
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(
+        policies
+            .into_iter()
+            .map(|p| ApprovalPolicyResponse {
+                tool_name: p.tool_name,
+                decision: p.decision,
+                decided_at: p.decided_at.to_rfc3339(),
+            })
+            .collect(),
+    ))
+}
+
+/// `GET /approvals/{tool}` — get approval policy for a specific tool.
+pub async fn get_approval_policy(
+    State(state): State<AppState>,
+    Path(tool): Path<String>,
+) -> Result<Json<ApprovalPolicyResponse>, GatewayError> {
+    let policy = state
+        .tool_approval_repo
+        .get_policy(&tool)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?
+        .ok_or_else(|| {
+            GatewayError::BadRequest(format!("no approval policy for tool: {tool}"))
+        })?;
+
+    Ok(Json(ApprovalPolicyResponse {
+        tool_name: policy.tool_name,
+        decision: policy.decision,
+        decided_at: policy.decided_at.to_rfc3339(),
+    }))
+}
+
+/// `PUT /approvals/{tool}` — set approval policy for a tool.
+pub async fn set_approval_policy(
+    State(state): State<AppState>,
+    Path(tool): Path<String>,
+    Json(body): Json<SetApprovalPolicyRequest>,
+) -> Result<Json<ApprovalPolicyResponse>, GatewayError> {
+    let valid_decisions = ["allow_always", "allow-always", "deny"];
+    let normalised = body.decision.replace('-', "_");
+    if !valid_decisions.contains(&normalised.as_str()) {
+        return Err(GatewayError::BadRequest(format!(
+            "invalid decision '{}'; expected one of: allow-always, deny",
+            body.decision
+        )));
+    }
+
+    let policy = state
+        .tool_approval_repo
+        .set_policy(&tool, &normalised)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(ApprovalPolicyResponse {
+        tool_name: policy.tool_name,
+        decision: policy.decision,
+        decided_at: policy.decided_at.to_rfc3339(),
+    }))
+}
+
+/// `DELETE /approvals/{tool}` — clear approval policy for a tool.
+pub async fn clear_approval_policy(
+    State(state): State<AppState>,
+    Path(tool): Path<String>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    let deleted = state
+        .tool_approval_repo
+        .clear_policy(&tool)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    if deleted {
+        Ok(Json(ActionResponse {
+            success: true,
+            message: format!("approval policy for '{tool}' cleared"),
+        }))
+    } else {
+        Err(GatewayError::BadRequest(format!(
+            "no approval policy found for tool: {tool}"
+        )))
+    }
+}
+
 // ── Telegram Webhook ────────────────────────────────────────────────
+
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
+
+/// `GET /heartbeat/status` — current heartbeat runner state.
+pub async fn heartbeat_status(
+    State(state): State<AppState>,
+) -> Result<Json<HeartbeatState>, GatewayError> {
+    let status = state.heartbeat.status().await;
+    Ok(Json(status))
+}
+
+/// `POST /heartbeat/enable` — enable the heartbeat runner.
+pub async fn heartbeat_enable(
+    State(state): State<AppState>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    state.heartbeat.enable().await;
+    Ok(Json(ActionResponse {
+        success: true,
+        message: "heartbeat enabled".to_string(),
+    }))
+}
+
+/// `POST /heartbeat/disable` — disable the heartbeat runner.
+pub async fn heartbeat_disable(
+    State(state): State<AppState>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    state.heartbeat.disable().await;
+    Ok(Json(ActionResponse {
+        success: true,
+        message: "heartbeat disabled".to_string(),
+    }))
+}
+
+// ── Reminders ─────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ReminderAddRequest {
+    pub message: String,
+    /// ISO-8601 fire-at timestamp.
+    pub fire_at: DateTime<Utc>,
+    /// Target session or channel (defaults to "main").
+    #[serde(default = "default_reminder_target")]
+    pub target: String,
+}
+
+fn default_reminder_target() -> String {
+    "main".to_string()
+}
+
+#[derive(Serialize)]
+pub struct ReminderResponse {
+    pub id: String,
+    pub message: String,
+    pub target: String,
+    pub fire_at: String,
+    pub delivered: bool,
+    pub created_at: String,
+    pub delivered_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RemindersListQuery {
+    #[serde(rename = "includeDelivered")]
+    pub include_delivered: Option<bool>,
+}
+
+/// `GET /reminders` — list reminders.
+pub async fn reminders_list(
+    State(state): State<AppState>,
+    Query(query): Query<RemindersListQuery>,
+) -> Result<Json<Vec<ReminderResponse>>, GatewayError> {
+    let include_delivered = query.include_delivered.unwrap_or(false);
+    let reminders = state.reminder_store.list(include_delivered).await;
+    Ok(Json(reminders.into_iter().map(reminder_to_response).collect()))
+}
+
+/// `POST /reminders` — add a reminder.
+pub async fn reminders_add(
+    State(state): State<AppState>,
+    Json(body): Json<ReminderAddRequest>,
+) -> Result<(StatusCode, Json<ReminderResponse>), GatewayError> {
+    let reminder = Reminder::new(body.message, body.target, body.fire_at);
+    let resp = reminder_to_response(reminder.clone());
+    state.reminder_store.add(reminder).await;
+    Ok((StatusCode::CREATED, Json(resp)))
+}
+
+/// `DELETE /reminders/{id}` — cancel a reminder.
+pub async fn reminders_cancel(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    let job_id = rune_core::JobId::from(id);
+    state
+        .reminder_store
+        .cancel(&job_id)
+        .await
+        .ok_or_else(|| GatewayError::JobNotFound(id.to_string()))?;
+
+    Ok(Json(ActionResponse {
+        success: true,
+        message: format!("reminder {id} cancelled"),
+    }))
+}
+
+fn reminder_to_response(r: Reminder) -> ReminderResponse {
+    ReminderResponse {
+        id: r.id.to_string(),
+        message: r.message,
+        target: r.target,
+        fire_at: r.fire_at.to_rfc3339(),
+        delivered: r.delivered,
+        created_at: r.created_at.to_rfc3339(),
+        delivered_at: r.delivered_at.map(|dt| dt.to_rfc3339()),
+    }
+}
 
 /// `POST /webhook/telegram/{token}` — receive Telegram Bot API updates.
 ///

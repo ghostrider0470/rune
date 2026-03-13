@@ -173,6 +173,7 @@ The current local `openclaw --help` surface confirms at least:
 - `message`
 - `models`
 - `node`
+- `system`
 - `nodes`
 - `onboard`
 - `pairing`

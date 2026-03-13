@@ -4,11 +4,13 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde_json::json;
+use toml_edit::{DocumentMut, Item, Table, Value};
 
 use crate::output::{
-    ActionResult, ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary,
-    CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport, HealthResponse,
-    SessionDetailResponse, SessionListResponse, SessionSummary, StatusResponse,
+    ActionResult, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
+    ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
+    CronStatusResponse, DoctorCheck, DoctorReport, HealthResponse, SessionDetailResponse,
+    SessionListResponse, SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -484,6 +486,241 @@ impl GatewayClient {
 
         Ok(DoctorReport { checks })
     }
+
+    // ── Approvals ─────────────────────────────────────────────────────
+
+    /// `GET /approvals` — list all tool approval policies.
+    pub async fn approvals_list(&self) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/approvals"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /approvals/{tool}` — get policy for a specific tool.
+    pub async fn approvals_get(&self, tool: &str) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/approvals/{tool}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+            bail!("No approval policy found for tool '{tool}'.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `PUT /approvals/{tool}` — set policy for a tool.
+    pub async fn approvals_set(&self, tool: &str, decision: &str) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .put(self.url(&format!("/approvals/{tool}")))
+            .json(&serde_json::json!({ "decision": decision }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Gateway error: {body}");
+        }
+    }
+
+    /// `DELETE /approvals/{tool}` — clear policy for a tool.
+    pub async fn approvals_clear(&self, tool: &str) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .delete(self.url(&format!("/approvals/{tool}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await?)
+        } else if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+            bail!("No approval policy found for tool '{tool}'.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+}
+
+fn local_config_path() -> std::path::PathBuf {
+    std::env::var_os("RUNE_CONFIG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"))
+}
+
+fn load_local_config_document() -> Result<(std::path::PathBuf, DocumentMut)> {
+    let path = local_config_path();
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
+    };
+
+    let doc = if content.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        content
+            .parse::<DocumentMut>()
+            .with_context(|| format!("failed to parse {}", path.display()))?
+    };
+
+    Ok((path, doc))
+}
+
+fn save_local_config_document(path: &std::path::Path, doc: &DocumentMut) -> Result<()> {
+    std::fs::write(path, doc.to_string())
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn item_to_json(item: &Item) -> Result<serde_json::Value> {
+    if let Some(value) = item.as_value() {
+        let wrapped = format!("value = {}", value);
+        let as_toml = wrapped
+            .parse::<toml::Table>()
+            .context("failed to parse wrapped TOML value while converting to JSON")?
+            .remove("value")
+            .ok_or_else(|| anyhow::anyhow!("wrapped TOML value did not produce `value` key"))?;
+        serde_json::to_value(as_toml).context("failed to convert TOML value to JSON")
+    } else {
+        Err(anyhow::anyhow!("item is not a concrete TOML value"))
+    }
+}
+
+fn parse_toml_value(raw: &str) -> Result<Value> {
+    let wrapped = format!("value = {raw}");
+    let doc = wrapped
+        .parse::<DocumentMut>()
+        .with_context(|| format!("failed to parse TOML value `{raw}`"))?;
+    doc["value"]
+        .as_value()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("parsed TOML value was not concrete"))
+}
+
+fn get_item_at_path<'a>(doc: &'a DocumentMut, key: &str) -> Option<&'a Item> {
+    let mut current: &Item = doc.as_item();
+    for segment in key.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+fn ensure_parent_table<'a>(doc: &'a mut DocumentMut, key: &str) -> Result<&'a mut Table> {
+    let segments = key.split('.').collect::<Vec<_>>();
+    let mut table = doc.as_table_mut();
+    for segment in segments.iter().take(segments.len().saturating_sub(1)) {
+        if !table.contains_key(segment) {
+            table.insert(segment, Item::Table(Table::new()));
+        }
+        let item = table.get_mut(segment).ok_or_else(|| {
+            anyhow::anyhow!("missing intermediate config path segment `{segment}`")
+        })?;
+        if !item.is_table() {
+            return Err(anyhow::anyhow!(
+                "config path segment `{segment}` is not a table and cannot contain nested keys"
+            ));
+        }
+        table = item
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("failed to access table segment `{segment}`"))?;
+    }
+    Ok(table)
+}
+
+fn get_parent_table_mut<'a>(doc: &'a mut DocumentMut, key: &str) -> Option<&'a mut Table> {
+    let segments = key.split('.').collect::<Vec<_>>();
+    let mut table = doc.as_table_mut();
+    for segment in segments.iter().take(segments.len().saturating_sub(1)) {
+        let item = table.get_mut(segment)?;
+        table = item.as_table_mut()?;
+    }
+    Some(table)
+}
+
+pub fn config_file() -> ConfigFileResponse {
+    let path = local_config_path();
+    ConfigFileResponse {
+        path: path.display().to_string(),
+        exists: path.exists(),
+    }
+}
+
+pub fn config_get(key: &str) -> Result<ConfigGetResponse> {
+    let (path, doc) = load_local_config_document()?;
+    let value = get_item_at_path(&doc, key).map(item_to_json).transpose()?;
+    Ok(ConfigGetResponse {
+        key: key.to_string(),
+        found: value.is_some(),
+        value,
+        source_path: path.display().to_string(),
+    })
+}
+
+pub fn config_set(key: &str, raw_value: &str) -> Result<ConfigMutationResponse> {
+    let (path, mut doc) = load_local_config_document()?;
+    let parsed = parse_toml_value(raw_value)?;
+    let new_json = item_to_json(&Item::Value(parsed.clone()))?;
+    let old_json = get_item_at_path(&doc, key).map(item_to_json).transpose()?;
+
+    let segments = key.split('.').collect::<Vec<_>>();
+    let leaf = segments
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("config key cannot be empty"))?;
+    let parent = ensure_parent_table(&mut doc, key)?;
+    parent.insert(leaf, Item::Value(parsed));
+    save_local_config_document(&path, &doc)?;
+
+    Ok(ConfigMutationResponse {
+        key: key.to_string(),
+        changed: old_json.as_ref() != Some(&new_json),
+        action: "set".to_string(),
+        source_path: path.display().to_string(),
+        value: Some(new_json),
+        note: Some("Local TOML updated; environment-variable overrides may still take precedence at runtime.".to_string()),
+    })
+}
+
+pub fn config_unset(key: &str) -> Result<ConfigMutationResponse> {
+    let (path, mut doc) = load_local_config_document()?;
+    let segments = key.split('.').collect::<Vec<_>>();
+    let leaf = segments
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("config key cannot be empty"))?;
+
+    let removed = if segments.len() == 1 {
+        doc.remove(leaf).is_some()
+    } else {
+        get_parent_table_mut(&mut doc, key)
+            .and_then(|parent| parent.remove(leaf))
+            .is_some()
+    };
+
+    if removed {
+        save_local_config_document(&path, &doc)?;
+    }
+
+    Ok(ConfigMutationResponse {
+        key: key.to_string(),
+        changed: removed,
+        action: "unset".to_string(),
+        source_path: path.display().to_string(),
+        value: None,
+        note: Some("Unset only changes the local TOML file; defaults or environment overrides may still provide an effective runtime value.".to_string()),
+    })
 }
 
 /// Validate a config file and return the result.
@@ -517,8 +754,8 @@ pub fn validate_config(file: Option<&str>) -> ConfigValidationResult {
 
 /// Show resolved config as pretty-printed JSON.
 pub fn show_config() -> Result<String> {
-    let config =
-        rune_config::AppConfig::load(None::<&str>).context("failed to load configuration")?;
+    let config = rune_config::AppConfig::load(Some(local_config_path()))
+        .context("failed to load configuration")?;
     serde_json::to_string_pretty(&config).context("failed to serialize config")
 }
 
@@ -574,6 +811,56 @@ mod tests {
         assert_eq!(resp.status, "running");
         assert_eq!(resp.version.as_deref(), Some("0.1.0"));
         assert_eq!(resp.uptime_seconds, Some(300));
+    }
+
+    #[test]
+    fn config_file_reports_default_path() {
+        let response = config_file();
+        assert!(response.path.ends_with("config.toml"));
+    }
+
+    #[test]
+    fn config_set_get_and_unset_roundtrip() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let set = config_set("gateway.port", "9090").unwrap();
+        assert!(set.changed);
+        assert_eq!(set.value, Some(serde_json::json!(9090)));
+
+        let get = config_get("gateway.port").unwrap();
+        assert!(get.found);
+        assert_eq!(get.value, Some(serde_json::json!(9090)));
+
+        let unset = config_unset("gateway.port").unwrap();
+        assert!(unset.changed);
+
+        let missing = config_get("gateway.port").unwrap();
+        assert!(!missing.found);
+        assert!(missing.value.is_none());
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn config_set_rejects_invalid_toml_value() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let err = config_set("gateway.port", "[").unwrap_err();
+        assert!(err.to_string().contains("failed to parse TOML value"));
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
     }
 
     #[tokio::test]

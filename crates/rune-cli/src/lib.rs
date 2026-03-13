@@ -12,15 +12,18 @@ use std::time::SystemTime;
 
 pub use cli::Cli;
 use cli::{
-    ChannelsAction, Command, ConfigAction, CronAction, GatewayAction, MemoryAction, ModelsAction,
-    SessionsAction,
+    ApprovalsAction, ChannelsAction, Command, ConfigAction, CronAction, GatewayAction,
+    MemoryAction, ModelsAction, RemindersAction, SessionsAction, SystemAction,
+    SystemHeartbeatAction,
 };
-use client::{GatewayClient, show_config, validate_config};
+use client::{
+    GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
+};
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
-    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, ModelAliasDetail,
-    ModelAliasesResponse, ModelListResponse, ModelProviderDetail, ModelSetResponse,
-    ModelStatusResponse, OutputFormat, render,
+    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, HeartbeatPresenceResponse,
+    ModelAliasDetail, ModelAliasesResponse, ModelListResponse, ModelProviderDetail,
+    ModelSetResponse, ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -161,7 +164,11 @@ fn resolve_channel(target: &str, channels: &[ChannelDetail]) -> ChannelResolveRe
 
     let channel = channels
         .iter()
-        .find(|channel| aliases.iter().any(|alias| channel.name.eq_ignore_ascii_case(alias)))
+        .find(|channel| {
+            aliases
+                .iter()
+                .any(|alias| channel.name.eq_ignore_ascii_case(alias))
+        })
         .cloned();
 
     ChannelResolveResponse {
@@ -169,7 +176,10 @@ fn resolve_channel(target: &str, channels: &[ChannelDetail]) -> ChannelResolveRe
         matched: channel.is_some(),
         channel,
         note: if channels.is_empty() {
-            Some("No channels are currently described by the local config/runtime inventory.".to_string())
+            Some(
+                "No channels are currently described by the local config/runtime inventory."
+                    .to_string(),
+            )
         } else if normalized != "telegram" && aliases == vec![normalized.as_str()] {
             Some(format!(
                 "Known channels: {}",
@@ -181,6 +191,43 @@ fn resolve_channel(target: &str, channels: &[ChannelDetail]) -> ChannelResolveRe
             ))
         } else {
             None
+        },
+    }
+}
+
+fn heartbeat_presence() -> HeartbeatPresenceResponse {
+    let config = load_config();
+    let workspace_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let path = workspace_root.join("HEARTBEAT.md");
+    match std::fs::metadata(&path) {
+        Ok(metadata) => {
+            let modified_at = metadata
+                .modified()
+                .ok()
+                .and_then(|ts| ts.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .and_then(|duration| {
+                    chrono::DateTime::<Utc>::from_timestamp(duration.as_secs() as i64, 0)
+                })
+                .map(|ts| ts.to_rfc3339());
+            HeartbeatPresenceResponse {
+                workspace_root: workspace_root.display().to_string(),
+                path: path.display().to_string(),
+                present: true,
+                modified_at,
+                size_bytes: Some(metadata.len()),
+                note: Some(format!(
+                    "Scheduled sessions load HEARTBEAT.md; runtime memory dir is {}.",
+                    config.paths.memory_dir.display()
+                )),
+            }
+        }
+        Err(_) => HeartbeatPresenceResponse {
+            workspace_root: workspace_root.display().to_string(),
+            path: path.display().to_string(),
+            present: false,
+            modified_at: None,
+            size_bytes: None,
+            note: Some("No HEARTBEAT.md present in the current workspace root.".to_string()),
         },
     }
 }
@@ -214,7 +261,9 @@ fn channel_logs(filter: Option<&str>, limit: usize) -> ChannelLogsResponse {
                 .modified()
                 .ok()
                 .and_then(|ts| ts.duration_since(SystemTime::UNIX_EPOCH).ok())
-                .and_then(|duration| chrono::DateTime::<Utc>::from_timestamp(duration.as_secs() as i64, 0))
+                .and_then(|duration| {
+                    chrono::DateTime::<Utc>::from_timestamp(duration.as_secs() as i64, 0)
+                })
                 .map(|ts| ts.to_rfc3339());
             files.push(ChannelLogFile {
                 path: path.display().to_string(),
@@ -224,11 +273,19 @@ fn channel_logs(filter: Option<&str>, limit: usize) -> ChannelLogsResponse {
         }
     }
 
-    files.sort_by(|left, right| right.modified_at.cmp(&left.modified_at).then_with(|| left.path.cmp(&right.path)));
+    files.sort_by(|left, right| {
+        right
+            .modified_at
+            .cmp(&left.modified_at)
+            .then_with(|| left.path.cmp(&right.path))
+    });
     files.truncate(limit);
 
     let note = if !logs_dir.exists() {
-        Some("Configured logs_dir does not exist yet; no local channel logs are available.".to_string())
+        Some(
+            "Configured logs_dir does not exist yet; no local channel logs are available."
+                .to_string(),
+        )
     } else if files.is_empty() {
         Some("No matching log files found in the configured logs_dir.".to_string())
     } else {
@@ -280,9 +337,9 @@ fn provider_notes(provider: &rune_config::ModelProviderConfig) -> Option<String>
         {
             Some("Azure OpenAI requires deployment_name and api_version for parity.".to_string())
         }
-        "azure-foundry" if !provider.base_url.contains("services.ai.azure.com") => Some(
-            "Azure Foundry is expected to use an Azure AI Foundry base URL.".to_string(),
-        ),
+        "azure-foundry" if !provider.base_url.contains("services.ai.azure.com") => {
+            Some("Azure Foundry is expected to use an Azure AI Foundry base URL.".to_string())
+        }
         _ => None,
     }
 }
@@ -449,6 +506,24 @@ pub async fn run(cli: Cli) -> Result<()> {
             let target = std::path::Path::new(&path);
             init_workspace(target).await?;
         }
+        Command::Approvals { action } => match action {
+            ApprovalsAction::List => {
+                let result = client.approvals_list().await?;
+                println!("{}", render(&result, format));
+            }
+            ApprovalsAction::Get { tool } => {
+                let result = client.approvals_get(&tool).await?;
+                println!("{}", render(&result, format));
+            }
+            ApprovalsAction::Set { tool, decision } => {
+                let result = client.approvals_set(&tool, &decision).await?;
+                println!("{}", render(&result, format));
+            }
+            ApprovalsAction::Clear { tool } => {
+                let result = client.approvals_clear(&tool).await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Cron { action } => match action {
             CronAction::Status => {
                 let result = client.cron_status().await?;
@@ -594,6 +669,56 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::System { action } => match action {
+            SystemAction::Event {
+                text,
+                mode,
+                context_messages,
+            } => {
+                let result = client.cron_wake(&text, &mode, context_messages).await?;
+                println!("{}", render(&result, format));
+            }
+            SystemAction::Heartbeat { action } => match action {
+                SystemHeartbeatAction::Presence | SystemHeartbeatAction::Last => {
+                    let result = heartbeat_presence();
+                    println!("{}", render(&result, format));
+                }
+                SystemHeartbeatAction::Enable => {
+                    anyhow::bail!(
+                        "system heartbeat enable is not implemented yet; runtime heartbeat state is not persisted/exposed via the gateway"
+                    );
+                }
+                SystemHeartbeatAction::Disable => {
+                    anyhow::bail!(
+                        "system heartbeat disable is not implemented yet; runtime heartbeat state is not persisted/exposed via the gateway"
+                    );
+                }
+                SystemHeartbeatAction::Status => {
+                    anyhow::bail!(
+                        "system heartbeat status is not implemented yet; runtime heartbeat state is not persisted/exposed via the gateway"
+                    );
+                }
+            },
+        },
+        Command::Reminders { action } => match action {
+            RemindersAction::Add {
+                message,
+                duration,
+                target,
+            } => {
+                anyhow::bail!(
+                    "reminders add is not implemented yet for target `{target}` (`{duration}`: {message})"
+                );
+            }
+            RemindersAction::List { include_delivered } => {
+                anyhow::bail!(
+                    "reminders list is not implemented yet (include_delivered={include_delivered})"
+                );
+            }
+            RemindersAction::Cancel { id } => {
+                anyhow::bail!("reminders cancel is not implemented yet for id `{id}`");
+            }
+        },
         Command::Config { action } => match action {
             ConfigAction::Show => {
                 let result = show_config()?;
@@ -602,6 +727,22 @@ pub async fn run(cli: Cli) -> Result<()> {
                 } else {
                     println!("Resolved configuration:\n{result}");
                 }
+            }
+            ConfigAction::File => {
+                let result = config_file();
+                println!("{}", render(&result, format));
+            }
+            ConfigAction::Get { key } => {
+                let result = config_get(&key)?;
+                println!("{}", render(&result, format));
+            }
+            ConfigAction::Set { key, value } => {
+                let result = config_set(&key, &value)?;
+                println!("{}", render(&result, format));
+            }
+            ConfigAction::Unset { key } => {
+                let result = config_unset(&key)?;
+                println!("{}", render(&result, format));
             }
             ConfigAction::Validate { file } => {
                 let result = validate_config(file.as_deref());
@@ -647,7 +788,10 @@ models = ["gpt-5.4", "gpt-5.4-pro"]
 
         let response = set_default_model("oc-01-openai/gpt-5.4-pro").unwrap();
         assert!(response.changed);
-        assert_eq!(response.previous_model.as_deref(), Some("oc-01-openai/gpt-5.4"));
+        assert_eq!(
+            response.previous_model.as_deref(),
+            Some("oc-01-openai/gpt-5.4")
+        );
         assert_eq!(response.default_model, "oc-01-openai/gpt-5.4-pro");
 
         let updated = std::fs::read_to_string(&config_path).unwrap();
@@ -680,7 +824,10 @@ models = ["grok-4-fast-reasoning"]
         }
 
         let response = set_default_model("grok-4-fast-reasoning").unwrap();
-        assert_eq!(response.default_model, "hamza-eastus2/grok-4-fast-reasoning");
+        assert_eq!(
+            response.default_model,
+            "hamza-eastus2/grok-4-fast-reasoning"
+        );
 
         unsafe {
             std::env::remove_var("RUNE_CONFIG");
@@ -710,7 +857,8 @@ models = ["gpt-5.4"]
 
         let err = set_default_model("not-a-real-model").unwrap_err();
         assert!(
-            err.to_string().contains("not present in configured inventory")
+            err.to_string()
+                .contains("not present in configured inventory")
                 || err.to_string().contains("not resolvable")
         );
 

@@ -6,15 +6,15 @@ use std::time::Instant;
 
 use axum::Router;
 use axum::middleware;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::info;
 
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
-use rune_runtime::{SessionEngine, TurnExecutor, scheduler::Scheduler};
-use rune_store::repos::{SessionRepo, TranscriptRepo};
+use rune_runtime::{SessionEngine, TurnExecutor, heartbeat::HeartbeatRunner, scheduler::{ReminderStore, Scheduler}};
+use rune_store::repos::{SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo};
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
@@ -56,6 +56,9 @@ pub struct Services {
     pub transcript_repo: Arc<dyn TranscriptRepo>,
     pub model_provider: Arc<dyn ModelProvider>,
     pub scheduler: Arc<Scheduler>,
+    pub heartbeat: Arc<HeartbeatRunner>,
+    pub reminder_store: Arc<ReminderStore>,
+    pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
     pub tool_count: usize,
 }
 
@@ -82,6 +85,9 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         transcript_repo: services.transcript_repo,
         model_provider: services.model_provider,
         scheduler: services.scheduler,
+        heartbeat: services.heartbeat,
+        reminder_store: services.reminder_store,
+        tool_approval_repo: services.tool_approval_repo,
         tool_count: services.tool_count,
         event_tx,
     };
@@ -114,7 +120,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     })
 }
 
-fn build_router(state: AppState, auth_token: Option<String>) -> Router {
+/// Build the gateway router. Public for integration testing.
+pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
     let public_routes = Router::new()
         .route("/health", get(routes::health))
         .route("/ws", get(ws::ws_handler))
@@ -143,6 +150,20 @@ fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/sessions/{id}", get(routes::get_session))
         .route("/sessions/{id}/messages", post(routes::send_message))
         .route("/sessions/{id}/transcript", get(routes::get_transcript))
+        .route("/approvals", get(routes::list_approval_policies))
+        .route(
+            "/approvals/{tool}",
+            get(routes::get_approval_policy)
+                .put(routes::set_approval_policy)
+                .delete(routes::clear_approval_policy),
+        )
+        // Heartbeat routes
+        .route("/heartbeat/status", get(routes::heartbeat_status))
+        .route("/heartbeat/enable", post(routes::heartbeat_enable))
+        .route("/heartbeat/disable", post(routes::heartbeat_disable))
+        // Reminder routes
+        .route("/reminders", get(routes::reminders_list).post(routes::reminders_add))
+        .route("/reminders/{id}", delete(routes::reminders_cancel))
         .layer(middleware::from_fn(move |req, next| {
             bearer_auth(req, next, auth_token.clone())
         }))

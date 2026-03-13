@@ -16,6 +16,8 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

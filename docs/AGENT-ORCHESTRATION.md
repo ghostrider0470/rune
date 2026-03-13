@@ -103,7 +103,7 @@ Implement:
 - `ModelsConfig`: vec of `ModelProviderConfig` (provider name, endpoint, deployment_name, api_version, api_key_env, model_alias)
 - `PathsConfig` with defaults: `db_dir` → `/data/db`, `sessions_dir` → `/data/sessions`, `memory_dir` → `/data/memory`, `media_dir` → `/data/media`, `skills_dir` → `/data/skills`, `logs_dir` → `/data/logs`, `backups_dir` → `/data/backups`, `config_dir` → `/config`, `secrets_dir` → `/secrets`
 - Layered loading: defaults → config file (TOML) → env vars → CLI overrides
-- Use `config` crate or manual layering with `serde`
+- Use `figment` for layered defaults → config file (TOML) → env vars → CLI overrides to match the confirmed stack
 - `ConfigError` type
 - Depends only on `rune-core` (for shared types if needed, otherwise standalone)
 

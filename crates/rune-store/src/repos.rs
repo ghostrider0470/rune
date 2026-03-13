@@ -128,6 +128,35 @@ pub trait ApprovalRepo: Send + Sync {
     ) -> Result<ApprovalRow, StoreError>;
 }
 
+// ── Tool approval policy repository ────────────────────────────────────
+
+/// A persisted tool-level approval policy entry.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ToolApprovalPolicy {
+    pub tool_name: String,
+    pub decision: String,
+    pub decided_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Persistence contract for tool-level approval policies (allow-always / deny).
+///
+/// These are stored as rows in the `approvals` table with
+/// `subject_type = "tool_policy"` and the tool name in `reason`.
+#[async_trait]
+pub trait ToolApprovalPolicyRepo: Send + Sync {
+    /// List all persisted tool policies.
+    async fn list_policies(&self) -> Result<Vec<ToolApprovalPolicy>, StoreError>;
+
+    /// Get the policy for a specific tool (if any).
+    async fn get_policy(&self, tool_name: &str) -> Result<Option<ToolApprovalPolicy>, StoreError>;
+
+    /// Upsert a policy for the given tool. Replaces any existing row.
+    async fn set_policy(&self, tool_name: &str, decision: &str) -> Result<ToolApprovalPolicy, StoreError>;
+
+    /// Remove the policy for a tool. Returns `true` if a row was deleted.
+    async fn clear_policy(&self, tool_name: &str) -> Result<bool, StoreError>;
+}
+
 // ── Tool execution repository ─────────────────────────────────────────
 
 /// Persistence contract for tool execution audit records.

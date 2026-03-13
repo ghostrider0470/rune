@@ -11,6 +11,6 @@ mod ws;
 
 pub use error::GatewayError;
 pub use logging::init_logging;
-pub use server::{GatewayHandle, Services, start};
-pub use state::AppState;
+pub use server::{GatewayHandle, Services, build_router, start};
+pub use state::{AppState, SessionEvent};
 pub use supervisor::BackgroundSupervisor;

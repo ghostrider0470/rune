@@ -375,6 +375,132 @@ impl ApprovalRepo for PgApprovalRepo {
     }
 }
 
+// ── PgToolApprovalPolicyRepo ─────────────────────────────────────
+
+/// PostgreSQL-backed tool approval policy repository.
+///
+/// Stores tool-level allow-always / deny rules as rows in the `approvals`
+/// table with `subject_type = "tool_policy"` and the tool name in `reason`.
+#[derive(Clone)]
+pub struct PgToolApprovalPolicyRepo {
+    pool: PgPool,
+}
+
+impl PgToolApprovalPolicyRepo {
+    /// Create a new repository backed by the given connection pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+/// Sentinel UUID used as `subject_id` for tool policy rows.
+fn tool_policy_subject_id() -> Uuid {
+    Uuid::nil()
+}
+
+const TOOL_POLICY_SUBJECT_TYPE: &str = "tool_policy";
+
+#[async_trait]
+impl ToolApprovalPolicyRepo for PgToolApprovalPolicyRepo {
+    async fn list_policies(&self) -> Result<Vec<ToolApprovalPolicy>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let rows: Vec<ApprovalRow> = approvals::table
+            .filter(approvals::subject_type.eq(TOOL_POLICY_SUBJECT_TYPE))
+            .select(ApprovalRow::as_select())
+            .order(approvals::reason.asc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+
+        Ok(rows.into_iter().map(|r| ToolApprovalPolicy {
+            tool_name: r.reason,
+            decision: r.decision.unwrap_or_default(),
+            decided_at: r.decided_at.unwrap_or(r.created_at),
+        }).collect())
+    }
+
+    async fn get_policy(&self, tool_name: &str) -> Result<Option<ToolApprovalPolicy>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let row: Option<ApprovalRow> = approvals::table
+            .filter(approvals::subject_type.eq(TOOL_POLICY_SUBJECT_TYPE))
+            .filter(approvals::reason.eq(tool_name))
+            .select(ApprovalRow::as_select())
+            .first(&mut conn)
+            .await
+            .optional()
+            .map_err(StoreError::from)?;
+
+        Ok(row.map(|r| ToolApprovalPolicy {
+            tool_name: r.reason,
+            decision: r.decision.unwrap_or_default(),
+            decided_at: r.decided_at.unwrap_or(r.created_at),
+        }))
+    }
+
+    async fn set_policy(&self, tool_name: &str, decision: &str) -> Result<ToolApprovalPolicy, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let now = Utc::now();
+
+        // Delete any existing policy for this tool first (upsert semantics).
+        diesel::delete(
+            approvals::table
+                .filter(approvals::subject_type.eq(TOOL_POLICY_SUBJECT_TYPE))
+                .filter(approvals::reason.eq(tool_name)),
+        )
+        .execute(&mut conn)
+        .await
+        .map_err(StoreError::from)?;
+
+        let new_row = NewApproval {
+            id: Uuid::now_v7(),
+            subject_type: TOOL_POLICY_SUBJECT_TYPE.to_string(),
+            subject_id: tool_policy_subject_id(),
+            reason: tool_name.to_string(),
+            presented_payload: serde_json::json!({"decision": decision}),
+            created_at: now,
+        };
+
+        let row: ApprovalRow = diesel::insert_into(approvals::table)
+            .values(&new_row)
+            .returning(ApprovalRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+
+        // Update the decision fields.
+        let row: ApprovalRow = diesel::update(approvals::table.find(row.id))
+            .set((
+                approvals::decision.eq(Some(decision)),
+                approvals::decided_by.eq(Some("cli")),
+                approvals::decided_at.eq(Some(now)),
+            ))
+            .returning(ApprovalRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+
+        Ok(ToolApprovalPolicy {
+            tool_name: row.reason,
+            decision: row.decision.unwrap_or_default(),
+            decided_at: row.decided_at.unwrap_or(row.created_at),
+        })
+    }
+
+    async fn clear_policy(&self, tool_name: &str) -> Result<bool, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let deleted = diesel::delete(
+            approvals::table
+                .filter(approvals::subject_type.eq(TOOL_POLICY_SUBJECT_TYPE))
+                .filter(approvals::reason.eq(tool_name)),
+        )
+        .execute(&mut conn)
+        .await
+        .map_err(StoreError::from)?;
+
+        Ok(deleted > 0)
+    }
+}
+
 // ── PgToolExecutionRepo ─────────────────────────────────────────────
 
 /// PostgreSQL-backed tool execution repository.
