@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
+
 use tracing::info;
 
 use crate::error::StoreError;
@@ -44,21 +45,35 @@ impl EmbeddedPg {
         let installation_dir = data_dir.join("pg_install");
         let pg_data_dir = data_dir.join("pg_data");
 
+        // Use a stable password so we can reconnect to an existing cluster.
+        // The password is written to a file on first start; subsequent starts
+        // read it back to avoid credential mismatch on an existing cluster.
+        let password_file = data_dir.join(".pg_password");
+        let password = if password_file.exists() {
+            std::fs::read_to_string(&password_file)
+                .unwrap_or_else(|_| "runedev".to_string())
+                .trim()
+                .to_string()
+        } else {
+            let pw = "runedev".to_string();
+            let _ = std::fs::write(&password_file, &pw);
+            pw
+        };
+
         let settings = Settings {
             version: VersionReq::parse("=16").unwrap_or(postgresql_embedded::LATEST.clone()),
             installation_dir,
             data_dir: pg_data_dir,
+            password,
             temporary: false,
             ..Settings::default()
         };
 
-        let port = settings.port;
         let host = settings.host.clone();
         let username = settings.username.clone();
         let password = settings.password.clone();
 
         info!(
-            port,
             host = %host,
             data_dir = %data_dir.display(),
             "starting embedded PostgreSQL"
@@ -73,6 +88,15 @@ impl EmbeddedPg {
         pg.start()
             .await
             .map_err(|e| StoreError::Database(format!("embedded PG start failed: {e}")))?;
+
+        // Read the actual port AFTER start (postgresql_embedded may assign a dynamic port).
+        let port = pg.settings().port;
+        if port == 0 {
+            return Err(StoreError::Database(
+                "embedded PostgreSQL reported port 0 after start — dynamic port assignment failed"
+                    .into(),
+            ));
+        }
 
         // Create the application database if it doesn't exist yet.
         let db_exists = pg.database_exists(database_name).await.unwrap_or(false);

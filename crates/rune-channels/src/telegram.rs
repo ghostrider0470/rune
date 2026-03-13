@@ -213,26 +213,26 @@ impl TelegramAdapter {
 #[async_trait]
 impl ChannelAdapter for TelegramAdapter {
     async fn receive(&mut self) -> Result<InboundEvent, ChannelError> {
-        // Return from buffer first
-        if let Some(event) = self.pending_events.pop() {
-            return Ok(event);
-        }
-
-        // Poll for new updates
-        let updates = self.poll_updates().await?;
-
-        for update in &updates {
-            if let Some(event) = Self::convert_update(update) {
-                self.pending_events.push(event);
+        loop {
+            // Return from buffer first
+            if let Some(event) = self.pending_events.pop() {
+                return Ok(event);
             }
+
+            // Long-poll for new updates (blocks up to `timeout` seconds)
+            let updates = self.poll_updates().await?;
+
+            for update in &updates {
+                if let Some(event) = Self::convert_update(update) {
+                    self.pending_events.push(event);
+                }
+            }
+
+            // Reverse so we pop from the front (oldest first)
+            self.pending_events.reverse();
+
+            // If no actionable events, just loop back and poll again
         }
-
-        // Reverse so we pop from the front
-        self.pending_events.reverse();
-
-        self.pending_events.pop().ok_or(ChannelError::Provider {
-            message: "no events in update batch".into(),
-        })
     }
 
     async fn send(&self, action: OutboundAction) -> Result<DeliveryReceipt, ChannelError> {
