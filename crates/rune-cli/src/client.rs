@@ -899,6 +899,7 @@ mod tests {
 
     #[test]
     fn config_set_get_and_unset_roundtrip() {
+        let _guard = crate::test_env_lock().lock().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         unsafe {
@@ -927,6 +928,7 @@ mod tests {
 
     #[test]
     fn config_set_rejects_invalid_toml_value() {
+        let _guard = crate::test_env_lock().lock().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         unsafe {

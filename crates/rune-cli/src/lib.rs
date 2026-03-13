@@ -10,6 +10,14 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use std::time::SystemTime;
 
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::{Mutex, OnceLock};
+
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 pub use cli::Cli;
 use cli::{
     ApprovalsAction, ChannelsAction, Command, ConfigAction, CronAction, GatewayAction,
@@ -754,14 +762,11 @@ pub async fn run(cli: Cli) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{LazyLock, Mutex};
     use tempfile::TempDir;
-
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn set_default_model_updates_existing_models_section() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
@@ -801,7 +806,7 @@ models = ["gpt-5.4", "gpt-5.4-pro"]
 
     #[test]
     fn set_default_model_accepts_unambiguous_short_name() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
@@ -833,7 +838,7 @@ models = ["grok-4-fast-reasoning"]
 
     #[test]
     fn set_default_model_rejects_unknown_inventory_entry() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         std::fs::write(

@@ -93,7 +93,7 @@ Interpretation rules:
 - [x] `memory get`
 
 ### Security / access CLI
-- [ ] `approvals` command family
+- [x] `approvals` command family
 - [ ] `config` no-subcommand setup-wizard behavior or explicit compatibility decision
 - [x] `config get|set|unset|file|validate`
 - [ ] `configure` command family
