@@ -1,6 +1,7 @@
 /target/
 Cargo.lock
 /data/
+/.data/
 /secrets/
 .DS_Store
 *.log

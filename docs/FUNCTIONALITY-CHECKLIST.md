@@ -217,7 +217,7 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 ## 5. Approvals / security / sandboxing
 
 - [x] approval request lifecycle
-- [ ] `allow-once` exact scope binding
+- [x] `allow-once` exact scope binding
 - [ ] `allow-always` persistence semantics
 - [x] `deny` audit trail semantics
 - [x] exact command/payload presentation for approval

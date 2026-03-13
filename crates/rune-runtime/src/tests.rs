@@ -17,7 +17,7 @@ use rune_store::repos::*;
 use rune_tools::{
     ToolCall, ToolDefinition as RtToolDefinition, ToolError, ToolExecutor, ToolRegistry,
     ToolResult,
-    approval::{ApprovalRequest, RiskLevel},
+    approval::{ApprovalRequest, ApprovalScope, RiskLevel},
 };
 
 use crate::compaction::NoOpCompaction;
@@ -25,9 +25,6 @@ use crate::context::ContextAssembler;
 use crate::engine::SessionEngine;
 use crate::executor::TurnExecutor;
 
-// ── Fake model provider ───────────────────────────────────────────────
-
-/// A model provider that returns pre-configured responses in order.
 #[derive(Debug)]
 struct FakeModelProvider {
     responses: Mutex<Vec<CompletionResponse>>,
@@ -95,7 +92,6 @@ impl ModelProvider for FakeModelProvider {
     }
 }
 
-/// A model provider that always fails.
 #[derive(Debug)]
 struct FailingModelProvider;
 
@@ -108,8 +104,6 @@ impl ModelProvider for FailingModelProvider {
         Err(ModelError::Transient("fake transient error".into()))
     }
 }
-
-// ── Fake tool executor ────────────────────────────────────────────────
 
 struct FakeToolExecutor {
     responses: Mutex<Vec<String>>,
@@ -139,8 +133,6 @@ impl ToolExecutor for FakeToolExecutor {
         })
     }
 }
-
-// ── In-memory repos ───────────────────────────────────────────────────
 
 struct MemSessionRepo {
     sessions: Mutex<Vec<SessionRow>>,
@@ -335,8 +327,6 @@ impl TranscriptRepo for MemTranscriptRepo {
     }
 }
 
-// ── Helper to build a TurnExecutor with fakes ─────────────────────────
-
 struct TestHarness {
     session_repo: Arc<MemSessionRepo>,
     turn_repo: Arc<MemTurnRepo>,
@@ -390,25 +380,20 @@ impl TestHarness {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn full_turn_cycle_no_tools() {
     let h = TestHarness::new();
     let engine = h.session_engine();
 
-    // Create session
     let session = engine
         .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     assert_eq!(session.status, "created");
 
-    // Mark ready, then running
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
-    // Execute a turn
     let model = Arc::new(FakeModelProvider::new(vec![
         FakeModelProvider::text_response("Hello! How can I help?"),
     ]));
@@ -429,7 +414,6 @@ async fn full_turn_cycle_no_tools() {
     assert_eq!(usage.prompt_tokens, 10);
     assert_eq!(usage.completion_tokens, 5);
 
-    // Verify transcript ordering
     let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
     assert_eq!(transcript.len(), 2);
     assert_eq!(transcript[0].kind, "user_message");
@@ -449,7 +433,6 @@ async fn tool_loop_with_multi_step_calls() {
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
-    // Model: tool call → tool call → final text
     let model = Arc::new(FakeModelProvider::new(vec![
         FakeModelProvider::tool_call_response("read_file", r#"{"path":"/tmp/a.txt"}"#),
         FakeModelProvider::tool_call_response("read_file", r#"{"path":"/tmp/b.txt"}"#),
@@ -479,7 +462,6 @@ async fn tool_loop_with_multi_step_calls() {
     assert_eq!(turn.status, "completed");
     assert_eq!(usage.model_calls, 3);
 
-    // Transcript: user, tool_req, tool_result, tool_req, tool_result, assistant
     let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
     assert_eq!(transcript.len(), 6);
     let kinds: Vec<&str> = transcript.iter().map(|t| t.kind.as_str()).collect();
@@ -495,7 +477,6 @@ async fn tool_loop_with_multi_step_calls() {
         ]
     );
 
-    // Verify sequence ordering
     for (i, item) in transcript.iter().enumerate() {
         assert_eq!(item.seq, i as i32);
     }
@@ -522,7 +503,6 @@ async fn failed_model_call_sets_turn_failed() {
     let result = executor.execute(session.id, "Hello", None).await;
     assert!(result.is_err());
 
-    // Verify the turn was persisted with failed status
     let turns = h.turn_repo.list_by_session(session.id).await.unwrap();
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0].status, "failed");
@@ -560,7 +540,6 @@ async fn invalid_session_transition_rejected() {
         .await
         .unwrap();
 
-    // Can't go created → running (must go through ready)
     let err = engine.mark_running(session.id).await.unwrap_err();
     assert!(
         err.to_string().contains("expected ready, got created"),
@@ -579,7 +558,6 @@ async fn max_tool_iterations_enforced() {
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
-    // Model always returns tool calls — should hit the limit
     let mut responses = Vec::new();
     for _ in 0..30 {
         responses.push(FakeModelProvider::tool_call_response(
@@ -645,7 +623,9 @@ async fn approval_required_is_attributed_in_transcript() {
                 tool: call.tool_name,
                 details: serde_json::to_string(&ApprovalRequest {
                     tool_name: "exec".to_string(),
-                    arguments_summary: serde_json::json!({
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({
                         "command": "rm -rf /tmp/demo",
                         "workdir": "/workspace",
                         "background": false,
@@ -654,9 +634,8 @@ async fn approval_required_is_attributed_in_transcript() {
                         "elevated": false,
                         "ask": "always",
                         "security": "allowlist"
-                    })
-                    .to_string(),
-                    risk_level: RiskLevel::Medium,
+                    }),
+                    command: Some("rm -rf /tmp/demo".to_string()),
                 })
                 .unwrap(),
             })
@@ -748,9 +727,9 @@ async fn usage_tracking_accumulates_across_tool_loop() {
     let (_, usage) = executor.execute(session.id, "read", None).await.unwrap();
 
     assert_eq!(usage.model_calls, 2);
-    assert_eq!(usage.prompt_tokens, 20); // 10 + 10
-    assert_eq!(usage.completion_tokens, 13); // 8 + 5
-    assert_eq!(usage.total_tokens, 33); // 18 + 15
+    assert_eq!(usage.prompt_tokens, 20);
+    assert_eq!(usage.completion_tokens, 13);
+    assert_eq!(usage.total_tokens, 33);
 }
 
 #[tokio::test]
@@ -758,13 +737,11 @@ async fn session_parent_linkage() {
     let h = TestHarness::new();
     let engine = h.session_engine();
 
-    // Create a parent session
     let parent = engine
         .create_session(SessionKind::Direct, Some("/workspace".to_string()))
         .await
         .unwrap();
 
-    // Create a subagent child session linked to the parent
     let child = engine
         .create_session_full(
             SessionKind::Subagent,
@@ -779,7 +756,6 @@ async fn session_parent_linkage() {
     assert_eq!(child.requester_session_id, Some(parent.id));
     assert!(child.channel_ref.is_none());
 
-    // Create a channel session with channel_ref
     let channel_session = engine
         .create_session_full(
             SessionKind::Channel,
@@ -794,7 +770,6 @@ async fn session_parent_linkage() {
     assert_eq!(channel_session.channel_ref, Some("telegram".to_string()));
     assert!(channel_session.requester_session_id.is_none());
 
-    // Verify parent session has no linkage
     assert!(parent.requester_session_id.is_none());
     assert!(parent.channel_ref.is_none());
 }
