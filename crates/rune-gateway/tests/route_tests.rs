@@ -12,11 +12,15 @@ use tokio::sync::{Mutex, broadcast};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use rune_config::AppConfig;
+use rune_config::{AppConfig, ConfiguredModel, ModelProviderConfig};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };
-use rune_runtime::{CompactionStrategy, ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor, heartbeat::HeartbeatRunner, scheduler::{ReminderStore, Scheduler}};
+use rune_runtime::{
+    CompactionStrategy, ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor,
+    heartbeat::HeartbeatRunner,
+    scheduler::{ReminderStore, Scheduler},
+};
 use rune_store::StoreError;
 use rune_store::models::*;
 use rune_store::repos::*;
@@ -257,7 +261,10 @@ struct FakeModelProvider;
 
 #[async_trait]
 impl ModelProvider for FakeModelProvider {
-    async fn complete(&self, _request: &CompletionRequest) -> Result<CompletionResponse, ModelError> {
+    async fn complete(
+        &self,
+        _request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelError> {
         Ok(CompletionResponse {
             content: Some("Hello from fake model!".to_string()),
             usage: Usage {
@@ -277,13 +284,22 @@ struct MemToolApprovalPolicyRepo;
 
 #[async_trait]
 impl ToolApprovalPolicyRepo for MemToolApprovalPolicyRepo {
-    async fn list_policies(&self) -> Result<Vec<rune_store::repos::ToolApprovalPolicy>, StoreError> {
+    async fn list_policies(
+        &self,
+    ) -> Result<Vec<rune_store::repos::ToolApprovalPolicy>, StoreError> {
         Ok(vec![])
     }
-    async fn get_policy(&self, _tool_name: &str) -> Result<Option<rune_store::repos::ToolApprovalPolicy>, StoreError> {
+    async fn get_policy(
+        &self,
+        _tool_name: &str,
+    ) -> Result<Option<rune_store::repos::ToolApprovalPolicy>, StoreError> {
         Ok(None)
     }
-    async fn set_policy(&self, tool_name: &str, decision: &str) -> Result<rune_store::repos::ToolApprovalPolicy, StoreError> {
+    async fn set_policy(
+        &self,
+        tool_name: &str,
+        decision: &str,
+    ) -> Result<rune_store::repos::ToolApprovalPolicy, StoreError> {
         Ok(rune_store::repos::ToolApprovalPolicy {
             tool_name: tool_name.to_string(),
             decision: decision.to_string(),
@@ -316,6 +332,10 @@ impl ToolExecutor for FakeToolExecutor {
 const TEST_AUTH_TOKEN: &str = "test-secret-token";
 
 fn build_test_app(auth_token: Option<String>) -> axum::Router {
+    build_test_app_with_config(AppConfig::default(), auth_token)
+}
+
+fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>) -> axum::Router {
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
@@ -324,14 +344,12 @@ fn build_test_app(auth_token: Option<String>) -> axum::Router {
 
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
-    let workspace_root =
-        std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
+    let workspace_root = std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
     std::fs::write(workspace_root.join("AGENTS.md"), "# Test workspace").unwrap();
 
     let context_assembler = ContextAssembler::new("You are a test assistant.");
-    let compaction: Arc<dyn CompactionStrategy> =
-        Arc::new(NoOpCompaction);
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
 
@@ -351,8 +369,10 @@ fn build_test_app(auth_token: Option<String>) -> axum::Router {
 
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
 
+    config.gateway.auth_token = auth_token.clone();
+
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(config),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -373,6 +393,11 @@ fn build_test_app(auth_token: Option<String>) -> axum::Router {
 async fn body_json(response: axum::http::Response<Body>) -> Value {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn body_text(response: axum::http::Response<Body>) -> String {
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    String::from_utf8(bytes.to_vec()).unwrap()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -407,6 +432,157 @@ async fn status_returns_correct_shape() {
     assert!(json["uptime_seconds"].is_number());
     assert!(json["registered_tools"].is_number());
     assert!(json["session_count"].is_number());
+}
+
+#[tokio::test]
+async fn dashboard_html_requires_auth_when_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+    let response = app
+        .oneshot(Request::get("/dashboard").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn dashboard_html_renders() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(Request::get("/dashboard").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("Rune Operator Dashboard"));
+    assert!(body.contains("/api/dashboard/summary"));
+}
+
+#[tokio::test]
+async fn dashboard_summary_reports_runtime_counts() {
+    let mut config = AppConfig::default();
+    config.models.default_model = Some("openai/gpt-4.1-mini".to_string());
+    config.models.providers.push(ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.example".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1-mini".to_string())],
+    });
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/summary")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["gateway_status"], "running");
+    assert_eq!(json["default_model"], "openai/gpt-4.1-mini");
+    assert_eq!(json["provider_count"], 1);
+    assert_eq!(json["configured_model_count"], 1);
+}
+
+#[tokio::test]
+async fn dashboard_models_lists_provider_inventory() {
+    let mut config = AppConfig::default();
+    config.models.default_model = Some("openai/gpt-4.1-mini".to_string());
+    config.models.providers.push(ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.example".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![
+            ConfiguredModel::Id("gpt-4.1-mini".to_string()),
+            ConfiguredModel::Id("gpt-4.1".to_string()),
+        ],
+    });
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/models")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["provider_name"], "openai");
+    assert!(items.iter().any(|item| item["is_default"] == true));
+}
+
+#[tokio::test]
+async fn dashboard_diagnostics_falls_back_to_status_notes() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["structured_errors_available"], false);
+    let items = json["items"].as_array().unwrap();
+    assert!(!items.is_empty());
+}
+
+#[tokio::test]
+async fn dashboard_sessions_includes_kind_and_activity_fields() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"kind":"channel","channel_ref":"telegram:ops"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/sessions")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["kind"], "channel");
+    assert_eq!(items[0]["channel_ref"], "telegram:ops");
+    assert!(items[0]["last_activity_at"].is_string());
 }
 
 #[tokio::test]
@@ -447,10 +623,7 @@ async fn auth_accepts_valid_token() {
     let response = app
         .oneshot(
             Request::get("/status")
-                .header(
-                    header::AUTHORIZATION,
-                    format!("Bearer {TEST_AUTH_TOKEN}"),
-                )
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -500,14 +673,12 @@ async fn send_message_and_transcript_with_shared_state() {
     let scheduler = Arc::new(Scheduler::new());
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
-    let workspace_root =
-        std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
+    let workspace_root = std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
     std::fs::write(workspace_root.join("AGENTS.md"), "# Test").unwrap();
 
     let context_assembler = ContextAssembler::new("You are a test assistant.");
-    let compaction: Arc<dyn CompactionStrategy> =
-        Arc::new(NoOpCompaction);
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
 
@@ -590,18 +761,26 @@ async fn send_message_and_transcript_with_shared_state() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let transcript: Vec<Value> = serde_json::from_slice(
-        &response.into_body().collect().await.unwrap().to_bytes(),
-    )
-    .unwrap();
+    let transcript: Vec<Value> =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
 
     // Should have at least user_message and assistant_message
-    assert!(transcript.len() >= 2, "expected >=2 transcript items, got {}", transcript.len());
+    assert!(
+        transcript.len() >= 2,
+        "expected >=2 transcript items, got {}",
+        transcript.len()
+    );
 
     // Verify ordering: seq values should be ascending
-    let seqs: Vec<i64> = transcript.iter().map(|t| t["seq"].as_i64().unwrap()).collect();
+    let seqs: Vec<i64> = transcript
+        .iter()
+        .map(|t| t["seq"].as_i64().unwrap())
+        .collect();
     for window in seqs.windows(2) {
-        assert!(window[0] <= window[1], "transcript not ordered by seq: {seqs:?}");
+        assert!(
+            window[0] <= window[1],
+            "transcript not ordered by seq: {seqs:?}"
+        );
     }
 
     // First item should be user message

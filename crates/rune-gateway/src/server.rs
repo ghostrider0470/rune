@@ -13,7 +13,11 @@ use tracing::info;
 
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
-use rune_runtime::{SessionEngine, TurnExecutor, heartbeat::HeartbeatRunner, scheduler::{ReminderStore, Scheduler}};
+use rune_runtime::{
+    SessionEngine, TurnExecutor,
+    heartbeat::HeartbeatRunner,
+    scheduler::{ReminderStore, Scheduler},
+};
 use rune_store::repos::{SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo};
 
 use crate::auth::bearer_auth;
@@ -139,6 +143,15 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let protected_routes = Router::new()
         .route("/status", get(routes::status))
+        .route("/dashboard", get(routes::dashboard_page))
+        .route("/ui", get(routes::dashboard_page))
+        .route("/api/dashboard/summary", get(routes::dashboard_summary))
+        .route("/api/dashboard/models", get(routes::dashboard_models))
+        .route("/api/dashboard/sessions", get(routes::dashboard_sessions))
+        .route(
+            "/api/dashboard/diagnostics",
+            get(routes::dashboard_diagnostics),
+        )
         .route("/gateway/health", get(routes::health))
         .route("/gateway/start", post(routes::gateway_start))
         .route("/gateway/stop", post(routes::gateway_stop))
@@ -171,7 +184,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/heartbeat/enable", post(routes::heartbeat_enable))
         .route("/heartbeat/disable", post(routes::heartbeat_disable))
         // Reminder routes
-        .route("/reminders", get(routes::reminders_list).post(routes::reminders_add))
+        .route(
+            "/reminders",
+            get(routes::reminders_list).post(routes::reminders_add),
+        )
         .route("/reminders/{id}", delete(routes::reminders_cancel))
         .layer(middleware::from_fn(move |req, next| {
             bearer_auth(req, next, auth_token.clone())

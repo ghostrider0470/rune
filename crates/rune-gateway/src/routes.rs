@@ -6,6 +6,7 @@ use std::time::Instant;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::Html;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -17,6 +18,7 @@ use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, Schedule, SessionTarget,
 };
+use rune_store::models::SessionRow;
 
 use crate::error::GatewayError;
 use crate::state::{AppState, SessionEvent};
@@ -109,6 +111,169 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             memory_dir: state.config.paths.memory_dir.display().to_string(),
             logs_dir: state.config.paths.logs_dir.display().to_string(),
         },
+    }))
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct DashboardSummaryResponse {
+    pub gateway_status: &'static str,
+    pub bind: String,
+    pub uptime_seconds: u64,
+    pub default_model: Option<String>,
+    pub provider_count: usize,
+    pub configured_model_count: usize,
+    pub session_count: usize,
+    pub auth_enabled: bool,
+    pub ws_subscribers: usize,
+    pub channels: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct DashboardModelItem {
+    pub provider_name: String,
+    pub provider_kind: String,
+    pub model_id: String,
+    pub raw_model: String,
+    pub is_default: bool,
+}
+
+#[derive(Serialize)]
+pub struct DashboardSessionItem {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub channel_ref: Option<String>,
+    pub routing_ref: Option<String>,
+    pub created_at: String,
+    pub last_activity_at: String,
+}
+
+#[derive(Serialize)]
+pub struct DashboardDiagnosticItem {
+    pub level: &'static str,
+    pub source: &'static str,
+    pub message: String,
+    pub observed_at: String,
+}
+
+#[derive(Serialize)]
+pub struct DashboardDiagnosticsResponse {
+    pub structured_errors_available: bool,
+    pub items: Vec<DashboardDiagnosticItem>,
+}
+
+pub async fn dashboard_page() -> Html<&'static str> {
+    Html(DASHBOARD_HTML)
+}
+
+pub async fn dashboard_summary(
+    State(state): State<AppState>,
+) -> Result<Json<DashboardSummaryResponse>, GatewayError> {
+    let sessions = state
+        .session_repo
+        .list(i64::MAX / 4, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(DashboardSummaryResponse {
+        gateway_status: "running",
+        bind: format!(
+            "{}:{}",
+            state.config.gateway.host, state.config.gateway.port
+        ),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        default_model: resolved_default_model(&state),
+        provider_count: state.config.models.providers.len(),
+        configured_model_count: state.config.models.inventory().len(),
+        session_count: sessions.len(),
+        auth_enabled: state.config.gateway.auth_token.is_some(),
+        ws_subscribers: state.event_tx.receiver_count(),
+        channels: configured_channels(&state),
+    }))
+}
+
+pub async fn dashboard_models(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DashboardModelItem>>, GatewayError> {
+    let default_model = resolved_default_model(&state);
+    let mut items = state
+        .config
+        .models
+        .inventory()
+        .into_iter()
+        .map(|entry| {
+            let model_id = entry.model_id();
+            let is_default = default_model.as_deref() == Some(model_id.as_str())
+                || default_model.as_deref() == Some(entry.raw_model);
+            DashboardModelItem {
+                provider_name: entry.provider_name.to_string(),
+                provider_kind: entry.provider_kind.to_string(),
+                model_id,
+                raw_model: entry.raw_model.to_string(),
+                is_default,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    items.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+    Ok(Json(items))
+}
+
+pub async fn dashboard_sessions(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DashboardSessionItem>>, GatewayError> {
+    let rows = state
+        .session_repo
+        .list(50, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(
+        rows.into_iter().map(session_to_dashboard_item).collect(),
+    ))
+}
+
+pub async fn dashboard_diagnostics(
+    State(state): State<AppState>,
+) -> Result<Json<DashboardDiagnosticsResponse>, GatewayError> {
+    let mut items = Vec::new();
+    let now = Utc::now().to_rfc3339();
+
+    if state.config.models.providers.is_empty() {
+        items.push(DashboardDiagnosticItem {
+            level: "warn",
+            source: "models",
+            message: "No model providers configured; gateway is using the demo echo backend."
+                .to_string(),
+            observed_at: now.clone(),
+        });
+    }
+
+    if configured_channels(&state).is_empty() {
+        items.push(DashboardDiagnosticItem {
+            level: "info",
+            source: "channels",
+            message: "No channel adapters are configured.".to_string(),
+            observed_at: now.clone(),
+        });
+    }
+
+    if items.is_empty() {
+        items.push(DashboardDiagnosticItem {
+            level: "info",
+            source: "runtime",
+            message:
+                "No structured provider or channel errors are currently exposed by the runtime."
+                    .to_string(),
+            observed_at: now,
+        });
+    }
+
+    Ok(Json(DashboardDiagnosticsResponse {
+        structured_errors_available: false,
+        items,
     }))
 }
 
@@ -858,6 +1023,381 @@ fn run_to_response(run: JobRun) -> CronRunResponse {
     }
 }
 
+fn resolved_default_model(state: &AppState) -> Option<String> {
+    state
+        .config
+        .agents
+        .default_agent()
+        .and_then(|agent| state.config.agents.effective_model(agent))
+        .map(str::to_string)
+        .or_else(|| state.config.models.default_model.clone())
+}
+
+fn configured_channels(state: &AppState) -> Vec<String> {
+    let mut channels = state.config.channels.enabled.clone();
+    if state.config.channels.telegram_token.is_some() && !channels.iter().any(|c| c == "telegram") {
+        channels.push("telegram".to_string());
+    }
+    channels.sort();
+    channels.dedup();
+    channels
+}
+
+fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
+    DashboardSessionItem {
+        id: row.id.to_string(),
+        kind: row.kind,
+        status: row.status,
+        routing_ref: row.channel_ref.clone(),
+        channel_ref: row.channel_ref,
+        created_at: row.created_at.to_rfc3339(),
+        last_activity_at: row.last_activity_at.to_rfc3339(),
+    }
+}
+
+const DASHBOARD_HTML: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rune Operator Dashboard</title>
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --panel: rgba(255, 252, 247, 0.9);
+      --panel-strong: #fffaf3;
+      --ink: #1f1c18;
+      --muted: #6e655d;
+      --line: #d5c6b8;
+      --accent: #0f766e;
+      --accent-soft: #d7f3ef;
+      --warn: #b45309;
+      --warn-soft: #fde7c7;
+      --danger: #b42318;
+      --danger-soft: #fee4e2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iosevka Aile", "IBM Plex Sans", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(180, 83, 9, 0.12), transparent 24%),
+        linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+    }
+    .shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+    .hero {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    h1 {
+      margin: 0;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: clamp(28px, 4vw, 42px);
+      letter-spacing: -0.04em;
+    }
+    .subhead {
+      margin-top: 8px;
+      color: var(--muted);
+      max-width: 680px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      background: rgba(255, 250, 243, 0.7);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+    }
+    .card {
+      grid-column: span 12;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(51, 33, 15, 0.05);
+      backdrop-filter: blur(10px);
+    }
+    .card h2 {
+      margin: 0 0 14px;
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .stats {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: var(--panel-strong);
+    }
+    .stat label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+    .stat strong {
+      font-size: 28px;
+      line-height: 1;
+    }
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 8px;
+      border-top: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-top: none;
+      padding-top: 0;
+    }
+    .diag {
+      display: grid;
+      gap: 10px;
+    }
+    .diag-item {
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      background: var(--panel-strong);
+    }
+    .diag-item.warn { background: var(--warn-soft); border-color: #eab308; }
+    .diag-item.error { background: var(--danger-soft); border-color: #fda29b; }
+    .diag-head {
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .empty, .loading {
+      color: var(--muted);
+      padding: 10px 0;
+    }
+    @media (min-width: 900px) {
+      .summary { grid-column: span 12; }
+      .models { grid-column: span 5; }
+      .sessions { grid-column: span 7; }
+      .diagnostics { grid-column: span 12; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <h1>Rune Operator Dashboard</h1>
+        <div class="subhead">Local-first operator view for gateway state, configured models, recent sessions, and runtime diagnostics.</div>
+      </div>
+      <div class="meta">
+        <div class="pill">Route: <strong>/dashboard</strong></div>
+        <div class="pill">API: <strong>/api/dashboard/*</strong></div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card summary">
+        <h2>Home</h2>
+        <div id="summary" class="stats">
+          <div class="loading">Loading summary…</div>
+        </div>
+      </article>
+
+      <article class="card models">
+        <h2>Models</h2>
+        <div class="stack">
+          <table>
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Provider</th>
+                <th>Kind</th>
+              </tr>
+            </thead>
+            <tbody id="models-body">
+              <tr><td colspan="3" class="loading">Loading models…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card sessions">
+        <h2>Recent Sessions</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Kind / Status</th>
+              <th>Channel / Routing</th>
+              <th>Last Activity</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-body">
+            <tr><td colspan="5" class="loading">Loading sessions…</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="card diagnostics">
+        <h2>Errors & Health</h2>
+        <div id="diagnostics" class="diag">
+          <div class="loading">Loading diagnostics…</div>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script>
+    function fmtDate(value) {
+      if (!value) return "n/a";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function fmtDuration(seconds) {
+      const parts = [];
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      if (days) parts.push(days + "d");
+      if (hours) parts.push(hours + "h");
+      parts.push(minutes + "m");
+      return parts.join(" ");
+    }
+
+    async function loadJson(path) {
+      const response = await fetch(path, { headers: { "accept": "application/json" } });
+      if (!response.ok) throw new Error(path + " returned " + response.status);
+      return response.json();
+    }
+
+    function renderSummary(summary) {
+      const root = document.getElementById("summary");
+      const entries = [
+        ["Gateway", summary.gateway_status],
+        ["Uptime", fmtDuration(summary.uptime_seconds)],
+        ["Default model", summary.default_model || "none"],
+        ["Providers", String(summary.provider_count)],
+        ["Configured models", String(summary.configured_model_count)],
+        ["Sessions", String(summary.session_count)],
+      ];
+      root.innerHTML = entries.map(([label, value]) =>
+        `<div class="stat"><label>${label}</label><strong>${value}</strong></div>`
+      ).join("");
+    }
+
+    function renderModels(models) {
+      const body = document.getElementById("models-body");
+      if (!models.length) {
+        body.innerHTML = `<tr><td colspan="3" class="empty">No configured models.</td></tr>`;
+        return;
+      }
+      body.innerHTML = models.map((model) => `
+        <tr>
+          <td>${model.model_id}${model.is_default ? " <strong>(default)</strong>" : ""}</td>
+          <td>${model.provider_name}</td>
+          <td>${model.provider_kind || "n/a"}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderSessions(sessions) {
+      const body = document.getElementById("sessions-body");
+      if (!sessions.length) {
+        body.innerHTML = `<tr><td colspan="5" class="empty">No sessions found.</td></tr>`;
+        return;
+      }
+      body.innerHTML = sessions.map((session) => `
+        <tr>
+          <td><code>${session.id}</code></td>
+          <td>${session.kind} / ${session.status}</td>
+          <td>${session.channel_ref || "n/a"}${session.routing_ref ? `<br><code>${session.routing_ref}</code>` : ""}</td>
+          <td>${fmtDate(session.last_activity_at)}</td>
+          <td>${fmtDate(session.created_at)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderDiagnostics(data) {
+      const root = document.getElementById("diagnostics");
+      root.innerHTML = data.items.map((item) => `
+        <div class="diag-item ${item.level}">
+          <div class="diag-head">
+            <span>${item.level.toUpperCase()} · ${item.source}</span>
+            <span>${fmtDate(item.observed_at)}</span>
+          </div>
+          <div>${item.message}</div>
+        </div>
+      `).join("");
+    }
+
+    async function boot() {
+      try {
+        const [summary, models, sessions, diagnostics] = await Promise.all([
+          loadJson("/api/dashboard/summary"),
+          loadJson("/api/dashboard/models"),
+          loadJson("/api/dashboard/sessions"),
+          loadJson("/api/dashboard/diagnostics"),
+        ]);
+        renderSummary(summary);
+        renderModels(models);
+        renderSessions(sessions);
+        renderDiagnostics(diagnostics);
+      } catch (error) {
+        document.getElementById("summary").innerHTML = `<div class="empty">${error.message}</div>`;
+        document.getElementById("models-body").innerHTML = `<tr><td colspan="3" class="empty">Failed to load models.</td></tr>`;
+        document.getElementById("sessions-body").innerHTML = `<tr><td colspan="5" class="empty">Failed to load sessions.</td></tr>`;
+        document.getElementById("diagnostics").innerHTML = `<div class="empty">Failed to load diagnostics.</div>`;
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>
+"#;
+
 // ── Approvals ─────────────────────────────────────────────────────────
 
 /// Response for a single tool approval policy.
@@ -906,9 +1446,7 @@ pub async fn get_approval_policy(
         .get_policy(&tool)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?
-        .ok_or_else(|| {
-            GatewayError::BadRequest(format!("no approval policy for tool: {tool}"))
-        })?;
+        .ok_or_else(|| GatewayError::BadRequest(format!("no approval policy for tool: {tool}")))?;
 
     Ok(Json(ApprovalPolicyResponse {
         tool_name: policy.tool_name,
@@ -1042,7 +1580,9 @@ pub async fn reminders_list(
 ) -> Result<Json<Vec<ReminderResponse>>, GatewayError> {
     let include_delivered = query.include_delivered.unwrap_or(false);
     let reminders = state.reminder_store.list(include_delivered).await;
-    Ok(Json(reminders.into_iter().map(reminder_to_response).collect()))
+    Ok(Json(
+        reminders.into_iter().map(reminder_to_response).collect(),
+    ))
 }
 
 /// `POST /reminders` — add a reminder.

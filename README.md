@@ -90,6 +90,11 @@ Gateway exposes a REST API on the configured port:
 |----------|-------------|
 | `GET /health` | Health check |
 | `GET /status` | Gateway status |
+| `GET /dashboard` | Operator dashboard HTML |
+| `GET /api/dashboard/summary` | Dashboard summary metrics |
+| `GET /api/dashboard/models` | Configured model inventory |
+| `GET /api/dashboard/sessions` | Recent session summaries |
+| `GET /api/dashboard/diagnostics` | Minimal runtime diagnostics |
 | `GET /sessions` | List sessions |
 | `POST /sessions` | Create session |
 | `POST /sessions/{id}/messages` | Send message |
@@ -128,6 +133,8 @@ cargo run --release --bin rune-gateway -- --config config.toml
 # Or run the built binary directly
 ./target/release/rune-gateway --config config.toml
 ```
+
+Open `http://127.0.0.1:8787/dashboard` after the gateway starts to inspect the operator dashboard. If `gateway.auth_token` is configured, the dashboard uses the same bearer-token protection as the rest of the protected gateway routes.
 
 ### Run as systemd service (recommended for dev)
 
