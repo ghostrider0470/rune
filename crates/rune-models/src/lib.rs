@@ -9,8 +9,8 @@ pub use provider::azure::AzureOpenAiProvider;
 pub use provider::openai::OpenAiProvider;
 pub use provider::ModelProvider;
 pub use types::{
-    ChatMessage, CompletionRequest, CompletionResponse, FinishReason, Role, ToolCallRequest,
-    ToolDefinition, Usage,
+    ChatMessage, CompletionRequest, CompletionResponse, FinishReason, FunctionCall,
+    FunctionDefinition, Role, ToolCallRequest, ToolDefinition, Usage,
 };
 
 use rune_config::ModelProviderConfig;
