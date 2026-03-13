@@ -1,7 +1,7 @@
 //! Background process management tool.
 //!
-//! Implements the `process` tool: list, poll, log, write, kill running background processes.
-//! Works in tandem with `exec_tool` when `background: true` is set.
+//! Implements the `process` tool: list, poll, log, write, submit, paste, send-keys, kill running
+//! background processes. Works in tandem with `exec_tool` when `background: true` is set.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,7 +47,6 @@ impl ProcessManager {
             })),
         });
 
-        // Spawn readers for stdout/stderr
         if let Some(reader) = stdout_handle {
             spawn_reader(reader, entry.stdout.clone());
         }
@@ -55,7 +54,6 @@ impl ProcessManager {
             spawn_reader(reader, entry.stderr.clone());
         }
 
-        // Spawn waiter for exit status
         spawn_waiter(entry.clone());
 
         self.entries.lock().await.insert(process_id, entry);
@@ -117,7 +115,12 @@ impl ProcessManager {
     }
 
     /// Write data to a process's stdin.
-    pub async fn write_stdin(&self, process_id: &str, data: &str) -> Result<usize, ToolError> {
+    pub async fn write_stdin(
+        &self,
+        process_id: &str,
+        data: &str,
+        eof: bool,
+    ) -> Result<usize, ToolError> {
         let entry = self.get(process_id).await?;
         let mut stdin_guard = entry.stdin.lock().await;
         let stdin = stdin_guard.as_mut().ok_or_else(|| {
@@ -127,7 +130,27 @@ impl ProcessManager {
             .write_all(data.as_bytes())
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to write to stdin: {e}")))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to flush stdin: {e}")))?;
+        if eof {
+            *stdin_guard = None;
+        }
         Ok(data.len())
+    }
+
+    /// Close stdin for a process without writing more data.
+    pub async fn close_stdin(&self, process_id: &str) -> Result<(), ToolError> {
+        let entry = self.get(process_id).await?;
+        let mut stdin_guard = entry.stdin.lock().await;
+        if stdin_guard.is_none() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "stdin not available for process {process_id}"
+            )));
+        }
+        *stdin_guard = None;
+        Ok(())
     }
 
     /// Kill a process.
@@ -207,6 +230,29 @@ fn spawn_waiter(entry: Arc<ProcessEntry>) {
         state.running = false;
         state.exit_code = status.and_then(|s| s.code());
     });
+}
+
+fn key_token_to_bytes(token: &str) -> Option<&'static [u8]> {
+    match token {
+        "enter" => Some(b"\n"),
+        "return" => Some(b"\n"),
+        "tab" => Some(b"\t"),
+        "ctrl-c" => Some(&[0x03]),
+        "ctrl-d" => Some(&[0x04]),
+        "esc" => Some(&[0x1b]),
+        _ => None,
+    }
+}
+
+fn parse_hex_byte(token: &str) -> Result<u8, ToolError> {
+    let trimmed = token.trim();
+    let normalized = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    u8::from_str_radix(normalized, 16).map_err(|_| {
+        ToolError::InvalidArgument(format!("invalid send-keys hex byte: {token}"))
+    })
 }
 
 /// Tool executor that handles `process` tool calls.
@@ -300,10 +346,114 @@ impl ProcessToolExecutor {
                     .ok_or_else(|| {
                         ToolError::InvalidArgument("write requires data parameter".into())
                     })?;
-                let written = self.manager.write_stdin(pid, data).await?;
+                let eof = call
+                    .arguments
+                    .get("eof")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let written = self.manager.write_stdin(pid, data, eof).await?;
                 Ok(ToolResult {
                     tool_call_id: call.tool_call_id,
                     output: format!("wrote {written} bytes"),
+                    is_error: false,
+                })
+            }
+            "submit" => {
+                let pid = process_id.ok_or_else(|| {
+                    ToolError::InvalidArgument("submit requires sessionId".into())
+                })?;
+                let data = call
+                    .arguments
+                    .get("data")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let payload = format!("{data}\n");
+                let written = self.manager.write_stdin(pid, &payload, false).await?;
+                Ok(ToolResult {
+                    tool_call_id: call.tool_call_id,
+                    output: format!("submitted {written} bytes"),
+                    is_error: false,
+                })
+            }
+            "paste" => {
+                let pid = process_id.ok_or_else(|| {
+                    ToolError::InvalidArgument("paste requires sessionId".into())
+                })?;
+                let text = call
+                    .arguments
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        ToolError::InvalidArgument("paste requires text parameter".into())
+                    })?;
+                let bracketed = call
+                    .arguments
+                    .get("bracketed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let payload = if bracketed {
+                    format!("\u{1b}[200~{text}\u{1b}[201~")
+                } else {
+                    text.to_string()
+                };
+                let written = self.manager.write_stdin(pid, &payload, false).await?;
+                Ok(ToolResult {
+                    tool_call_id: call.tool_call_id,
+                    output: format!("pasted {written} bytes"),
+                    is_error: false,
+                })
+            }
+            "send-keys" => {
+                let pid = process_id.ok_or_else(|| {
+                    ToolError::InvalidArgument("send-keys requires sessionId".into())
+                })?;
+                let mut payload = Vec::<u8>::new();
+                if let Some(literal) = call.arguments.get("literal").and_then(|v| v.as_str()) {
+                    payload.extend_from_slice(literal.as_bytes());
+                }
+                if let Some(keys) = call.arguments.get("keys").and_then(|v| v.as_array()) {
+                    for key in keys {
+                        let token = key.as_str().ok_or_else(|| {
+                            ToolError::InvalidArgument(
+                                "send-keys keys entries must be strings".into(),
+                            )
+                        })?;
+                        let bytes = key_token_to_bytes(token).ok_or_else(|| {
+                            ToolError::InvalidArgument(format!(
+                                "unsupported send-keys token: {token}"
+                            ))
+                        })?;
+                        payload.extend_from_slice(bytes);
+                    }
+                }
+                if let Some(hex_values) = call.arguments.get("hex").and_then(|v| v.as_array()) {
+                    for value in hex_values {
+                        let token = value.as_str().ok_or_else(|| {
+                            ToolError::InvalidArgument(
+                                "send-keys hex entries must be strings".into(),
+                            )
+                        })?;
+                        payload.push(parse_hex_byte(token)?);
+                    }
+                }
+                if payload.is_empty() {
+                    return Err(ToolError::InvalidArgument(
+                        "send-keys requires keys, hex, or literal".into(),
+                    ));
+                }
+                let text = String::from_utf8_lossy(&payload).to_string();
+                let written = self.manager.write_stdin(pid, &text, false).await?;
+                if call
+                    .arguments
+                    .get("eof")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    self.manager.close_stdin(pid).await?;
+                }
+                Ok(ToolResult {
+                    tool_call_id: call.tool_call_id,
+                    output: format!("sent {written} bytes"),
                     is_error: false,
                 })
             }
@@ -387,7 +537,6 @@ mod tests {
         let stdin = child.stdin.take();
         mgr.register("echo-1".into(), child, stdin).await;
 
-        // Wait for process to finish
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let info = mgr.poll("echo-1").await.unwrap();
@@ -417,5 +566,114 @@ mod tests {
         let call = make_call("process", serde_json::json!({"action": "dance"}));
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn submit_and_paste_write_to_stdin() {
+        let mgr = ProcessManager::new();
+        let exec = ProcessToolExecutor::new(mgr.clone());
+
+        let mut child = Command::new("bash")
+            .args(["-c", "cat"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let stdin = child.stdin.take();
+        mgr.register("cat-1".into(), child, stdin).await;
+
+        exec.execute(make_call(
+            "process",
+            serde_json::json!({"action": "submit", "sessionId": "cat-1", "data": "hello"}),
+        ))
+        .await
+        .unwrap();
+
+        exec.execute(make_call(
+            "process",
+            serde_json::json!({"action": "paste", "sessionId": "cat-1", "text": "world", "bracketed": false}),
+        ))
+        .await
+        .unwrap();
+
+        exec.execute(make_call(
+            "process",
+            serde_json::json!({"action": "write", "sessionId": "cat-1", "data": "!", "eof": true}),
+        ))
+        .await
+        .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let log = mgr.log("cat-1", None, None).await.unwrap();
+        assert!(log.contains("hello\nworld!"));
+    }
+
+    #[tokio::test]
+    async fn send_keys_supports_literal_and_enter() {
+        let mgr = ProcessManager::new();
+        let exec = ProcessToolExecutor::new(mgr.clone());
+
+        let mut child = Command::new("bash")
+            .args(["-c", "cat"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let stdin = child.stdin.take();
+        mgr.register("cat-keys".into(), child, stdin).await;
+
+        exec.execute(make_call(
+            "process",
+            serde_json::json!({
+                "action": "send-keys",
+                "sessionId": "cat-keys",
+                "literal": "abc",
+                "keys": ["enter"],
+                "eof": true
+            }),
+        ))
+        .await
+        .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let log = mgr.log("cat-keys", None, None).await.unwrap();
+        assert!(log.contains("abc\n"));
+    }
+
+    #[tokio::test]
+    async fn send_keys_supports_hex_bytes() {
+        let mgr = ProcessManager::new();
+        let exec = ProcessToolExecutor::new(mgr.clone());
+
+        let mut child = Command::new("bash")
+            .args(["-c", "cat"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let stdin = child.stdin.take();
+        mgr.register("cat-hex".into(), child, stdin).await;
+
+        exec.execute(make_call(
+            "process",
+            serde_json::json!({
+                "action": "send-keys",
+                "sessionId": "cat-hex",
+                "hex": ["41", "42", "0x43", "0a"],
+                "eof": true
+            }),
+        ))
+        .await
+        .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let log = mgr.log("cat-hex", None, None).await.unwrap();
+        assert!(log.contains("ABC\n"));
     }
 }
