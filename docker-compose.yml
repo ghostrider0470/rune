@@ -1,0 +1,35 @@
+services:
+  rune:
+    build: .
+    ports:
+      - "8787:8787"
+    volumes:
+      - rune-data:/data
+      - ./config:/config:ro
+      - ./secrets:/secrets:ro
+    environment:
+      - RUNE__DATABASE__DATABASE_URL=postgres://rune:rune@db:5432/rune
+      - RUNE__GATEWAY__PORT=8787
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: rune
+      POSTGRES_PASSWORD: rune
+      POSTGRES_DB: rune
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rune"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  rune-data:
+  pg-data:
