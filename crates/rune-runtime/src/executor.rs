@@ -145,7 +145,7 @@ impl TurnExecutor {
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        let workspace_context = WorkspaceLoader::new(&workspace_root).load().await;
+        let workspace_context = WorkspaceLoader::new(&workspace_root, session_kind).load().await;
         let memory_context = MemoryLoader::new(&workspace_root).load(session_kind).await;
 
         let mut iterations: u32 = 0;

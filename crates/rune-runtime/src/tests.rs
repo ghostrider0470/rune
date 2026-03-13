@@ -802,6 +802,7 @@ async fn direct_session_prompt_includes_workspace_and_memory_context() {
     assert!(system.contains("USER.md"));
     assert!(system.contains("Long-term Memory"));
     assert!(system.contains("Today's Notes"));
+    assert!(!system.contains("HEARTBEAT.md"));
 }
 
 #[tokio::test]
@@ -833,4 +834,5 @@ async fn channel_session_prompt_excludes_long_term_memory() {
     assert!(system.contains("Today's Notes"));
     assert!(!system.contains("Long-term Memory"));
     assert!(!system.contains("Long-term fact."));
+    assert!(!system.contains("HEARTBEAT.md"));
 }

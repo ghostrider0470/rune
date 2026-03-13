@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use rune_core::SessionKind;
 use tracing::{debug, warn};
 
 /// Loaded workspace context ready for prompt injection.
@@ -47,18 +48,11 @@ pub struct WorkspaceLoader {
 }
 
 impl WorkspaceLoader {
-    /// Create with default OpenClaw-compatible file list.
-    pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
+    /// Create with default OpenClaw-compatible file list for a session kind.
+    pub fn new(workspace_root: impl Into<PathBuf>, session_kind: SessionKind) -> Self {
         Self {
             workspace_root: workspace_root.into(),
-            files_to_load: vec![
-                "AGENTS.md".into(),
-                "SOUL.md".into(),
-                "USER.md".into(),
-                "TOOLS.md".into(),
-                "IDENTITY.md".into(),
-                "HEARTBEAT.md".into(),
-            ],
+            files_to_load: default_files_for_session(session_kind),
         }
     }
 
@@ -98,6 +92,22 @@ impl WorkspaceLoader {
     }
 }
 
+fn default_files_for_session(session_kind: SessionKind) -> Vec<String> {
+    let mut files = vec![
+        "AGENTS.md".into(),
+        "SOUL.md".into(),
+        "USER.md".into(),
+        "TOOLS.md".into(),
+        "IDENTITY.md".into(),
+    ];
+
+    if matches!(session_kind, SessionKind::Scheduled) {
+        files.push("HEARTBEAT.md".into());
+    }
+
+    files
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,7 +130,7 @@ mod tests {
     #[tokio::test]
     async fn loads_existing_files() {
         let tmp = setup().await;
-        let loader = WorkspaceLoader::new(tmp.path());
+        let loader = WorkspaceLoader::new(tmp.path(), SessionKind::Direct);
         let ctx = loader.load().await;
 
         assert!(ctx.has_file("AGENTS.md"));
@@ -132,7 +142,7 @@ mod tests {
     #[tokio::test]
     async fn skips_missing_files_gracefully() {
         let tmp = TempDir::new().unwrap();
-        let loader = WorkspaceLoader::new(tmp.path());
+        let loader = WorkspaceLoader::new(tmp.path(), SessionKind::Direct);
         let ctx = loader.load().await;
 
         assert!(ctx.files.is_empty());
@@ -141,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn format_includes_file_content() {
         let tmp = setup().await;
-        let loader = WorkspaceLoader::new(tmp.path());
+        let loader = WorkspaceLoader::new(tmp.path(), SessionKind::Direct);
         let ctx = loader.load().await;
 
         let formatted = ctx.format_for_prompt();
@@ -168,5 +178,21 @@ mod tests {
     async fn empty_context_formats_empty() {
         let ctx = WorkspaceContext::default();
         assert!(ctx.format_for_prompt().is_empty());
+    }
+
+    #[tokio::test]
+    async fn heartbeat_file_only_loaded_for_scheduled_sessions() {
+        let tmp = TempDir::new().unwrap();
+        tokio::fs::write(tmp.path().join("HEARTBEAT.md"), "check inbox").await.unwrap();
+
+        let direct = WorkspaceLoader::new(tmp.path(), SessionKind::Direct)
+            .load()
+            .await;
+        let scheduled = WorkspaceLoader::new(tmp.path(), SessionKind::Scheduled)
+            .load()
+            .await;
+
+        assert!(!direct.has_file("HEARTBEAT.md"));
+        assert!(scheduled.has_file("HEARTBEAT.md"));
     }
 }
