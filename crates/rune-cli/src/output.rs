@@ -713,6 +713,97 @@ pub struct ActionResult {
     pub message: String,
 }
 
+/// Result of probing gateway reachability/auth semantics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayProbeResponse {
+    pub gateway_url: String,
+    pub status_http_ok: bool,
+    pub health_http_ok: bool,
+    pub auth_required: bool,
+    pub auth_valid: Option<bool>,
+    pub note: String,
+}
+
+impl fmt::Display for GatewayProbeResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Gateway probe")?;
+        writeln!(f, "  URL:           {}", self.gateway_url)?;
+        writeln!(f, "  /status OK:    {}", self.status_http_ok)?;
+        writeln!(f, "  /health OK:    {}", self.health_http_ok)?;
+        writeln!(f, "  Auth required: {}", self.auth_required)?;
+        if let Some(auth_valid) = self.auth_valid {
+            writeln!(f, "  Auth valid:    {}", auth_valid)?;
+        }
+        write!(f, "  Note:          {}", self.note)
+    }
+}
+
+/// Operator-facing discovery data for the current gateway binding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayDiscoverResponse {
+    pub gateway_url: String,
+    pub health_url: String,
+    pub websocket_url: String,
+    pub config_path: String,
+    pub auth_enabled: bool,
+    pub note: String,
+}
+
+impl fmt::Display for GatewayDiscoverResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Gateway discovery")?;
+        writeln!(f, "  Gateway URL:   {}", self.gateway_url)?;
+        writeln!(f, "  Health URL:    {}", self.health_url)?;
+        writeln!(f, "  WebSocket URL: {}", self.websocket_url)?;
+        writeln!(f, "  Config path:   {}", self.config_path)?;
+        writeln!(f, "  Auth enabled:  {}", self.auth_enabled)?;
+        write!(f, "  Note:          {}", self.note)
+    }
+}
+
+/// Raw gateway HTTP call result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayCallResponse {
+    pub method: String,
+    pub path: String,
+    pub status_code: u16,
+    pub content_type: Option<String>,
+    pub body: String,
+}
+
+impl fmt::Display for GatewayCallResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "{} {} -> HTTP {}", self.method, self.path, self.status_code)?;
+        if let Some(content_type) = &self.content_type {
+            writeln!(f, "Content-Type: {content_type}")?;
+        }
+        write!(f, "{}", self.body)
+    }
+}
+
+/// Aggregate token-usage summary from persisted session turns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayUsageCostResponse {
+    pub total_sessions: usize,
+    pub total_turns: usize,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+    pub note: String,
+}
+
+impl fmt::Display for GatewayUsageCostResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Gateway usage")?;
+        writeln!(f, "  Sessions:          {}", self.total_sessions)?;
+        writeln!(f, "  Turns:             {}", self.total_turns)?;
+        writeln!(f, "  Prompt tokens:     {}", self.prompt_tokens)?;
+        writeln!(f, "  Completion tokens: {}", self.completion_tokens)?;
+        writeln!(f, "  Total tokens:      {}", self.total_tokens)?;
+        write!(f, "  Note:              {}", self.note)
+    }
+}
+
 /// HEARTBEAT.md presence/metadata response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatPresenceResponse {
@@ -1052,6 +1143,65 @@ mod tests {
         assert!(out.contains("Heartbeat"));
         assert!(out.contains("Present:   true"));
         assert!(out.contains("Scheduled sessions load this file at startup."));
+    }
+
+    #[test]
+    fn render_gateway_probe() {
+        let response = GatewayProbeResponse {
+            gateway_url: "http://127.0.0.1:8787".into(),
+            status_http_ok: true,
+            health_http_ok: true,
+            auth_required: true,
+            auth_valid: Some(true),
+            note: "RPC reachable and auth accepted.".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Gateway probe"));
+        assert!(out.contains("Auth required: true"));
+    }
+
+    #[test]
+    fn render_gateway_discover() {
+        let response = GatewayDiscoverResponse {
+            gateway_url: "http://127.0.0.1:8787".into(),
+            health_url: "http://127.0.0.1:8787/health".into(),
+            websocket_url: "ws://127.0.0.1:8787/ws".into(),
+            config_path: "config.toml".into(),
+            auth_enabled: false,
+            note: "Use /health for probes and /status for operator detail.".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Gateway discovery"));
+        assert!(out.contains("WebSocket URL: ws://127.0.0.1:8787/ws"));
+    }
+
+    #[test]
+    fn render_gateway_call() {
+        let response = GatewayCallResponse {
+            method: "GET".into(),
+            path: "/status".into(),
+            status_code: 200,
+            content_type: Some("application/json".into()),
+            body: "{\"status\":\"running\"}".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("GET /status -> HTTP 200"));
+        assert!(out.contains("application/json"));
+    }
+
+    #[test]
+    fn render_gateway_usage_cost() {
+        let response = GatewayUsageCostResponse {
+            total_sessions: 2,
+            total_turns: 3,
+            prompt_tokens: 100,
+            completion_tokens: 40,
+            total_tokens: 140,
+            note: "Token aggregates only; monetary cost accounting is not implemented yet.".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Gateway usage"));
+        assert!(out.contains("Total tokens:      140"));
     }
 
     #[test]

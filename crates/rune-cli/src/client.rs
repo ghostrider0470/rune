@@ -3,15 +3,18 @@
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use reqwest::Method;
 use serde_json::json;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
 use crate::output::{
     ActionResult, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DoctorCheck, DoctorReport, HealthResponse, HeartbeatStatusResponse,
-    ReminderSummary, RemindersListResponse, SessionDetailResponse, SessionListResponse,
-    SessionSummary, StatusResponse,
+    CronStatusResponse, DoctorCheck, DoctorReport, GatewayCallResponse,
+    GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
+    HeartbeatStatusResponse, ReminderSummary, RemindersListResponse, SessionDetailResponse,
+    SessionListResponse, SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -176,6 +179,192 @@ impl GatewayClient {
                 message: format!("Gateway returned HTTP {}", resp.status()),
             })
         }
+    }
+
+    /// Probe gateway reachability and auth semantics separately from process liveness.
+    pub async fn gateway_probe(&self) -> Result<GatewayProbeResponse> {
+        let health_resp = self.http.get(self.url("/health")).send().await;
+        let status_resp = self.http.get(self.url("/status")).send().await;
+
+        let health_http_ok = matches!(health_resp.as_ref().map(|r| r.status().is_success()), Ok(true));
+        let status_http_ok = matches!(status_resp.as_ref().map(|r| r.status().is_success()), Ok(true));
+        let auth_required = matches!(status_resp.as_ref().map(|r| r.status().as_u16()), Ok(401));
+        let auth_valid = if status_http_ok {
+            Some(true)
+        } else if auth_required {
+            Some(false)
+        } else {
+            None
+        };
+
+        let note = if status_http_ok && health_http_ok {
+            "RPC reachable and operator status endpoint responded successfully.".to_string()
+        } else if health_http_ok && auth_required {
+            "Process is up (`/health` OK) but protected RPC requires a valid bearer token.".to_string()
+        } else if health_http_ok {
+            "Process is up via `/health`, but protected RPC/status did not respond cleanly.".to_string()
+        } else {
+            "Gateway health probe failed; process may be down or bound to a different address/profile.".to_string()
+        };
+
+        Ok(GatewayProbeResponse {
+            gateway_url: self.base_url.clone(),
+            status_http_ok,
+            health_http_ok,
+            auth_required,
+            auth_valid,
+            note,
+        })
+    }
+
+    /// Discover operator-facing runtime URLs and config binding context.
+    pub async fn gateway_discover(&self) -> Result<GatewayDiscoverResponse> {
+        let status = self.status().await.ok();
+        let gateway_url = self.base_url.clone();
+        let ws_url = if let Some(rest) = gateway_url.strip_prefix("https://") {
+            format!("wss://{rest}/ws")
+        } else if let Some(rest) = gateway_url.strip_prefix("http://") {
+            format!("ws://{rest}/ws")
+        } else {
+            format!("{gateway_url}/ws")
+        };
+
+        Ok(GatewayDiscoverResponse {
+            gateway_url: gateway_url.clone(),
+            health_url: format!("{gateway_url}/health"),
+            websocket_url: ws_url,
+            config_path: local_config_path().display().to_string(),
+            auth_enabled: status.as_ref().map(|s| s.status == "running").unwrap_or(false),
+            note: "Use `/health` for probes and `/status` for operator detail; mismatches usually mean wrong gateway URL, auth token, or profile/config binding.".to_string(),
+        })
+    }
+
+    /// Perform a raw gateway HTTP call for parity-style operator debugging.
+    pub async fn gateway_call(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+        token: Option<&str>,
+    ) -> Result<GatewayCallResponse> {
+        let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
+            .with_context(|| format!("invalid HTTP method `{method}`"))?;
+        let normalized_path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{path}")
+        };
+
+        let mut request = self.http.request(method.clone(), self.url(&normalized_path));
+        if let Some(token) = token {
+            request = request.header(AUTHORIZATION, format!("Bearer {token}"));
+        }
+        if let Some(body) = body {
+            request = request.header(CONTENT_TYPE, "application/json").body(body.to_string());
+        }
+
+        let response = request.send().await.context("failed to reach gateway")?;
+        let status_code = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let body = response.text().await.context("failed to read gateway response body")?;
+
+        Ok(GatewayCallResponse {
+            method: method.as_str().to_string(),
+            path: normalized_path,
+            status_code,
+            content_type,
+            body,
+        })
+    }
+
+    /// Aggregate persisted session-turn token usage. Monetary cost is intentionally not derived yet.
+    pub async fn gateway_usage_cost(&self) -> Result<GatewayUsageCostResponse> {
+        let sessions = self.sessions_list(None, None, 500).await?;
+        let mut total_turns = 0usize;
+        let mut prompt_tokens = 0u64;
+        let mut completion_tokens = 0u64;
+
+        for session in &sessions.sessions {
+            let response = self
+                .http
+                .get(self.url(&format!("/sessions/{}/transcript", session.id)))
+                .send()
+                .await
+                .with_context(|| format!("failed to fetch transcript for session {}", session.id))?;
+            if !response.status().is_success() {
+                continue;
+            }
+            let transcript: serde_json::Value = response
+                .json()
+                .await
+                .with_context(|| format!("invalid transcript JSON for session {}", session.id))?;
+            if let Some(items) = transcript.as_array() {
+                let session_turns = items
+                    .iter()
+                    .filter(|item| item["kind"].as_str() == Some("assistant_message"))
+                    .count();
+                total_turns += session_turns;
+            }
+
+            let detail = self.sessions_show(&session.id).await.ok();
+            if let Some(turn_count) = detail.and_then(|d| d.turn_count) {
+                total_turns = total_turns.max(turn_count as usize);
+            }
+        }
+
+        let status_response = self.http.get(self.url("/status")).send().await;
+        if let Ok(resp) = status_response {
+            let _ = resp.bytes().await;
+        }
+
+        let transcript_sessions = sessions.sessions.iter().map(|session| session.id.clone()).collect::<Vec<_>>();
+        for session_id in transcript_sessions {
+            let response = self
+                .http
+                .get(self.url(&format!("/sessions/{session_id}/transcript")))
+                .send()
+                .await
+                .with_context(|| format!("failed to fetch transcript for session {session_id}"))?;
+            if !response.status().is_success() {
+                continue;
+            }
+            let transcript: serde_json::Value = response
+                .json()
+                .await
+                .with_context(|| format!("invalid transcript JSON for session {session_id}"))?;
+            if let Some(items) = transcript.as_array() {
+                let mut per_turn: std::collections::BTreeMap<String, (u64, u64)> = std::collections::BTreeMap::new();
+                for item in items {
+                    let turn_id = item["turn_id"].as_str().unwrap_or_default();
+                    let payload = &item["payload"];
+                    if let Some(p) = payload.get("prompt_tokens").and_then(|v| v.as_u64()) {
+                        let entry = per_turn.entry(turn_id.to_string()).or_default();
+                        entry.0 = entry.0.max(p);
+                    }
+                    if let Some(c) = payload.get("completion_tokens").and_then(|v| v.as_u64()) {
+                        let entry = per_turn.entry(turn_id.to_string()).or_default();
+                        entry.1 = entry.1.max(c);
+                    }
+                }
+                for (_turn, (p, c)) in per_turn {
+                    prompt_tokens += p;
+                    completion_tokens += c;
+                }
+            }
+        }
+
+        Ok(GatewayUsageCostResponse {
+            total_sessions: sessions.sessions.len(),
+            total_turns,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+            note: "Token aggregates only; provider-specific monetary cost accounting is not implemented yet.".to_string(),
+        })
     }
 
     /// `GET /status`

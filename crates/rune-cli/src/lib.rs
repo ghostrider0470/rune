@@ -524,6 +524,29 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.gateway_health().await?;
                 println!("{}", render(&result, format));
             }
+            GatewayAction::Probe => {
+                let result = client.gateway_probe().await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::Discover => {
+                let result = client.gateway_discover().await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::Call {
+                method,
+                path,
+                body,
+                token,
+            } => {
+                let result = client
+                    .gateway_call(&method, &path, body.as_deref(), token.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::UsageCost => {
+                let result = client.gateway_usage_cost().await?;
+                println!("{}", render(&result, format));
+            }
             GatewayAction::Start => {
                 let result = client.gateway_start().await?;
                 println!("{}", render(&result, format));

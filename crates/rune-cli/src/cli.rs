@@ -100,6 +100,26 @@ pub enum GatewayAction {
     Status,
     /// Run a health check against the gateway.
     Health,
+    /// Probe RPC/API reachability and auth separately from process status.
+    Probe,
+    /// Discover operator-facing runtime URLs and config binding details.
+    Discover,
+    /// Perform a raw gateway HTTP call.
+    Call {
+        /// HTTP method to use.
+        #[arg(long, default_value = "GET")]
+        method: String,
+        /// Absolute path to call (for example `/status`).
+        path: String,
+        /// Optional JSON body string for POST/PUT/PATCH requests.
+        #[arg(long)]
+        body: Option<String>,
+        /// Optional bearer token override.
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Show token-usage aggregates from persisted session turns.
+    UsageCost,
     /// Start the gateway daemon.
     Start,
     /// Stop the gateway daemon.
@@ -430,6 +450,72 @@ mod tests {
             cli.command,
             Command::Gateway {
                 action: GatewayAction::Health
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_probe() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "probe"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Probe
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_discover() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "discover"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Discover
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_call() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "gateway",
+            "call",
+            "--method",
+            "POST",
+            "--body",
+            "{\"ping\":true}",
+            "--token",
+            "secret",
+            "/cron/wake",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Gateway {
+                action: GatewayAction::Call {
+                    method,
+                    path,
+                    body,
+                    token,
+                },
+            } => {
+                assert_eq!(method, "POST");
+                assert_eq!(path, "/cron/wake");
+                assert_eq!(body.as_deref(), Some("{\"ping\":true}"));
+                assert_eq!(token.as_deref(), Some("secret"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_gateway_usage_cost() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "usage-cost"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::UsageCost
             }
         ));
     }
