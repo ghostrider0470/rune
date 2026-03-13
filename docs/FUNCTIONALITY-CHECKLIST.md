@@ -24,16 +24,16 @@ Interpretation rules:
 - [ ] top-level `openclaw --help` command-family census matches intended parity story
 - [ ] top-level `openclaw --version` behavior exists
 - [ ] top-level `--dev`, `--profile`, `--log-level`, `--no-color`, `--help`, and `--version` controls have equivalent semantics
-- [ ] `openclaw gateway status`
+- [x] `openclaw gateway status`
 - [ ] `openclaw gateway install`
 - [ ] `openclaw gateway uninstall`
 - [ ] `openclaw gateway start`
 - [ ] `openclaw gateway stop`
-- [ ] `openclaw gateway restart`
+- [x] `openclaw gateway restart`
 - [ ] `openclaw gateway run`
 - [ ] `openclaw gateway call`
 - [ ] `openclaw gateway usage-cost`
-- [ ] `openclaw gateway health`
+- [x] `openclaw gateway health`
 - [ ] `openclaw gateway probe`
 - [ ] `openclaw gateway discover`
 - [ ] `openclaw daemon status`
@@ -144,30 +144,34 @@ Interpretation rules:
 - [ ] auth/token generation and rotation
 - [ ] HTTP API resource families
 - [ ] HTTP API resource-operation coverage for parity-critical entities
-- [ ] WebSocket API
+- [x] WebSocket API
 - [ ] WebSocket topic/subscription/replay semantics
 - [ ] dashboard/discovery surfacing
-- [ ] background process supervision visibility
+- [x] background process supervision visibility
 - [ ] restart durability for sessions/jobs/approvals/process history
-- [ ] structured error envelopes
-- [ ] durable IDs returned by create/mutate flows
+- [x] structured error envelopes
+- [x] durable IDs returned by create/mutate flows
+
+Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. This is not full parity, but it is now runnable instead of planning-only.
 
 ---
 
 ## 3. Runtime / sessions / transcripts
 
-- [ ] session creation and persistence
+- [x] session creation and persistence
 - [ ] session kinds and parent linkage
-- [ ] agent turn loop
-- [ ] context assembly
-- [ ] transcript ordering
+- [x] agent turn loop
+- [x] context assembly
+- [x] transcript ordering
 - [ ] transcript attribution of tool/approval/subagent events
 - [ ] transcript compaction/pruning
-- [ ] usage/cost tracking
+- [x] usage/cost tracking
 - [ ] model failover / fallback behavior
 - [ ] session status surface (`/status` + `session_status` equivalent)
 - [ ] startup file loading rules by session type
 - [ ] main-session-only curated-memory boundary
+
+Implementation note (2026-03-13): current smoke evidence covers create-session -> append input -> execute turn -> receive assistant reply -> retrieve ordered transcript through the gateway. The current gateway app uses a transitional in-memory runtime path for executability; release-target durable behavior remains PostgreSQL-backed.
 
 ---
 

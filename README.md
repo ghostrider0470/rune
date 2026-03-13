@@ -4,6 +4,39 @@ Goal: design and build a personal Rust rewrite of OpenClaw with near-identical e
 
 This repo is now in active implementation. The planning docs remain the execution authority for parity, sequencing, and acceptance criteria.
 
+## Current implementation snapshot
+
+- Phase-1 skeleton is in place across the initial `rune-*` workspace and both app binaries.
+- `cargo test` and `cargo clippy --all-targets --all-features -- -D warnings` are currently green at the workspace root.
+- `apps/gateway` is no longer a stub exit path: it now boots a zero-config in-memory gateway/runtime stack so the current HTTP/WS control-plane surface is executable during development.
+- Current smoke-tested gateway surface:
+  - `GET /health`
+  - `GET /status`
+  - `GET /gateway/health`
+  - `POST /gateway/start`
+  - `POST /gateway/stop`
+  - `POST /gateway/restart`
+  - `GET /sessions`
+  - `POST /sessions`
+  - `GET /sessions/{id}`
+  - `POST /sessions/{id}/messages`
+  - `GET /sessions/{id}/transcript`
+- Current runnable CLI parity slice now includes:
+  - `rune gateway status`
+  - `rune gateway health`
+  - `rune gateway start`
+  - `rune gateway stop`
+  - `rune gateway restart`
+  - `rune status`
+  - `rune health`
+  - `rune doctor`
+  - `rune sessions list`
+  - `rune sessions show <id>`
+  - `rune config show`
+  - `rune config validate`
+- Current smoke-tested runtime flow: create session -> send message -> receive assistant reply -> inspect persisted transcript.
+- This runnable path is transitional and intentionally zero-config. Release-target persistence remains PostgreSQL via Diesel + `diesel-async`, with embedded PostgreSQL fallback for local dev.
+
 ## Current deliverables
 
 - `docs/PLAN.md` — rewrite scope, architecture, subsystem breakdown, migration strategy

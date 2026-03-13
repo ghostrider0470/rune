@@ -17,13 +17,28 @@ pub async fn run(cli: Cli) -> Result<()> {
     let client = GatewayClient::new(&cli.gateway_url);
 
     match cli.command {
-        Command::Gateway { action } => {
-            let result = match action {
-                GatewayAction::Start => client.gateway_start().await?,
-                GatewayAction::Stop => client.gateway_stop().await?,
-            };
-            println!("{}", render(&result, format));
-        }
+        Command::Gateway { action } => match action {
+            GatewayAction::Status => {
+                let result = client.gateway_status().await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::Health => {
+                let result = client.gateway_health().await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::Start => {
+                let result = client.gateway_start().await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::Stop => {
+                let result = client.gateway_stop().await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::Restart => {
+                let result = client.gateway_restart().await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Status => {
             let result = client.status().await?;
             println!("{}", render(&result, format));

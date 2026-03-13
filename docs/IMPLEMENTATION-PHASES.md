@@ -95,6 +95,14 @@ Stand up the daemon/gateway/CLI contract without full agent intelligence.
 - auth failure and token validation behavior
 - WS connect/subscribe/reconnect basics
 
+### Current implementation evidence (2026-03-13)
+
+- workspace compile/test/clippy gates are green
+- gateway binary is runnable in zero-config development mode rather than exiting as a stub
+- smoke-tested HTTP flow currently covers: `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`
+- smoke-tested runtime flow currently covers session creation, message execution, assistant reply return, and transcript retrieval end-to-end
+- remaining gap: this executable path is still backed by transitional in-memory repos in the app binary rather than the release-target PostgreSQL/Diesel service wiring
+
 ### Key risk retired
 Control plane instability.
 

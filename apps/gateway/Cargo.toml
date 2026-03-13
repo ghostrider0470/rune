@@ -10,4 +10,15 @@ name = "rune-gateway"
 path = "src/main.rs"
 
 [dependencies]
+rune-config = { path = "../../crates/rune-config" }
+rune-gateway = { path = "../../crates/rune-gateway" }
+rune-models = { path = "../../crates/rune-models" }
+rune-runtime = { path = "../../crates/rune-runtime" }
+rune-store = { path = "../../crates/rune-store" }
+rune-tools = { path = "../../crates/rune-tools" }
+
 anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+uuid.workspace = true

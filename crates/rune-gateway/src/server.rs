@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::middleware;
 use axum::routing::{get, post};
@@ -75,6 +76,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         transcript_repo: services.transcript_repo,
         model_provider: services.model_provider,
         event_tx,
+        started_at: Arc::new(Instant::now()),
     };
 
     // Build the router.
@@ -109,7 +111,11 @@ fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let protected_routes = Router::new()
         .route("/status", get(routes::status))
-        .route("/sessions", post(routes::create_session))
+        .route("/gateway/health", get(routes::health))
+        .route("/gateway/start", post(routes::gateway_start))
+        .route("/gateway/stop", post(routes::gateway_stop))
+        .route("/gateway/restart", post(routes::gateway_restart))
+        .route("/sessions", get(routes::list_sessions).post(routes::create_session))
         .route("/sessions/{id}", get(routes::get_session))
         .route(
             "/sessions/{id}/messages",

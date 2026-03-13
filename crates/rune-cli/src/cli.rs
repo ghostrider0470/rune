@@ -45,10 +45,16 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayAction {
+    /// Query gateway status.
+    Status,
+    /// Run a health check against the gateway.
+    Health,
     /// Start the gateway daemon.
     Start,
     /// Stop the gateway daemon.
     Stop,
+    /// Restart the gateway daemon.
+    Restart,
 }
 
 #[derive(Debug, Subcommand)]
@@ -105,6 +111,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_gateway_status() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Status
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_health() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "health"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Health
+            }
+        ));
+    }
+
+    #[test]
     fn parse_gateway_start() {
         let cli = Cli::try_parse_from(["rune", "gateway", "start"]).unwrap();
         assert!(matches!(
@@ -122,6 +150,17 @@ mod tests {
             cli.command,
             Command::Gateway {
                 action: GatewayAction::Stop
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_restart() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "restart"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Restart
             }
         ));
     }

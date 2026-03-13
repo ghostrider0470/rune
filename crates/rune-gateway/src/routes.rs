@@ -1,5 +1,8 @@
 //! HTTP route handlers for the gateway API.
 
+use std::sync::Arc;
+use std::time::Instant;
+
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -11,7 +14,7 @@ use rune_core::SessionKind;
 use crate::error::GatewayError;
 use crate::state::AppState;
 
-// ── Health & Status ───────────────────────────────────────────────────
+// ── Health & Status ────────────────────────────────────────────────────────────
 
 /// Response for `GET /health`.
 #[derive(Serialize)]
@@ -29,17 +32,50 @@ pub async fn health() -> Json<HealthResponse> {
 pub struct StatusResponse {
     pub status: &'static str,
     pub version: &'static str,
+    pub uptime_seconds: u64,
 }
 
 /// Daemon status with version info.
-pub async fn status() -> Json<StatusResponse> {
+pub async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
     Json(StatusResponse {
         status: "running",
         version: env!("CARGO_PKG_VERSION"),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
     })
 }
 
-// ── Sessions ──────────────────────────────────────────────────────────
+/// Response for control actions that are acknowledged but not yet fully wired.
+#[derive(Serialize)]
+pub struct ActionResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+/// `POST /gateway/start` — parity placeholder for CLI/gateway contract alignment.
+pub async fn gateway_start() -> Json<ActionResponse> {
+    Json(ActionResponse {
+        success: true,
+        message: "gateway already running in foreground mode".to_string(),
+    })
+}
+
+/// `POST /gateway/stop` — parity placeholder for CLI/gateway contract alignment.
+pub async fn gateway_stop() -> Json<ActionResponse> {
+    Json(ActionResponse {
+        success: true,
+        message: "gateway stop acknowledged; external service supervision pending".to_string(),
+    })
+}
+
+/// `POST /gateway/restart` — parity placeholder for CLI/gateway contract alignment.
+pub async fn gateway_restart() -> Json<ActionResponse> {
+    Json(ActionResponse {
+        success: true,
+        message: "gateway restart acknowledged; external service supervision pending".to_string(),
+    })
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /sessions`.
 #[derive(Deserialize)]
@@ -63,6 +99,38 @@ pub struct SessionResponse {
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Lightweight session summary for list output.
+#[derive(Serialize)]
+pub struct SessionListItem {
+    pub id: String,
+    pub status: String,
+    pub channel: Option<String>,
+    pub created_at: String,
+}
+
+/// `GET /sessions` — list sessions.
+pub async fn list_sessions(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<SessionListItem>>, GatewayError> {
+    let rows = state
+        .session_repo
+        .list(100, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let items = rows
+        .into_iter()
+        .map(|row| SessionListItem {
+            id: row.id.to_string(),
+            status: row.status,
+            channel: row.channel_ref,
+            created_at: row.created_at.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(Json(items))
 }
 
 /// `POST /sessions` — create a new session.
@@ -109,7 +177,7 @@ pub async fn get_session(
     }))
 }
 
-// ── Messages ──────────────────────────────────────────────────────────
+// ── Messages ───────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /sessions/{id}/messages`.
 #[derive(Deserialize)]
@@ -139,7 +207,6 @@ pub async fn send_message(
     Path(session_id): Path<Uuid>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Json<MessageResponse>, GatewayError> {
-    // Verify session exists
     state
         .session_engine
         .get_session(session_id)
@@ -152,7 +219,6 @@ pub async fn send_message(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
-    // Fetch transcript for this session to find the assistant's reply
     let transcript = state
         .transcript_repo
         .list_by_session(session_id)
@@ -164,6 +230,17 @@ pub async fn send_message(
         .rev()
         .find(|t| t.turn_id == Some(turn_row.id) && t.kind == "assistant_message")
         .and_then(|t| t.payload.get("content").and_then(|v| v.as_str()).map(String::from));
+
+    let _ = state.event_tx.send(crate::state::SessionEvent {
+        session_id: session_id.to_string(),
+        kind: "turn_completed".to_string(),
+        payload: serde_json::json!({
+            "turn_id": turn_row.id,
+            "assistant_reply": assistant_reply,
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+        }),
+    });
 
     info!(session_id = %session_id, turn_id = %turn_row.id, "message processed");
 
@@ -177,7 +254,7 @@ pub async fn send_message(
     }))
 }
 
-// ── Transcript ────────────────────────────────────────────────────────
+// ── Transcript ─────────────────────────────────────────────────────────────────
 
 /// A single transcript entry in the response.
 #[derive(Serialize)]
@@ -195,7 +272,6 @@ pub async fn get_transcript(
     State(state): State<AppState>,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<Vec<TranscriptEntry>>, GatewayError> {
-    // Verify session exists
     state
         .session_engine
         .get_session(session_id)
@@ -223,7 +299,12 @@ pub async fn get_transcript(
     Ok(Json(entries))
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+#[allow(dead_code)]
+fn _started_at_for_tests() -> Arc<Instant> {
+    Arc::new(Instant::now())
+}
 
 fn parse_session_kind(s: &str) -> Result<SessionKind, GatewayError> {
     match s.to_lowercase().as_str() {

@@ -72,6 +72,33 @@ impl GatewayClient {
         }
     }
 
+    /// `GET /gateway/health`
+    pub async fn gateway_health(&self) -> Result<HealthResponse> {
+        let resp = self
+            .http
+            .get(self.url("/gateway/health"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            Ok(HealthResponse {
+                healthy: true,
+                message: "Gateway is healthy.".into(),
+            })
+        } else {
+            Ok(HealthResponse {
+                healthy: false,
+                message: format!("Gateway returned HTTP {}", resp.status()),
+            })
+        }
+    }
+
+    /// `GET /status`
+    pub async fn gateway_status(&self) -> Result<StatusResponse> {
+        self.status().await
+    }
+
     /// `POST /gateway/start`
     pub async fn gateway_start(&self) -> Result<ActionResult> {
         let resp = self
@@ -104,6 +131,25 @@ impl GatewayClient {
             success: resp.status().is_success(),
             message: if resp.status().is_success() {
                 "Gateway stop signal sent.".into()
+            } else {
+                format!("Gateway returned HTTP {}", resp.status())
+            },
+        })
+    }
+
+    /// `POST /gateway/restart`
+    pub async fn gateway_restart(&self) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url("/gateway/restart"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        Ok(ActionResult {
+            success: resp.status().is_success(),
+            message: if resp.status().is_success() {
+                "Gateway restart signal sent.".into()
             } else {
                 format!("Gateway returned HTTP {}", resp.status())
             },
@@ -298,6 +344,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_health_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/gateway/health"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.gateway_health().await.unwrap();
+        assert!(resp.healthy);
+    }
+
+    #[tokio::test]
     async fn gateway_start_success() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -308,6 +368,20 @@ mod tests {
 
         let client = GatewayClient::new(&server.uri());
         let resp = client.gateway_start().await.unwrap();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn gateway_restart_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/gateway/restart"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.gateway_restart().await.unwrap();
         assert!(resp.success);
     }
 

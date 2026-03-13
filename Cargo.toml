@@ -25,6 +25,7 @@ version = "0.1.0"
 anyhow = "1"
 async-trait = "0.1"
 axum = "0.8"
+figment = { version = "0.10", features = ["env", "toml"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 diesel = { version = "2", features = ["postgres", "uuid", "chrono", "serde_json"] }
