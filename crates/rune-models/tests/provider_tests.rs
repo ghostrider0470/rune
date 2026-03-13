@@ -136,7 +136,10 @@ async fn openai_uses_max_completion_tokens_field() {
 
     let requests = server.received_requests().await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    assert_eq!(body.get("max_completion_tokens"), Some(&serde_json::json!(123)));
+    assert_eq!(
+        body.get("max_completion_tokens"),
+        Some(&serde_json::json!(123))
+    );
     assert!(body.get("max_tokens").is_none());
 }
 
@@ -257,6 +260,7 @@ fn selects_azure_provider() {
         api_key_env: Some("TEST_AZURE_KEY_SEL".into()),
         api_key: None,
         model_alias: None,
+        models: vec![],
     };
     let provider = provider_from_config(&cfg).unwrap();
     // We can't downcast easily, but we can verify it works by checking it's Send+Sync
@@ -276,6 +280,7 @@ fn selects_openai_provider() {
         api_key_env: Some("TEST_OAI_KEY_SEL".into()),
         api_key: None,
         model_alias: None,
+        models: vec![],
     };
     let provider = provider_from_config(&cfg).unwrap();
     let _: Box<dyn ModelProvider> = provider;
@@ -294,6 +299,7 @@ fn azure_requires_deployment_name() {
         api_key_env: Some("TEST_AZURE_KEY_DEP".into()),
         api_key: None,
         model_alias: None,
+        models: vec![],
     };
     let err = provider_from_config(&cfg).unwrap_err();
     assert!(matches!(err, ModelError::Configuration(_)));
@@ -312,6 +318,7 @@ fn azure_requires_api_version() {
         api_key_env: Some("TEST_AZURE_KEY_VER".into()),
         api_key: None,
         model_alias: None,
+        models: vec![],
     };
     let err = provider_from_config(&cfg).unwrap_err();
     assert!(matches!(err, ModelError::Configuration(_)));
@@ -329,6 +336,7 @@ fn missing_api_key_env_returns_auth_error() {
         api_key_env: Some("DEFINITELY_NOT_SET_12345".into()),
         api_key: None,
         model_alias: None,
+        models: vec![],
     };
     let err = provider_from_config(&cfg).unwrap_err();
     assert!(matches!(err, ModelError::Auth(_)));

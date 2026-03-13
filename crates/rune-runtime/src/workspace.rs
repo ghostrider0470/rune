@@ -183,7 +183,9 @@ mod tests {
     #[tokio::test]
     async fn heartbeat_file_only_loaded_for_scheduled_sessions() {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::write(tmp.path().join("HEARTBEAT.md"), "check inbox").await.unwrap();
+        tokio::fs::write(tmp.path().join("HEARTBEAT.md"), "check inbox")
+            .await
+            .unwrap();
 
         let direct = WorkspaceLoader::new(tmp.path(), SessionKind::Direct)
             .load()

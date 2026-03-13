@@ -56,6 +56,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ModelsAction,
     },
+    /// Inspect workspace memory files and retrieval state.
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
     /// Initialize a new workspace with default files.
     Init {
         /// Directory to initialize (defaults to current directory).
@@ -185,6 +190,31 @@ pub enum ModelsAction {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum MemoryAction {
+    /// Show workspace memory status.
+    Status,
+    /// Search MEMORY.md and memory/*.md for a query.
+    Search {
+        /// Query text to search for.
+        query: String,
+        /// Maximum number of hits to return.
+        #[arg(long, default_value_t = 10)]
+        max_results: usize,
+    },
+    /// Read a bounded snippet from MEMORY.md or memory/*.md.
+    Get {
+        /// Path relative to the workspace root: MEMORY.md or memory/*.md.
+        path: String,
+        /// Starting line number (1-indexed).
+        #[arg(long, default_value_t = 1)]
+        from: usize,
+        /// Maximum lines to read.
+        #[arg(long)]
+        lines: Option<usize>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ConfigAction {
     /// Dump the resolved configuration.
     Show,
@@ -301,6 +331,64 @@ mod tests {
                 action: ModelsAction::Status
             }
         ));
+    }
+
+    #[test]
+    fn parse_memory_status() {
+        let cli = Cli::try_parse_from(["rune", "memory", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Memory {
+                action: MemoryAction::Status
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_memory_search() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "memory",
+            "search",
+            "dark mode",
+            "--max-results",
+            "3",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Memory {
+                action: MemoryAction::Search { query, max_results },
+            } => {
+                assert_eq!(query, "dark mode");
+                assert_eq!(max_results, 3);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_memory_get() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "memory",
+            "get",
+            "memory/2026-03-13.md",
+            "--from",
+            "10",
+            "--lines",
+            "5",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Memory {
+                action: MemoryAction::Get { path, from, lines },
+            } => {
+                assert_eq!(path, "memory/2026-03-13.md");
+                assert_eq!(from, 10);
+                assert_eq!(lines, Some(5));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

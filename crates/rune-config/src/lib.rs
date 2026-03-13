@@ -7,6 +7,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 /// Top-level application configuration resolved from defaults, files, and environment.
@@ -129,6 +130,104 @@ pub struct ModelsConfig {
     pub providers: Vec<ModelProviderConfig>,
 }
 
+impl ModelsConfig {
+    /// Return every configured model in canonical `provider/model` form.
+    #[must_use]
+    pub fn inventory(&self) -> Vec<ModelInventoryEntry<'_>> {
+        let mut entries = Vec::new();
+
+        for provider in &self.providers {
+            for model in &provider.models {
+                entries.push(ModelInventoryEntry {
+                    provider_name: &provider.name,
+                    provider_kind: provider.kind.as_str(),
+                    raw_model: model.id(),
+                });
+            }
+        }
+
+        entries
+    }
+
+    /// Return all canonical model ids in sorted order.
+    #[must_use]
+    pub fn model_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.inventory().into_iter().map(|model| model.model_id()).collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    /// Resolve a configured model reference to its provider and raw model id.
+    pub fn resolve_model<'a>(
+        &'a self,
+        model_ref: &'a str,
+    ) -> Result<ResolvedModel<'a>, ModelResolutionError> {
+        if self.providers.is_empty() {
+            return Err(ModelResolutionError::NoProvidersConfigured);
+        }
+
+        if let Some((provider_name, raw_model)) = model_ref.split_once('/') {
+            let provider = self
+                .providers
+                .iter()
+                .find(|provider| provider.name == provider_name)
+                .ok_or_else(|| ModelResolutionError::UnknownProvider {
+                    provider: provider_name.to_string(),
+                })?;
+
+            if !provider.models.is_empty() && !provider.supports_model(raw_model) {
+                return Err(ModelResolutionError::UnknownModel {
+                    model: model_ref.to_string(),
+                });
+            }
+
+            return Ok(ResolvedModel {
+                model_ref,
+                provider,
+                raw_model,
+            });
+        }
+
+        let matches = self
+            .providers
+            .iter()
+            .filter(|provider| provider.supports_model(model_ref))
+            .collect::<Vec<_>>();
+
+        if matches.len() == 1 {
+            let provider = matches[0];
+            return Ok(ResolvedModel {
+                model_ref,
+                provider,
+                raw_model: model_ref,
+            });
+        }
+
+        if matches.len() > 1 {
+            return Err(ModelResolutionError::AmbiguousModel {
+                model: model_ref.to_string(),
+                providers: matches
+                    .into_iter()
+                    .map(|provider| provider.name.clone())
+                    .collect(),
+            });
+        }
+
+        if self.providers.len() == 1 {
+            return Ok(ResolvedModel {
+                model_ref,
+                provider: &self.providers[0],
+                raw_model: model_ref,
+            });
+        }
+
+        Err(ModelResolutionError::UnknownModel {
+            model: model_ref.to_string(),
+        })
+    }
+}
+
 /// A single configured model-provider target.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProviderConfig {
@@ -149,6 +248,90 @@ pub struct ModelProviderConfig {
     /// Environment variable holding the API key.
     pub api_key_env: Option<String>,
     pub model_alias: Option<String>,
+    /// Inventory of models available through this provider.
+    #[serde(default)]
+    pub models: Vec<ConfiguredModel>,
+}
+
+impl ModelProviderConfig {
+    #[must_use]
+    pub fn supports_model(&self, raw_model: &str) -> bool {
+        self.models.is_empty() || self.models.iter().any(|model| model.id() == raw_model)
+    }
+}
+
+/// Configured model entry for a provider inventory.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ConfiguredModel {
+    Id(String),
+    Detailed(ConfiguredModelDetail),
+}
+
+impl ConfiguredModel {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Id(id) => id,
+            Self::Detailed(detail) => &detail.id,
+        }
+    }
+}
+
+/// Rich configured model entry. Extra metadata is preserved for future use.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfiguredModelDetail {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+/// Canonical inventory entry for a configured model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelInventoryEntry<'a> {
+    pub provider_name: &'a str,
+    pub provider_kind: &'a str,
+    pub raw_model: &'a str,
+}
+
+impl ModelInventoryEntry<'_> {
+    #[must_use]
+    pub fn model_id(&self) -> String {
+        format!("{}/{}", self.provider_name, self.raw_model)
+    }
+}
+
+/// A resolved model reference.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedModel<'a> {
+    pub model_ref: &'a str,
+    pub provider: &'a ModelProviderConfig,
+    pub raw_model: &'a str,
+}
+
+impl ResolvedModel<'_> {
+    #[must_use]
+    pub fn canonical_model_id(&self) -> String {
+        format!("{}/{}", self.provider.name, self.raw_model)
+    }
+}
+
+/// Model inventory and routing errors.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum ModelResolutionError {
+    #[error("no model providers configured")]
+    NoProvidersConfigured,
+    #[error("unknown model provider '{provider}'")]
+    UnknownProvider { provider: String },
+    #[error("unknown model '{model}'")]
+    UnknownModel { model: String },
+    #[error("ambiguous model '{model}' across providers: {providers:?}")]
+    AmbiguousModel {
+        model: String,
+        providers: Vec<String>,
+    },
 }
 
 /// Channel adapter inventory.
@@ -265,8 +448,9 @@ impl AgentsConfig {
     pub fn effective_model<'a>(&'a self, agent: &'a AgentConfig) -> Option<&'a str> {
         agent
             .model
-            .as_deref()
-            .or(self.defaults.model.as_deref())
+            .as_ref()
+            .map(AgentModelSelection::primary)
+            .or_else(|| self.defaults.model.as_ref().map(AgentModelSelection::primary))
     }
 
     /// Resolve the effective workspace for an agent.
@@ -289,7 +473,7 @@ impl AgentsConfig {
 /// Defaults that apply to all agents unless individually overridden.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AgentDefaults {
-    pub model: Option<String>,
+    pub model: Option<AgentModelSelection>,
     pub workspace: Option<String>,
     pub system_prompt: Option<String>,
 }
@@ -303,11 +487,36 @@ pub struct AgentConfig {
     #[serde(default)]
     pub default: Option<bool>,
     /// Model override (falls back to agents.defaults.model).
-    pub model: Option<String>,
+    pub model: Option<AgentModelSelection>,
     /// Workspace path override.
     pub workspace: Option<String>,
     /// System prompt override.
     pub system_prompt: Option<String>,
+}
+
+/// Agent model selection, compatible with both plain strings and OpenClaw-style
+/// structured selections.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AgentModelSelection {
+    Id(String),
+    Structured(StructuredAgentModelSelection),
+}
+
+impl AgentModelSelection {
+    #[must_use]
+    pub fn primary(&self) -> &str {
+        match self {
+            Self::Id(id) => id,
+            Self::Structured(model) => &model.primary,
+        }
+    }
+}
+
+/// Structured agent model selection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StructuredAgentModelSelection {
+    pub primary: String,
 }
 
 /// Configuration loading and validation failures.
@@ -443,6 +652,146 @@ port = "not-a-number"
 
         let err = AppConfig::load(Some(&path)).unwrap_err();
         assert!(err.to_string().contains("failed to load configuration"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn model_inventory_lists_provider_model_ids() {
+        let config = ModelsConfig {
+            default_model: Some("oc-01-openai/gpt-5.4".into()),
+            providers: vec![
+                ModelProviderConfig {
+                    name: "oc-01-openai".into(),
+                    kind: "openai".into(),
+                    base_url: "https://example.test/openai/v1".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("OPENAI_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![
+                        ConfiguredModel::Id("gpt-5.4".into()),
+                        ConfiguredModel::Id("gpt-5.4-pro".into()),
+                    ],
+                },
+                ModelProviderConfig {
+                    name: "oc-01-anthropic".into(),
+                    kind: "anthropic".into(),
+                    base_url: "https://example.test/anthropic".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("ANTHROPIC_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![ConfiguredModel::Id("claude-opus-4-6".into())],
+                },
+            ],
+        };
+
+        assert_eq!(
+            config.model_ids(),
+            vec![
+                "oc-01-anthropic/claude-opus-4-6".to_string(),
+                "oc-01-openai/gpt-5.4".to_string(),
+                "oc-01-openai/gpt-5.4-pro".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn model_resolution_supports_provider_model_ids() {
+        let config = ModelsConfig {
+            default_model: None,
+            providers: vec![ModelProviderConfig {
+                name: "hamza-eastus2".into(),
+                kind: "openai".into(),
+                base_url: "https://example.test/openai/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                model_alias: None,
+                models: vec![
+                    ConfiguredModel::Id("gpt-5.4".into()),
+                    ConfiguredModel::Id("grok-4-fast-reasoning".into()),
+                ],
+            }],
+        };
+
+        let resolved = config
+            .resolve_model("hamza-eastus2/grok-4-fast-reasoning")
+            .unwrap();
+        assert_eq!(resolved.provider.name, "hamza-eastus2");
+        assert_eq!(resolved.raw_model, "grok-4-fast-reasoning");
+        assert_eq!(
+            resolved.canonical_model_id(),
+            "hamza-eastus2/grok-4-fast-reasoning"
+        );
+    }
+
+    #[test]
+    fn model_resolution_rejects_ambiguous_short_names() {
+        let config = ModelsConfig {
+            default_model: None,
+            providers: vec![
+                ModelProviderConfig {
+                    name: "oc-01-openai".into(),
+                    kind: "openai".into(),
+                    base_url: "https://example.test/openai-a".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("OPENAI_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+                },
+                ModelProviderConfig {
+                    name: "hamza-eastus2".into(),
+                    kind: "openai".into(),
+                    base_url: "https://example.test/openai-b".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("OPENAI_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+                },
+            ],
+        };
+
+        let err = config.resolve_model("gpt-5.4").unwrap_err();
+        assert!(matches!(
+            err,
+            ModelResolutionError::AmbiguousModel { model, .. } if model == "gpt-5.4"
+        ));
+    }
+
+    #[test]
+    fn agent_model_selection_accepts_structured_primary_shape() {
+        let path = temp_config_path("agent-model-structured");
+        fs::write(
+            &path,
+            r#"
+[agents.defaults.model]
+primary = "openai-codex/gpt-5.3-codex"
+
+[[agents.list]]
+id = "coder"
+default = true
+
+[agents.list.model]
+primary = "oc-01-openai/gpt-5.4"
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        let agent = config.agents.default_agent().unwrap();
+        assert_eq!(
+            config.agents.effective_model(agent),
+            Some("oc-01-openai/gpt-5.4")
+        );
 
         let _ = fs::remove_file(path);
     }

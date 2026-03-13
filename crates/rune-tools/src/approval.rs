@@ -205,8 +205,7 @@ impl ApprovalCheck for PolicyBasedApproval {
 
         Err(ToolError::ApprovalRequired {
             tool: call.tool_name.clone(),
-            details: serde_json::to_string(&request)
-                .unwrap_or_else(|_| call.arguments.to_string()),
+            details: serde_json::to_string(&request).unwrap_or_else(|_| call.arguments.to_string()),
         })
     }
 }
@@ -321,7 +320,10 @@ mod tests {
     #[tokio::test]
     async fn approve_once_binds_to_exact_payload_only_once() {
         let policy = PolicyBasedApproval::new(HashSet::new());
-        let call = make_call("exec", serde_json::json!({"command": "ls", "workdir": "/tmp"}));
+        let call = make_call(
+            "exec",
+            serde_json::json!({"command": "ls", "workdir": "/tmp"}),
+        );
         let request = ApprovalRequest::from_call(&call);
 
         policy.approve_once(&request).await;
@@ -332,8 +334,14 @@ mod tests {
     #[tokio::test]
     async fn approve_once_does_not_expand_to_different_payload() {
         let policy = PolicyBasedApproval::new(HashSet::new());
-        let approved_call = make_call("exec", serde_json::json!({"command": "ls", "workdir": "/tmp"}));
-        let different_call = make_call("exec", serde_json::json!({"command": "pwd", "workdir": "/tmp"}));
+        let approved_call = make_call(
+            "exec",
+            serde_json::json!({"command": "ls", "workdir": "/tmp"}),
+        );
+        let different_call = make_call(
+            "exec",
+            serde_json::json!({"command": "pwd", "workdir": "/tmp"}),
+        );
 
         let request = ApprovalRequest::from_call(&approved_call);
         policy.approve_once(&request).await;

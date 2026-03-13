@@ -87,9 +87,10 @@ Interpretation rules:
 - [ ] Azure-aware provider config
 
 ### Memory CLI
-- [ ] `memory status`
+- [x] `memory status`
 - [ ] `memory index`
-- [ ] `memory search`
+- [x] `memory search`
+- [x] `memory get`
 
 ### Security / access CLI
 - [ ] `approvals` command family
@@ -262,6 +263,8 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 Implementation note (2026-03-13): the operator CLI now exposes a first inspectable channel surface with `channels list`, `channels status`, and `channels capabilities`, backed by resolved config and the currently implemented Telegram adapter/runtime wiring. This does not yet cover login/logout, dynamic registration, resolution helpers, or provider log inspection, but it removes the previous blind spot where channel support existed in code yet had no operator-facing visibility.
 
 Implementation note (2026-03-13): the operator CLI now also exposes `models list` and `models status`, giving a config-backed inventory of provider kind/base URL/default model/alias plus credential-readiness hints. This is intentionally read-only for now: it improves operator inspectability and Azure/provider debugging without pretending model mutation, auth-order management, or fallback editing are complete.
+
+Implementation note (2026-03-13): the operator CLI now exposes an initial read-only memory surface with `memory status`, `memory search`, and `memory get`, wired directly to the same file-oriented workspace conventions Rune/OpenClaw already use (`MEMORY.md` plus `memory/*.md`). This improves Tier-0 operator visibility without faking unfinished indexing infrastructure or inventing a remote gateway memory API before parity contracts for that surface are defined.
 
 ### Common abstractions
 - [ ] normalized inbound envelope

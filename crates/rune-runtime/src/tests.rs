@@ -156,6 +156,7 @@ impl SessionRepo for MemSessionRepo {
             workspace_root: s.workspace_root,
             channel_ref: s.channel_ref,
             requester_session_id: s.requester_session_id,
+            metadata: s.metadata,
             created_at: s.created_at,
             updated_at: s.updated_at,
             last_activity_at: s.last_activity_at,
@@ -221,6 +222,36 @@ impl SessionRepo for MemSessionRepo {
         session.updated_at = updated_at;
         session.last_activity_at = updated_at;
         Ok(session.clone())
+    }
+
+    async fn update_metadata(
+        &self,
+        id: Uuid,
+        metadata: serde_json::Value,
+        updated_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<SessionRow, StoreError> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "session",
+                id: id.to_string(),
+            })?;
+        session.metadata = metadata;
+        session.updated_at = updated_at;
+        session.last_activity_at = updated_at;
+        Ok(session.clone())
+    }
+}
+
+#[cfg(test)]
+impl MemSessionRepo {
+    async fn set_metadata(&self, id: Uuid, metadata: serde_json::Value) {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+            session.metadata = metadata;
+        }
     }
 }
 
@@ -352,12 +383,21 @@ struct TestHarness {
 
 impl TestHarness {
     fn new() -> Self {
-        let workspace_root = std::env::temp_dir().join(format!("rune-runtime-test-{}", Uuid::now_v7()));
+        let workspace_root =
+            std::env::temp_dir().join(format!("rune-runtime-test-{}", Uuid::now_v7()));
         std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
-        std::fs::write(workspace_root.join("AGENTS.md"), "# AGENTS\nWorkspace rules.").unwrap();
+        std::fs::write(
+            workspace_root.join("AGENTS.md"),
+            "# AGENTS\nWorkspace rules.",
+        )
+        .unwrap();
         std::fs::write(workspace_root.join("SOUL.md"), "# SOUL\nBe sharp.").unwrap();
         std::fs::write(workspace_root.join("USER.md"), "# USER\nHamza").unwrap();
-        std::fs::write(workspace_root.join("MEMORY.md"), "# MEMORY\nLong-term fact.").unwrap();
+        std::fs::write(
+            workspace_root.join("MEMORY.md"),
+            "# MEMORY\nLong-term fact.",
+        )
+        .unwrap();
         let today = chrono::Utc::now().date_naive();
         std::fs::write(
             workspace_root.join(format!("memory/{}.md", today.format("%Y-%m-%d"))),
@@ -402,7 +442,10 @@ async fn full_turn_cycle_no_tools() {
     let engine = h.session_engine();
 
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
     assert_eq!(session.status, "created");
@@ -443,7 +486,10 @@ async fn tool_loop_with_multi_step_calls() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -503,7 +549,10 @@ async fn failed_model_call_sets_turn_failed() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -531,7 +580,10 @@ async fn session_status_transitions() {
     let engine = h.session_engine();
 
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
     assert_eq!(session.status, "created");
@@ -552,7 +604,10 @@ async fn invalid_session_transition_rejected() {
     let engine = h.session_engine();
 
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
 
@@ -568,7 +623,10 @@ async fn max_tool_iterations_enforced() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -610,7 +668,10 @@ async fn approval_required_is_attributed_in_transcript() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -697,7 +758,9 @@ async fn approval_required_is_attributed_in_transcript() {
     let tool_result_item: rune_core::TranscriptItem =
         serde_json::from_value(transcript[4].payload.clone()).unwrap();
     match tool_result_item {
-        rune_core::TranscriptItem::ToolResult { is_error, output, .. } => {
+        rune_core::TranscriptItem::ToolResult {
+            is_error, output, ..
+        } => {
             assert!(is_error);
             assert!(output.contains("Approval required for tool exec"));
         }
@@ -719,7 +782,10 @@ async fn usage_tracking_accumulates_across_tool_loop() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -803,11 +869,15 @@ async fn direct_session_prompt_includes_workspace_and_memory_context() {
         .await
         .unwrap();
 
-    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
-        "Context loaded",
-    )]));
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("Context loaded"),
+    ]));
     let model_handle = model.clone();
-    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new());
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
 
     executor.execute(session.id, "hello", None).await.unwrap();
 
@@ -836,11 +906,15 @@ async fn channel_session_prompt_excludes_long_term_memory() {
         .await
         .unwrap();
 
-    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
-        "Channel context",
-    )]));
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("Channel context"),
+    ]));
     let model_handle = model.clone();
-    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new());
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
 
     executor.execute(session.id, "ping", None).await.unwrap();
 
@@ -851,4 +925,37 @@ async fn channel_session_prompt_excludes_long_term_memory() {
     assert!(!system.contains("Long-term Memory"));
     assert!(!system.contains("Long-term fact."));
     assert!(!system.contains("HEARTBEAT.md"));
+}
+
+#[tokio::test]
+async fn selected_model_metadata_is_used_for_future_turns() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    h.session_repo
+        .set_metadata(session.id, serde_json::json!({"selected_model": "azure/gpt-5.4"}))
+        .await;
+
+    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
+        "Model remembered",
+    )]));
+    let model_handle = model.clone();
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
+
+    executor.execute(session.id, "hello again", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    assert_eq!(requests[0].model.as_deref(), Some("azure/gpt-5.4"));
 }

@@ -60,6 +60,7 @@ impl SessionEngine {
             workspace_root,
             channel_ref,
             requester_session_id,
+            metadata: serde_json::json!({}),
             created_at: now,
             updated_at: now,
             last_activity_at: now,

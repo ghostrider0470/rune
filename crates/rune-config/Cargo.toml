@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 rune-core = { path = "../rune-core" }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 figment = { version = "0.10", features = ["env", "toml"] }
 

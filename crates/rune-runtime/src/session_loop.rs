@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
-use rune_config::AgentsConfig;
+use rune_config::{AgentsConfig, ModelsConfig};
 use rune_core::SessionKind;
 use rune_store::models::SessionRow;
 use rune_store::repos::SessionRepo;
@@ -18,6 +18,7 @@ use rune_store::repos::SessionRepo;
 use crate::engine::SessionEngine;
 use crate::error::RuntimeError;
 use crate::executor::TurnExecutor;
+use crate::session_metadata::{selected_model, set_selected_model};
 
 const HELP_TEXT: &str = "\
 Rune commands:
@@ -38,8 +39,7 @@ pub struct SessionLoop {
     channel: Arc<Mutex<Box<dyn ChannelAdapter>>>,
     sessions: Mutex<SessionIndex>,
     agents: AgentsConfig,
-    /// Per-session model overrides set via /model command.
-    model_overrides: Mutex<HashMap<Uuid, String>>,
+    models: ModelsConfig,
 }
 
 impl SessionLoop {
@@ -49,6 +49,7 @@ impl SessionLoop {
         session_repo: Arc<dyn SessionRepo>,
         channel: Box<dyn ChannelAdapter>,
         agents: AgentsConfig,
+        models: ModelsConfig,
     ) -> Self {
         Self {
             engine,
@@ -57,7 +58,7 @@ impl SessionLoop {
             channel: Arc::new(Mutex::new(channel)),
             sessions: Mutex::new(HashMap::new()),
             agents,
-            model_overrides: Mutex::new(HashMap::new()),
+            models,
         }
     }
 
@@ -109,19 +110,9 @@ impl SessionLoop {
                         .await;
                 }
 
-                // Resolve model override for this session
-                let model_override = {
-                    let overrides = self.model_overrides.lock().await;
-                    overrides.get(&session.id).cloned()
-                };
-
                 match self
                     .turn_executor
-                    .execute(
-                        session.id,
-                        &msg.content,
-                        model_override.as_deref(),
-                    )
+                    .execute(session.id, &msg.content, None)
                     .await
                 {
                     Ok((turn, usage)) => {
@@ -184,7 +175,11 @@ impl SessionLoop {
 
         match cmd {
             "/start" => {
-                self.send_command_reply(msg, "Rune is online. Send a message to start a session, or use /help for commands.").await;
+                self.send_command_reply(
+                    msg,
+                    "Rune is online. Send a message to start a session, or use /help for commands.",
+                )
+                .await;
                 Ok(true)
             }
             "/help" => {
@@ -217,21 +212,17 @@ impl SessionLoop {
         if args.is_empty() {
             // No model specified → show available models as inline keyboard
             let mut buttons: Vec<(String, String)> = self
-                .agents
-                .list
-                .iter()
-                .filter_map(|a| {
-                    let model = self.agents.effective_model(a)?;
-                    Some((
-                        format!("{} ({})", a.id, model),
-                        format!("/model {model}"),
-                    ))
-                })
+                .available_models()
+                .into_iter()
+                .map(|model| (model.clone(), format!("/model {model}")))
                 .collect();
 
             if buttons.is_empty() {
-                // No agents configured, just show a help message
-                self.send_command_reply(msg, "No agents configured. Use /model <name> to set a model directly.").await;
+                self.send_command_reply(
+                    msg,
+                    "No configured models found. Add provider inventories under [models.providers].",
+                )
+                .await;
             } else {
                 // Deduplicate by callback_data
                 buttons.dedup_by(|a, b| a.1 == b.1);
@@ -247,19 +238,31 @@ impl SessionLoop {
                     .await;
             }
         } else {
+            let resolved = match self.models.resolve_model(args) {
+                Ok(model) => model,
+                Err(_) => {
+                    self.send_command_reply(
+                        msg,
+                        &format!("Unknown model `{args}`. Use `/model` to list configured models."),
+                    )
+                    .await;
+                    return Ok(());
+                }
+            };
+
             // Model specified → set it for this session
             let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
             let session = self.find_or_create_session(&routing_key).await?;
+            let model_id = resolved.canonical_model_id();
+            let metadata = set_selected_model(&session.metadata, &model_id);
+            self.session_repo
+                .update_metadata(session.id, metadata, chrono::Utc::now())
+                .await?;
 
-            {
-                let mut overrides = self.model_overrides.lock().await;
-                overrides.insert(session.id, args.to_string());
-            }
-
-            info!(session_id = %session.id, model = %args, "model override set");
+            info!(session_id = %session.id, model = %model_id, "model override set");
             self.send_command_reply(
                 msg,
-                &format!("Model switched to `{args}` for this session."),
+                &format!("Model switched to `{model_id}` for this session."),
             )
             .await;
         }
@@ -284,16 +287,15 @@ impl SessionLoop {
                 {
                     warn!(error = %e, "failed to mark old session as completed");
                 }
-
-                // Remove model override for old session
-                let mut overrides = self.model_overrides.lock().await;
-                overrides.remove(&old_id);
             }
         }
 
         info!(routing_key = %routing_key, "session reset");
-        self.send_command_reply(msg, "Session reset. Your next message starts a fresh conversation.")
-            .await;
+        self.send_command_reply(
+            msg,
+            "Session reset. Your next message starts a fresh conversation.",
+        )
+        .await;
         Ok(())
     }
 
@@ -330,10 +332,17 @@ impl SessionLoop {
             .count();
 
         let current_model = {
-            let index = self.sessions.lock().await;
-            if let Some(session_id) = index.get(routing_key) {
-                let overrides = self.model_overrides.lock().await;
-                overrides.get(session_id).cloned()
+            let session_id = {
+                let index = self.sessions.lock().await;
+                index.get(routing_key).copied()
+            };
+
+            if let Some(session_id) = session_id {
+                self.session_repo
+                    .find_by_id(session_id)
+                    .await
+                    .ok()
+                    .and_then(|session| selected_model(&session).map(str::to_owned))
             } else {
                 None
             }
@@ -343,11 +352,15 @@ impl SessionLoop {
             .agents
             .default_agent()
             .and_then(|a| self.agents.effective_model(a))
+            .or(self.models.default_model.as_deref())
             .unwrap_or("(not configured)");
 
-        let model_display = current_model
-            .as_deref()
-            .unwrap_or(default_model);
+        let model_display = current_model.as_deref().unwrap_or(default_model);
+        let model_origin = if current_model.is_some() {
+            "session override"
+        } else {
+            "default"
+        };
 
         let session_info = {
             let index = self.sessions.lock().await;
@@ -358,15 +371,12 @@ impl SessionLoop {
         };
 
         Ok(format!(
-            "Rune status: ok\nmodel: {model_display}\n{session_info}\nsessions: {} total, {active} active",
+            "Rune status: ok\nactive_model: {model_display} ({model_origin})\ndefault_model: {default_model}\n{session_info}\nsessions: {} total, {active} active",
             sessions.len()
         ))
     }
 
-    async fn find_or_create_session(
-        &self,
-        routing_key: &str,
-    ) -> Result<SessionRow, RuntimeError> {
+    async fn find_or_create_session(&self, routing_key: &str) -> Result<SessionRow, RuntimeError> {
         // 1. Check in-memory cache
         {
             let index = self.sessions.lock().await;
@@ -409,6 +419,27 @@ impl SessionLoop {
         }
 
         Ok(session)
+    }
+
+    fn available_models(&self) -> Vec<String> {
+        let mut models = self.models.model_ids();
+
+        if models.is_empty() {
+            if let Some(default_model) = &self.models.default_model {
+                models.push(default_model.clone());
+            }
+
+            for agent in &self.agents.list {
+                if let Some(model) = self.agents.effective_model(agent) {
+                    models.push(model.to_string());
+                }
+            }
+
+            models.sort();
+            models.dedup();
+        }
+
+        models
     }
 
     async fn get_last_assistant_message(&self, session_id: Uuid) -> Option<String> {

@@ -2,9 +2,9 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use diesel::OptionalExtension;
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
-use diesel::OptionalExtension;
 use uuid::Uuid;
 
 use crate::error::StoreError;
@@ -105,6 +105,25 @@ impl SessionRepo for PgSessionRepo {
         diesel::update(sessions::table.find(id))
             .set((
                 sessions::status.eq(status),
+                sessions::updated_at.eq(updated_at),
+                sessions::last_activity_at.eq(updated_at),
+            ))
+            .returning(SessionRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "session", id))
+    }
+
+    async fn update_metadata(
+        &self,
+        id: Uuid,
+        metadata: serde_json::Value,
+        updated_at: DateTime<Utc>,
+    ) -> Result<SessionRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(sessions::table.find(id))
+            .set((
+                sessions::metadata.eq(metadata),
                 sessions::updated_at.eq(updated_at),
                 sessions::last_activity_at.eq(updated_at),
             ))

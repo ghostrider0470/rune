@@ -16,9 +16,7 @@ use tracing::debug;
 use super::ModelProvider;
 use super::response::{ApiResponse, map_error_response, parse_response};
 use crate::error::ModelError;
-use crate::types::{
-    ChatMessage, CompletionRequest, CompletionResponse, FinishReason, Usage,
-};
+use crate::types::{ChatMessage, CompletionRequest, CompletionResponse, FinishReason, Usage};
 
 /// Azure AI Foundry provider.
 #[derive(Debug)]
@@ -198,10 +196,7 @@ impl ModelProvider for AzureFoundryProvider {
         &self,
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
-        let model = request
-            .model
-            .as_deref()
-            .unwrap_or("gpt-5.4");
+        let model = request.model.as_deref().unwrap_or("gpt-5.4");
 
         if Self::is_anthropic_model(model) {
             self.complete_anthropic(request, model).await

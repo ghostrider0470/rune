@@ -27,7 +27,10 @@ impl OpenAiProvider {
             url,
             api_key: api_key.to_owned(),
             use_azure_auth: false,
-            client: Client::builder().timeout(std::time::Duration::from_secs(120)).build().unwrap_or_default(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -39,7 +42,10 @@ impl OpenAiProvider {
             url,
             api_key: api_key.to_owned(),
             use_azure_auth: true,
-            client: Client::builder().timeout(std::time::Duration::from_secs(120)).build().unwrap_or_default(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_default(),
         }
     }
 

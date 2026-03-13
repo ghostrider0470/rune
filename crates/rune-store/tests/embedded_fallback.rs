@@ -14,7 +14,8 @@ async fn embedded_pg_bootstrap_runs_migrations_and_accepts_connections() {
         return;
     }
 
-    let data_dir = std::env::temp_dir().join(format!("rune-store-embedded-test-{}", Uuid::now_v7()));
+    let data_dir =
+        std::env::temp_dir().join(format!("rune-store-embedded-test-{}", Uuid::now_v7()));
 
     let embedded = EmbeddedPg::start(&data_dir, "rune_test")
         .await
@@ -34,6 +35,9 @@ async fn embedded_pg_bootstrap_runs_migrations_and_accepts_connections() {
         .await
         .expect("embedded postgres should accept queries");
 
-    embedded.stop().await.expect("embedded postgres should stop cleanly");
+    embedded
+        .stop()
+        .await
+        .expect("embedded postgres should stop cleanly");
     let _ = std::fs::remove_dir_all(&data_dir);
 }

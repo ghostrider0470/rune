@@ -19,8 +19,8 @@ use rune_config::AppConfig;
 use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_models::{
-    CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
-    AnthropicProvider, AzureFoundryProvider, AzureOpenAiProvider, OpenAiProvider,
+    CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider,
+    RoutedModelProvider, Usage,
 };
 use rune_runtime::{
     ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor, scheduler::Scheduler,
@@ -225,6 +225,7 @@ async fn build_services(
                 session_repo.clone(),
                 Box::new(adapter),
                 config.agents.clone(),
+                config.models.clone(),
             ))
         } else {
             None
@@ -430,88 +431,11 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry) {
 
 /// Build the model provider from config, falling back to echo if none configured.
 fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
-    if let Some(provider_cfg) = config.models.providers.first() {
-        let api_key = provider_cfg
-            .api_key
-            .clone()
-            .or_else(|| {
-                provider_cfg
-                    .api_key_env
-                    .as_ref()
-                    .and_then(|env_var| std::env::var(env_var).ok())
-            })
-            .unwrap_or_default();
-
-        match provider_cfg.kind.as_str() {
-            "anthropic" => {
-                info!(
-                    provider = %provider_cfg.name,
-                    base_url = %provider_cfg.base_url,
-                    "using Anthropic provider"
-                );
-                let api_version = provider_cfg
-                    .api_version
-                    .as_deref()
-                    .unwrap_or("2023-06-01");
-                Arc::new(AnthropicProvider::azure(
-                    &provider_cfg.base_url,
-                    &api_key,
-                    api_version,
-                ))
-            }
-            "openai" => {
-                let is_azure = provider_cfg.base_url.contains(".azure.com")
-                    || provider_cfg.base_url.contains("azure");
-                info!(
-                    provider = %provider_cfg.name,
-                    azure = is_azure,
-                    "using OpenAI provider"
-                );
-                if is_azure {
-                    Arc::new(OpenAiProvider::azure(&provider_cfg.base_url, &api_key))
-                } else {
-                    Arc::new(OpenAiProvider::new(&provider_cfg.base_url, &api_key))
-                }
-            }
-            "azure-foundry" | "azure-ai" => {
-                info!(
-                    provider = %provider_cfg.name,
-                    base_url = %provider_cfg.base_url,
-                    "using Azure AI Foundry provider (multi-model)"
-                );
-                let api_version = provider_cfg
-                    .api_version
-                    .as_deref()
-                    .unwrap_or("2023-06-01");
-                Arc::new(AzureFoundryProvider::with_api_version(
-                    &provider_cfg.base_url,
-                    &api_key,
-                    api_version,
-                ))
-            }
-            "azure-openai" => {
-                let deployment = provider_cfg
-                    .deployment_name
-                    .as_deref()
-                    .unwrap_or("gpt-4o");
-                let api_version = provider_cfg
-                    .api_version
-                    .as_deref()
-                    .unwrap_or("2024-06-01");
-                info!(
-                    provider = %provider_cfg.name,
-                    deployment,
-                    "using Azure OpenAI provider"
-                );
-                Arc::new(AzureOpenAiProvider::new(
-                    &provider_cfg.base_url,
-                    deployment,
-                    api_version,
-                    &api_key,
-                ))
-            }
-            other => {
-                warn!(kind = other, "unknown provider kind, falling back to echo");
+    if !config.models.providers.is_empty() {
+        match RoutedModelProvider::from_models_config(&config.models) {
+            Ok(provider) => Arc::new(provider),
+            Err(error) => {
+                warn!(error = %error, "failed to build routed model provider, falling back to echo");
                 Arc::new(EchoModelProvider)
             }
         }

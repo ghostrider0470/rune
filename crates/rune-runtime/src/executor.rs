@@ -18,6 +18,7 @@ use crate::compaction::CompactionStrategy;
 use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
 use crate::memory::MemoryLoader;
+use crate::session_metadata::selected_model;
 use crate::usage::UsageAccumulator;
 use crate::workspace::WorkspaceLoader;
 
@@ -92,6 +93,11 @@ impl TurnExecutor {
     ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
         let turn_id = TurnId::new();
         let now = Utc::now();
+        let session = self.session_repo.find_by_id(session_id).await?;
+        let effective_model = model_ref
+            .map(str::to_owned)
+            .or_else(|| selected_model(&session).map(str::to_owned))
+            .or_else(|| self.default_model.clone());
 
         // 1. Create turn in Started state
         let turn = self
@@ -101,7 +107,7 @@ impl TurnExecutor {
                 session_id,
                 trigger_kind: "user_message".to_string(),
                 status: status_str(TurnStatus::Started).to_string(),
-                model_ref: model_ref.map(String::from),
+                model_ref: effective_model.clone(),
                 started_at: now,
                 ended_at: None,
                 usage_prompt_tokens: None,
@@ -120,7 +126,9 @@ impl TurnExecutor {
 
         // 3. Run the model/tool loop
         let mut usage = UsageAccumulator::new();
-        let result = self.run_turn_loop(session_id, turn_id, &mut usage).await;
+        let result = self
+            .run_turn_loop(session_id, turn_id, effective_model.as_deref(), &mut usage)
+            .await;
 
         // 4. Finalize turn status
         let (final_status, ended_at) = match &result {
@@ -144,6 +152,7 @@ impl TurnExecutor {
         &self,
         session_id: Uuid,
         turn_id: TurnId,
+        model_ref: Option<&str>,
         usage: &mut UsageAccumulator,
     ) -> Result<(), RuntimeError> {
         let session = self.session_repo.find_by_id(session_id).await?;
@@ -153,7 +162,9 @@ impl TurnExecutor {
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        let workspace_context = WorkspaceLoader::new(&workspace_root, session_kind).load().await;
+        let workspace_context = WorkspaceLoader::new(&workspace_root, session_kind)
+            .load()
+            .await;
         let memory_context = MemoryLoader::new(&workspace_root).load(session_kind).await;
 
         let mut iterations: u32 = 0;
@@ -200,7 +211,7 @@ impl TurnExecutor {
 
             let request = CompletionRequest {
                 messages,
-                model: self.default_model.clone(),
+                model: model_ref.map(str::to_owned),
                 temperature: None,
                 max_tokens: None,
                 tools: if tool_defs.is_empty() {
@@ -409,7 +420,9 @@ fn extract_approval_command(details: &str) -> Option<String> {
         }
     }
 
-    details
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("command:").map(|s| s.trim().to_string()))
+    details.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("command:")
+            .map(|s| s.trim().to_string())
+    })
 }

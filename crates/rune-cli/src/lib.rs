@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod client;
 pub mod doctor;
+pub mod memory;
 pub mod output;
 
 use anyhow::{Context, Result};
@@ -10,7 +11,7 @@ use chrono::{DateTime, Utc};
 
 pub use cli::Cli;
 use cli::{
-    ChannelsAction, Command, ConfigAction, CronAction, GatewayAction, ModelsAction,
+    ChannelsAction, Command, ConfigAction, CronAction, GatewayAction, MemoryAction, ModelsAction,
     SessionsAction,
 };
 use client::{GatewayClient, show_config, validate_config};
@@ -31,7 +32,11 @@ fn channel_details() -> Vec<ChannelDetail> {
         .telegram_token
         .as_deref()
         .is_some_and(|token| !token.trim().is_empty());
-    let telegram_enabled = config.channels.enabled.iter().any(|name| name == "telegram");
+    let telegram_enabled = config
+        .channels
+        .enabled
+        .iter()
+        .any(|name| name == "telegram");
 
     vec![ChannelDetail {
         name: "telegram".to_string(),
@@ -102,12 +107,17 @@ fn model_provider_details() -> ModelListResponse {
                         .is_some_and(|value| !value.trim().is_empty()));
 
             let notes = match provider.kind.as_str() {
-                "azure-openai" | "azure_openai" | "azure" if provider.deployment_name.is_none() || provider.api_version.is_none() => {
-                    Some("Azure OpenAI requires deployment_name and api_version for parity.".to_string())
+                "azure-openai" | "azure_openai" | "azure"
+                    if provider.deployment_name.is_none() || provider.api_version.is_none() =>
+                {
+                    Some(
+                        "Azure OpenAI requires deployment_name and api_version for parity."
+                            .to_string(),
+                    )
                 }
-                "azure-foundry" if !provider.base_url.contains("services.ai.azure.com") => {
-                    Some("Azure Foundry is expected to use an Azure AI Foundry base URL.".to_string())
-                }
+                "azure-foundry" if !provider.base_url.contains("services.ai.azure.com") => Some(
+                    "Azure Foundry is expected to use an Azure AI Foundry base URL.".to_string(),
+                ),
                 _ => None,
             };
 
@@ -351,6 +361,20 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
+        Command::Memory { action } => match action {
+            MemoryAction::Status => {
+                let result = memory::status().await?;
+                println!("{}", render(&result, format));
+            }
+            MemoryAction::Search { query, max_results } => {
+                let result = memory::search(&query, max_results).await?;
+                println!("{}", render(&result, format));
+            }
+            MemoryAction::Get { path, from, lines } => {
+                let result = memory::get(&path, from, lines).await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Config { action } => match action {
             ConfigAction::Show => {
                 let result = show_config()?;

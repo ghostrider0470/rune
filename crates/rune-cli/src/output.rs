@@ -276,7 +276,11 @@ impl fmt::Display for ModelProviderDetail {
             self.name,
             self.kind,
             self.model_alias.as_deref().unwrap_or("-"),
-            if self.credentials_ready { "ready" } else { "missing" },
+            if self.credentials_ready {
+                "ready"
+            } else {
+                "missing"
+            },
             self.default_model.as_deref().unwrap_or("-")
         )
     }
@@ -341,6 +345,97 @@ impl fmt::Display for ModelStatusResponse {
             }
         }
         Ok(())
+    }
+}
+
+/// Summary status for workspace memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryStatusResponse {
+    pub workspace_root: String,
+    pub memory_dir: String,
+    pub semantic_search_enabled: bool,
+    pub long_term_exists: bool,
+    pub daily_file_count: usize,
+    pub latest_daily_file: Option<String>,
+}
+
+impl fmt::Display for MemoryStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Memory")?;
+        writeln!(f, "  Workspace:               {}", self.workspace_root)?;
+        writeln!(f, "  Memory dir:              {}", self.memory_dir)?;
+        writeln!(
+            f,
+            "  Semantic search enabled: {}",
+            self.semantic_search_enabled
+        )?;
+        writeln!(f, "  MEMORY.md present:       {}", self.long_term_exists)?;
+        writeln!(f, "  Daily files:             {}", self.daily_file_count)?;
+        write!(
+            f,
+            "  Latest daily file:       {}",
+            self.latest_daily_file.as_deref().unwrap_or("(none)")
+        )
+    }
+}
+
+/// A single memory search hit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySearchHit {
+    pub path: String,
+    pub line: usize,
+    pub score: f64,
+    pub snippet: String,
+}
+
+impl fmt::Display for MemorySearchHit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "{}:{} (score {:.2})", self.path, self.line, self.score)?;
+        write!(f, "{}", self.snippet)
+    }
+}
+
+/// Search results for workspace memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySearchResponse {
+    pub query: String,
+    pub total: usize,
+    pub hits: Vec<MemorySearchHit>,
+}
+
+impl fmt::Display for MemorySearchResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.hits.is_empty() {
+            return write!(f, "No results found for query: {}", self.query);
+        }
+        writeln!(f, "Memory search: {} ({} hits)", self.query, self.total)?;
+        for (idx, hit) in self.hits.iter().enumerate() {
+            if idx > 0 {
+                writeln!(f, "\n---")?;
+            }
+            writeln!(f, "{hit}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Bounded snippet read from a memory file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryGetResponse {
+    pub path: String,
+    pub from: usize,
+    pub lines: usize,
+    pub content: String,
+}
+
+impl fmt::Display for MemoryGetResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "{} (from line {}, {} lines)",
+            self.path, self.from, self.lines
+        )?;
+        write!(f, "{}", self.content)
     }
 }
 
@@ -605,7 +700,10 @@ mod tests {
             default_model: None,
             providers: vec![],
         };
-        assert_eq!(render(&response, OutputFormat::Human), "No model providers configured.");
+        assert_eq!(
+            render(&response, OutputFormat::Human),
+            "No model providers configured."
+        );
     }
 
     #[test]
@@ -630,5 +728,44 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Default model:       gpt-5.4"));
         assert!(out.contains("credential_source: api_key"));
+    }
+
+    #[test]
+    fn render_memory_status() {
+        let response = MemoryStatusResponse {
+            workspace_root: "/workspace".into(),
+            memory_dir: "/workspace/memory".into(),
+            semantic_search_enabled: true,
+            long_term_exists: true,
+            daily_file_count: 2,
+            latest_daily_file: Some("memory/2026-03-13.md".into()),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Memory"));
+        assert!(out.contains("MEMORY.md present:       true"));
+    }
+
+    #[test]
+    fn render_memory_search_empty() {
+        let response = MemorySearchResponse {
+            query: "nothing".into(),
+            total: 0,
+            hits: vec![],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert_eq!(out, "No results found for query: nothing");
+    }
+
+    #[test]
+    fn render_memory_get() {
+        let response = MemoryGetResponse {
+            path: "MEMORY.md".into(),
+            from: 1,
+            lines: 2,
+            content: "# Memory\nEntry".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("MEMORY.md (from line 1, 2 lines)"));
+        assert!(out.contains("Entry"));
     }
 }

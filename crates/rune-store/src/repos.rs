@@ -38,6 +38,14 @@ pub trait SessionRepo: Send + Sync {
         status: &str,
         updated_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<SessionRow, StoreError>;
+
+    /// Replace session metadata and update last_activity_at.
+    async fn update_metadata(
+        &self,
+        id: Uuid,
+        metadata: serde_json::Value,
+        updated_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<SessionRow, StoreError>;
 }
 
 // ── Turn repository ───────────────────────────────────────────────────

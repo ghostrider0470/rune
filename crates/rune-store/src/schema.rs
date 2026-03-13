@@ -16,6 +16,7 @@ table! {
         workspace_root -> Nullable<Text>,
         channel_ref -> Nullable<Text>,
         requester_session_id -> Nullable<Uuid>,
+        metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         last_activity_at -> Timestamptz,

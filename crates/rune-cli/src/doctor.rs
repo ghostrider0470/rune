@@ -330,9 +330,15 @@ fn check_embedded_postgres_layout(config: &AppConfig) -> Vec<CheckResult> {
             CheckStatus::Skip
         },
         message: if install_dir.exists() && install_dir.is_dir() {
-            format!("Embedded PostgreSQL installation cache present at {}", install_dir.display())
+            format!(
+                "Embedded PostgreSQL installation cache present at {}",
+                install_dir.display()
+            )
         } else {
-            format!("Embedded PostgreSQL installation cache not initialized yet ({})", install_dir.display())
+            format!(
+                "Embedded PostgreSQL installation cache not initialized yet ({})",
+                install_dir.display()
+            )
         },
         hint: if install_dir.exists() && install_dir.is_dir() {
             None
@@ -350,9 +356,15 @@ fn check_embedded_postgres_layout(config: &AppConfig) -> Vec<CheckResult> {
             CheckStatus::Skip
         },
         message: if cluster_dir.exists() && cluster_dir.is_dir() {
-            format!("Embedded PostgreSQL cluster data present at {}", cluster_dir.display())
+            format!(
+                "Embedded PostgreSQL cluster data present at {}",
+                cluster_dir.display()
+            )
         } else {
-            format!("Embedded PostgreSQL cluster data not initialized yet ({})", cluster_dir.display())
+            format!(
+                "Embedded PostgreSQL cluster data not initialized yet ({})",
+                cluster_dir.display()
+            )
         },
         hint: if cluster_dir.exists() && cluster_dir.is_dir() {
             None
@@ -370,9 +382,15 @@ fn check_embedded_postgres_layout(config: &AppConfig) -> Vec<CheckResult> {
             CheckStatus::Skip
         },
         message: if password_file.exists() {
-            format!("Embedded PostgreSQL password state present at {}", password_file.display())
+            format!(
+                "Embedded PostgreSQL password state present at {}",
+                password_file.display()
+            )
         } else {
-            format!("Embedded PostgreSQL password state not initialized yet ({})", password_file.display())
+            format!(
+                "Embedded PostgreSQL password state not initialized yet ({})",
+                password_file.display()
+            )
         },
         hint: if password_file.exists() {
             None
@@ -440,10 +458,7 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
         });
 
         let looks_azure = provider.base_url.contains("openai.azure.com")
-            || provider
-                .name
-                .to_ascii_lowercase()
-                .contains("azure");
+            || provider.name.to_ascii_lowercase().contains("azure");
         results.push(CheckResult {
             name: format!("{prefix}.auth"),
             category: "models".into(),
@@ -895,6 +910,7 @@ mod tests {
                 api_version: Some("2024-10-21".into()),
                 api_key_env: Some("RUNE_TEST_AZURE_KEY".into()),
                 model_alias: Some("default".into()),
+                models: vec![rune_config::ConfiguredModel::Id("gpt-4.1".into())],
             });
         config.channels.enabled.push("telegram".into());
         config.channels.telegram_token = Some("123:abc".into());
@@ -956,6 +972,7 @@ mod tests {
                 api_version: None,
                 api_key_env: Some("RUNE_TEST_MISSING_KEY".into()),
                 model_alias: None,
+                models: vec![rune_config::ConfiguredModel::Id("gpt-4.1".into())],
             });
 
         unsafe {
@@ -983,9 +1000,11 @@ mod tests {
         config.database.database_url = None;
 
         let initial = check_database_config(&config).await;
-        assert!(initial.iter().any(|r| {
-            r.name == "database.embedded.mode" && r.status == CheckStatus::Pass
-        }));
+        assert!(
+            initial
+                .iter()
+                .any(|r| { r.name == "database.embedded.mode" && r.status == CheckStatus::Pass })
+        );
         assert!(initial.iter().any(|r| {
             r.name == "database.embedded.install_dir" && r.status == CheckStatus::Skip
         }));
