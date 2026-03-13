@@ -1,27 +1,38 @@
+//! Thin gateway binary — loads config and starts the Rune gateway daemon.
+//!
+//! When `database.database_url` is configured, uses PostgreSQL-backed
+//! repositories. Otherwise falls back to in-memory repos for zero-config
+//! local development.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
-use rune_config::AppConfig;
-use rune_gateway::{init_logging, start, Services};
-use rune_models::{CompletionRequest, CompletionResponse, ModelError, ModelProvider, Usage};
-use rune_runtime::{ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor};
-use rune_store::models::{NewSession, NewTranscriptItem, NewTurn, SessionRow, TranscriptItemRow, TurnRow};
-use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
-use rune_store::StoreError;
-use rune_tools::{register_builtin_stubs, StubExecutor, ToolRegistry};
 use tokio::signal;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use rune_config::AppConfig;
+use rune_gateway::{init_logging, start, Services};
+use rune_models::{CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage};
+use rune_runtime::{ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor};
+use rune_store::models::{NewSession, NewTranscriptItem, NewTurn, SessionRow, TranscriptItemRow, TurnRow};
+use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
+use rune_store::StoreError;
+use rune_tools::{register_builtin_stubs, StubExecutor, ToolRegistry};
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let config_path = discover_config_path();
-    let config = AppConfig::load(config_path.as_deref())
-        .with_context(|| format!("failed to load config from {}", display_config_path(config_path.as_deref())))?;
+    let config = AppConfig::load(config_path.as_deref()).with_context(|| {
+        format!(
+            "failed to load config from {}",
+            display_config_path(config_path.as_deref())
+        )
+    })?;
 
     init_logging(&config.logging);
     emit_startup_banner(&config, config_path.as_deref());
@@ -63,21 +74,51 @@ fn display_config_path(path: Option<&Path>) -> String {
 }
 
 fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
+    let store_backend = if config.database.database_url.is_some() {
+        "postgres"
+    } else {
+        "in-memory"
+    };
+
     info!(
         version = env!("CARGO_PKG_VERSION"),
         host = %config.gateway.host,
         port = config.gateway.port,
         config_path = %display_config_path(config_path),
-        store_backend = "in-memory",
+        store_backend,
         model_backend = if config.models.providers.is_empty() { "demo-echo" } else { "configured-provider-or-demo-fallback" },
         "starting rune gateway"
     );
 }
 
 fn build_services(config: AppConfig) -> Result<Services> {
-    let session_repo: Arc<dyn SessionRepo> = Arc::new(InMemorySessionRepo::default());
-    let turn_repo: Arc<dyn TurnRepo> = Arc::new(InMemoryTurnRepo::default());
-    let transcript_repo: Arc<dyn TranscriptRepo> = Arc::new(InMemoryTranscriptRepo::default());
+    let (session_repo, turn_repo, transcript_repo): (
+        Arc<dyn SessionRepo>,
+        Arc<dyn TurnRepo>,
+        Arc<dyn TranscriptRepo>,
+    ) = if let Some(ref database_url) = config.database.database_url {
+        info!("using PostgreSQL persistence");
+        if config.database.run_migrations {
+            info!("running pending database migrations");
+            rune_store::pool::run_migrations(database_url)?;
+        }
+        let pool = rune_store::pool::create_pool(
+            database_url,
+            config.database.max_connections as usize,
+        )?;
+        (
+            Arc::new(rune_store::pg::PgSessionRepo::new(pool.clone())),
+            Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone())),
+            Arc::new(rune_store::pg::PgTranscriptRepo::new(pool)),
+        )
+    } else {
+        warn!("no DATABASE_URL configured — using in-memory persistence");
+        (
+            Arc::new(InMemorySessionRepo::default()),
+            Arc::new(InMemoryTurnRepo::default()),
+            Arc::new(InMemoryTranscriptRepo::default()),
+        )
+    };
 
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
@@ -85,6 +126,7 @@ fn build_services(config: AppConfig) -> Result<Services> {
 
     let mut registry = ToolRegistry::new();
     register_builtin_stubs(&mut registry);
+    let tool_count = registry.len();
     let tool_registry = Arc::new(registry);
     let tool_executor = Arc::new(StubExecutor);
 
@@ -93,7 +135,7 @@ fn build_services(config: AppConfig) -> Result<Services> {
         transcript_repo.clone(),
         model_provider.clone(),
         tool_executor,
-        tool_registry.clone(),
+        tool_registry,
         ContextAssembler::new("You are Rune, the Rust gateway runtime for OpenClaw parity testing."),
         Arc::new(NoOpCompaction),
     ));
@@ -105,7 +147,7 @@ fn build_services(config: AppConfig) -> Result<Services> {
         session_repo,
         transcript_repo,
         model_provider,
-        tool_count: tool_registry.len(),
+        tool_count,
     })
 }
 
@@ -326,7 +368,7 @@ impl ModelProvider for EchoModelProvider {
                 completion_tokens: (latest_user.len() as u32) + 6,
                 total_tokens: (latest_user.len() as u32) * 2 + 6,
             },
-            finish_reason: Some(rune_models::FinishReason::Stop),
+            finish_reason: Some(FinishReason::Stop),
             tool_calls: Vec::new(),
         })
     }
