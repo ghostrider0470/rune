@@ -12,6 +12,7 @@ mod registry;
 pub mod session_tool;
 pub mod spawn_tool;
 mod stubs;
+pub mod subagent_tool;
 
 pub use definition::{ToolCall, ToolDefinition, ToolResult};
 pub use error::ToolError;
