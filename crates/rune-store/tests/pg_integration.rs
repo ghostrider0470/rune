@@ -19,12 +19,13 @@ use rune_store::pool::{PgPool, create_pool, run_migrations};
 use rune_store::repos::*;
 
 use std::sync::OnceLock;
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 
 /// Shared embedded PG handle kept alive for the entire test binary.
 /// Using `OnceLock<OnceCell<..>>` so we can do async init exactly once.
 /// A unique directory per test-run avoids stale cluster conflicts.
 static EMBEDDED: OnceLock<OnceCell<(EmbeddedPg, String)>> = OnceLock::new();
+static SETUP_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 async fn database_url() -> String {
     if let Ok(url) = std::env::var("TEST_DATABASE_URL") {
@@ -48,6 +49,11 @@ async fn database_url() -> String {
 }
 
 async fn setup() -> PgPool {
+    let _guard = SETUP_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .await;
+
     let url = database_url().await;
     run_migrations(&url).expect("migrations failed");
     let pool = create_pool(&url, 5).expect("pool creation failed");
