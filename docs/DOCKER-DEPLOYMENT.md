@@ -1,0 +1,696 @@
+# Docker Deployment
+
+## Purpose
+
+Define a first-class Docker/container deployment model for the Rust rewrite that:
+
+- preserves functional parity with OpenClaw
+- keeps durable state mount-friendly and inspectable
+- works equally well for local-first Docker and Azure-hosted containers
+- avoids hiding critical runtime state inside disposable container layers
+
+This is not a container-afterthought document.
+Container deployment is a primary runtime target and a release constraint.
+
+Hard constraints:
+
+- functional parity with OpenClaw
+- full Azure compatibility
+- Docker-first deployment with mountable persistent storage
+
+---
+
+## 1. Deployment goals
+
+The containerized runtime must support:
+
+- the same operator workflows as bare-metal deployment
+- the same logical state layout across host and container modes
+- durable persistence through mounted paths or managed backends
+- Azure-compatible hosting without requiring Azure-only architecture
+- backup, restore, migration, and inspection without container archaeology
+
+---
+
+## 2. Non-negotiable constraints
+
+1. **Behavioral parity first**
+   - Docker deployment must not change session/tool/cron/memory behavior
+
+2. **No critical durable state in ephemeral image layers**
+   - container filesystem internals are not a database strategy
+
+3. **Mount-friendly layout**
+   - all important file-backed state must live in explicit mountable paths
+
+4. **Same logical directories in all modes**
+   - local host, Docker, and Azure-hosted deployments should share one mental model
+
+5. **Fast failure on broken storage**
+   - missing or unwritable required mounts must fail explicitly and early
+
+6. **Operator inspectability survives restart**
+   - restart must not erase the history of sessions, jobs, approvals, deliveries, or background work records
+
+7. **Azure compatibility**
+   - the layout must map cleanly to Azure Files, Blob-backed archival flows, and managed DB services
+
+---
+
+## 3. Release-blocker deployment outcomes
+
+These are not optional nice-to-haves.
+They are parity gates for a credible rewrite.
+
+A parity-credible Docker deployment must prove:
+
+- the image is stateless by design
+- all parity-critical state is externalized
+- the runtime can boot with only mounted/configured durable paths plus env/secrets
+- restart preserves sessions, transcripts, jobs, approvals, and diagnostic history
+- health/readiness endpoints reflect real dependency state, not just process liveness
+- doctor can detect broken mount/storage states
+- Azure-hosted deployment preserves the same logical storage contract
+
+If any of those fail, Docker support is not done.
+
+---
+
+## 4. Recommended container topology
+
+## 4.1 Phase-1 topology: single primary runtime container
+
+Start with one main runtime container.
+
+Why:
+
+- simplest parity path
+- easiest to debug
+- closest to current OpenClaw operational expectations
+- easiest local/hosted symmetry
+- avoids premature microservice decomposition
+
+The primary container should own:
+
+- gateway/daemon
+- agent runtime
+- scheduler/cron engine
+- tool orchestration
+- memory/search integration
+- channel adapters
+- media pipeline coordination
+- doctor/status/diagnostic surfaces
+
+Optional external dependencies may exist later, but the main runtime should still be operable as one primary service.
+
+## 4.2 Avoid early service sprawl
+
+Do not split into many containers early for:
+
+- scheduler
+- channels
+- memory indexer
+- approvals
+- media workers
+- diagnostics
+
+unless profiling, tenancy, or isolation requirements justify it.
+
+The rewrite is already complex enough.
+Early decomposition would make parity validation harder.
+
+---
+
+## 5. Canonical state layout
+
+The runtime should expose a stable logical directory layout:
+
+- `/data/db`
+- `/data/sessions`
+- `/data/memory`
+- `/data/media`
+- `/data/skills`
+- `/data/logs`
+- `/data/backups`
+- `/config`
+- `/secrets`
+
+This layout should work:
+
+- on local host installs
+- in Docker bind-mount deployments
+- in Docker named-volume deployments
+- in Azure-hosted mounts
+
+If a managed DB is used, `/data/db` may be unused or reserved for local indexes/caches, but the logical slot should still exist in the deployment mental model.
+
+---
+
+## 6. Persistent vs ephemeral state
+
+## 6.1 Persistent state
+
+These should be durable by default.
+
+### `/data/db`
+Use for:
+
+- SQLite database files
+- embedded search metadata
+- migration state
+- operational metadata in local-first mode
+
+Persistence requirement: **yes**
+
+### `/data/sessions`
+Use for:
+
+- transcript files
+- session exports
+- raw or normalized session artifacts
+- session-scoped diagnostic artifacts where file-backed
+
+Persistence requirement: **yes**
+
+### `/data/memory`
+Use for:
+
+- daily memory files
+- long-term memory files
+- workspace knowledge docs
+- derived memory artifacts if file-based
+
+Persistence requirement: **yes**
+
+### `/data/media`
+Use for:
+
+- inbound attachments
+- audio/image artifacts
+- TTS outputs
+- extracted files and media cache that should survive restarts
+
+Persistence requirement: **usually yes**
+
+### `/data/skills`
+Use for:
+
+- installed skills
+- skill metadata
+- plugin bundles
+- runtime-managed extension assets
+
+Persistence requirement: **yes** if runtime installation/update is supported
+
+### `/data/logs`
+Use for:
+
+- structured file logs if enabled
+- debug bundles
+- diagnostic dumps
+- recent failure artifacts worth preserving for supportability
+
+Persistence requirement: **recommended**
+
+### `/data/backups`
+Use for:
+
+- export archives
+- snapshot bundles
+- restore staging
+
+Persistence requirement: **yes**
+
+### `/config`
+Use for:
+
+- config overlays
+- operator-provided environment-specific files
+- channel/provider configuration files
+
+Persistence requirement: **yes**
+
+### `/secrets`
+Use for:
+
+- mounted secret files
+- certificate/key material
+- provider secret references
+
+Persistence requirement: externalized, but not necessarily stored on a normal persistent volume if the platform injects them separately
+
+## 6.2 Ephemeral state
+
+These may remain non-durable:
+
+- `/tmp`
+- download scratch space
+- request staging
+- transient tool execution scratch files
+- rebuildable caches
+- short-lived compaction/intermediate files
+
+If lost on restart, the runtime should recover safely.
+
+## 6.3 Explicitly non-ephemeral parity domains
+
+The following must **not** depend only on ephemeral writable layers:
+
+- session and transcript history
+- job definitions and run history
+- approval records
+- process/tool audit records
+- memory files
+- skill/plugin bundles if runtime-managed
+- config overlays
+- diagnostic history needed for operator support
+
+---
+
+## 7. Mount strategy
+
+## 7.1 Preferred local development/operator strategy
+
+For local Docker deployments, prefer bind mounts or named volumes that map directly to the canonical layout.
+
+Best for parity and inspectability:
+
+- bind mounts for human-managed files (`memory`, `config`, `skills`, `backups`)
+- named volumes or bind mounts for DB and media depending on operator preference
+
+Why:
+
+- easy backup
+- easy inspection/editing
+- easy migration from non-container installs
+- easy comparison with OpenClaw workspace conventions
+
+## 7.2 One mount vs many mounts
+
+### One large mount
+
+Example conceptually:
+
+- host path -> `/data`
+
+Pros:
+
+- simple setup
+- easy snapshots
+- easy portability
+
+Cons:
+
+- less granular backup policy
+- mixes hot and cold data
+- harder to assign different storage classes
+
+### Multiple targeted mounts
+
+Example conceptually:
+
+- host path A -> `/data/db`
+- host path B -> `/data/memory`
+- host path C -> `/data/media`
+- host path D -> `/config`
+
+Pros:
+
+- better separation
+- different backup/retention policies
+- easier cloud mapping
+
+Cons:
+
+- slightly more operational complexity
+
+### Recommendation
+
+Support both, but design for multiple logical paths internally.
+That gives flexibility for local and Azure-hosted patterns.
+
+---
+
+## 8. Operational storage guidance by deployment mode
+
+## 8.1 Local-first Docker mode
+
+Recommended:
+
+- **Operational DB:** embedded PostgreSQL in `/data/db` when no external connection string is configured
+- **Sessions/memory/media/skills/logs/backups:** mounted local filesystem paths
+- **Search:** embedded index in `/data/db` or adjacent path
+
+Why this should be the baseline:
+
+- closest to OpenClaw behavior
+- simplest setup
+- easiest portability
+- easiest backup/restore
+- strongest offline/local capability
+
+This should be treated as the reference implementation mode.
+
+---
+
+## 8.2 Hosted Azure Docker/container mode — parity-first
+
+Recommended:
+
+- **Operational DB:** embedded PostgreSQL on reliable persistent volume for conservative single-instance mode, or external PostgreSQL if managed DB is preferred
+- **Mounted durable file paths:** Azure Files or persistent volumes
+- **Archive/large object retention:** Azure Blob Storage
+- **Secrets:** Key Vault references or mounted secret files
+
+Best when:
+
+- one main runtime instance
+- mount semantics matter
+- operator wants behavior close to local Docker mode
+
+Caution:
+
+SQLite on network-backed storage can be acceptable for conservative single-instance deployments, but it should be validated carefully. If concurrency, HA, or storage semantics become concerning, move operational metadata to Azure Database for PostgreSQL.
+
+---
+
+## 8.3 Hosted Azure mode — managed relational pattern
+
+Recommended:
+
+- **Operational DB:** Azure Database for PostgreSQL
+- **File-backed durable paths:** Azure Files or persistent volume mounts
+- **Backups/archives/media offload:** Azure Blob Storage
+
+This is the strongest managed-Azure pattern that still preserves the mount-friendly file model where needed.
+
+---
+
+## 9. Startup, shutdown, and restart contract
+
+## 9.1 Startup contract
+
+On startup, the runtime must:
+
+- validate required mounted paths and config roots
+- fail fast on missing/unwritable parity-critical paths
+- validate DB/schema compatibility
+- restore durable job state and next-run derivation
+- restore pending approvals
+- restore session and transcript inspectability
+- surface degraded state explicitly if some optional path is unavailable
+
+## 9.2 Shutdown contract
+
+On graceful shutdown, the runtime must:
+
+- flush durable state
+- record terminal or interrupted state for active sessions/jobs/processes as needed
+- stop accepting new work before teardown when possible
+- make interrupted-but-durable work inspectable on restart
+
+## 9.3 Restart contract
+
+After restart, the runtime must preserve and recover at minimum:
+
+- sessions and transcript history
+- jobs and next-run state
+- approvals still awaiting decision
+- process/tool audit history
+- durable channel delivery references
+- recent logs/diagnostic state where configured durable
+
+Long-running OS child processes may not survive restart in all modes, but their prior existence and terminal or lost state must remain inspectable. The runtime must not pretend the work never existed.
+
+---
+
+## 10. Probe and doctor expectations in containers
+
+## 10.1 Health/readiness/liveness behavior
+
+Container deployment should provide:
+
+- liveness endpoint proving the process loop is alive
+- readiness endpoint proving critical dependencies are usable
+- status endpoint for deeper operator inspection
+
+Readiness should fail or degrade when parity-critical dependencies are unavailable, including where relevant:
+
+- auth/bootstrap state is broken
+- required durable paths are unwritable
+- DB/schema is incompatible
+- scheduler core cannot initialize
+- gateway control plane cannot serve expected requests
+
+## 10.2 Doctor integration
+
+Doctor must be able to detect container/storage-specific issues such as:
+
+- missing mounts
+- wrong ownership/permissions
+- read-only mounts where write access is required
+- path mismatch between config and mounted layout
+- stale schema vs current runtime
+- Azure-mounted storage drift or misconfiguration where detectable
+
+---
+
+## 11. Azure-native storage research applied to Docker
+
+## 11.1 Azure Files
+
+Best Azure-native fit for mounted directories required by the runtime.
+
+Good targets:
+
+- `/data/memory`
+- `/data/skills`
+- `/data/logs`
+- `/data/backups`
+- `/config`
+- `/data/sessions` if session files remain file-based
+- `/data/media` if throughput is acceptable
+
+Use caution for:
+
+- `/data/db` if SQLite is write-heavy
+- high-churn search index paths
+
+## 11.2 Azure Blob Storage
+
+Best fit for object/archive semantics, not ordinary mounted workspace semantics.
+
+Good targets:
+
+- backup exports copied out of `/data/backups`
+- media archive tiers
+- old transcript archives
+- diagnostic bundles
+
+Do not treat Blob Storage as the canonical replacement for directories like `/data/memory` or `/config`.
+
+## 11.3 Azure Database for PostgreSQL
+
+Best managed Azure backend if moving operational state out of embedded storage.
+
+Best target for:
+
+- metadata tables
+- job history
+- approvals
+- channel/provider state
+- operational indexes/pointers
+
+Use this when hosted reliability and managed DB posture matter more than full SQLite symmetry.
+
+## 11.4 Cosmos DB and Azure SQL
+
+Not recommended as default deployment targets for the parity-first container architecture.
+
+- **Cosmos DB NoSQL:** wrong default model for the runtime core
+- **Cosmos DB for PostgreSQL:** overbuilt for early parity needs
+- **Azure SQL:** possible enterprise-specific support, but not the default portable path
+
+---
+
+## 12. Backup and restore expectations
+
+Container deployment must make backup/restore straightforward.
+
+## 12.1 What must be backup-friendly
+
+- database files or managed DB dumps
+- memory documents
+- session/transcript artifacts
+- skills/plugins bundles
+- configuration overlays
+- secrets references/config, excluding secret values where policy requires external secret storage
+- exports and logs as needed
+
+## 12.2 Backup strategy by mode
+
+### Local-first Docker
+
+- filesystem snapshot of mounted paths
+- SQLite-consistent backup/export for `/data/db`
+- optional archive bundles into `/data/backups`
+
+### Hosted Azure with mounted filesystem
+
+- volume/share snapshot where available
+- PostgreSQL backups if managed DB is used
+- Blob Storage replication for backup archives
+
+## 12.3 Restore principle
+
+A restore should reconstruct the runtime without needing image-layer recovery or undocumented hidden paths.
+
+---
+
+## 13. Upgrade and migration expectations
+
+Container upgrades should be image-replace operations, not state-migration adventures hidden inside ephemeral layers.
+
+Rules:
+
+- runtime version changes may migrate DB/schema, but not relocate hidden state into image internals
+- file layout changes must be explicit and documented
+- migration tooling should preserve mounted data paths
+- rollback should be possible from persistent backup/state snapshots
+
+---
+
+## 14. Scaling posture
+
+## 14.1 Early scaling assumption
+
+Assume:
+
+- single primary runtime instance
+- single active scheduler authority
+- single writer for embedded DB mode
+
+This is fine for parity-first OpenClaw-style operation.
+
+## 14.2 When to move beyond embedded storage
+
+Move from SQLite to managed PostgreSQL when:
+
+- multi-instance runtime becomes necessary
+- scheduler/job state coordination becomes multi-node
+- write concurrency grows materially
+- backup/restore/HA requirements exceed comfort with embedded DB
+
+Do **not** switch storage just because the runtime is on Azure.
+
+---
+
+## 15. Security and secret handling in containers
+
+Container images must not bake in secrets.
+
+Support these patterns:
+
+- environment variables
+- mounted secret files in `/secrets`
+- Azure Key Vault references or injection paths
+- certificate/key mounts for provider integrations when needed
+
+Secrets should be external to the image and easy to rotate.
+
+---
+
+## 16. Container runtime contract
+
+The container image and runtime configuration should satisfy these baseline operational rules:
+
+- image is stateless by design
+- all durable paths are externalized
+- runtime fails fast if required persistent paths are missing or unwritable
+- runtime can run as a non-root user where practical
+- health/readiness endpoints reflect actual dependency readiness, not just process liveness
+- shutdown drains in-flight work to the extent compatible with bounded graceful termination
+- logs go to stdout/stderr first, with optional mirrored durable logs
+
+## 16.1 Required environment/config categories
+
+The deployment model should expect configuration for at least:
+
+- gateway bind/address and auth settings
+- workspace/data root mappings
+- provider/model configuration including Azure-specific fields
+- channel credentials/config
+- storage backend selection where optional
+- log/telemetry/export settings
+- secrets references
+
+## 16.2 Compatibility note on host paths
+
+Physical host paths may differ across environments.
+What must remain stable is the logical in-container contract and operator mental model.
+
+---
+
+## 17. Recommended default deployment patterns
+
+## Pattern A — default local-first Docker
+
+Use:
+
+- single runtime container
+- embedded PostgreSQL in `/data/db`
+- mounted host paths or named volumes for `/data/*`, `/config`, `/secrets`
+
+This should be the default documentation path for parity-first deployment.
+
+## Pattern B — default hosted Azure deployment
+
+Use:
+
+- single runtime container
+- Azure Database for PostgreSQL if managed DB is desired, otherwise SQLite on persistent volume for conservative single-instance mode
+- Azure Files for mount-style durable paths
+- Azure Blob Storage for archives/backups/media offload
+- Key Vault for managed secrets
+
+This should be the default Azure-hosted recommendation.
+
+## Pattern C — future larger-scale hosted mode
+
+Use:
+
+- runtime container(s)
+- PostgreSQL for operational metadata
+- Azure Files/persistent volumes for file semantics
+- Blob Storage for object/archive data
+- keep the same logical state contract
+
+---
+
+## 18. Evidence required before claiming Docker parity
+
+Before claiming Docker-first parity, capture black-box evidence for:
+
+- boot with mounted persistent storage only
+- fail-fast behavior on missing/unwritable required paths
+- restart durability for sessions, jobs, approvals, and history
+- readiness/liveness/status distinction
+- doctor detection of broken storage/mount states
+- backup/restore path that does not rely on image-layer state
+- Azure-hosted deployment mapping using the same logical durable-state model
+
+---
+
+## 19. Final recommendation
+
+The safest container strategy is:
+
+1. preserve one canonical logical state layout
+2. keep all durable state external to the image
+3. use PostgreSQL + mounted filesystem as the baseline local-first mode, with embedded Postgres when no external database is configured
+4. use Azure Database for PostgreSQL as the preferred managed relational path in Azure when external managed DB is desired
+5. use Azure Files for mount-friendly persistent directories
+6. use Azure Blob Storage for archives, backups, and object-scale media
+7. avoid redesigning the runtime around Cosmos DB or Azure SQL unless a specific hosted requirement justifies it
+
+That gives first-class Docker support, Azure compatibility, and the best chance of remaining behaviorally identical to OpenClaw while staying portable.
