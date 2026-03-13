@@ -7,6 +7,7 @@ pub mod exec_tool;
 mod executor;
 pub mod file_tools;
 pub mod memory_tool;
+pub mod message_tool;
 pub mod process_tool;
 mod registry;
 pub mod session_tool;
