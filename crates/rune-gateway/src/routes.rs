@@ -768,3 +768,36 @@ fn run_to_response(run: JobRun) -> CronRunResponse {
         output: run.output,
     }
 }
+
+// ── Telegram Webhook ────────────────────────────────────────────────
+
+/// `POST /webhook/telegram/{token}` — receive Telegram Bot API updates.
+///
+/// The token in the URL is validated against the configured bot token
+/// to prevent unauthorized webhook calls.
+pub async fn telegram_webhook(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Json(update): Json<serde_json::Value>,
+) -> Result<StatusCode, GatewayError> {
+    // Validate the webhook token matches the configured bot token
+    let expected_token = state
+        .config
+        .channels
+        .telegram_token
+        .as_deref()
+        .unwrap_or_default();
+
+    if token != expected_token {
+        return Err(GatewayError::Unauthorized);
+    }
+
+    // Emit the update as a session event for processing
+    let _ = state.event_tx.send(crate::state::SessionEvent {
+        session_id: "telegram".to_string(),
+        kind: "telegram_update".to_string(),
+        payload: update,
+    });
+
+    Ok(StatusCode::OK)
+}

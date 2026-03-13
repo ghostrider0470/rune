@@ -118,6 +118,7 @@ fn build_router(state: AppState, auth_token: Option<String>) -> Router {
     let public_routes = Router::new()
         .route("/health", get(routes::health))
         .route("/ws", get(ws::ws_handler))
+        .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
         .with_state(state.clone());
 
     let protected_routes = Router::new()

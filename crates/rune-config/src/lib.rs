@@ -139,6 +139,9 @@ pub struct ModelProviderConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ChannelsConfig {
     pub enabled: Vec<String>,
+    /// Telegram bot token for the Bot API.
+    #[serde(default)]
+    pub telegram_token: Option<String>,
 }
 
 /// Memory indexing and retrieval settings.
