@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use diesel::Connection;
-use diesel::migration::MigrationHarness;
 use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
+use diesel_migrations::MigrationHarness;
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
 use rune_config::AppConfig;
 use tracing::info;
@@ -14,13 +14,13 @@ use tracing::info;
 use crate::error::StoreError;
 use crate::repos::{PgPool, PgStore, build_pool};
 
-const MIGRATIONS: diesel_migrations::EmbeddedMigrations = diesel_migrations::embed_migrations!("./migrations");
+const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
+    diesel_migrations::embed_migrations!("./migrations");
 const EMBEDDED_DB_NAME: &str = "rune";
 
 /// Stateful holder for an embedded PostgreSQL instance.
-#[derive(Debug)]
 pub struct EmbeddedPostgres {
-    server: PostgreSQL,
+    _server: PostgreSQL,
     database_url: String,
 }
 
@@ -50,7 +50,7 @@ impl EmbeddedPostgres {
         let database_url = server.settings().url(EMBEDDED_DB_NAME);
 
         Ok(Self {
-            server,
+            _server: server,
             database_url,
         })
     }
@@ -61,16 +61,7 @@ impl EmbeddedPostgres {
     }
 }
 
-impl Drop for EmbeddedPostgres {
-    fn drop(&mut self) {
-        if let Err(error) = self.server.stop() {
-            tracing::warn!(%error, "failed to stop embedded postgres during drop");
-        }
-    }
-}
-
 /// Database resources assembled from configuration.
-#[derive(Debug)]
 pub struct StoreRuntime {
     pub store: Arc<PgStore>,
     pub pool: PgPool,
@@ -83,7 +74,8 @@ pub async fn connect(config: &AppConfig) -> Result<StoreRuntime, StoreError> {
     let (database_url, embedded) = match &config.database.database_url {
         Some(database_url) => (database_url.clone(), None),
         None => {
-            let embedded = EmbeddedPostgres::start(&embedded_base_dir(&config.paths.db_dir)).await?;
+            let embedded =
+                EmbeddedPostgres::start(&embedded_base_dir(&config.paths.db_dir)).await?;
             (embedded.database_url().to_string(), Some(embedded))
         }
     };
@@ -91,7 +83,10 @@ pub async fn connect(config: &AppConfig) -> Result<StoreRuntime, StoreError> {
     let pool = build_pool(&database_url, config.database.max_connections)?;
 
     if config.database.run_migrations {
-        run_migrations(&database_url)?;
+        let migration_url = database_url.clone();
+        tokio::task::spawn_blocking(move || run_migrations(&migration_url))
+            .await
+            .map_err(|error| StoreError::Migration(error.to_string()))??;
     }
 
     info!(database_url = %redact_database_url(&database_url), "database ready");
@@ -111,11 +106,14 @@ fn embedded_base_dir(db_dir: &Path) -> PathBuf {
 
 /// Run embedded Diesel migrations against the provided database URL.
 pub fn run_migrations(database_url: &str) -> Result<(), StoreError> {
-    let mut connection = AsyncConnectionWrapper::<diesel_async::AsyncPgConnection>::establish(database_url)?;
+    let mut connection =
+        AsyncConnectionWrapper::<diesel_async::AsyncPgConnection>::establish(database_url)?;
     connection
         .run_pending_migrations(MIGRATIONS)
         .map(|_| ())
-        .map_err(|error| StoreError::Migration(error.to_string()))
+        .map_err(|error: Box<dyn std::error::Error + Send + Sync>| {
+            StoreError::Migration(error.to_string())
+        })
 }
 
 fn redact_database_url(database_url: &str) -> String {

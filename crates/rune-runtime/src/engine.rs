@@ -4,9 +4,9 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use rune_core::{SessionId, SessionKind, SessionStatus};
+use rune_store::StoreError;
 use rune_store::models::{NewSession, SessionRow};
 use rune_store::repos::SessionRepo;
-use rune_store::StoreError;
 
 use crate::error::RuntimeError;
 
@@ -31,16 +31,8 @@ impl SessionEngine {
 
         let new_session = NewSession {
             id: id.into_uuid(),
-            kind: serde_json::to_value(kind)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string(),
-            status: serde_json::to_value(SessionStatus::Created)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string(),
+            kind: enum_label_session_kind(kind),
+            status: enum_label_session_status(SessionStatus::Created),
             workspace_root,
             channel_ref: None,
             requester_session_id: None,
@@ -55,19 +47,26 @@ impl SessionEngine {
 
     /// Transition a session to Ready status.
     pub async fn mark_ready(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.transition_session(session_id, "created", "ready").await
+        self.transition_session(session_id, "created", "ready")
+            .await
     }
 
     /// Transition a session to Running status.
     pub async fn mark_running(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.transition_session(session_id, "ready", "running").await
+        self.transition_session(session_id, "ready", "running")
+            .await
     }
 
     /// Transition a session to Completed status.
     pub async fn mark_completed(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
         // Running or waiting states can transition to completed
         let row = self.session_repo.find_by_id(session_id).await?;
-        let valid_from = ["running", "waiting_for_tool", "waiting_for_approval", "waiting_for_subagent"];
+        let valid_from = [
+            "running",
+            "waiting_for_tool",
+            "waiting_for_approval",
+            "waiting_for_subagent",
+        ];
         if !valid_from.contains(&row.status.as_str()) {
             return Err(RuntimeError::InvalidSessionState {
                 expected: "running|waiting_*".to_string(),
@@ -122,4 +121,30 @@ impl SessionEngine {
             .await?;
         Ok(updated)
     }
+}
+
+fn enum_label_session_kind(kind: SessionKind) -> String {
+    match kind {
+        SessionKind::Direct => "direct",
+        SessionKind::Channel => "channel",
+        SessionKind::Scheduled => "scheduled",
+        SessionKind::Subagent => "subagent",
+    }
+    .to_string()
+}
+
+fn enum_label_session_status(status: SessionStatus) -> String {
+    match status {
+        SessionStatus::Created => "created",
+        SessionStatus::Ready => "ready",
+        SessionStatus::Running => "running",
+        SessionStatus::WaitingForTool => "waiting_for_tool",
+        SessionStatus::WaitingForApproval => "waiting_for_approval",
+        SessionStatus::WaitingForSubagent => "waiting_for_subagent",
+        SessionStatus::Suspended => "suspended",
+        SessionStatus::Completed => "completed",
+        SessionStatus::Failed => "failed",
+        SessionStatus::Cancelled => "cancelled",
+    }
+    .to_string()
 }

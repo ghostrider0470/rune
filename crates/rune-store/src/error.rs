@@ -23,10 +23,7 @@ pub enum StoreError {
 
     /// The requested entity was not found.
     #[error("{entity} not found: {id}")]
-    NotFound {
-        entity: &'static str,
-        id: String,
-    },
+    NotFound { entity: &'static str, id: String },
 
     /// A constraint or uniqueness violation.
     #[error("conflict: {0}")]
@@ -43,6 +40,10 @@ pub enum StoreError {
     /// Embedded PostgreSQL bootstrap failure.
     #[error("embedded postgresql error: {0}")]
     EmbeddedPostgres(#[from] postgresql_embedded::Error),
+
+    /// Semver parsing failure while configuring embedded PostgreSQL.
+    #[error("version parse error: {0}")]
+    VersionParse(#[from] semver::Error),
 }
 
 impl From<serde_json::Error> for StoreError {

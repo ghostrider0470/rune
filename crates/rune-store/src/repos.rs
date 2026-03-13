@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::error::StoreError;
 use crate::models::*;
-use crate::schema::{jobs, sessions, tool_executions, transcript_items, turns};
+use crate::schema::{jobs, sessions, transcript_items, turns};
 
 /// Persistence contract for session records.
 #[async_trait]
@@ -46,7 +46,8 @@ pub trait TurnRepo: Send + Sync {
 #[async_trait]
 pub trait TranscriptRepo: Send + Sync {
     async fn append(&self, item: NewTranscriptItem) -> Result<TranscriptItemRow, StoreError>;
-    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<TranscriptItemRow>, StoreError>;
+    async fn list_by_session(&self, session_id: Uuid)
+    -> Result<Vec<TranscriptItemRow>, StoreError>;
 }
 
 /// Persistence contract for scheduled jobs.
@@ -251,11 +252,17 @@ impl TranscriptRepo for PgStore {
             .map_err(StoreError::from)
     }
 
-    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<TranscriptItemRow>, StoreError> {
+    async fn list_by_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<TranscriptItemRow>, StoreError> {
         let mut conn = self.connection().await?;
         transcript_items::table
             .filter(transcript_items::session_id.eq(session_id))
-            .order((transcript_items::seq.asc(), transcript_items::created_at.asc()))
+            .order((
+                transcript_items::seq.asc(),
+                transcript_items::created_at.asc(),
+            ))
             .select(TranscriptItemRow::as_select())
             .load(&mut conn)
             .await
@@ -324,7 +331,8 @@ impl JobRepo for PgStore {
 
 /// Build a PostgreSQL pool from a database URL.
 pub fn build_pool(database_url: &str, max_connections: u32) -> Result<PgPool, StoreError> {
-    let manager = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(database_url);
+    let manager =
+        AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(database_url);
     Pool::builder(manager)
         .max_size(max_connections as usize)
         .build()
