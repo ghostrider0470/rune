@@ -200,7 +200,7 @@ impl TelegramAdapter {
             && body
                 .description
                 .as_deref()
-                .map_or(false, |d| d.contains("parse entities") || d.contains("can't parse"))
+                .is_some_and(|d| d.contains("parse entities") || d.contains("can't parse"))
         {
             tracing::warn!("Markdown parse failed, retrying without parse_mode");
             params.as_object_mut().unwrap().remove("parse_mode");
@@ -268,12 +268,8 @@ impl ChannelAdapter for TelegramAdapter {
     async fn send(&self, action: OutboundAction) -> Result<DeliveryReceipt, ChannelError> {
         match action {
             OutboundAction::Send {
-                channel_id,
-                content,
-            } => {
-                self.send_message(&channel_id.to_string(), &content, None)
-                    .await
-            }
+                chat_id, content, ..
+            } => self.send_message(&chat_id, &content, None).await,
             OutboundAction::Reply {
                 chat_id,
                 reply_to,
@@ -284,13 +280,14 @@ impl ChannelAdapter for TelegramAdapter {
                     .await
             }
             OutboundAction::Edit {
-                channel_id,
+                chat_id,
                 message_id,
                 new_content,
+                ..
             } => {
                 let url = format!("{}/editMessageText", self.base_url);
                 let params = serde_json::json!({
-                    "chat_id": channel_id.to_string(),
+                    "chat_id": chat_id,
                     "message_id": message_id.parse::<i64>().unwrap_or(0),
                     "text": new_content,
                 });
@@ -327,12 +324,13 @@ impl ChannelAdapter for TelegramAdapter {
                 })
             }
             OutboundAction::Delete {
-                channel_id,
+                chat_id,
                 message_id,
+                ..
             } => {
                 let url = format!("{}/deleteMessage", self.base_url);
                 let params = serde_json::json!({
-                    "chat_id": channel_id.to_string(),
+                    "chat_id": chat_id,
                     "message_id": message_id.parse::<i64>().unwrap_or(0),
                 });
 

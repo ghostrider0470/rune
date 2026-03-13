@@ -22,6 +22,7 @@ async fn telegram_send_with_bad_token_returns_provider_error() {
     let adapter = TelegramAdapter::with_base_url("bad-token", "http://127.0.0.1:1");
     let action = OutboundAction::Send {
         channel_id: ChannelId::new(),
+        chat_id: "123456".into(),
         content: "hello".into(),
     };
     let err = adapter.send(action).await.unwrap_err();
@@ -107,6 +108,7 @@ fn outbound_action_variants_roundtrip() {
         (
             OutboundAction::Send {
                 channel_id: cid,
+                chat_id: "chat-1".into(),
                 content: "hi".into(),
             },
             "send",
@@ -123,6 +125,7 @@ fn outbound_action_variants_roundtrip() {
         (
             OutboundAction::Edit {
                 channel_id: cid,
+                chat_id: "chat-1".into(),
                 message_id: "m1".into(),
                 new_content: "v2".into(),
             },
@@ -139,6 +142,7 @@ fn outbound_action_variants_roundtrip() {
         (
             OutboundAction::Delete {
                 channel_id: cid,
+                chat_id: "chat-1".into(),
                 message_id: "m1".into(),
             },
             "delete",

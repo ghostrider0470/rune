@@ -60,6 +60,8 @@ pub enum InboundEvent {
 pub enum OutboundAction {
     Send {
         channel_id: ChannelId,
+        /// Provider-native chat identifier for routing the message.
+        chat_id: String,
         content: String,
     },
     Reply {
@@ -71,6 +73,8 @@ pub enum OutboundAction {
     },
     Edit {
         channel_id: ChannelId,
+        /// Provider-native chat identifier for routing the edit.
+        chat_id: String,
         message_id: String,
         new_content: String,
     },
@@ -81,6 +85,8 @@ pub enum OutboundAction {
     },
     Delete {
         channel_id: ChannelId,
+        /// Provider-native chat identifier for routing the delete.
+        chat_id: String,
         message_id: String,
     },
 }
