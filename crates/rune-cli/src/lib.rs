@@ -165,6 +165,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.cron_runs(&id).await?;
                 println!("{}", render(&result, format));
             }
+            CronAction::Wake {
+                text,
+                mode,
+                context_messages,
+            } => {
+                let result = client.cron_wake(&text, &mode, context_messages).await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Sessions { action } => match action {
             SessionsAction::List => {

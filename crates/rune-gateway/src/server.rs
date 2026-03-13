@@ -129,6 +129,7 @@ fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/gateway/restart", post(routes::gateway_restart))
         .route("/cron/status", get(routes::cron_status))
         .route("/cron", get(routes::cron_list).post(routes::cron_add))
+        .route("/cron/wake", post(routes::cron_wake))
         .route(
             "/cron/{id}",
             post(routes::cron_update).delete(routes::cron_remove),

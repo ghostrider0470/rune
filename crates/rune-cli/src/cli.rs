@@ -131,6 +131,18 @@ pub enum CronAction {
         /// Job ID.
         id: String,
     },
+    /// Queue a wake event for the runtime heartbeat/session layer.
+    Wake {
+        /// Wake/reminder text to inject.
+        #[arg(long)]
+        text: String,
+        /// Delivery timing mode (`next-heartbeat` or `now`).
+        #[arg(long, default_value = "next-heartbeat")]
+        mode: String,
+        /// Optional number of recent context messages to attach.
+        #[arg(long = "context-messages")]
+        context_messages: Option<u64>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -351,6 +363,37 @@ mod tests {
                 ) => assert_eq!(id, "job-1"),
                 other => panic!("unexpected parse result: {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn parse_cron_wake() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "cron",
+            "wake",
+            "--text",
+            "Reminder: check Rune",
+            "--mode",
+            "now",
+            "--context-messages",
+            "3",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Cron {
+                action:
+                    CronAction::Wake {
+                        text,
+                        mode,
+                        context_messages,
+                    },
+            } => {
+                assert_eq!(text, "Reminder: check Rune");
+                assert_eq!(mode, "now");
+                assert_eq!(context_messages, Some(3));
+            }
+            other => panic!("unexpected command: {other:?}"),
         }
     }
 

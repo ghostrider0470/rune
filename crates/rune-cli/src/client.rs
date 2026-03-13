@@ -353,6 +353,41 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /cron/wake`
+    pub async fn cron_wake(
+        &self,
+        text: &str,
+        mode: &str,
+        context_messages: Option<u64>,
+    ) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url("/cron/wake"))
+            .json(&json!({
+                "text": text,
+                "mode": mode,
+                "contextMessages": context_messages,
+            }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /cron/wake")?;
+            Ok(ActionResult {
+                success: true,
+                message: body["message"]
+                    .as_str()
+                    .unwrap_or("Wake event queued")
+                    .to_string(),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(&self) -> Result<SessionListResponse> {
         let resp = self

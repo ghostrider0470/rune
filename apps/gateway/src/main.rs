@@ -28,7 +28,7 @@ use rune_runtime::{
 };
 use rune_store::EmbeddedPg;
 use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
-use rune_tools::approval::{ApprovalRequest, RiskLevel};
+use rune_tools::approval::ApprovalRequest;
 use rune_tools::exec_tool::ExecToolExecutor;
 use rune_tools::file_tools::FileToolExecutor;
 use rune_tools::memory_tool::MemoryToolExecutor;
@@ -265,30 +265,14 @@ impl ToolExecutor for AppToolExecutor {
                 self.file.execute(call).await
             }
             "exec" | "execute_command" => {
-                let details = serde_json::to_string_pretty(&ApprovalRequest {
-                    tool_name: call.tool_name.clone(),
-                    arguments_summary: serde_json::json!({
-                        "command": call.arguments.get("command").and_then(|v| v.as_str()).unwrap_or(""),
-                        "workdir": call.arguments.get("workdir").and_then(|v| v.as_str()),
-                        "background": call.arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false),
-                        "timeout": call.arguments.get("timeout").and_then(|v| v.as_u64()),
-                        "pty": call.arguments.get("pty").and_then(|v| v.as_bool()).unwrap_or(false),
-                        "elevated": call.arguments.get("elevated").and_then(|v| v.as_bool()).unwrap_or(false),
-                        "ask": call.arguments.get("ask").and_then(|v| v.as_str()),
-                        "security": call.arguments.get("security").and_then(|v| v.as_str())
-                    }).to_string(),
-                    risk_level: if call.arguments.get("elevated").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        RiskLevel::High
-                    } else {
-                        RiskLevel::Medium
-                    },
-                }).unwrap_or_else(|_| call.arguments.to_string());
-
+                let approval_request = ApprovalRequest::from_call(&call);
                 let approval_bypassed = matches!(
                     call.arguments.get("ask").and_then(|v| v.as_str()),
                     Some("off")
                 );
                 if !approval_bypassed {
+                    let details = serde_json::to_string_pretty(&approval_request)
+                        .unwrap_or_else(|_| call.arguments.to_string());
                     return Err(ToolError::ApprovalRequired {
                         tool: call.tool_name.clone(),
                         details,

@@ -147,6 +147,14 @@ pub struct CronListQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CronWakeRequest {
+    pub text: String,
+    pub mode: Option<String>,
+    #[serde(rename = "contextMessages")]
+    pub context_messages: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CronJobRequest {
     pub name: Option<String>,
     pub schedule: CronScheduleRequest,
@@ -227,6 +235,15 @@ pub struct CronRunResponse {
 pub struct CronMutationResponse {
     pub success: bool,
     pub job_id: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct CronWakeResponse {
+    pub success: bool,
+    pub mode: String,
+    pub text: String,
+    pub context_messages: Option<u64>,
     pub message: String,
 }
 
@@ -404,6 +421,31 @@ pub async fn cron_runs(
         .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
     let runs = state.scheduler.get_runs(&job_id, None).await;
     Ok(Json(runs.into_iter().map(run_to_response).collect()))
+}
+
+pub async fn cron_wake(
+    State(state): State<AppState>,
+    Json(body): Json<CronWakeRequest>,
+) -> Result<Json<CronWakeResponse>, GatewayError> {
+    let mode = body.mode.unwrap_or_else(|| "next-heartbeat".to_string());
+
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: "system".to_string(),
+        kind: "wake_event".to_string(),
+        payload: json!({
+            "text": body.text,
+            "mode": mode,
+            "contextMessages": body.context_messages,
+        }),
+    });
+
+    Ok(Json(CronWakeResponse {
+        success: true,
+        mode: mode.clone(),
+        text: body.text,
+        context_messages: body.context_messages,
+        message: format!("wake event queued for {mode}"),
+    }))
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────

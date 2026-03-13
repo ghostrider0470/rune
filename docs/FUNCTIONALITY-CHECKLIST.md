@@ -152,7 +152,7 @@ Interpretation rules:
 - [x] structured error envelopes
 - [x] durable IDs returned by create/mutate flows
 
-Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs`), `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|start|stop|restart`, with human and `--json` output modes. This is still not full parity, but it is now runnable instead of planning-only.
+Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs|wake`), `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|start|stop|restart`, with human and `--json` output modes. This is still not full parity, but it is now runnable instead of planning-only.
 
 ---
 
@@ -171,7 +171,7 @@ Implementation note (2026-03-13): the current executable control-plane slice is 
 - [ ] startup file loading rules by session type
 - [ ] main-session-only curated-memory boundary
 
-Implementation note (2026-03-13): current smoke evidence covers create-session -> append input -> execute turn -> receive assistant reply -> retrieve ordered transcript through the gateway. The current gateway app uses a transitional in-memory runtime path for executability; release-target durable behavior remains PostgreSQL-backed.
+Implementation note (2026-03-13): current smoke evidence covers create-session -> append input -> execute turn -> receive assistant reply -> retrieve ordered transcript through the gateway. The runnable gateway now uses PostgreSQL-backed repositories through Diesel, with embedded PostgreSQL as the zero-config local fallback and configured external PostgreSQL as the release-target path; remaining work is durability evidence and parity breadth, not placeholder in-memory wiring.
 
 ---
 
@@ -233,7 +233,7 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 
 - [x] cron jobs
 - [ ] reminders
-- [ ] wake events
+- [x] wake events
 - [ ] heartbeats
 - [ ] isolated scheduled agent runs
 - [ ] run history durability
