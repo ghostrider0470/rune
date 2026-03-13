@@ -17,7 +17,7 @@ This document is the master instruction set for AI agents building this project 
 ## Project state
 
 - **15+ design docs** in `docs/` define architecture, parity contracts, protocols, and phasing
-- **No code exists yet** — you are starting from an empty Cargo workspace
+- **Initial code now exists** — the Cargo workspace, crate skeletons, and early Wave 1 foundations are in progress; treat this document as the execution authority for sequencing and acceptance gates, not as a literal snapshot of repo emptiness
 - **Crate prefix is `rune-`** — all crate names use `rune-*` (e.g., `rune-core`, `rune-runtime`)
 
 ---
