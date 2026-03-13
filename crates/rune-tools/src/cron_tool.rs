@@ -230,6 +230,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wake_returns_queued_payload() {
+        let exec = CronToolExecutor::new(Arc::new(MockScheduler));
+        let call = make_call(serde_json::json!({
+            "action": "wake",
+            "text": "Reminder: check Rune",
+            "mode": "now",
+            "contextMessages": 3
+        }));
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.output.contains("queued"));
+        assert!(result.output.contains("Reminder: check Rune"));
+        assert!(result.output.contains("now"));
+    }
+
+    #[tokio::test]
     async fn missing_action_rejected() {
         let exec = CronToolExecutor::new(Arc::new(MockScheduler));
         let call = make_call(serde_json::json!({}));
