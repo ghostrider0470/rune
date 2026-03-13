@@ -184,6 +184,20 @@ pub enum ChannelsAction {
     Status,
     /// Show channel capability inventory.
     Capabilities,
+    /// Resolve a channel name/alias to the concrete configured adapter.
+    Resolve {
+        /// Channel name or alias to resolve.
+        target: String,
+    },
+    /// Show recent local log files for channel-related runtime activity.
+    Logs {
+        /// Channel name filter (defaults to all known channels).
+        #[arg(long)]
+        channel: Option<String>,
+        /// Maximum number of log files to return.
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -341,6 +355,40 @@ mod tests {
                 action: ChannelsAction::Capabilities
             }
         ));
+    }
+
+    #[test]
+    fn parse_channels_resolve() {
+        let cli = Cli::try_parse_from(["rune", "channels", "resolve", "telegram"]).unwrap();
+        match cli.command {
+            Command::Channels {
+                action: ChannelsAction::Resolve { target },
+            } => assert_eq!(target, "telegram"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_channels_logs() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "channels",
+            "logs",
+            "--channel",
+            "telegram",
+            "--limit",
+            "5",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Channels {
+                action: ChannelsAction::Logs { channel, limit },
+            } => {
+                assert_eq!(channel.as_deref(), Some("telegram"));
+                assert_eq!(limit, 5);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

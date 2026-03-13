@@ -8,6 +8,7 @@ pub mod output;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use std::time::SystemTime;
 
 pub use cli::Cli;
 use cli::{
@@ -16,9 +17,9 @@ use cli::{
 };
 use client::{GatewayClient, show_config, validate_config};
 use output::{
-    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelStatusResponse,
-    ModelListResponse, ModelProviderDetail, ModelSetResponse, ModelStatusResponse, OutputFormat,
-    render,
+    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
+    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, ModelListResponse,
+    ModelProviderDetail, ModelSetResponse, ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -148,6 +149,97 @@ fn channel_details() -> Vec<ChannelDetail> {
             Some("Set channels.telegram_token and enable telegram in channels.enabled".to_string())
         },
     }]
+}
+
+fn resolve_channel(target: &str, channels: &[ChannelDetail]) -> ChannelResolveResponse {
+    let normalized = target.trim().to_ascii_lowercase();
+    let aliases = match normalized.as_str() {
+        "tg" | "telegram-bot" | "telegram_bot" => vec!["telegram"],
+        other => vec![other],
+    };
+
+    let channel = channels
+        .iter()
+        .find(|channel| aliases.iter().any(|alias| channel.name.eq_ignore_ascii_case(alias)))
+        .cloned();
+
+    ChannelResolveResponse {
+        target: target.to_string(),
+        matched: channel.is_some(),
+        channel,
+        note: if channels.is_empty() {
+            Some("No channels are currently described by the local config/runtime inventory.".to_string())
+        } else if normalized != "telegram" && aliases == vec![normalized.as_str()] {
+            Some(format!(
+                "Known channels: {}",
+                channels
+                    .iter()
+                    .map(|channel| channel.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        } else {
+            None
+        },
+    }
+}
+
+fn channel_logs(filter: Option<&str>, limit: usize) -> ChannelLogsResponse {
+    let config = load_config();
+    let logs_dir = config.paths.logs_dir;
+    let normalized_filter = filter.map(|value| value.trim().to_ascii_lowercase());
+
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&logs_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let file_name = match path.file_name().and_then(|name| name.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+            if let Some(filter_value) = &normalized_filter {
+                if !file_name.to_ascii_lowercase().contains(filter_value) {
+                    continue;
+                }
+            }
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            let modified_at = metadata
+                .modified()
+                .ok()
+                .and_then(|ts| ts.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .and_then(|duration| chrono::DateTime::<Utc>::from_timestamp(duration.as_secs() as i64, 0))
+                .map(|ts| ts.to_rfc3339());
+            files.push(ChannelLogFile {
+                path: path.display().to_string(),
+                modified_at,
+                size_bytes: metadata.len(),
+            });
+        }
+    }
+
+    files.sort_by(|left, right| right.modified_at.cmp(&left.modified_at).then_with(|| left.path.cmp(&right.path)));
+    files.truncate(limit);
+
+    let note = if !logs_dir.exists() {
+        Some("Configured logs_dir does not exist yet; no local channel logs are available.".to_string())
+    } else if files.is_empty() {
+        Some("No matching log files found in the configured logs_dir.".to_string())
+    } else {
+        Some("This is a local filesystem view of channel-related logs, not a remote provider log API.".to_string())
+    };
+
+    ChannelLogsResponse {
+        logs_dir: logs_dir.display().to_string(),
+        filter: filter.map(str::to_string),
+        files,
+        note,
+    }
 }
 
 fn model_provider_details() -> ModelListResponse {
@@ -420,6 +512,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 ChannelsAction::Capabilities => {
                     let result = ChannelCapabilitiesResponse { channels };
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Resolve { target } => {
+                    let result = resolve_channel(&target, &channels);
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Logs { channel, limit } => {
+                    let result = channel_logs(channel.as_deref(), limit);
                     println!("{}", render(&result, format));
                 }
             }

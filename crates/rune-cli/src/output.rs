@@ -253,6 +253,90 @@ impl fmt::Display for ChannelCapabilitiesResponse {
     }
 }
 
+/// Resolution result for a channel name/alias.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelResolveResponse {
+    pub target: String,
+    pub matched: bool,
+    pub channel: Option<ChannelDetail>,
+    pub note: Option<String>,
+}
+
+impl fmt::Display for ChannelResolveResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(channel) = &self.channel {
+            writeln!(f, "Resolved `{}` -> {}", self.target, channel.name)?;
+            writeln!(f, "  status: {}", channel.status)?;
+            writeln!(f, "  enabled: {}", channel.enabled)?;
+            writeln!(f, "  configured: {}", channel.configured)?;
+            if !channel.capabilities.is_empty() {
+                writeln!(f, "  capabilities: {}", channel.capabilities.join(", "))?;
+            }
+            if let Some(notes) = &channel.notes {
+                writeln!(f, "  note: {notes}")?;
+            }
+            Ok(())
+        } else {
+            write!(f, "No configured channel matched `{}`", self.target)?;
+            if let Some(note) = &self.note {
+                write!(f, "\nNote: {note}")?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Single local log file summary for channel diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelLogFile {
+    pub path: String,
+    pub modified_at: Option<String>,
+    pub size_bytes: u64,
+}
+
+impl fmt::Display for ChannelLogFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({} bytes", self.path, self.size_bytes)?;
+        if let Some(modified_at) = &self.modified_at {
+            write!(f, ", modified {modified_at}")?;
+        }
+        write!(f, ")")
+    }
+}
+
+/// Response for `channels logs`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelLogsResponse {
+    pub logs_dir: String,
+    pub filter: Option<String>,
+    pub files: Vec<ChannelLogFile>,
+    pub note: Option<String>,
+}
+
+impl fmt::Display for ChannelLogsResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Channel logs")?;
+        writeln!(f, "  Logs dir: {}", self.logs_dir)?;
+        writeln!(
+            f,
+            "  Filter:   {}",
+            self.filter.as_deref().unwrap_or("(all channels)")
+        )?;
+        if self.files.is_empty() {
+            writeln!(f, "  Files:    none")?;
+        } else {
+            writeln!(f, "  Files:")?;
+            for file in &self.files {
+                writeln!(f, "    - {file}")?;
+            }
+        }
+        if let Some(note) = &self.note {
+            write!(f, "  Note:     {note}")?;
+        }
+        Ok(())
+    }
+}
+
 /// Per-provider model configuration detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelProviderDetail {
@@ -719,6 +803,32 @@ mod tests {
         let out = render(&a, OutputFormat::Json);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["success"], true);
+    }
+
+    #[test]
+    fn render_channel_resolve_miss() {
+        let response = ChannelResolveResponse {
+            target: "discord".into(),
+            matched: false,
+            channel: None,
+            note: Some("Only telegram is currently configured.".into()),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("No configured channel matched `discord`"));
+        assert!(out.contains("Only telegram is currently configured."));
+    }
+
+    #[test]
+    fn render_channel_logs_empty() {
+        let response = ChannelLogsResponse {
+            logs_dir: "/data/logs".into(),
+            filter: Some("telegram".into()),
+            files: vec![],
+            note: Some("No matching log files found.".into()),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Channel logs"));
+        assert!(out.contains("No matching log files found."));
     }
 
     #[test]

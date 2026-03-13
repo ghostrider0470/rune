@@ -66,8 +66,8 @@ Interpretation rules:
 - [x] `channels list`
 - [x] `channels status`
 - [x] `channels capabilities`
-- [ ] `channels resolve`
-- [ ] `channels logs`
+- [x] `channels resolve`
+- [x] `channels logs`
 - [ ] `channels add`
 - [ ] `channels remove`
 - [ ] `channels login`
@@ -260,7 +260,7 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 
 ## 8. Channels
 
-Implementation note (2026-03-13): the operator CLI now exposes a first inspectable channel surface with `channels list`, `channels status`, and `channels capabilities`, backed by resolved config and the currently implemented Telegram adapter/runtime wiring. This does not yet cover login/logout, dynamic registration, resolution helpers, or provider log inspection, but it removes the previous blind spot where channel support existed in code yet had no operator-facing visibility.
+Implementation note (2026-03-13): the operator CLI now exposes a first inspectable channel surface with `channels list`, `channels status`, `channels capabilities`, `channels resolve`, and `channels logs`, backed by resolved config plus local Docker-first log-path inspection. `resolve` currently maps operator input/aliases onto the configured adapter inventory, and `logs` intentionally reports filesystem-backed log visibility from `paths.logs_dir` rather than pretending to offer remote provider log APIs. This still does not cover login/logout or dynamic registration, but it closes the earlier operator blind spot without violating parity constraints.
 
 Implementation note (2026-03-13): the operator CLI now also exposes `models list` and `models status`, giving a config-backed inventory of provider kind/base URL/default model/alias plus credential-readiness hints. This is intentionally read-only for now: it improves operator inspectability and Azure/provider debugging without pretending model mutation, auth-order management, or fallback editing are complete.
 
