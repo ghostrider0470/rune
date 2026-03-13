@@ -47,7 +47,7 @@ Interpretation rules:
 - [x] `openclaw status`
 - [x] `openclaw dashboard`
 - [ ] `openclaw configure`
-- [ ] shell completion
+- [x] shell completion
 - [x] help/usage text aligned with actual command families
 - [x] JSON output where operator automation depends on it
 
@@ -134,7 +134,7 @@ Interpretation rules:
 - [ ] browser `extension` helpers and responsebody/download/trace-style action breadth tracked
 - [ ] `docs`
 - [ ] `tui`
-- [ ] `qr` / `dns` / `docs` / `completion`
+- [ ] `qr` / `dns` / `docs`
 - [ ] `clawbot` / `voicecall`
 - [ ] `reset` command family
 
@@ -267,6 +267,8 @@ Implementation note (2026-03-13): the operator CLI now exposes a first inspectab
 Implementation note (2026-03-13): the operator CLI now also exposes `models list`, `models status`, `models set`, and `models aliases`, giving a config-backed inventory of provider kind/base URL/default model/alias plus credential-readiness hints, a validated local default-model update path, and a read-only alias map for operator routing visibility. This is still intentionally narrow: it improves operator inspectability and Azure/provider debugging without pretending auth-order management, fallback editing, or image-model routing are complete.
 
 Implementation note (2026-03-13): the operator CLI now exposes an initial read-only memory surface with `memory status`, `memory search`, and `memory get`, wired directly to the same file-oriented workspace conventions Rune/OpenClaw already use (`MEMORY.md` plus `memory/*.md`). This improves Tier-0 operator visibility without faking unfinished indexing infrastructure or inventing a remote gateway memory API before parity contracts for that surface are defined.
+
+Implementation note (2026-03-13): `completion generate <shell>` now emits real shell completion scripts via Clap for `bash`, `zsh`, `fish`, `elvish`, and `powershell`, closing the shell-ergonomics gap without inventing a bespoke compatibility layer. Current evidence is CLI parse coverage plus a direct smoke run that writes the generated script to stdout.
 
 ### Common abstractions
 - [ ] normalized inbound envelope

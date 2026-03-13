@@ -8,6 +8,8 @@ pub mod output;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use clap::CommandFactory;
+use clap_complete::{Shell, generate};
 use std::process::Command as StdCommand;
 use std::time::SystemTime;
 
@@ -21,9 +23,9 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    ApprovalsAction, ChannelsAction, Command, ConfigAction, CronAction, GatewayAction,
-    MemoryAction, ModelsAction, RemindersAction, SessionsAction, SystemAction,
-    SystemHeartbeatAction,
+    ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell, ConfigAction,
+    CronAction, GatewayAction, MemoryAction, ModelsAction, RemindersAction, SessionsAction,
+    SystemAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -64,6 +66,22 @@ fn run_gateway_foreground() -> Result<()> {
     } else {
         anyhow::bail!("`rune-gateway` exited with status {status}");
     }
+}
+
+fn completion_shell(shell: CompletionShell) -> Shell {
+    match shell {
+        CompletionShell::Bash => Shell::Bash,
+        CompletionShell::Elvish => Shell::Elvish,
+        CompletionShell::Fish => Shell::Fish,
+        CompletionShell::PowerShell => Shell::PowerShell,
+        CompletionShell::Zsh => Shell::Zsh,
+    }
+}
+
+fn print_completion(shell: CompletionShell) -> Result<()> {
+    let mut command = Cli::command();
+    generate(completion_shell(shell), &mut command, "rune", &mut std::io::stdout());
+    Ok(())
 }
 
 fn parse_reminder_duration(input: &str) -> Result<DateTime<Utc>> {
@@ -631,6 +649,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             let target = std::path::Path::new(&path);
             init_workspace(target).await?;
         }
+        Command::Completion { action } => match action {
+            CompletionAction::Generate { shell } => {
+                print_completion(shell)?;
+            }
+        },
         Command::Approvals { action } => match action {
             ApprovalsAction::List => {
                 let result = client.approvals_list().await?;

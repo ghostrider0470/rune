@@ -11,6 +11,7 @@ rune-config = { path = "../rune-config" }
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clap_complete = "4"
 dirs = "6"
 reqwest.workspace = true
 serde.workspace = true

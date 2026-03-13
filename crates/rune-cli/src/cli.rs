@@ -1,6 +1,6 @@
 //! Clap-based CLI definition with all subcommands.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// Rune — the operator CLI for managing the Rune AI runtime.
 #[derive(Debug, Parser)]
@@ -82,6 +82,11 @@ pub enum Command {
     Reminders {
         #[command(subcommand)]
         action: RemindersAction,
+    },
+    /// Generate shell completion scripts.
+    Completion {
+        #[command(subcommand)]
+        action: CompletionAction,
     },
     /// Initialize a new workspace with default files.
     Init {
@@ -351,6 +356,25 @@ pub enum RemindersAction {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum CompletionAction {
+    /// Print a shell completion script to stdout.
+    Generate {
+        /// Shell to generate completion for.
+        #[arg(value_enum)]
+        shell: CompletionShell,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CompletionShell {
+    Bash,
+    Elvish,
+    Fish,
+    PowerShell,
+    Zsh,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ApprovalsAction {
     /// List all tool approval policies.
     List,
@@ -408,6 +432,8 @@ pub enum ConfigAction {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    use super::CompletionShell;
 
     #[test]
     fn parse_status() {
@@ -1108,6 +1134,19 @@ mod tests {
             Command::Config {
                 action: ConfigAction::Validate { file },
             } => assert_eq!(file.as_deref(), Some("custom.toml")),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_completion_generate() {
+        let cli = Cli::try_parse_from(["rune", "completion", "generate", "bash"]).unwrap();
+        match cli.command {
+            Command::Completion {
+                action: CompletionAction::Generate { shell },
+            } => {
+                assert_eq!(shell, CompletionShell::Bash);
+            }
             other => panic!("unexpected command: {other:?}"),
         }
     }
