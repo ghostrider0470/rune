@@ -7,8 +7,6 @@ use uuid::Uuid;
 
 use crate::schema::*;
 
-// ── Sessions ──────────────────────────────────────────────────────────
-
 /// A session row as returned by queries.
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = sessions)]
@@ -39,8 +37,6 @@ pub struct NewSession {
     pub updated_at: DateTime<Utc>,
     pub last_activity_at: DateTime<Utc>,
 }
-
-// ── Turns ─────────────────────────────────────────────────────────────
 
 /// A turn row as returned by queries.
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
@@ -73,8 +69,6 @@ pub struct NewTurn {
     pub usage_completion_tokens: Option<i32>,
 }
 
-// ── Transcript items ──────────────────────────────────────────────────
-
 /// A transcript item row.
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = transcript_items)]
@@ -101,8 +95,6 @@ pub struct NewTranscriptItem {
     pub payload: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }
-
-// ── Jobs ──────────────────────────────────────────────────────────────
 
 /// A job row.
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
@@ -135,8 +127,6 @@ pub struct NewJob {
     pub updated_at: DateTime<Utc>,
 }
 
-// ── Approvals ─────────────────────────────────────────────────────────
-
 /// An approval row.
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = approvals)]
@@ -164,8 +154,6 @@ pub struct NewApproval {
     pub presented_payload: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }
-
-// ── Tool executions ───────────────────────────────────────────────────
 
 /// A tool execution row.
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
@@ -197,36 +185,4 @@ pub struct NewToolExecution {
     pub arguments: serde_json::Value,
     pub status: String,
     pub started_at: DateTime<Utc>,
-}
-
-// ── Channel deliveries ────────────────────────────────────────────────
-
-/// A channel delivery row.
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
-#[diesel(table_name = channel_deliveries)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ChannelDeliveryRow {
-    pub id: Uuid,
-    pub channel: String,
-    pub destination: String,
-    pub source_session_id: Option<Uuid>,
-    pub message_kind: String,
-    pub provider_message_id: Option<String>,
-    pub attempt_count: i32,
-    pub status: String,
-    pub sent_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-}
-
-/// Insert payload for a new channel delivery.
-#[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = channel_deliveries)]
-pub struct NewChannelDelivery {
-    pub id: Uuid,
-    pub channel: String,
-    pub destination: String,
-    pub source_session_id: Option<Uuid>,
-    pub message_kind: String,
-    pub status: String,
-    pub created_at: DateTime<Utc>,
 }

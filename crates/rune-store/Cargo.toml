@@ -9,8 +9,11 @@ license.workspace = true
 rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
 async-trait.workspace = true
+deadpool-diesel = { version = "0.6.1", features = ["postgres"] }
 diesel = { workspace = true, features = ["postgres", "uuid", "chrono", "serde_json"] }
 diesel-async = { workspace = true, features = ["postgres", "deadpool"] }
+diesel_migrations = "2.3.1"
+postgresql_embedded = { version = "0.18.2", features = ["tokio"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS tool_executions;
+DROP TABLE IF EXISTS approvals;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS transcript_items;
+DROP TABLE IF EXISTS turns;
+DROP TABLE IF EXISTS sessions;
