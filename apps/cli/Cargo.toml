@@ -5,5 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "rune"
+path = "src/main.rs"
+
 [dependencies]
+rune-cli = { path = "../../crates/rune-cli" }
 anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
