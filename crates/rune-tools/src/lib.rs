@@ -6,6 +6,7 @@ mod error;
 pub mod exec_tool;
 mod executor;
 pub mod file_tools;
+pub mod gateway_tool;
 pub mod memory_tool;
 pub mod message_tool;
 pub mod process_tool;
