@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Top-level application configuration resolved from defaults, files, and environment.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppConfig {
     pub gateway: GatewayConfig,
     pub database: DatabaseConfig,
@@ -20,21 +20,6 @@ pub struct AppConfig {
     pub media: MediaConfig,
     pub logging: LoggingConfig,
     pub paths: PathsConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            gateway: GatewayConfig::default(),
-            database: DatabaseConfig::default(),
-            models: ModelsConfig::default(),
-            channels: ChannelsConfig::default(),
-            memory: MemoryConfig::default(),
-            media: MediaConfig::default(),
-            logging: LoggingConfig::default(),
-            paths: PathsConfig::default(),
-        }
-    }
 }
 
 impl AppConfig {
@@ -48,13 +33,46 @@ impl AppConfig {
 
         figment = figment.merge(Env::prefixed("RUNE_").split("__"));
 
-        figment.extract().map_err(ConfigError::from)
+        figment.extract().map_err(|e| ConfigError::Load(Box::new(e)))
     }
 
     /// Apply a fully-populated override on top of the current config.
     #[must_use]
     pub fn with_override(self, override_config: AppConfig) -> Self {
         override_config
+    }
+
+    /// Validate that required persistent paths exist and are writable.
+    ///
+    /// Per DOCKER-DEPLOYMENT.md §9.1 the runtime must fail fast on
+    /// missing or unwritable parity-critical paths.
+    pub fn validate_paths(&self) -> Result<(), Vec<ConfigError>> {
+        let required = [
+            ("db_dir", &self.paths.db_dir),
+            ("sessions_dir", &self.paths.sessions_dir),
+            ("memory_dir", &self.paths.memory_dir),
+            ("media_dir", &self.paths.media_dir),
+            ("logs_dir", &self.paths.logs_dir),
+        ];
+        let mut errors = Vec::new();
+        for (name, path) in &required {
+            if !path.exists() {
+                errors.push(ConfigError::PathValidation {
+                    path: path.display().to_string(),
+                    reason: format!("{name} does not exist"),
+                });
+            } else if path.metadata().map(|m| m.permissions().readonly()).unwrap_or(true) {
+                errors.push(ConfigError::PathValidation {
+                    path: path.display().to_string(),
+                    reason: format!("{name} is not writable"),
+                });
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
@@ -197,14 +215,19 @@ impl Default for PathsConfig {
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to load configuration: {0}")]
-    Load(#[from] figment::Error),
+    Load(#[from] Box<figment::Error>),
+    #[error("path validation failed: {path} — {reason}")]
+    PathValidation { path: String, reason: String },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{LazyLock, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     fn temp_config_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -226,6 +249,11 @@ mod tests {
 
     #[test]
     fn file_values_override_defaults() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var("RUNE_GATEWAY__PORT");
+        }
+
         let path = temp_config_path("file-override");
         fs::write(
             &path,
@@ -252,6 +280,8 @@ run_migrations = false
 
     #[test]
     fn environment_values_override_file_values() {
+        let _guard = ENV_LOCK.lock().unwrap();
+
         let path = temp_config_path("env-override");
         fs::write(
             &path,
@@ -275,7 +305,33 @@ port = 8787
     }
 
     #[test]
+    fn validate_paths_reports_missing_dirs() {
+        let mut config = AppConfig::default();
+        config.paths.db_dir = PathBuf::from("/nonexistent/rune-test-path");
+        let errors = config.validate_paths().unwrap_err();
+        assert!(!errors.is_empty());
+        assert!(errors[0].to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn validate_paths_passes_for_existing_writable_dirs() {
+        let tmp = std::env::temp_dir();
+        let mut config = AppConfig::default();
+        config.paths.db_dir = tmp.clone();
+        config.paths.sessions_dir = tmp.clone();
+        config.paths.memory_dir = tmp.clone();
+        config.paths.media_dir = tmp.clone();
+        config.paths.logs_dir = tmp;
+        assert!(config.validate_paths().is_ok());
+    }
+
+    #[test]
     fn invalid_config_returns_error() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var("RUNE_GATEWAY__PORT");
+        }
+
         let path = temp_config_path("invalid");
         fs::write(
             &path,

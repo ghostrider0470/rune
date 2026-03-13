@@ -6,3 +6,19 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+rune-core = { path = "../rune-core" }
+rune-config = { path = "../rune-config" }
+rune-store = { path = "../rune-store" }
+rune-models = { path = "../rune-models" }
+rune-tools = { path = "../rune-tools" }
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

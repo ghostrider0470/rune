@@ -138,11 +138,61 @@ pub fn assert_golden(actual: &str, expected: &str) -> Result<(), TestkitError> {
     }
 }
 
+/// Compare actual output against a `.expected` file. When `RUNE_UPDATE_GOLDEN=1`
+/// is set, the expected file is overwritten with the actual value instead of
+/// failing, making it easy to accept new baselines.
+pub fn assert_golden_file(
+    actual: &str,
+    expected_path: impl AsRef<std::path::Path>,
+) -> Result<(), TestkitError> {
+    use std::fs;
+    let path = expected_path.as_ref();
+
+    if std::env::var("RUNE_UPDATE_GOLDEN").as_deref() == Ok("1") {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        fs::write(path, actual).map_err(|e| TestkitError::Io(e.to_string()))?;
+        return Ok(());
+    }
+
+    let expected = fs::read_to_string(path).map_err(|e| TestkitError::Io(e.to_string()))?;
+    assert_golden(actual, &expected)
+}
+
+/// Build a `TranscriptItem::UserMessage` fixture from text.
+#[must_use]
+pub fn fixture_user_message(content: impl Into<String>) -> TranscriptItem {
+    TranscriptItem::UserMessage {
+        message: fixture_message(content),
+    }
+}
+
+/// Build a `TranscriptItem::AssistantMessage` fixture from text.
+#[must_use]
+pub fn fixture_assistant_message(content: impl Into<String>) -> TranscriptItem {
+    TranscriptItem::AssistantMessage {
+        content: content.into(),
+    }
+}
+
+/// Build a `TranscriptItem::ToolRequest` fixture.
+#[must_use]
+pub fn fixture_tool_request(name: impl Into<String>, args: serde_json::Value) -> TranscriptItem {
+    TranscriptItem::ToolRequest {
+        tool_call_id: rune_core::ToolCallId::new(),
+        tool_name: name.into(),
+        arguments: args,
+    }
+}
+
 /// Shared errors for temporary test helpers.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TestkitError {
     #[error("golden mismatch\nexpected: {expected}\nactual: {actual}")]
     GoldenMismatch { expected: String, actual: String },
+    #[error("I/O error: {0}")]
+    Io(String),
 }
 
 #[cfg(test)]
@@ -179,5 +229,38 @@ mod tests {
         assert!(assert_golden("same", "same").is_ok());
         let err = assert_golden("left", "right").unwrap_err();
         assert!(err.to_string().contains("golden mismatch"));
+    }
+
+    #[test]
+    fn golden_file_creates_and_compares() {
+        let dir = std::env::temp_dir().join("rune-testkit-golden");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test.expected");
+
+        // Write baseline
+        unsafe { std::env::set_var("RUNE_UPDATE_GOLDEN", "1"); }
+        assert_golden_file("baseline content", &path).unwrap();
+        unsafe { std::env::remove_var("RUNE_UPDATE_GOLDEN"); }
+
+        // Match succeeds
+        assert_golden_file("baseline content", &path).unwrap();
+
+        // Mismatch fails
+        let err = assert_golden_file("different", &path).unwrap_err();
+        assert!(err.to_string().contains("golden mismatch"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn transcript_fixture_helpers_produce_valid_items() {
+        let user = fixture_user_message("hi");
+        assert!(matches!(user, rune_core::TranscriptItem::UserMessage { .. }));
+
+        let asst = fixture_assistant_message("hello");
+        assert!(matches!(asst, rune_core::TranscriptItem::AssistantMessage { content } if content == "hello"));
+
+        let tool = fixture_tool_request("read", serde_json::json!({"path": "/tmp"}));
+        assert!(matches!(tool, rune_core::TranscriptItem::ToolRequest { tool_name, .. } if tool_name == "read"));
     }
 }

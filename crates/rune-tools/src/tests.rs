@@ -1,0 +1,177 @@
+use rune_core::{ToolCallId, ToolCategory};
+
+use crate::definition::{ToolCall, ToolDefinition};
+use crate::executor::{AlwaysAllow, ApprovalCheck, ToolExecutor};
+use crate::registry::ToolRegistry;
+use crate::stubs::{register_builtin_stubs, validate_arguments, StubExecutor};
+
+#[test]
+fn registry_starts_empty() {
+    let reg = ToolRegistry::new();
+    assert!(reg.is_empty());
+    assert_eq!(reg.len(), 0);
+    assert!(reg.list().is_empty());
+}
+
+#[test]
+fn registry_register_and_lookup() {
+    let mut reg = ToolRegistry::new();
+    reg.register(ToolDefinition {
+        name: "test_tool".into(),
+        description: "A test tool.".into(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    });
+
+    assert_eq!(reg.len(), 1);
+    let tool = reg.lookup("test_tool").unwrap();
+    assert_eq!(tool.name, "test_tool");
+    assert!(!tool.requires_approval);
+}
+
+#[test]
+fn registry_lookup_unknown_returns_error() {
+    let reg = ToolRegistry::new();
+    let err = reg.lookup("nonexistent").unwrap_err();
+    assert!(err.to_string().contains("nonexistent"));
+}
+
+#[test]
+fn registry_list_returns_sorted() {
+    let mut reg = ToolRegistry::new();
+    for name in ["zebra", "alpha", "middle"] {
+        reg.register(ToolDefinition {
+            name: name.into(),
+            description: String::new(),
+            parameters: serde_json::json!({"type": "object"}),
+            category: ToolCategory::FileRead,
+            requires_approval: false,
+        });
+    }
+
+    let names: Vec<_> = reg.list().iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, vec!["alpha", "middle", "zebra"]);
+}
+
+#[test]
+fn register_builtin_stubs_populates_expected_tools() {
+    let mut reg = ToolRegistry::new();
+    register_builtin_stubs(&mut reg);
+
+    assert_eq!(reg.len(), 8);
+
+    let expected = [
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "search_files",
+        "execute_command",
+        "list_sessions",
+        "get_session_status",
+    ];
+    for name in expected {
+        assert!(reg.lookup(name).is_ok(), "missing builtin: {name}");
+    }
+
+    // execute_command should require approval
+    assert!(reg.lookup("execute_command").unwrap().requires_approval);
+    // read_file should not
+    assert!(!reg.lookup("read_file").unwrap().requires_approval);
+}
+
+#[test]
+fn validate_arguments_passes_with_required_fields() {
+    let def = ToolDefinition {
+        name: "test".into(),
+        description: String::new(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"]
+        }),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    };
+
+    let args = serde_json::json!({"path": "/tmp/test"});
+    assert!(validate_arguments(&def, &args).is_ok());
+}
+
+#[test]
+fn validate_arguments_fails_on_missing_required() {
+    let def = ToolDefinition {
+        name: "test".into(),
+        description: String::new(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "required": ["path"]
+        }),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    };
+
+    let args = serde_json::json!({});
+    let err = validate_arguments(&def, &args).unwrap_err();
+    assert!(err.to_string().contains("path"));
+}
+
+#[test]
+fn validate_arguments_passes_when_no_required() {
+    let def = ToolDefinition {
+        name: "test".into(),
+        description: String::new(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    };
+
+    assert!(validate_arguments(&def, &serde_json::json!({})).is_ok());
+}
+
+#[tokio::test]
+async fn stub_executor_returns_output() {
+    let exec = StubExecutor;
+    let call = ToolCall {
+        tool_call_id: ToolCallId::new(),
+        tool_name: "read_file".into(),
+        arguments: serde_json::json!({"path": "/tmp/x"}),
+    };
+
+    let result = exec.execute(call).await.unwrap();
+    assert!(!result.is_error);
+    assert!(result.output.contains("read_file"));
+    assert!(result.output.contains("/tmp/x"));
+}
+
+#[tokio::test]
+async fn always_allow_approval_check_permits() {
+    let checker = AlwaysAllow;
+    let call = ToolCall {
+        tool_call_id: ToolCallId::new(),
+        tool_name: "execute_command".into(),
+        arguments: serde_json::json!({"command": "ls"}),
+    };
+
+    assert!(checker.check(&call, true).await.is_ok());
+    assert!(checker.check(&call, false).await.is_ok());
+}
+
+#[test]
+fn tool_definition_roundtrips_through_serde() {
+    let def = ToolDefinition {
+        name: "read_file".into(),
+        description: "Read a file.".into(),
+        parameters: serde_json::json!({"type": "object", "required": ["path"]}),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    };
+
+    let json = serde_json::to_value(&def).unwrap();
+    assert_eq!(json["name"], "read_file");
+    assert_eq!(json["category"], "file_read");
+
+    let restored: ToolDefinition = serde_json::from_value(json).unwrap();
+    assert_eq!(restored.name, "read_file");
+}

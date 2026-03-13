@@ -1,8 +1,8 @@
 # OpenClaw Rust Rewrite
 
-Goal: design a personal Rust rewrite of OpenClaw with near-identical end-user functionality, stronger performance characteristics, and an extension model that supports Rust-native skills/plugins.
+Goal: design and build a personal Rust rewrite of OpenClaw with near-identical end-user functionality, stronger performance characteristics, and an extension model that supports Rust-native skills/plugins.
 
-This folder is planning-only for now.
+This repo is now in active implementation. The planning docs remain the execution authority for parity, sequencing, and acceptance criteria.
 
 ## Current deliverables
 
@@ -22,7 +22,7 @@ This folder is planning-only for now.
 
 ## Ground rules
 
-- No coding yet
 - Treat OpenClaw behavior as the compatibility target
 - Prefer protocol and behavior parity over implementation parity
 - Optimize for performance, observability, safety, and future extensibility
+- Keep code aligned to the docs, and reconcile stale contradictions explicitly when implementation overtakes old planning text
