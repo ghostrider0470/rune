@@ -30,6 +30,14 @@ This repo is now in active implementation. The planning docs remain the executio
   - `rune status`
   - `rune health`
   - `rune doctor`
+  - `rune cron status`
+  - `rune cron list`
+  - `rune cron add --text ... --at ...`
+  - `rune cron edit <id> --name ...`
+  - `rune cron enable <id>` / `rune cron disable <id>`
+  - `rune cron rm <id>`
+  - `rune cron run <id>`
+  - `rune cron runs <id>`
   - `rune sessions list`
   - `rune sessions show <id>`
   - `rune config show`

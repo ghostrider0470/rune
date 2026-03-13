@@ -25,11 +25,7 @@ pub trait SessionQuery: Send + Sync {
     async fn get_session(&self, session_id: &str) -> Result<String, String>;
 
     /// Get session history/transcript.
-    async fn get_history(
-        &self,
-        session_id: &str,
-        limit: Option<usize>,
-    ) -> Result<String, String>;
+    async fn get_history(&self, session_id: &str, limit: Option<usize>) -> Result<String, String>;
 
     /// Get current session status (usage, time, model).
     async fn session_status(&self) -> Result<String, String>;
@@ -152,11 +148,15 @@ mod tests {
             _kinds: Option<Vec<String>>,
         ) -> Result<String, String> {
             let l = limit.unwrap_or(10);
-            Ok(format!("[{{\"id\": \"session-1\", \"status\": \"running\"}}] (limit: {l})"))
+            Ok(format!(
+                "[{{\"id\": \"session-1\", \"status\": \"running\"}}] (limit: {l})"
+            ))
         }
 
         async fn get_session(&self, session_id: &str) -> Result<String, String> {
-            Ok(format!("{{\"id\": \"{session_id}\", \"status\": \"running\"}}"))
+            Ok(format!(
+                "{{\"id\": \"{session_id}\", \"status\": \"running\"}}"
+            ))
         }
 
         async fn get_history(

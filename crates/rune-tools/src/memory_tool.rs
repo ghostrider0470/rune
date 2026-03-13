@@ -140,16 +140,12 @@ impl MemoryToolExecutor {
             .arguments
             .get("path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::InvalidArgument("missing required parameter: path".into())
-            })?;
+            .ok_or_else(|| ToolError::InvalidArgument("missing required parameter: path".into()))?;
 
         // Only allow MEMORY.md and memory/*.md
         let path = Path::new(path_str);
         let is_memory_md = path_str == "MEMORY.md";
-        let is_memory_dir = path
-            .parent()
-            .is_some_and(|p| p == Path::new("memory"))
+        let is_memory_dir = path.parent().is_some_and(|p| p == Path::new("memory"))
             && path.extension().is_some_and(|e| e == "md");
 
         if !is_memory_md && !is_memory_dir {
@@ -159,9 +155,9 @@ impl MemoryToolExecutor {
         }
 
         let full_path = self.workspace_root.join(path);
-        let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("failed to read {path_str}: {e}"))
-        })?;
+        let content = tokio::fs::read_to_string(&full_path)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to read {path_str}: {e}")))?;
 
         let from = call
             .arguments
@@ -246,10 +242,7 @@ mod tests {
         let tmp = setup_workspace().await;
         let exec = MemoryToolExecutor::new(tmp.path());
 
-        let call = make_call(
-            "memory_search",
-            serde_json::json!({"query": "dark mode"}),
-        );
+        let call = make_call("memory_search", serde_json::json!({"query": "dark mode"}));
         let result = exec.execute(call).await.unwrap();
         assert!(!result.is_error);
         assert!(result.output.contains("dark mode"));
@@ -274,10 +267,7 @@ mod tests {
         let tmp = setup_workspace().await;
         let exec = MemoryToolExecutor::new(tmp.path());
 
-        let call = make_call(
-            "memory_get",
-            serde_json::json!({"path": "MEMORY.md"}),
-        );
+        let call = make_call("memory_get", serde_json::json!({"path": "MEMORY.md"}));
         let result = exec.execute(call).await.unwrap();
         assert!(result.output.contains("Preferences"));
     }
@@ -300,10 +290,7 @@ mod tests {
         let tmp = setup_workspace().await;
         let exec = MemoryToolExecutor::new(tmp.path());
 
-        let call = make_call(
-            "memory_get",
-            serde_json::json!({"path": "secrets/keys.md"}),
-        );
+        let call = make_call("memory_get", serde_json::json!({"path": "secrets/keys.md"}));
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }

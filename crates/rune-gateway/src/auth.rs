@@ -24,7 +24,11 @@ pub async fn bearer_auth(
         .and_then(|value| value.to_str().ok());
 
     match auth_header {
-        Some(value) if value.strip_prefix("Bearer ").is_some_and(|token| token == expected) => {
+        Some(value)
+            if value
+                .strip_prefix("Bearer ")
+                .is_some_and(|token| token == expected) =>
+        {
             Ok(next.run(request).await)
         }
         _ => Err(GatewayError::Unauthorized),

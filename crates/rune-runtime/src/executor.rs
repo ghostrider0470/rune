@@ -146,7 +146,7 @@ impl TurnExecutor {
 
             let messages = self
                 .context_assembler
-                .assemble(&transcript_rows, self.compaction.as_ref());
+                .assemble(&transcript_rows, self.compaction.as_ref(), None);
 
             // Build tool definitions for the request
             let tool_defs: Vec<rune_models::ToolDefinition> = self

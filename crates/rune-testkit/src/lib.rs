@@ -1,7 +1,9 @@
 #![doc = "Shared fixtures and test doubles for Rune crates."]
 
 use async_trait::async_trait;
-use rune_core::{ChannelId, NormalizedMessage, SessionId, SessionKind, SessionStatus, TranscriptItem};
+use rune_core::{
+    ChannelId, NormalizedMessage, SessionId, SessionKind, SessionStatus, TranscriptItem,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -238,9 +240,13 @@ mod tests {
         let path = dir.join("test.expected");
 
         // Write baseline
-        unsafe { std::env::set_var("RUNE_UPDATE_GOLDEN", "1"); }
+        unsafe {
+            std::env::set_var("RUNE_UPDATE_GOLDEN", "1");
+        }
         assert_golden_file("baseline content", &path).unwrap();
-        unsafe { std::env::remove_var("RUNE_UPDATE_GOLDEN"); }
+        unsafe {
+            std::env::remove_var("RUNE_UPDATE_GOLDEN");
+        }
 
         // Match succeeds
         assert_golden_file("baseline content", &path).unwrap();
@@ -255,12 +261,19 @@ mod tests {
     #[test]
     fn transcript_fixture_helpers_produce_valid_items() {
         let user = fixture_user_message("hi");
-        assert!(matches!(user, rune_core::TranscriptItem::UserMessage { .. }));
+        assert!(matches!(
+            user,
+            rune_core::TranscriptItem::UserMessage { .. }
+        ));
 
         let asst = fixture_assistant_message("hello");
-        assert!(matches!(asst, rune_core::TranscriptItem::AssistantMessage { content } if content == "hello"));
+        assert!(
+            matches!(asst, rune_core::TranscriptItem::AssistantMessage { content } if content == "hello")
+        );
 
         let tool = fixture_tool_request("read", serde_json::json!({"path": "/tmp"}));
-        assert!(matches!(tool, rune_core::TranscriptItem::ToolRequest { tool_name, .. } if tool_name == "read"));
+        assert!(
+            matches!(tool, rune_core::TranscriptItem::ToolRequest { tool_name, .. } if tool_name == "read")
+        );
     }
 }

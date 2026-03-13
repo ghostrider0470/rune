@@ -48,9 +48,7 @@ impl<S: SessionSpawner> SpawnToolExecutor<S> {
             .arguments
             .get("task")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::InvalidArgument("missing required parameter: task".into())
-            })?;
+            .ok_or_else(|| ToolError::InvalidArgument("missing required parameter: task".into()))?;
 
         let model = call.arguments.get("model").and_then(|v| v.as_str());
         let mode = call.arguments.get("mode").and_then(|v| v.as_str());
@@ -92,11 +90,7 @@ impl<S: SessionSpawner> SpawnToolExecutor<S> {
             ));
         }
 
-        match self
-            .spawner
-            .send_message(session_key, label, message)
-            .await
-        {
+        match self.spawner.send_message(session_key, label, message).await {
             Ok(output) => Ok(ToolResult {
                 tool_call_id: call.tool_call_id,
                 output,
@@ -179,10 +173,7 @@ mod tests {
     #[tokio::test]
     async fn send_requires_target() {
         let exec = SpawnToolExecutor::new(MockSpawner);
-        let call = make_call(
-            "sessions_send",
-            serde_json::json!({"message": "hello"}),
-        );
+        let call = make_call("sessions_send", serde_json::json!({"message": "hello"}));
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }

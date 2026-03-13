@@ -41,10 +41,7 @@ impl<M: SubagentManager> SubagentToolExecutor<M> {
 
         let result = match action {
             "list" => {
-                let recent = call
-                    .arguments
-                    .get("recentMinutes")
-                    .and_then(|v| v.as_u64());
+                let recent = call.arguments.get("recentMinutes").and_then(|v| v.as_u64());
                 self.manager.list(recent).await
             }
             "steer" => {
@@ -116,10 +113,15 @@ mod tests {
     #[async_trait]
     impl SubagentManager for MockManager {
         async fn list(&self, _recent: Option<u64>) -> Result<String, String> {
-            Ok("[{\"id\": \"sub-1\", \"status\": \"running\", \"task\": \"build feature\"}]".into())
+            Ok(
+                "[{\"id\": \"sub-1\", \"status\": \"running\", \"task\": \"build feature\"}]"
+                    .into(),
+            )
         }
         async fn steer(&self, target: &str, message: &str) -> Result<String, String> {
-            Ok(format!("{{\"target\": \"{target}\", \"steered\": true, \"message\": \"{message}\"}}"))
+            Ok(format!(
+                "{{\"target\": \"{target}\", \"steered\": true, \"message\": \"{message}\"}}"
+            ))
         }
         async fn kill(&self, target: &str) -> Result<String, String> {
             Ok(format!("{{\"target\": \"{target}\", \"killed\": true}}"))

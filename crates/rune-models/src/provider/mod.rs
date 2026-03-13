@@ -11,5 +11,6 @@ use crate::types::{CompletionRequest, CompletionResponse};
 #[async_trait]
 pub trait ModelProvider: Send + Sync + std::fmt::Debug {
     /// Send a completion request and return the response.
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse, ModelError>;
+    async fn complete(&self, request: &CompletionRequest)
+    -> Result<CompletionResponse, ModelError>;
 }

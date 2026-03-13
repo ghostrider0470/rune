@@ -2,10 +2,10 @@
 
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
-use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::AsyncPgConnection;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::deadpool::Pool;
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 
 use crate::error::StoreError;
 

@@ -59,9 +59,9 @@ impl FileToolExecutor {
                 .canonicalize()
                 .map_err(|e| Self::execution_failed(format!("path resolution failed: {e}")))?
         } else {
-            let parent = joined.parent().ok_or_else(|| {
-                self.invalid_arguments(tool, "cannot determine parent directory")
-            })?;
+            let parent = joined
+                .parent()
+                .ok_or_else(|| self.invalid_arguments(tool, "cannot determine parent directory"))?;
 
             let canonical_parent = parent.canonicalize().map_err(|e| {
                 Self::execution_failed(format!("parent path resolution failed: {e}"))
@@ -204,9 +204,11 @@ impl FileToolExecutor {
         })?;
 
         let mut names = Vec::new();
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            Self::execution_failed(format!("failed to read directory entry: {e}"))
-        })? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| Self::execution_failed(format!("failed to read directory entry: {e}")))?
+        {
             let name = entry.file_name().to_string_lossy().to_string();
             let file_type = entry.file_type().await.map_err(|e| {
                 Self::execution_failed(format!("failed to read file type for {name}: {e}"))
@@ -329,7 +331,10 @@ mod tests {
             "edit_file",
             serde_json::json!({"path": "edit.txt", "old_string": "nope", "new_string": "qux"}),
         );
-        let result = exec.execute(edit_call).await.expect("edit returns tool result");
+        let result = exec
+            .execute(edit_call)
+            .await
+            .expect("edit returns tool result");
         assert!(result.is_error);
         assert!(result.output.contains("not found"));
     }
@@ -349,7 +354,10 @@ mod tests {
             "edit_file",
             serde_json::json!({"path": "dup.txt", "old_string": "aaa", "new_string": "ccc"}),
         );
-        let result = exec.execute(edit_call).await.expect("edit returns tool result");
+        let result = exec
+            .execute(edit_call)
+            .await
+            .expect("edit returns tool result");
         assert!(result.is_error);
         assert!(result.output.contains("2 times"));
     }
@@ -360,7 +368,10 @@ mod tests {
         let exec = FileToolExecutor::new(tmp.path());
 
         let call = make_call("read_file", serde_json::json!({"path": "/etc/passwd"}));
-        let err = exec.execute(call).await.expect_err("absolute path rejected");
+        let err = exec
+            .execute(call)
+            .await
+            .expect_err("absolute path rejected");
         assert!(matches!(err, ToolError::InvalidArguments { .. }));
     }
 

@@ -11,10 +11,7 @@ pub enum StoreError {
 
     /// The requested entity was not found.
     #[error("{entity} not found: {id}")]
-    NotFound {
-        entity: &'static str,
-        id: String,
-    },
+    NotFound { entity: &'static str, id: String },
 
     /// A constraint or uniqueness violation.
     #[error("conflict: {0}")]

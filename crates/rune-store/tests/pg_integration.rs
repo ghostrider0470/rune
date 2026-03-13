@@ -7,11 +7,11 @@ use chrono::Utc;
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
+use rune_store::StoreError;
 use rune_store::models::*;
 use rune_store::pg::*;
-use rune_store::pool::{create_pool, run_migrations, PgPool};
+use rune_store::pool::{PgPool, create_pool, run_migrations};
 use rune_store::repos::*;
-use rune_store::StoreError;
 
 async fn setup() -> PgPool {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL must be set");

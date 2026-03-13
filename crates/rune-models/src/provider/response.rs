@@ -92,7 +92,13 @@ pub(crate) async fn map_error_response(resp: Response) -> ModelError {
 pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, ModelError> {
     let choice = api
         .choices
-        .and_then(|mut c| if c.is_empty() { None } else { Some(c.remove(0)) })
+        .and_then(|mut c| {
+            if c.is_empty() {
+                None
+            } else {
+                Some(c.remove(0))
+            }
+        })
         .ok_or_else(|| ModelError::Provider("no choices in response".into()))?;
 
     let finish_reason = choice.finish_reason.as_deref().map(|fr| match fr {
@@ -108,11 +114,14 @@ pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, Mod
         tool_calls: None,
     });
 
-    let usage = api.usage.map(|u| Usage {
-        prompt_tokens: u.prompt_tokens.unwrap_or(0),
-        completion_tokens: u.completion_tokens.unwrap_or(0),
-        total_tokens: u.total_tokens.unwrap_or(0),
-    }).unwrap_or_default();
+    let usage = api
+        .usage
+        .map(|u| Usage {
+            prompt_tokens: u.prompt_tokens.unwrap_or(0),
+            completion_tokens: u.completion_tokens.unwrap_or(0),
+            total_tokens: u.total_tokens.unwrap_or(0),
+        })
+        .unwrap_or_default();
 
     Ok(CompletionResponse {
         content: message.content,

@@ -22,13 +22,13 @@ Interpretation rules:
 
 ### Tier-0 operator commands
 - [ ] top-level `openclaw --help` command-family census matches intended parity story
-- [ ] top-level `openclaw --version` behavior exists
+- [x] top-level `openclaw --version` behavior exists
 - [ ] top-level `--dev`, `--profile`, `--log-level`, `--no-color`, `--help`, and `--version` controls have equivalent semantics
 - [x] `openclaw gateway status`
 - [ ] `openclaw gateway install`
 - [ ] `openclaw gateway uninstall`
-- [ ] `openclaw gateway start`
-- [ ] `openclaw gateway stop`
+- [x] `openclaw gateway start`
+- [x] `openclaw gateway stop`
 - [x] `openclaw gateway restart`
 - [ ] `openclaw gateway run`
 - [ ] `openclaw gateway call`
@@ -42,25 +42,25 @@ Interpretation rules:
 - [ ] `openclaw daemon start`
 - [ ] `openclaw daemon stop`
 - [ ] `openclaw daemon restart`
-- [ ] `openclaw doctor`
-- [ ] `openclaw health`
-- [ ] `openclaw status`
+- [x] `openclaw doctor`
+- [x] `openclaw health`
+- [x] `openclaw status`
 - [ ] `openclaw dashboard`
 - [ ] `openclaw configure`
 - [ ] shell completion
-- [ ] help/usage text aligned with actual command families
-- [ ] JSON output where operator automation depends on it
+- [x] help/usage text aligned with actual command families
+- [x] JSON output where operator automation depends on it
 
 ### Cron CLI
-- [ ] `cron status`
-- [ ] `cron list`
-- [ ] `cron add`
-- [ ] `cron edit`
-- [ ] `cron enable`
-- [ ] `cron disable`
-- [ ] `cron rm`
-- [ ] `cron run`
-- [ ] `cron runs`
+- [x] `cron status`
+- [x] `cron list`
+- [x] `cron add`
+- [x] `cron edit`
+- [x] `cron enable`
+- [x] `cron disable`
+- [x] `cron rm`
+- [x] `cron run`
+- [x] `cron runs`
 
 ### Channels CLI
 - [ ] `channels list`
@@ -152,7 +152,7 @@ Interpretation rules:
 - [x] structured error envelopes
 - [x] durable IDs returned by create/mutate flows
 
-Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. This is not full parity, but it is now runnable instead of planning-only.
+Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs`), `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|start|stop|restart`, with human and `--json` output modes. This is still not full parity, but it is now runnable instead of planning-only.
 
 ---
 
@@ -231,13 +231,13 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 
 ## 6. Scheduler / automation
 
-- [ ] cron jobs
+- [x] cron jobs
 - [ ] reminders
 - [ ] wake events
 - [ ] heartbeats
 - [ ] isolated scheduled agent runs
 - [ ] run history durability
-- [ ] enable/disable semantics
+- [x] enable/disable semantics
 - [ ] no-op heartbeat suppression (`HEARTBEAT_OK` behavior)
 - [ ] duplicate notification suppression
 - [ ] hook/webhook lifecycle where shipped

@@ -3,7 +3,7 @@ use rune_core::{ToolCallId, ToolCategory};
 use crate::definition::{ToolCall, ToolDefinition};
 use crate::executor::{AlwaysAllow, ApprovalCheck, ToolExecutor};
 use crate::registry::ToolRegistry;
-use crate::stubs::{register_builtin_stubs, validate_arguments, StubExecutor};
+use crate::stubs::{StubExecutor, register_builtin_stubs, validate_arguments};
 
 #[test]
 fn registry_starts_empty() {

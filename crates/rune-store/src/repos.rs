@@ -66,7 +66,8 @@ pub trait TranscriptRepo: Send + Sync {
     async fn append(&self, item: NewTranscriptItem) -> Result<TranscriptItemRow, StoreError>;
 
     /// List transcript items for a session in sequence order.
-    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<TranscriptItemRow>, StoreError>;
+    async fn list_by_session(&self, session_id: Uuid)
+    -> Result<Vec<TranscriptItemRow>, StoreError>;
 }
 
 // ── Job repository ────────────────────────────────────────────────────

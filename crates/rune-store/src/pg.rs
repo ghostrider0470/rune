@@ -154,10 +154,7 @@ impl TurnRepo for PgTurnRepo {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
         if let Some(ended) = ended_at {
             diesel::update(turns::table.find(id))
-                .set((
-                    turns::status.eq(status),
-                    turns::ended_at.eq(Some(ended)),
-                ))
+                .set((turns::status.eq(status), turns::ended_at.eq(Some(ended))))
                 .returning(TurnRow::as_returning())
                 .get_result(&mut conn)
                 .await

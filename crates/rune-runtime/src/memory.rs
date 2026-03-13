@@ -5,7 +5,7 @@
 //! - memory/*.md: daily notes (always available)
 //! - Privacy boundary: MEMORY.md must NOT be loaded in shared/group contexts
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::{NaiveDate, Utc};
 use rune_core::SessionKind;

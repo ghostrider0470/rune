@@ -3,15 +3,19 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 use uuid::Uuid;
 
-use rune_core::SessionKind;
+use rune_core::{JobId, SessionKind};
+use rune_runtime::scheduler::{
+    Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Schedule, SessionTarget,
+};
 
 use crate::error::GatewayError;
 use crate::state::{AppState, SessionEvent};
@@ -58,6 +62,7 @@ pub struct StatusResponse {
     pub active_model_backend: &'static str,
     pub registered_tools: usize,
     pub session_count: usize,
+    pub cron_job_count: usize,
     pub ws_subscribers: usize,
     pub uptime_seconds: u64,
     pub config_paths: StatusPaths,
@@ -77,16 +82,21 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
         .list(i64::MAX / 4, 0)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let cron_job_count = state.scheduler.list_jobs(true).await.len();
 
     Ok(Json(StatusResponse {
         status: "running",
         version: env!("CARGO_PKG_VERSION"),
-        bind: format!("{}:{}", state.config.gateway.host, state.config.gateway.port),
+        bind: format!(
+            "{}:{}",
+            state.config.gateway.host, state.config.gateway.port
+        ),
         auth_enabled: state.config.gateway.auth_token.is_some(),
         configured_model_providers: state.config.models.providers.len(),
         active_model_backend: "in-memory-demo",
         registered_tools: state.tool_count,
         session_count: sessions.len(),
+        cron_job_count,
         ws_subscribers: state.event_tx.receiver_count(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         config_paths: StatusPaths {
@@ -126,6 +136,274 @@ pub async fn gateway_restart() -> Json<ActionResponse> {
         success: true,
         message: "gateway restart acknowledged; external service supervision pending".to_string(),
     })
+}
+
+// ── Cron / Scheduler ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct CronListQuery {
+    #[serde(rename = "includeDisabled")]
+    pub include_disabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CronJobRequest {
+    pub name: Option<String>,
+    pub schedule: CronScheduleRequest,
+    pub payload: CronPayloadRequest,
+    #[serde(rename = "sessionTarget")]
+    pub session_target: String,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CronScheduleRequest {
+    At {
+        at: DateTime<Utc>,
+    },
+    Every {
+        every_ms: u64,
+        anchor_ms: Option<u64>,
+    },
+    Cron {
+        expr: String,
+        tz: Option<String>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CronPayloadRequest {
+    SystemEvent {
+        text: String,
+    },
+    AgentTurn {
+        message: String,
+        model: Option<String>,
+        timeout_seconds: Option<u64>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CronUpdateRequest {
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+    pub schedule: Option<CronScheduleRequest>,
+    pub payload: Option<CronPayloadRequest>,
+}
+
+#[derive(Serialize)]
+pub struct CronStatusResponse {
+    pub total_jobs: usize,
+    pub enabled_jobs: usize,
+    pub due_jobs: usize,
+}
+
+#[derive(Serialize)]
+pub struct CronJobResponse {
+    pub id: String,
+    pub name: Option<String>,
+    pub schedule: Schedule,
+    pub payload: JobPayload,
+    pub session_target: SessionTarget,
+    pub enabled: bool,
+    pub created_at: String,
+    pub last_run_at: Option<String>,
+    pub next_run_at: Option<String>,
+    pub run_count: u64,
+}
+
+#[derive(Serialize)]
+pub struct CronRunResponse {
+    pub job_id: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub status: JobRunStatus,
+    pub output: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct CronMutationResponse {
+    pub success: bool,
+    pub job_id: String,
+    pub message: String,
+}
+
+pub async fn cron_status(
+    State(state): State<AppState>,
+) -> Result<Json<CronStatusResponse>, GatewayError> {
+    let jobs = state.scheduler.list_jobs(true).await;
+    let due_jobs = state.scheduler.get_due_jobs().await;
+    Ok(Json(CronStatusResponse {
+        total_jobs: jobs.len(),
+        enabled_jobs: jobs.iter().filter(|job| job.enabled).count(),
+        due_jobs: due_jobs.len(),
+    }))
+}
+
+pub async fn cron_list(
+    State(state): State<AppState>,
+    Query(query): Query<CronListQuery>,
+) -> Result<Json<Vec<CronJobResponse>>, GatewayError> {
+    let include_disabled = query.include_disabled.unwrap_or(false);
+    let jobs = state.scheduler.list_jobs(include_disabled).await;
+    Ok(Json(jobs.into_iter().map(job_to_response).collect()))
+}
+
+pub async fn cron_add(
+    State(state): State<AppState>,
+    Json(body): Json<CronJobRequest>,
+) -> Result<(StatusCode, Json<CronMutationResponse>), GatewayError> {
+    let schedule = convert_schedule(body.schedule);
+    let payload = convert_payload(body.payload);
+    let session_target = parse_session_target(&body.session_target)?;
+    validate_job_contract(&session_target, &payload)?;
+
+    let now = Utc::now();
+    let id = JobId::new();
+    let next_run_at = initial_next_run(&schedule);
+    let mut job = Job {
+        id,
+        name: body.name,
+        schedule,
+        payload,
+        session_target,
+        enabled: body.enabled.unwrap_or(true),
+        created_at: now,
+        last_run_at: None,
+        next_run_at,
+        run_count: 0,
+    };
+
+    if matches!(job.schedule, Schedule::At { .. }) && !job.enabled {
+        job.next_run_at = None;
+    }
+
+    let job_id = state.scheduler.add_job(job).await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CronMutationResponse {
+            success: true,
+            job_id: job_id.to_string(),
+            message: "cron job created".to_string(),
+        }),
+    ))
+}
+
+pub async fn cron_update(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CronUpdateRequest>,
+) -> Result<Json<CronMutationResponse>, GatewayError> {
+    let job_id = JobId::from(id);
+    let existing = state
+        .scheduler
+        .get_job(&job_id)
+        .await
+        .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
+
+    let new_payload = body.payload.map(convert_payload);
+    let new_schedule = body.schedule.map(convert_schedule);
+    let effective_payload = new_payload
+        .clone()
+        .unwrap_or_else(|| existing.payload.clone());
+    validate_job_contract(&existing.session_target, &effective_payload)?;
+
+    let update = JobUpdate {
+        name: body.name,
+        enabled: body.enabled,
+        schedule: new_schedule,
+        payload: new_payload,
+    };
+
+    state
+        .scheduler
+        .update_job(&job_id, update)
+        .await
+        .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
+
+    if let Some(updated) = state.scheduler.get_job(&job_id).await {
+        if updated.next_run_at.is_none() && updated.enabled {
+            state.scheduler.advance_next_run(&job_id).await;
+        }
+    }
+
+    Ok(Json(CronMutationResponse {
+        success: true,
+        job_id: job_id.to_string(),
+        message: "cron job updated".to_string(),
+    }))
+}
+
+pub async fn cron_remove(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<CronMutationResponse>, GatewayError> {
+    let job_id = JobId::from(id);
+    state
+        .scheduler
+        .remove_job(&job_id)
+        .await
+        .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
+
+    Ok(Json(CronMutationResponse {
+        success: true,
+        job_id: job_id.to_string(),
+        message: "cron job removed".to_string(),
+    }))
+}
+
+pub async fn cron_run(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<CronMutationResponse>, GatewayError> {
+    let job_id = JobId::from(id);
+    let job = state
+        .scheduler
+        .get_job(&job_id)
+        .await
+        .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
+
+    let run = state.scheduler.start_run(job_id).await;
+    let output = simulated_job_output(&job);
+    state
+        .scheduler
+        .complete_run(job_id, JobRunStatus::Completed, Some(output.clone()))
+        .await;
+    state.scheduler.advance_next_run(&job_id).await;
+
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: job_id.to_string(),
+        kind: "cron_run_completed".to_string(),
+        payload: json!({
+            "job_id": job_id.to_string(),
+            "started_at": run.started_at,
+            "status": "completed",
+            "output": output,
+        }),
+    });
+
+    Ok(Json(CronMutationResponse {
+        success: true,
+        job_id: job_id.to_string(),
+        message: "cron job triggered".to_string(),
+    }))
+}
+
+pub async fn cron_runs(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<CronRunResponse>>, GatewayError> {
+    let job_id = JobId::from(id);
+    state
+        .scheduler
+        .get_job(&job_id)
+        .await
+        .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
+    let runs = state.scheduler.get_runs(&job_id, None).await;
+    Ok(Json(runs.into_iter().map(run_to_response).collect()))
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
@@ -298,7 +576,12 @@ pub async fn send_message(
         .iter()
         .rev()
         .find(|t| t.turn_id == Some(turn_row.id) && t.kind == "assistant_message")
-        .and_then(|t| t.payload.get("content").and_then(|v| v.as_str()).map(String::from));
+        .and_then(|t| {
+            t.payload
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        });
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: session_id.to_string(),
@@ -386,5 +669,102 @@ fn parse_session_kind(s: &str) -> Result<SessionKind, GatewayError> {
         other => Err(GatewayError::BadRequest(format!(
             "unknown session kind: {other}"
         ))),
+    }
+}
+
+fn parse_session_target(s: &str) -> Result<SessionTarget, GatewayError> {
+    match s.to_lowercase().as_str() {
+        "main" => Ok(SessionTarget::Main),
+        "isolated" => Ok(SessionTarget::Isolated),
+        other => Err(GatewayError::BadRequest(format!(
+            "unknown session target: {other}"
+        ))),
+    }
+}
+
+fn convert_schedule(request: CronScheduleRequest) -> Schedule {
+    match request {
+        CronScheduleRequest::At { at } => Schedule::At { at },
+        CronScheduleRequest::Every {
+            every_ms,
+            anchor_ms,
+        } => Schedule::Every {
+            every_ms,
+            anchor_ms,
+        },
+        CronScheduleRequest::Cron { expr, tz } => Schedule::Cron { expr, tz },
+    }
+}
+
+fn convert_payload(request: CronPayloadRequest) -> JobPayload {
+    match request {
+        CronPayloadRequest::SystemEvent { text } => JobPayload::SystemEvent { text },
+        CronPayloadRequest::AgentTurn {
+            message,
+            model,
+            timeout_seconds,
+        } => JobPayload::AgentTurn {
+            message,
+            model,
+            timeout_seconds,
+        },
+    }
+}
+
+fn validate_job_contract(
+    session_target: &SessionTarget,
+    payload: &JobPayload,
+) -> Result<(), GatewayError> {
+    match (session_target, payload) {
+        (SessionTarget::Main, JobPayload::SystemEvent { .. }) => Ok(()),
+        (SessionTarget::Isolated, JobPayload::AgentTurn { .. }) => Ok(()),
+        (SessionTarget::Main, _) => Err(GatewayError::BadRequest(
+            "sessionTarget=main requires payload.kind=system_event".to_string(),
+        )),
+        (SessionTarget::Isolated, _) => Err(GatewayError::BadRequest(
+            "sessionTarget=isolated requires payload.kind=agent_turn".to_string(),
+        )),
+    }
+}
+
+fn initial_next_run(schedule: &Schedule) -> Option<DateTime<Utc>> {
+    match schedule {
+        Schedule::At { at } => Some(*at),
+        Schedule::Every { every_ms, .. } => {
+            Some(Utc::now() + chrono::Duration::milliseconds(*every_ms as i64))
+        }
+        Schedule::Cron { .. } => Some(Utc::now() + chrono::Duration::hours(1)),
+    }
+}
+
+fn simulated_job_output(job: &Job) -> String {
+    match &job.payload {
+        JobPayload::SystemEvent { text } => format!("system event delivered: {text}"),
+        JobPayload::AgentTurn { message, .. } => format!("isolated agent turn queued: {message}"),
+    }
+}
+
+fn job_to_response(job: Job) -> CronJobResponse {
+    CronJobResponse {
+        id: job.id.to_string(),
+        name: job.name,
+        schedule: job.schedule,
+        payload: job.payload,
+        session_target: job.session_target,
+        enabled: job.enabled,
+        created_at: job.created_at.to_rfc3339(),
+        last_run_at: job.last_run_at.map(|dt| dt.to_rfc3339()),
+        next_run_at: job.next_run_at.map(|dt| dt.to_rfc3339()),
+        run_count: job.run_count,
+    }
+}
+
+fn run_to_response(run: JobRun) -> CronRunResponse {
+    CronRunResponse {
+        job_id: run.job_id.to_string(),
+        started_at: run.started_at.to_rfc3339(),
+        finished_at: run.finished_at.map(|dt| dt.to_rfc3339()),
+        status: run.status,
+        output: run.output,
     }
 }

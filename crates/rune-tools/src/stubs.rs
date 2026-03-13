@@ -15,7 +15,10 @@ impl ToolExecutor for StubExecutor {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         Ok(ToolResult {
             tool_call_id: call.tool_call_id,
-            output: format!("[stub] {} executed with args: {}", call.tool_name, call.arguments),
+            output: format!(
+                "[stub] {} executed with args: {}",
+                call.tool_name, call.arguments
+            ),
             is_error: false,
         })
     }
@@ -147,18 +150,13 @@ pub fn register_builtin_stubs(registry: &mut ToolRegistry) {
 /// Validate that a tool call's arguments satisfy the `required` fields in the tool schema.
 /// Returns `Ok(())` or a `ToolError::InvalidArguments`.
 pub fn validate_arguments(def: &ToolDefinition, args: &serde_json::Value) -> Result<(), ToolError> {
-    let required = def
-        .parameters
-        .get("required")
-        .and_then(|v| v.as_array());
+    let required = def.parameters.get("required").and_then(|v| v.as_array());
 
     if let Some(required_fields) = required {
         let obj = args.as_object();
         for field in required_fields {
             if let Some(field_name) = field.as_str() {
-                let present = obj
-                    .map(|o| o.contains_key(field_name))
-                    .unwrap_or(false);
+                let present = obj.map(|o| o.contains_key(field_name)).unwrap_or(false);
                 if !present {
                     return Err(ToolError::InvalidArguments {
                         tool: def.name.clone(),

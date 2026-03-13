@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use tracing::debug;
 
-use super::response::{map_error_response, parse_response, ApiResponse};
 use super::ModelProvider;
+use super::response::{ApiResponse, map_error_response, parse_response};
 use crate::error::ModelError;
 use crate::types::{CompletionRequest, CompletionResponse};
 
@@ -40,7 +40,10 @@ impl OpenAiProvider {
 
 #[async_trait]
 impl ModelProvider for OpenAiProvider {
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse, ModelError> {
+    async fn complete(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelError> {
         debug!(url = %self.url, "OpenAI completion request");
 
         let resp = self

@@ -31,12 +31,7 @@ impl ProcessManager {
     }
 
     /// Register a new background process.
-    pub async fn register(
-        &self,
-        process_id: String,
-        mut child: Child,
-        stdin: Option<ChildStdin>,
-    ) {
+    pub async fn register(&self, process_id: String, mut child: Child, stdin: Option<ChildStdin>) {
         let stdout_handle = child.stdout.take();
         let stderr_handle = child.stderr.take();
 
@@ -128,9 +123,10 @@ impl ProcessManager {
         let stdin = stdin_guard.as_mut().ok_or_else(|| {
             ToolError::ExecutionFailed(format!("stdin not available for process {process_id}"))
         })?;
-        stdin.write_all(data.as_bytes()).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("failed to write to stdin: {e}"))
-        })?;
+        stdin
+            .write_all(data.as_bytes())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to write to stdin: {e}")))?;
         Ok(data.len())
     }
 
@@ -152,9 +148,7 @@ impl ProcessManager {
             .await
             .get(process_id)
             .cloned()
-            .ok_or_else(|| {
-                ToolError::ExecutionFailed(format!("process not found: {process_id}"))
-            })
+            .ok_or_else(|| ToolError::ExecutionFailed(format!("process not found: {process_id}")))
     }
 }
 
@@ -262,9 +256,8 @@ impl ProcessToolExecutor {
                 })
             }
             "poll" => {
-                let pid = process_id.ok_or_else(|| {
-                    ToolError::InvalidArgument("poll requires sessionId".into())
-                })?;
+                let pid = process_id
+                    .ok_or_else(|| ToolError::InvalidArgument("poll requires sessionId".into()))?;
                 let info = self.manager.poll(pid).await?;
                 Ok(ToolResult {
                     tool_call_id: call.tool_call_id,
@@ -278,11 +271,18 @@ impl ProcessToolExecutor {
                 })
             }
             "log" => {
-                let pid = process_id.ok_or_else(|| {
-                    ToolError::InvalidArgument("log requires sessionId".into())
-                })?;
-                let offset = call.arguments.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
-                let limit = call.arguments.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+                let pid = process_id
+                    .ok_or_else(|| ToolError::InvalidArgument("log requires sessionId".into()))?;
+                let offset = call
+                    .arguments
+                    .get("offset")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                let limit = call
+                    .arguments
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
                 let output = self.manager.log(pid, offset, limit).await?;
                 Ok(ToolResult {
                     tool_call_id: call.tool_call_id,
@@ -291,9 +291,8 @@ impl ProcessToolExecutor {
                 })
             }
             "write" => {
-                let pid = process_id.ok_or_else(|| {
-                    ToolError::InvalidArgument("write requires sessionId".into())
-                })?;
+                let pid = process_id
+                    .ok_or_else(|| ToolError::InvalidArgument("write requires sessionId".into()))?;
                 let data = call
                     .arguments
                     .get("data")
@@ -309,9 +308,8 @@ impl ProcessToolExecutor {
                 })
             }
             "kill" => {
-                let pid = process_id.ok_or_else(|| {
-                    ToolError::InvalidArgument("kill requires sessionId".into())
-                })?;
+                let pid = process_id
+                    .ok_or_else(|| ToolError::InvalidArgument("kill requires sessionId".into()))?;
                 self.manager.kill(pid).await?;
                 Ok(ToolResult {
                     tool_call_id: call.tool_call_id,

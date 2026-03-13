@@ -16,13 +16,19 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use rune_config::AppConfig;
-use rune_gateway::{init_logging, start, Services};
-use rune_models::{CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage};
-use rune_runtime::{ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor};
-use rune_store::models::{NewSession, NewTranscriptItem, NewTurn, SessionRow, TranscriptItemRow, TurnRow};
-use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
+use rune_gateway::{Services, init_logging, start};
+use rune_models::{
+    CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
+};
+use rune_runtime::{
+    ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor, scheduler::Scheduler,
+};
 use rune_store::StoreError;
-use rune_tools::{register_builtin_stubs, StubExecutor, ToolRegistry};
+use rune_store::models::{
+    NewSession, NewTranscriptItem, NewTurn, SessionRow, TranscriptItemRow, TurnRow,
+};
+use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
+use rune_tools::{StubExecutor, ToolRegistry, register_builtin_stubs};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -102,10 +108,8 @@ fn build_services(config: AppConfig) -> Result<Services> {
             info!("running pending database migrations");
             rune_store::pool::run_migrations(database_url)?;
         }
-        let pool = rune_store::pool::create_pool(
-            database_url,
-            config.database.max_connections as usize,
-        )?;
+        let pool =
+            rune_store::pool::create_pool(database_url, config.database.max_connections as usize)?;
         (
             Arc::new(rune_store::pg::PgSessionRepo::new(pool.clone())),
             Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone())),
@@ -123,6 +127,7 @@ fn build_services(config: AppConfig) -> Result<Services> {
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
     let model_provider: Arc<dyn ModelProvider> = Arc::new(EchoModelProvider::new());
+    let scheduler = Arc::new(Scheduler::new());
 
     let mut registry = ToolRegistry::new();
     register_builtin_stubs(&mut registry);
@@ -136,7 +141,9 @@ fn build_services(config: AppConfig) -> Result<Services> {
         model_provider.clone(),
         tool_executor,
         tool_registry,
-        ContextAssembler::new("You are Rune, the Rust gateway runtime for OpenClaw parity testing."),
+        ContextAssembler::new(
+            "You are Rune, the Rust gateway runtime for OpenClaw parity testing.",
+        ),
         Arc::new(NoOpCompaction),
     ));
 
@@ -147,6 +154,7 @@ fn build_services(config: AppConfig) -> Result<Services> {
         session_repo,
         transcript_repo,
         model_provider,
+        scheduler,
         tool_count,
     })
 }
@@ -225,13 +233,14 @@ impl SessionRepo for InMemorySessionRepo {
         updated_at: chrono::DateTime<Utc>,
     ) -> Result<SessionRow, StoreError> {
         let mut sessions = self.sessions.lock().await;
-        let session = sessions
-            .iter_mut()
-            .find(|session| session.id == id)
-            .ok_or(StoreError::NotFound {
-                entity: "session",
-                id: id.to_string(),
-            })?;
+        let session =
+            sessions
+                .iter_mut()
+                .find(|session| session.id == id)
+                .ok_or(StoreError::NotFound {
+                    entity: "session",
+                    id: id.to_string(),
+                })?;
         session.status = status.to_string();
         session.updated_at = updated_at;
         session.last_activity_at = updated_at;
@@ -327,7 +336,10 @@ impl TranscriptRepo for InMemoryTranscriptRepo {
         Ok(row)
     }
 
-    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<TranscriptItemRow>, StoreError> {
+    async fn list_by_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<TranscriptItemRow>, StoreError> {
         let mut items: Vec<_> = self
             .items
             .lock()
@@ -352,7 +364,10 @@ impl EchoModelProvider {
 
 #[async_trait]
 impl ModelProvider for EchoModelProvider {
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse, ModelError> {
+    async fn complete(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelError> {
         let latest_user = request
             .messages
             .iter()

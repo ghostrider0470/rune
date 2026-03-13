@@ -4,16 +4,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum::Router;
 use axum::middleware;
 use axum::routing::{get, post};
-use axum::Router;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::info;
 
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
-use rune_runtime::{SessionEngine, TurnExecutor};
+use rune_runtime::{SessionEngine, TurnExecutor, scheduler::Scheduler};
 use rune_store::repos::{SessionRepo, TranscriptRepo};
 
 use crate::auth::bearer_auth;
@@ -55,6 +55,7 @@ pub struct Services {
     pub session_repo: Arc<dyn SessionRepo>,
     pub transcript_repo: Arc<dyn TranscriptRepo>,
     pub model_provider: Arc<dyn ModelProvider>,
+    pub scheduler: Arc<Scheduler>,
     pub tool_count: usize,
 }
 
@@ -80,6 +81,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         session_repo: services.session_repo,
         transcript_repo: services.transcript_repo,
         model_provider: services.model_provider,
+        scheduler: services.scheduler,
         tool_count: services.tool_count,
         event_tx,
     };
@@ -124,16 +126,21 @@ fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/gateway/start", post(routes::gateway_start))
         .route("/gateway/stop", post(routes::gateway_stop))
         .route("/gateway/restart", post(routes::gateway_restart))
-        .route("/sessions", get(routes::list_sessions).post(routes::create_session))
+        .route("/cron/status", get(routes::cron_status))
+        .route("/cron", get(routes::cron_list).post(routes::cron_add))
+        .route(
+            "/cron/{id}",
+            post(routes::cron_update).delete(routes::cron_remove),
+        )
+        .route("/cron/{id}/run", post(routes::cron_run))
+        .route("/cron/{id}/runs", get(routes::cron_runs))
+        .route(
+            "/sessions",
+            get(routes::list_sessions).post(routes::create_session),
+        )
         .route("/sessions/{id}", get(routes::get_session))
-        .route(
-            "/sessions/{id}/messages",
-            post(routes::send_message),
-        )
-        .route(
-            "/sessions/{id}/transcript",
-            get(routes::get_transcript),
-        )
+        .route("/sessions/{id}/messages", post(routes::send_message))
+        .route("/sessions/{id}/transcript", get(routes::get_transcript))
         .layer(middleware::from_fn(move |req, next| {
             bearer_auth(req, next, auth_token.clone())
         }))

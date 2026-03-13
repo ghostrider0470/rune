@@ -1,7 +1,7 @@
 use rune_config::ModelProviderConfig;
 use rune_models::{
-    provider_from_config, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
-    ModelError, ModelProvider, OpenAiProvider, Role,
+    AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason, ModelError, ModelProvider,
+    OpenAiProvider, Role, provider_from_config,
 };
 use wiremock::matchers::{header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -57,13 +57,11 @@ fn azure_url_standard() {
 
 #[test]
 fn azure_url_strips_trailing_slash() {
-    let p = AzureOpenAiProvider::new(
-        "https://myres.openai.azure.com/",
-        "dep",
-        "2025-01-01",
-        "k",
+    let p = AzureOpenAiProvider::new("https://myres.openai.azure.com/", "dep", "2025-01-01", "k");
+    assert!(
+        p.url()
+            .starts_with("https://myres.openai.azure.com/openai/")
     );
-    assert!(p.url().starts_with("https://myres.openai.azure.com/openai/"));
 }
 
 // --- Azure header handling ---

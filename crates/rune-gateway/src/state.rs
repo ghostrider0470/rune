@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
-use rune_runtime::{SessionEngine, TurnExecutor};
+use rune_runtime::{SessionEngine, TurnExecutor, scheduler::Scheduler};
 use rune_store::repos::{SessionRepo, TranscriptRepo};
 use tokio::sync::broadcast;
 
@@ -37,6 +37,8 @@ pub struct AppState {
     pub transcript_repo: Arc<dyn TranscriptRepo>,
     /// Model provider for status reporting.
     pub model_provider: Arc<dyn ModelProvider>,
+    /// In-memory scheduler backing the current cron operator surface.
+    pub scheduler: Arc<Scheduler>,
     /// Number of registered tools in the runtime graph.
     pub tool_count: usize,
     /// Broadcast channel for session events (WebSocket fan-out).

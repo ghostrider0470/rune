@@ -63,13 +63,9 @@ impl<S: SchedulerOps> CronToolExecutor<S> {
                 self.scheduler.list_jobs(include_disabled).await
             }
             "add" => {
-                let job = call
-                    .arguments
-                    .get("job")
-                    .cloned()
-                    .ok_or_else(|| {
-                        ToolError::InvalidArgument("add requires 'job' parameter".into())
-                    })?;
+                let job = call.arguments.get("job").cloned().ok_or_else(|| {
+                    ToolError::InvalidArgument("add requires 'job' parameter".into())
+                })?;
                 self.scheduler.add_job(job).await
             }
             "remove" => {
@@ -153,7 +149,9 @@ mod tests {
             Ok(format!("{{\"jobId\": \"{id}\", \"updated\": true}}"))
         }
         async fn run_job(&self, id: &str) -> Result<String, String> {
-            Ok(format!("{{\"jobId\": \"{id}\", \"status\": \"triggered\"}}"))
+            Ok(format!(
+                "{{\"jobId\": \"{id}\", \"status\": \"triggered\"}}"
+            ))
         }
         async fn get_runs(&self, _id: &str) -> Result<String, String> {
             Ok("[]".into())

@@ -20,7 +20,7 @@ pub use definition::{ToolCall, ToolDefinition, ToolResult};
 pub use error::ToolError;
 pub use executor::{AlwaysAllow, ApprovalCheck, ToolExecutor};
 pub use registry::ToolRegistry;
-pub use stubs::{register_builtin_stubs, validate_arguments, StubExecutor};
+pub use stubs::{StubExecutor, register_builtin_stubs, validate_arguments};
 
 #[cfg(test)]
 mod tests;

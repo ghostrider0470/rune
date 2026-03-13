@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use figment::{
-    providers::{Env, Format, Serialized, Toml},
     Figment,
+    providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -33,7 +33,9 @@ impl AppConfig {
 
         figment = figment.merge(Env::prefixed("RUNE_").split("__"));
 
-        figment.extract().map_err(|e| ConfigError::Load(Box::new(e)))
+        figment
+            .extract()
+            .map_err(|e| ConfigError::Load(Box::new(e)))
     }
 
     /// Apply a fully-populated override on top of the current config.
@@ -61,7 +63,11 @@ impl AppConfig {
                     path: path.display().to_string(),
                     reason: format!("{name} does not exist"),
                 });
-            } else if path.metadata().map(|m| m.permissions().readonly()).unwrap_or(true) {
+            } else if path
+                .metadata()
+                .map(|m| m.permissions().readonly())
+                .unwrap_or(true)
+            {
                 errors.push(ConfigError::PathValidation {
                     path: path.display().to_string(),
                     reason: format!("{name} is not writable"),

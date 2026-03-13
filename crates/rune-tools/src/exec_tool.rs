@@ -167,10 +167,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let exec = ExecToolExecutor::new(tmp.path(), Duration::from_secs(30));
 
-        let call = make_call(
-            "execute_command",
-            serde_json::json!({"command": "exit 42"}),
-        );
+        let call = make_call("execute_command", serde_json::json!({"command": "exit 42"}));
         let result = exec.execute(call).await.unwrap();
         assert!(result.is_error);
         assert!(result.output.contains("42"));

@@ -85,7 +85,10 @@ mod tests {
             _reply_to: Option<&str>,
         ) -> Result<String, String> {
             let ch = channel_id.unwrap_or("default");
-            Ok(format!("{{\"delivered\": true, \"channel\": \"{ch}\", \"length\": {}}}", content.len()))
+            Ok(format!(
+                "{{\"delivered\": true, \"channel\": \"{ch}\", \"length\": {}}}",
+                content.len()
+            ))
         }
     }
 

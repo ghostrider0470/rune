@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 macro_rules! id_newtype {
     ($name:ident) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(Uuid);
 
@@ -280,7 +282,13 @@ mod tests {
 
     fn roundtrip_id<T>()
     where
-        T: Default + fmt::Display + FromStr + Serialize + for<'de> Deserialize<'de> + PartialEq + fmt::Debug,
+        T: Default
+            + fmt::Display
+            + FromStr
+            + Serialize
+            + for<'de> Deserialize<'de>
+            + PartialEq
+            + fmt::Debug,
         <T as FromStr>::Err: fmt::Debug,
     {
         let id = T::default();
@@ -354,7 +362,10 @@ mod tests {
 
     #[test]
     fn lifecycle_state_maps_waiting_session_states() {
-        assert_eq!(LifecycleState::from(SessionStatus::WaitingForTool), LifecycleState::Waiting);
+        assert_eq!(
+            LifecycleState::from(SessionStatus::WaitingForTool),
+            LifecycleState::Waiting
+        );
         assert_eq!(
             LifecycleState::from(SessionStatus::WaitingForApproval),
             LifecycleState::Waiting
@@ -367,12 +378,30 @@ mod tests {
 
     #[test]
     fn lifecycle_state_maps_turn_states() {
-        assert_eq!(LifecycleState::from(TurnStatus::Started), LifecycleState::Created);
-        assert_eq!(LifecycleState::from(TurnStatus::ModelCalling), LifecycleState::Running);
-        assert_eq!(LifecycleState::from(TurnStatus::ToolExecuting), LifecycleState::Running);
-        assert_eq!(LifecycleState::from(TurnStatus::Completed), LifecycleState::Completed);
-        assert_eq!(LifecycleState::from(TurnStatus::Failed), LifecycleState::Failed);
-        assert_eq!(LifecycleState::from(TurnStatus::Cancelled), LifecycleState::Cancelled);
+        assert_eq!(
+            LifecycleState::from(TurnStatus::Started),
+            LifecycleState::Created
+        );
+        assert_eq!(
+            LifecycleState::from(TurnStatus::ModelCalling),
+            LifecycleState::Running
+        );
+        assert_eq!(
+            LifecycleState::from(TurnStatus::ToolExecuting),
+            LifecycleState::Running
+        );
+        assert_eq!(
+            LifecycleState::from(TurnStatus::Completed),
+            LifecycleState::Completed
+        );
+        assert_eq!(
+            LifecycleState::from(TurnStatus::Failed),
+            LifecycleState::Failed
+        );
+        assert_eq!(
+            LifecycleState::from(TurnStatus::Cancelled),
+            LifecycleState::Cancelled
+        );
     }
 
     #[test]

@@ -10,7 +10,9 @@ use tracing::debug;
 
 use async_trait::async_trait;
 
-use crate::{ChannelAdapter, ChannelError, ChannelMessage, DeliveryReceipt, InboundEvent, OutboundAction};
+use crate::{
+    ChannelAdapter, ChannelError, ChannelMessage, DeliveryReceipt, InboundEvent, OutboundAction,
+};
 
 /// Telegram Bot API adapter using long-polling for updates.
 pub struct TelegramAdapter {
@@ -108,11 +110,7 @@ impl TelegramAdapter {
                 sender: msg
                     .from
                     .as_ref()
-                    .map(|u| {
-                        u.username
-                            .clone()
-                            .unwrap_or_else(|| u.id.to_string())
-                    })
+                    .map(|u| u.username.clone().unwrap_or_else(|| u.id.to_string()))
                     .unwrap_or_else(|| "unknown".into()),
                 content: text,
                 attachments,
@@ -120,11 +118,14 @@ impl TelegramAdapter {
                 provider_message_id: msg.message_id.to_string(),
             }))
         } else {
-            update.edited_message.as_ref().map(|edited| InboundEvent::Edit {
-                channel_id: ChannelId::new(),
-                message_id: edited.message_id.to_string(),
-                new_content: edited.text.clone().unwrap_or_default(),
-            })
+            update
+                .edited_message
+                .as_ref()
+                .map(|edited| InboundEvent::Edit {
+                    channel_id: ChannelId::new(),
+                    message_id: edited.message_id.to_string(),
+                    new_content: edited.text.clone().unwrap_or_default(),
+                })
         }
     }
 
@@ -194,9 +195,7 @@ impl TelegramAdapter {
 
         if !body.ok {
             return Err(ChannelError::Provider {
-                message: body
-                    .description
-                    .unwrap_or_else(|| "send failed".into()),
+                message: body.description.unwrap_or_else(|| "send failed".into()),
             });
         }
 
@@ -238,7 +237,10 @@ impl ChannelAdapter for TelegramAdapter {
 
     async fn send(&self, action: OutboundAction) -> Result<DeliveryReceipt, ChannelError> {
         match action {
-            OutboundAction::Send { channel_id, content } => {
+            OutboundAction::Send {
+                channel_id,
+                content,
+            } => {
                 self.send_message(&channel_id.to_string(), &content, None)
                     .await
             }

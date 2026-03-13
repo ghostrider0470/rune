@@ -3,6 +3,7 @@ use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 
 use crate::compaction::CompactionStrategy;
+use crate::memory::MemoryContext;
 
 /// Builds the prompt messages from session history, system instructions, and context.
 pub struct ContextAssembler {
@@ -18,19 +19,31 @@ impl ContextAssembler {
 
     /// Assemble prompt messages from persisted transcript rows.
     ///
-    /// Produces: [system] + transcript items converted to ChatMessages,
+    /// Produces: [system (with optional memory)] + transcript items converted to ChatMessages,
     /// then passed through the compaction strategy.
     pub fn assemble(
         &self,
         transcript_rows: &[TranscriptItemRow],
         compaction: &dyn CompactionStrategy,
+        memory: Option<&MemoryContext>,
     ) -> Vec<ChatMessage> {
         let mut messages = Vec::with_capacity(transcript_rows.len() + 1);
 
-        // System message
+        // System message with optional memory context
+        let system_content = if let Some(mem) = memory {
+            let mem_section = mem.format_for_prompt();
+            if mem_section.is_empty() {
+                self.system_instructions.clone()
+            } else {
+                format!("{}\n\n{mem_section}", self.system_instructions)
+            }
+        } else {
+            self.system_instructions.clone()
+        };
+
         messages.push(ChatMessage {
             role: Role::System,
-            content: Some(self.system_instructions.clone()),
+            content: Some(system_content),
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -47,7 +60,6 @@ impl ContextAssembler {
     }
 
     fn row_to_chat_message(&self, row: &TranscriptItemRow) -> Option<ChatMessage> {
-        // Deserialize the payload to a TranscriptItem to get the typed variant
         let item: TranscriptItem = serde_json::from_value(row.payload.clone()).ok()?;
 
         match item {
@@ -94,7 +106,6 @@ impl ContextAssembler {
                 tool_call_id: Some(tool_call_id.to_string()),
                 tool_calls: None,
             }),
-            // Status notes, approval items, subagent results don't map to chat messages
             _ => None,
         }
     }

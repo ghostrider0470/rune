@@ -1,7 +1,7 @@
 //! WebSocket endpoint for subscribing to session events.
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -10,10 +10,7 @@ use tracing::{debug, warn};
 use crate::state::{AppState, SessionEvent};
 
 /// `GET /ws` — upgrade to WebSocket for live session event streaming.
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Response {
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state.event_tx.subscribe()))
 }
 
