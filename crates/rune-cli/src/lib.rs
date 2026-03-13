@@ -65,6 +65,37 @@ fn run_gateway_foreground() -> Result<()> {
     }
 }
 
+fn parse_reminder_duration(input: &str) -> Result<DateTime<Utc>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("reminder duration cannot be empty");
+    }
+
+    let split_at = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| anyhow::anyhow!("invalid reminder duration `{trimmed}`; expected forms like 30m, 2h, 1d"))?;
+    let (amount_raw, unit_raw) = trimmed.split_at(split_at);
+    let amount: i64 = amount_raw
+        .parse()
+        .with_context(|| format!("invalid reminder duration amount `{amount_raw}`"))?;
+    if amount <= 0 {
+        anyhow::bail!("reminder duration must be positive");
+    }
+
+    let delta = match unit_raw.trim().to_ascii_lowercase().as_str() {
+        "m" | "min" | "mins" | "minute" | "minutes" => chrono::Duration::minutes(amount),
+        "h" | "hr" | "hrs" | "hour" | "hours" => chrono::Duration::hours(amount),
+        "d" | "day" | "days" => chrono::Duration::days(amount),
+        other => {
+            anyhow::bail!(
+                "invalid reminder duration unit `{other}`; expected minutes (m), hours (h), or days (d)"
+            )
+        }
+    };
+
+    Ok(Utc::now() + delta)
+}
+
 fn set_default_model(model_ref: &str) -> Result<ModelSetResponse> {
     let config_path = discover_local_config_path();
     let config = rune_config::AppConfig::load(Some(&config_path)).with_context(|| {
@@ -734,17 +765,17 @@ pub async fn run(cli: Cli) -> Result<()> {
                 duration,
                 target,
             } => {
-                anyhow::bail!(
-                    "reminders add is not implemented yet for target `{target}` (`{duration}`: {message})"
-                );
+                let fire_at = parse_reminder_duration(&duration)?;
+                let result = client.reminders_add(&message, fire_at, &target).await?;
+                println!("{}", render(&result, format));
             }
             RemindersAction::List { include_delivered } => {
-                anyhow::bail!(
-                    "reminders list is not implemented yet (include_delivered={include_delivered})"
-                );
+                let result = client.reminders_list(include_delivered).await?;
+                println!("{}", render(&result, format));
             }
             RemindersAction::Cancel { id } => {
-                anyhow::bail!("reminders cancel is not implemented yet for id `{id}`");
+                let result = client.reminders_cancel(&id).await?;
+                println!("{}", render(&result, format));
             }
         },
         Command::Config { action } => match action {
@@ -857,6 +888,26 @@ models = ["grok-4-fast-reasoning"]
         unsafe {
             std::env::remove_var("RUNE_CONFIG");
         }
+    }
+
+    #[test]
+    fn parse_reminder_duration_minutes() {
+        let fire_at = parse_reminder_duration("30m").unwrap();
+        let delta = fire_at.signed_duration_since(Utc::now());
+        assert!(delta.num_minutes() >= 29 && delta.num_minutes() <= 30);
+    }
+
+    #[test]
+    fn parse_reminder_duration_hours() {
+        let fire_at = parse_reminder_duration("2h").unwrap();
+        let delta = fire_at.signed_duration_since(Utc::now());
+        assert!(delta.num_minutes() >= 119 && delta.num_minutes() <= 120);
+    }
+
+    #[test]
+    fn parse_reminder_duration_rejects_bad_unit() {
+        let err = parse_reminder_duration("5w").unwrap_err();
+        assert!(err.to_string().contains("invalid reminder duration unit"));
     }
 
     #[test]

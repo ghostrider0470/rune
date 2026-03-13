@@ -877,6 +877,50 @@ impl fmt::Display for CronRunsResponse {
     }
 }
 
+/// One-shot reminder detail.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReminderSummary {
+    pub id: String,
+    pub message: String,
+    pub target: String,
+    pub fire_at: String,
+    pub delivered: bool,
+    pub created_at: String,
+    pub delivered_at: Option<String>,
+}
+
+impl fmt::Display for ReminderSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} [{}] {} -> {}",
+            self.id,
+            if self.delivered { "delivered" } else { "pending" },
+            self.target,
+            self.message
+        )?;
+        write!(f, " at {}", self.fire_at)
+    }
+}
+
+/// Response for `reminders list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemindersListResponse {
+    pub reminders: Vec<ReminderSummary>,
+}
+
+impl fmt::Display for RemindersListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.reminders.is_empty() {
+            return write!(f, "No reminders.");
+        }
+        for reminder in &self.reminders {
+            writeln!(f, "  {reminder}")?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

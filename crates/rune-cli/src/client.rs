@@ -10,7 +10,8 @@ use crate::output::{
     ActionResult, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
     CronStatusResponse, DoctorCheck, DoctorReport, HealthResponse, HeartbeatStatusResponse,
-    SessionDetailResponse, SessionListResponse, SessionSummary, StatusResponse,
+    ReminderSummary, RemindersListResponse, SessionDetailResponse, SessionListResponse,
+    SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -466,6 +467,93 @@ impl GatewayClient {
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
+    }
+
+    /// `GET /reminders`
+    pub async fn reminders_list(&self, include_delivered: bool) -> Result<RemindersListResponse> {
+        let resp = self
+            .http
+            .get(self.url("/reminders"))
+            .query(&[("includeDelivered", include_delivered)])
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let items: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /reminders")?;
+            let reminders = items
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|item| ReminderSummary {
+                    id: item["id"].as_str().unwrap_or("?").to_string(),
+                    message: item["message"].as_str().unwrap_or("").to_string(),
+                    target: item["target"].as_str().unwrap_or("main").to_string(),
+                    fire_at: item["fire_at"].as_str().unwrap_or("?").to_string(),
+                    delivered: item["delivered"].as_bool().unwrap_or(false),
+                    created_at: item["created_at"].as_str().unwrap_or("?").to_string(),
+                    delivered_at: item["delivered_at"].as_str().map(String::from),
+                })
+                .collect();
+            Ok(RemindersListResponse { reminders })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /reminders`
+    pub async fn reminders_add(
+        &self,
+        message: &str,
+        fire_at: DateTime<Utc>,
+        target: &str,
+    ) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url("/reminders"))
+            .json(&json!({
+                "message": message,
+                "fire_at": fire_at.to_rfc3339(),
+                "target": target,
+            }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /reminders")?;
+            Ok(ActionResult {
+                success: true,
+                message: format!(
+                    "Reminder created: {}",
+                    body["id"].as_str().unwrap_or("unknown")
+                ),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `DELETE /reminders/{id}`
+    pub async fn reminders_cancel(&self, id: &str) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .delete(self.url(&format!("/reminders/{id}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        Ok(ActionResult {
+            success: resp.status().is_success(),
+            message: if resp.status().is_success() {
+                "Reminder cancelled".to_string()
+            } else {
+                format!("Gateway returned HTTP {}", resp.status())
+            },
+        })
     }
 
     /// `GET /sessions`
