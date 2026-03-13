@@ -8,6 +8,7 @@ pub mod output;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use std::process::Command as StdCommand;
 use std::time::SystemTime;
 
 #[cfg(test)]
@@ -43,6 +44,25 @@ fn discover_local_config_path() -> std::path::PathBuf {
     std::env::var_os("RUNE_CONFIG")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("config.toml"))
+}
+
+fn run_gateway_foreground() -> Result<()> {
+    let mut args = Vec::new();
+    if let Some(config_path) = std::env::var_os("RUNE_CONFIG") {
+        args.push("--config".to_string());
+        args.push(config_path.to_string_lossy().into_owned());
+    }
+
+    let status = StdCommand::new("rune-gateway")
+        .args(&args)
+        .status()
+        .context("failed to start `rune-gateway`; ensure the binary is installed and on PATH")?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("`rune-gateway` exited with status {status}");
+    }
 }
 
 fn set_default_model(model_ref: &str) -> Result<ModelSetResponse> {
@@ -484,6 +504,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             GatewayAction::Restart => {
                 let result = client.gateway_restart().await?;
                 println!("{}", render(&result, format));
+            }
+            GatewayAction::Run => {
+                run_gateway_foreground()?;
             }
         },
         Command::Status => {

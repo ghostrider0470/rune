@@ -106,6 +106,8 @@ pub enum GatewayAction {
     Stop,
     /// Restart the gateway daemon.
     Restart,
+    /// Run the gateway in the foreground using the local rune-gateway binary.
+    Run,
 }
 
 #[derive(Debug, Subcommand)]
@@ -445,6 +447,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_daemon_run() {
+        let cli = Cli::try_parse_from(["rune", "daemon", "run"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Daemon {
+                action: GatewayAction::Run
+            }
+        ));
+    }
+
+    #[test]
     fn parse_channels_list() {
         let cli = Cli::try_parse_from(["rune", "channels", "list"]).unwrap();
         assert!(matches!(
@@ -699,6 +712,17 @@ mod tests {
             cli.command,
             Command::Gateway {
                 action: GatewayAction::Restart
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_run() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "run"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Run
             }
         ));
     }
