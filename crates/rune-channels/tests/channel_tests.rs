@@ -11,21 +11,21 @@ fn telegram_adapter_is_object_safe() {
 }
 
 #[tokio::test]
-async fn telegram_receive_returns_not_implemented() {
-    let mut adapter = TelegramAdapter::new("test-token");
+async fn telegram_receive_with_bad_token_returns_provider_error() {
+    let mut adapter = TelegramAdapter::with_base_url("bad-token", "http://127.0.0.1:1");
     let err = adapter.receive().await.unwrap_err();
-    assert!(matches!(err, ChannelError::NotImplemented));
+    assert!(matches!(err, ChannelError::Provider { .. }));
 }
 
 #[tokio::test]
-async fn telegram_send_returns_not_implemented() {
-    let adapter = TelegramAdapter::new("test-token");
+async fn telegram_send_with_bad_token_returns_provider_error() {
+    let adapter = TelegramAdapter::with_base_url("bad-token", "http://127.0.0.1:1");
     let action = OutboundAction::Send {
         channel_id: ChannelId::new(),
         content: "hello".into(),
     };
     let err = adapter.send(action).await.unwrap_err();
-    assert!(matches!(err, ChannelError::NotImplemented));
+    assert!(matches!(err, ChannelError::Provider { .. }));
 }
 
 #[test]
