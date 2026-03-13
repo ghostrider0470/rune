@@ -152,7 +152,11 @@ impl ModelsConfig {
     /// Return all canonical model ids in sorted order.
     #[must_use]
     pub fn model_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.inventory().into_iter().map(|model| model.model_id()).collect();
+        let mut ids: Vec<String> = self
+            .inventory()
+            .into_iter()
+            .map(|model| model.model_id())
+            .collect();
         ids.sort();
         ids.dedup();
         ids
@@ -450,7 +454,12 @@ impl AgentsConfig {
             .model
             .as_ref()
             .map(AgentModelSelection::primary)
-            .or_else(|| self.defaults.model.as_ref().map(AgentModelSelection::primary))
+            .or_else(|| {
+                self.defaults
+                    .model
+                    .as_ref()
+                    .map(AgentModelSelection::primary)
+            })
     }
 
     /// Resolve the effective workspace for an agent.

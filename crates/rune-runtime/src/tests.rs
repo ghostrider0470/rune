@@ -144,6 +144,13 @@ impl MemSessionRepo {
             sessions: Mutex::new(Vec::new()),
         }
     }
+
+    async fn set_metadata(&self, id: Uuid, metadata: serde_json::Value) {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.iter_mut().find(|session| session.id == id) {
+            session.metadata = metadata;
+        }
+    }
 }
 
 #[async_trait]
@@ -242,16 +249,6 @@ impl SessionRepo for MemSessionRepo {
         session.updated_at = updated_at;
         session.last_activity_at = updated_at;
         Ok(session.clone())
-    }
-}
-
-#[cfg(test)]
-impl MemSessionRepo {
-    async fn set_metadata(&self, id: Uuid, metadata: serde_json::Value) {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
-            session.metadata = metadata;
-        }
     }
 }
 
@@ -941,12 +938,15 @@ async fn selected_model_metadata_is_used_for_future_turns() {
         .unwrap();
 
     h.session_repo
-        .set_metadata(session.id, serde_json::json!({"selected_model": "azure/gpt-5.4"}))
+        .set_metadata(
+            session.id,
+            serde_json::json!({"selected_model": "azure/gpt-5.4"}),
+        )
         .await;
 
-    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
-        "Model remembered",
-    )]));
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("Model remembered"),
+    ]));
     let model_handle = model.clone();
     let executor = h.turn_executor(
         model,
@@ -954,7 +954,10 @@ async fn selected_model_metadata_is_used_for_future_turns() {
         ToolRegistry::new(),
     );
 
-    executor.execute(session.id, "hello again", None).await.unwrap();
+    executor
+        .execute(session.id, "hello again", None)
+        .await
+        .unwrap();
 
     let requests = model_handle.requests().await;
     assert_eq!(requests[0].model.as_deref(), Some("azure/gpt-5.4"));

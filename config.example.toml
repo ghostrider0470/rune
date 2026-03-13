@@ -10,37 +10,74 @@ run_migrations = true
 # telegram_token = "YOUR_BOT_TOKEN"
 
 [models]
-default_model = "claude-sonnet-4-6"
+default_model = "oc-01-anthropic/claude-sonnet-4-6"
 
 [[models.providers]]
-name = "anthropic-azure"
+name = "oc-01-anthropic"
 kind = "anthropic"
-base_url = "https://your-resource.services.ai.azure.com/anthropic"
-# api_key = "your-key"  # or use api_key_env
-api_key_env = "ANTHROPIC_API_KEY"
+base_url = "https://oc-01-resource.services.ai.azure.com/anthropic"
+api_key_env = "OC_01_ANTHROPIC_API_KEY"
+api_version = "2023-06-01"
+models = ["claude-opus-4-6", "claude-sonnet-4-6"]
+
+[[models.providers]]
+name = "oc-01-openai"
+kind = "openai"
+base_url = "https://oc-01-resource.services.ai.azure.com/openai/v1"
+api_key_env = "OC_01_OPENAI_API_KEY"
+models = ["gpt-5.4", "gpt-5.4-pro"]
+
+[[models.providers]]
+name = "hamza-eastus2"
+kind = "openai"
+base_url = "https://hamza-eastus2.services.ai.azure.com/openai/v1"
+api_key_env = "HAMZA_EASTUS2_API_KEY"
+models = [
+  "gpt-5.4",
+  "gpt-5.4-pro",
+  "gpt-5.3-chat",
+  "grok-4-fast-reasoning",
+  "Kimi-K2.5",
+]
+
+[[models.providers]]
+name = "openai-codex"
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+models = ["gpt-5.3-codex"]
 
 [agents.defaults]
-model = "gpt-5.4"
+model = "oc-01-anthropic/claude-opus-4-6"
 workspace = "/home/hamza/.openclaw/workspace"
-system_prompt = "You are a helpful assistant."
+system_prompt = "You are Rune, a coding-focused assistant."
 
 [[agents.list]]
 id = "main"
 default = true
-model = "gpt-5.4"
+model = "oc-01-anthropic/claude-opus-4-6"
 workspace = "/home/hamza/.openclaw/workspace"
 
 [[agents.list]]
 id = "coder"
-model = "gpt-5.3-codex"
+model = "openai-codex/gpt-5.3-codex"
 workspace = "/home/hamza/.openclaw/workspace"
 
 [[agents.list]]
 id = "fast"
-model = "claude-sonnet-4-6"
+model = "oc-01-anthropic/claude-sonnet-4-6"
 
 [logging]
 level = "info"
+json = true
 
 [paths]
-workspace_root = "/path/to/workspace"
+db_dir = "/data/db"
+sessions_dir = "/data/sessions"
+memory_dir = "/data/memory"
+media_dir = "/data/media"
+skills_dir = "/data/skills"
+logs_dir = "/data/logs"
+backups_dir = "/data/backups"
+config_dir = "/config"
+secrets_dir = "/secrets"

@@ -1,9 +1,9 @@
-use rune_config::ModelProviderConfig;
+use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
     AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason, ModelError, ModelProvider,
-    OpenAiProvider, Role, provider_from_config,
+    OpenAiProvider, Role, RoutedModelProvider, provider_from_config,
 };
-use wiremock::matchers::{header, method};
+use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn simple_request() -> CompletionRequest {
@@ -340,4 +340,80 @@ fn missing_api_key_env_returns_auth_error() {
     };
     let err = provider_from_config(&cfg).unwrap_err();
     assert!(matches!(err, ModelError::Auth(_)));
+}
+
+#[tokio::test]
+async fn routed_provider_dispatches_by_provider_model_id_and_strips_prefix() {
+    let openai_server = MockServer::start().await;
+    let codex_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gpt-5.4"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&openai_server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gpt-5.3-codex"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&codex_server)
+        .await;
+
+    unsafe {
+        std::env::set_var("TEST_ROUTED_OPENAI_KEY", "fake-openai");
+        std::env::set_var("TEST_ROUTED_CODEX_KEY", "fake-codex");
+    }
+
+    let models = ModelsConfig {
+        default_model: Some("oc-01-openai/gpt-5.4".into()),
+        providers: vec![
+            ModelProviderConfig {
+                name: "oc-01-openai".into(),
+                kind: "openai".into(),
+                base_url: openai_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_ROUTED_OPENAI_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            ModelProviderConfig {
+                name: "openai-codex".into(),
+                kind: "openai".into(),
+                base_url: codex_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_ROUTED_CODEX_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.3-codex".into())],
+            },
+        ],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+
+    let codex_request = CompletionRequest {
+        model: Some("openai-codex/gpt-5.3-codex".into()),
+        ..simple_request()
+    };
+    provider.complete(&codex_request).await.unwrap();
+
+    let openai_request = CompletionRequest {
+        model: Some("oc-01-openai/gpt-5.4".into()),
+        ..simple_request()
+    };
+    provider.complete(&openai_request).await.unwrap();
+
+    unsafe {
+        std::env::remove_var("TEST_ROUTED_OPENAI_KEY");
+        std::env::remove_var("TEST_ROUTED_CODEX_KEY");
+    }
 }

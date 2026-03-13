@@ -332,20 +332,20 @@ impl SessionLoop {
             .count();
 
         let current_model = {
-            let session_id = {
-                let index = self.sessions.lock().await;
-                index.get(routing_key).copied()
+            let session = {
+                let session_id = {
+                    let index = self.sessions.lock().await;
+                    index.get(routing_key).copied()
+                };
+
+                if let Some(session_id) = session_id {
+                    self.session_repo.find_by_id(session_id).await.ok()
+                } else {
+                    self.session_repo.find_by_channel_ref(routing_key).await?
+                }
             };
 
-            if let Some(session_id) = session_id {
-                self.session_repo
-                    .find_by_id(session_id)
-                    .await
-                    .ok()
-                    .and_then(|session| selected_model(&session).map(str::to_owned))
-            } else {
-                None
-            }
+            session.and_then(|session| selected_model(&session).map(str::to_owned))
         };
 
         let default_model = self
@@ -363,11 +363,11 @@ impl SessionLoop {
         };
 
         let session_info = {
-            let index = self.sessions.lock().await;
-            index
-                .get(routing_key)
-                .map(|id| format!("session={id}"))
-                .unwrap_or_else(|| "session=none".to_string())
+            if let Some(session) = self.session_repo.find_by_channel_ref(routing_key).await? {
+                format!("session={}", session.id)
+            } else {
+                "session=none".to_string()
+            }
         };
 
         Ok(format!(
