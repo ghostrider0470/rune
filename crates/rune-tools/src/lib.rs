@@ -3,6 +3,7 @@
 mod definition;
 mod error;
 mod executor;
+pub mod file_tools;
 mod registry;
 mod stubs;
 

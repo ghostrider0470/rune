@@ -6,11 +6,20 @@ pub enum ToolError {
     #[error("unknown tool: {name}")]
     UnknownTool { name: String },
 
+    #[error("tool not found: {0}")]
+    NotFound(String),
+
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+
     #[error("invalid arguments for tool {tool}: {reason}")]
     InvalidArguments { tool: String, reason: String },
 
+    #[error("tool execution failed: {0}")]
+    ExecutionFailed(String),
+
     #[error("tool execution failed: {message}")]
-    ExecutionFailed { message: String },
+    ExecutionFailedStructured { message: String },
 
     #[error("approval required for tool {tool}")]
     ApprovalRequired { tool: String },
