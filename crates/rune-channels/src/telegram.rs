@@ -118,6 +118,33 @@ impl TelegramAdapter {
                 timestamp,
                 provider_message_id: msg.message_id.to_string(),
             }))
+        } else if let Some(cb) = &update.callback_query {
+            // Convert callback query (inline keyboard press) into a message event
+            let data = cb.data.clone().unwrap_or_default();
+            let chat_id = cb
+                .message
+                .as_ref()
+                .map(|m| m.chat.id.to_string())
+                .unwrap_or_default();
+            let message_id = cb
+                .message
+                .as_ref()
+                .map(|m| m.message_id.to_string())
+                .unwrap_or_default();
+
+            Some(InboundEvent::Message(ChannelMessage {
+                channel_id: ChannelId::new(),
+                raw_chat_id: chat_id,
+                sender: cb
+                    .from
+                    .username
+                    .clone()
+                    .unwrap_or_else(|| cb.from.id.to_string()),
+                content: data,
+                attachments: Vec::new(),
+                timestamp: Utc::now(),
+                provider_message_id: message_id,
+            }))
         } else {
             update
                 .edited_message
@@ -348,6 +375,73 @@ impl ChannelAdapter for TelegramAdapter {
                     delivered_at: Utc::now(),
                 })
             }
+            OutboundAction::SendTypingIndicator { chat_id, .. } => {
+                let url = format!("{}/sendChatAction", self.base_url);
+                let params = serde_json::json!({
+                    "chat_id": chat_id,
+                    "action": "typing",
+                });
+
+                let _ = self
+                    .client
+                    .post(&url)
+                    .json(&params)
+                    .send()
+                    .await;
+
+                Ok(DeliveryReceipt {
+                    provider_message_id: String::new(),
+                    delivered_at: Utc::now(),
+                })
+            }
+            OutboundAction::SendInlineKeyboard {
+                chat_id,
+                content,
+                buttons,
+                ..
+            } => {
+                let keyboard_buttons: Vec<serde_json::Value> = buttons
+                    .iter()
+                    .map(|(label, data)| {
+                        serde_json::json!([{
+                            "text": label,
+                            "callback_data": data,
+                        }])
+                    })
+                    .collect();
+
+                let url = format!("{}/sendMessage", self.base_url);
+                let params = serde_json::json!({
+                    "chat_id": chat_id,
+                    "text": content,
+                    "reply_markup": {
+                        "inline_keyboard": keyboard_buttons,
+                    },
+                });
+
+                let response = self
+                    .client
+                    .post(&url)
+                    .json(&params)
+                    .send()
+                    .await
+                    .map_err(|e| ChannelError::Provider {
+                        message: format!("failed to send inline keyboard: {e}"),
+                    })?;
+
+                let body: TelegramResponse<TelegramMessage> =
+                    response.json().await.map_err(|e| ChannelError::Provider {
+                        message: format!("failed to parse keyboard response: {e}"),
+                    })?;
+
+                Ok(DeliveryReceipt {
+                    provider_message_id: body
+                        .result
+                        .map(|m| m.message_id.to_string())
+                        .unwrap_or_default(),
+                    delivered_at: Utc::now(),
+                })
+            }
         }
     }
 }
@@ -366,6 +460,16 @@ struct TelegramUpdate {
     update_id: i64,
     message: Option<TelegramMessage>,
     edited_message: Option<TelegramMessage>,
+    callback_query: Option<TelegramCallbackQuery>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramCallbackQuery {
+    #[allow(dead_code)]
+    id: String,
+    from: TelegramUser,
+    message: Option<TelegramMessage>,
+    data: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -426,6 +530,7 @@ mod tests {
                 photo: None,
             }),
             edited_message: None,
+            callback_query: None,
         };
 
         let event = TelegramAdapter::convert_update(&update).unwrap();
@@ -453,6 +558,7 @@ mod tests {
                 document: None,
                 photo: None,
             }),
+            callback_query: None,
         };
 
         let event = TelegramAdapter::convert_update(&update).unwrap();
@@ -483,6 +589,7 @@ mod tests {
                 photo: None,
             }),
             edited_message: None,
+            callback_query: None,
         };
 
         assert!(TelegramAdapter::convert_update(&update).is_none());

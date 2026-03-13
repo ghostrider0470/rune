@@ -89,6 +89,19 @@ pub enum OutboundAction {
         chat_id: String,
         message_id: String,
     },
+    /// Send a typing indicator to show the bot is processing.
+    SendTypingIndicator {
+        channel_id: ChannelId,
+        chat_id: String,
+    },
+    /// Send a message with an inline keyboard for interactive selection.
+    SendInlineKeyboard {
+        channel_id: ChannelId,
+        chat_id: String,
+        content: String,
+        /// Each entry is (button_label, callback_data).
+        buttons: Vec<(String, String)>,
+    },
 }
 
 /// Channel-layer errors.
