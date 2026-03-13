@@ -30,6 +30,13 @@ pub trait SchedulerOps: Send + Sync {
     async fn get_runs(&self, job_id: &str) -> Result<String, String>;
     /// Get scheduler status summary.
     async fn status(&self) -> Result<String, String>;
+    /// Inject a wake event into the runtime scheduler/session layer.
+    async fn wake(
+        &self,
+        text: &str,
+        mode: Option<&str>,
+        context_messages: Option<u64>,
+    ) -> Result<String, String>;
 }
 
 /// Tool executor for cron/scheduler operations.
@@ -86,6 +93,21 @@ impl<S: SchedulerOps> CronToolExecutor<S> {
                 self.scheduler.get_runs(&id).await
             }
             "status" => self.scheduler.status().await,
+            "wake" => {
+                let text = call
+                    .arguments
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        ToolError::InvalidArgument("wake requires 'text' parameter".into())
+                    })?;
+                let mode = call.arguments.get("mode").and_then(|v| v.as_str());
+                let context_messages = call
+                    .arguments
+                    .get("contextMessages")
+                    .and_then(|v| v.as_u64());
+                self.scheduler.wake(text, mode, context_messages).await
+            }
             other => {
                 return Err(ToolError::InvalidArgument(format!(
                     "unknown cron action: {other}"
@@ -158,6 +180,16 @@ mod tests {
         }
         async fn status(&self) -> Result<String, String> {
             Ok("{\"totalJobs\": 1, \"enabled\": 1}".into())
+        }
+        async fn wake(
+            &self,
+            text: &str,
+            mode: Option<&str>,
+            context_messages: Option<u64>,
+        ) -> Result<String, String> {
+            Ok(format!(
+                "{{\"status\":\"queued\",\"text\":{text:?},\"mode\":{mode:?},\"contextMessages\":{context_messages:?}}}"
+            ))
         }
     }
 

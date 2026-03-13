@@ -46,6 +46,12 @@ pub enum Command {
         #[command(subcommand)]
         action: SessionsAction,
     },
+    /// Initialize a new workspace with default files.
+    Init {
+        /// Directory to initialize (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: String,
+    },
     /// Manage configuration.
     Config {
         #[command(subcommand)]

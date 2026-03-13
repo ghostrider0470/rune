@@ -13,6 +13,37 @@ use cli::{Command, ConfigAction, CronAction, GatewayAction, SessionsAction};
 use client::{GatewayClient, show_config, validate_config};
 use output::{OutputFormat, render};
 
+/// Initialize a workspace directory with default files.
+async fn init_workspace(path: &std::path::Path) -> Result<()> {
+    tokio::fs::create_dir_all(path)
+        .await
+        .with_context(|| format!("cannot create directory: {}", path.display()))?;
+    tokio::fs::create_dir_all(path.join("memory")).await?;
+
+    let files: &[(&str, &str)] = &[
+        ("AGENTS.md", "# AGENTS.md - Your Workspace\n\nAdd your agent configuration here.\n"),
+        ("SOUL.md", "# SOUL.md - Who You Are\n\nDefine your assistant's personality and style.\n"),
+        ("USER.md", "# USER.md - About Your Human\n\n- **Name:**\n- **Timezone:**\n- **Notes:**\n"),
+        ("TOOLS.md", "# TOOLS.md - Local Notes\n\nAdd environment-specific tool notes here.\n"),
+        ("MEMORY.md", "# MEMORY.md\n\nLong-term memory — curated and updated over time.\n"),
+    ];
+
+    let mut created = 0;
+    for (name, content) in files {
+        let file_path = path.join(name);
+        if !file_path.exists() {
+            tokio::fs::write(&file_path, content).await?;
+            created += 1;
+            println!("  ✓ Created {name}");
+        } else {
+            println!("  ○ {name} already exists, skipping");
+        }
+    }
+
+    println!("\nWorkspace initialized at {} ({created} files created)", path.display());
+    Ok(())
+}
+
 /// Execute the parsed CLI command against the configured gateway and print output.
 pub async fn run(cli: Cli) -> Result<()> {
     let format = OutputFormat::from_json_flag(cli.json);
@@ -50,8 +81,20 @@ pub async fn run(cli: Cli) -> Result<()> {
             println!("{}", render(&result, format));
         }
         Command::Doctor => {
-            let result = client.doctor().await?;
-            println!("{}", render(&result, format));
+            let ws_root = dirs::home_dir()
+                .map(|h| h.join(".rune/workspace"))
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let results = doctor::run_all_checks(None, Some(&cli.gateway_url), Some(&ws_root)).await;
+            let output = doctor::format_results(&results);
+            if matches!(format, OutputFormat::Json) {
+                println!("{}", serde_json::to_string_pretty(&results).unwrap_or_default());
+            } else {
+                print!("{output}");
+            }
+        }
+        Command::Init { path } => {
+            let target = std::path::Path::new(&path);
+            init_workspace(target).await?;
         }
         Command::Cron { action } => match action {
             CronAction::Status => {
