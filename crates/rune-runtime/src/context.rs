@@ -1,5 +1,5 @@
 use rune_core::TranscriptItem;
-use rune_models::{ChatMessage, Role, ToolCallRequest, FunctionCall};
+use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 
 use crate::compaction::CompactionStrategy;

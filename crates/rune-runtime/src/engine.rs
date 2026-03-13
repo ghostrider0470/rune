@@ -4,9 +4,9 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use rune_core::{SessionId, SessionKind, SessionStatus};
+use rune_store::StoreError;
 use rune_store::models::{NewSession, SessionRow};
 use rune_store::repos::SessionRepo;
-use rune_store::StoreError;
 
 use crate::error::RuntimeError;
 
@@ -55,19 +55,26 @@ impl SessionEngine {
 
     /// Transition a session to Ready status.
     pub async fn mark_ready(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.transition_session(session_id, "created", "ready").await
+        self.transition_session(session_id, "created", "ready")
+            .await
     }
 
     /// Transition a session to Running status.
     pub async fn mark_running(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.transition_session(session_id, "ready", "running").await
+        self.transition_session(session_id, "ready", "running")
+            .await
     }
 
     /// Transition a session to Completed status.
     pub async fn mark_completed(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
         // Running or waiting states can transition to completed
         let row = self.session_repo.find_by_id(session_id).await?;
-        let valid_from = ["running", "waiting_for_tool", "waiting_for_approval", "waiting_for_subagent"];
+        let valid_from = [
+            "running",
+            "waiting_for_tool",
+            "waiting_for_approval",
+            "waiting_for_subagent",
+        ];
         if !valid_from.contains(&row.status.as_str()) {
             return Err(RuntimeError::InvalidSessionState {
                 expected: "running|waiting_*".to_string(),

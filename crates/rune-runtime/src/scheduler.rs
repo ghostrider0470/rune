@@ -186,12 +186,7 @@ impl Scheduler {
     }
 
     /// Complete a job run.
-    pub async fn complete_run(
-        &self,
-        job_id: JobId,
-        status: JobRunStatus,
-        output: Option<String>,
-    ) {
+    pub async fn complete_run(&self, job_id: JobId, status: JobRunStatus, output: Option<String>) {
         let mut runs = self.runs.lock().await;
         // Find the most recent running entry for this job
         for run in runs.iter_mut().rev() {
@@ -224,11 +219,7 @@ impl Scheduler {
         let now = Utc::now();
         let jobs = self.jobs.lock().await;
         jobs.values()
-            .filter(|j| {
-                j.enabled
-                    && j.next_run_at
-                        .is_some_and(|next| next <= now)
-            })
+            .filter(|j| j.enabled && j.next_run_at.is_some_and(|next| next <= now))
             .cloned()
             .collect()
     }

@@ -5,6 +5,7 @@ mod context;
 mod engine;
 mod error;
 mod executor;
+pub mod memory;
 pub mod scheduler;
 mod usage;
 

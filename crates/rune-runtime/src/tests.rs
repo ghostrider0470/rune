@@ -6,13 +6,15 @@ use uuid::Uuid;
 
 use rune_core::{SessionKind, ToolCategory};
 use rune_models::{
-    CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider,
-    ToolCallRequest, FunctionCall, Usage,
+    CompletionRequest, CompletionResponse, FinishReason, FunctionCall, ModelError, ModelProvider,
+    ToolCallRequest, Usage,
 };
+use rune_store::StoreError;
 use rune_store::models::*;
 use rune_store::repos::*;
-use rune_store::StoreError;
-use rune_tools::{ToolCall, ToolDefinition as RtToolDefinition, ToolError, ToolExecutor, ToolRegistry, ToolResult};
+use rune_tools::{
+    ToolCall, ToolDefinition as RtToolDefinition, ToolError, ToolExecutor, ToolRegistry, ToolResult,
+};
 
 use crate::compaction::NoOpCompaction;
 use crate::context::ContextAssembler;
@@ -70,7 +72,10 @@ impl FakeModelProvider {
 
 #[async_trait]
 impl ModelProvider for FakeModelProvider {
-    async fn complete(&self, _request: &CompletionRequest) -> Result<CompletionResponse, ModelError> {
+    async fn complete(
+        &self,
+        _request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelError> {
         let mut responses = self.responses.lock().await;
         if responses.is_empty() {
             return Err(ModelError::Provider("no more fake responses".into()));
@@ -85,7 +90,10 @@ struct FailingModelProvider;
 
 #[async_trait]
 impl ModelProvider for FailingModelProvider {
-    async fn complete(&self, _request: &CompletionRequest) -> Result<CompletionResponse, ModelError> {
+    async fn complete(
+        &self,
+        _request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelError> {
         Err(ModelError::Transient("fake transient error".into()))
     }
 }
@@ -301,7 +309,10 @@ impl TranscriptRepo for MemTranscriptRepo {
         Ok(row)
     }
 
-    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<TranscriptItemRow>, StoreError> {
+    async fn list_by_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<TranscriptItemRow>, StoreError> {
         let items = self.items.lock().await;
         let mut result: Vec<_> = items
             .iter()
@@ -360,7 +371,10 @@ async fn full_turn_cycle_no_tools() {
     let engine = h.session_engine();
 
     // Create session
-    let session = engine.create_session(SessionKind::Direct, None).await.unwrap();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
     assert_eq!(session.status, "created");
 
     // Mark ready, then running
@@ -371,9 +385,16 @@ async fn full_turn_cycle_no_tools() {
     let model = Arc::new(FakeModelProvider::new(vec![
         FakeModelProvider::text_response("Hello! How can I help?"),
     ]));
-    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new());
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
 
-    let (turn, usage) = executor.execute(session.id, "Hi there", None).await.unwrap();
+    let (turn, usage) = executor
+        .execute(session.id, "Hi there", None)
+        .await
+        .unwrap();
 
     assert_eq!(turn.status, "completed");
     assert!(turn.ended_at.is_some());
@@ -394,7 +415,10 @@ async fn full_turn_cycle_no_tools() {
 async fn tool_loop_with_multi_step_calls() {
     let h = TestHarness::new();
     let engine = h.session_engine();
-    let session = engine.create_session(SessionKind::Direct, None).await.unwrap();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
@@ -420,7 +444,10 @@ async fn tool_loop_with_multi_step_calls() {
     ]));
 
     let executor = h.turn_executor(model, tool_exec, registry);
-    let (turn, usage) = executor.execute(session.id, "Read both files", None).await.unwrap();
+    let (turn, usage) = executor
+        .execute(session.id, "Read both files", None)
+        .await
+        .unwrap();
 
     assert_eq!(turn.status, "completed");
     assert_eq!(usage.model_calls, 3);
@@ -431,7 +458,14 @@ async fn tool_loop_with_multi_step_calls() {
     let kinds: Vec<&str> = transcript.iter().map(|t| t.kind.as_str()).collect();
     assert_eq!(
         kinds,
-        ["user_message", "tool_request", "tool_result", "tool_request", "tool_result", "assistant_message"]
+        [
+            "user_message",
+            "tool_request",
+            "tool_result",
+            "tool_request",
+            "tool_result",
+            "assistant_message"
+        ]
     );
 
     // Verify sequence ordering
@@ -444,12 +478,19 @@ async fn tool_loop_with_multi_step_calls() {
 async fn failed_model_call_sets_turn_failed() {
     let h = TestHarness::new();
     let engine = h.session_engine();
-    let session = engine.create_session(SessionKind::Direct, None).await.unwrap();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
     let model: Arc<dyn ModelProvider> = Arc::new(FailingModelProvider);
-    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new());
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
 
     let result = executor.execute(session.id, "Hello", None).await;
     assert!(result.is_err());
@@ -466,7 +507,10 @@ async fn session_status_transitions() {
     let h = TestHarness::new();
     let engine = h.session_engine();
 
-    let session = engine.create_session(SessionKind::Direct, None).await.unwrap();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
     assert_eq!(session.status, "created");
 
     let session = engine.mark_ready(session.id).await.unwrap();
@@ -484,7 +528,10 @@ async fn invalid_session_transition_rejected() {
     let h = TestHarness::new();
     let engine = h.session_engine();
 
-    let session = engine.create_session(SessionKind::Direct, None).await.unwrap();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
 
     // Can't go created → running (must go through ready)
     let err = engine.mark_running(session.id).await.unwrap_err();
@@ -498,14 +545,20 @@ async fn invalid_session_transition_rejected() {
 async fn max_tool_iterations_enforced() {
     let h = TestHarness::new();
     let engine = h.session_engine();
-    let session = engine.create_session(SessionKind::Direct, None).await.unwrap();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
     // Model always returns tool calls — should hit the limit
     let mut responses = Vec::new();
     for _ in 0..30 {
-        responses.push(FakeModelProvider::tool_call_response("read_file", r#"{"path":"x"}"#));
+        responses.push(FakeModelProvider::tool_call_response(
+            "read_file",
+            r#"{"path":"x"}"#,
+        ));
     }
     let model = Arc::new(FakeModelProvider::new(responses));
 
@@ -525,7 +578,10 @@ async fn max_tool_iterations_enforced() {
     let result = executor.execute(session.id, "loop", None).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.to_string().contains("max tool iterations (3)"), "got: {err}");
+    assert!(
+        err.to_string().contains("max tool iterations (3)"),
+        "got: {err}"
+    );
 }
 
 #[tokio::test]
@@ -541,7 +597,10 @@ async fn session_not_found_returns_error() {
 async fn usage_tracking_accumulates_across_tool_loop() {
     let h = TestHarness::new();
     let engine = h.session_engine();
-    let session = engine.create_session(SessionKind::Direct, None).await.unwrap();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 

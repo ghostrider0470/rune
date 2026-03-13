@@ -4,7 +4,7 @@ use chrono::Utc;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
-use rune_core::{ToolCallId, TranscriptItem, TurnId, TurnStatus, NormalizedMessage};
+use rune_core::{NormalizedMessage, ToolCallId, TranscriptItem, TurnId, TurnStatus};
 use rune_models::{CompletionRequest, ModelProvider};
 use rune_store::models::{NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
 use rune_store::repos::{TranscriptRepo, TurnRepo};
@@ -98,9 +98,7 @@ impl TurnExecutor {
 
         // 3. Run the model/tool loop
         let mut usage = UsageAccumulator::new();
-        let result = self
-            .run_turn_loop(session_id, turn_id, &mut usage)
-            .await;
+        let result = self.run_turn_loop(session_id, turn_id, &mut usage).await;
 
         // 4. Finalize turn status
         let (final_status, ended_at) = match &result {
@@ -144,10 +142,7 @@ impl TurnExecutor {
                 .await?;
 
             // Load transcript and assemble prompt
-            let transcript_rows = self
-                .transcript_repo
-                .list_by_session(session_id)
-                .await?;
+            let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;
 
             let messages = self
                 .context_assembler
