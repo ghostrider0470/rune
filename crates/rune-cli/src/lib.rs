@@ -9,16 +9,23 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 pub use cli::Cli;
-use cli::{ChannelsAction, Command, ConfigAction, CronAction, GatewayAction, SessionsAction};
+use cli::{
+    ChannelsAction, Command, ConfigAction, CronAction, GatewayAction, ModelsAction,
+    SessionsAction,
+};
 use client::{GatewayClient, show_config, validate_config};
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelStatusResponse,
-    OutputFormat, render,
+    ModelListResponse, ModelProviderDetail, ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
+fn load_config() -> rune_config::AppConfig {
+    rune_config::AppConfig::load(None::<&std::path::Path>).unwrap_or_default()
+}
+
 fn channel_details() -> Vec<ChannelDetail> {
-    let config = rune_config::AppConfig::load(None::<&std::path::Path>).unwrap_or_default();
+    let config = load_config();
     let telegram_configured = config
         .channels
         .telegram_token
@@ -51,6 +58,78 @@ fn channel_details() -> Vec<ChannelDetail> {
             Some("Set channels.telegram_token and enable telegram in channels.enabled".to_string())
         },
     }]
+}
+
+fn model_provider_details() -> ModelListResponse {
+    let config = load_config();
+    let default_model = config.models.default_model.clone().or_else(|| {
+        config
+            .agents
+            .default_agent()
+            .and_then(|agent| config.agents.effective_model(agent))
+            .map(ToOwned::to_owned)
+    });
+
+    let providers = config
+        .models
+        .providers
+        .iter()
+        .map(|provider| {
+            let credential_source = if provider
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+            {
+                "api_key".to_string()
+            } else if let Some(env_var) = provider.api_key_env.as_deref() {
+                format!("env:{env_var}")
+            } else {
+                "env:OPENAI_API_KEY".to_string()
+            };
+
+            let credentials_ready = provider
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+                || provider
+                    .api_key_env
+                    .as_deref()
+                    .and_then(|env_var| std::env::var(env_var).ok())
+                    .is_some_and(|value| !value.trim().is_empty())
+                || (provider.api_key_env.is_none()
+                    && std::env::var("OPENAI_API_KEY")
+                        .ok()
+                        .is_some_and(|value| !value.trim().is_empty()));
+
+            let notes = match provider.kind.as_str() {
+                "azure-openai" | "azure_openai" | "azure" if provider.deployment_name.is_none() || provider.api_version.is_none() => {
+                    Some("Azure OpenAI requires deployment_name and api_version for parity.".to_string())
+                }
+                "azure-foundry" if !provider.base_url.contains("services.ai.azure.com") => {
+                    Some("Azure Foundry is expected to use an Azure AI Foundry base URL.".to_string())
+                }
+                _ => None,
+            };
+
+            ModelProviderDetail {
+                name: provider.name.clone(),
+                kind: provider.kind.clone(),
+                base_url: provider.base_url.clone(),
+                default_model: default_model.clone(),
+                model_alias: provider.model_alias.clone(),
+                deployment_name: provider.deployment_name.clone(),
+                api_version: provider.api_version.clone(),
+                credential_source,
+                credentials_ready,
+                notes,
+            }
+        })
+        .collect();
+
+    ModelListResponse {
+        default_model,
+        providers,
+    }
 }
 
 async fn init_workspace(path: &std::path::Path) -> Result<()> {
@@ -247,6 +326,28 @@ pub async fn run(cli: Cli) -> Result<()> {
                 ChannelsAction::Capabilities => {
                     let result = ChannelCapabilitiesResponse { channels };
                     println!("{}", render(&result, format));
+                }
+            }
+        }
+        Command::Models { action } => {
+            let result = model_provider_details();
+            match action {
+                ModelsAction::List => {
+                    println!("{}", render(&result, format));
+                }
+                ModelsAction::Status => {
+                    let ready = result
+                        .providers
+                        .iter()
+                        .filter(|provider| provider.credentials_ready)
+                        .count();
+                    let status = ModelStatusResponse {
+                        default_model: result.default_model,
+                        total: result.providers.len(),
+                        credentials_ready: ready,
+                        providers: result.providers,
+                    };
+                    println!("{}", render(&status, format));
                 }
             }
         }

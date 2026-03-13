@@ -51,6 +51,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ChannelsAction,
     },
+    /// Inspect configured model providers and routing.
+    Models {
+        #[command(subcommand)]
+        action: ModelsAction,
+    },
     /// Initialize a new workspace with default files.
     Init {
         /// Directory to initialize (defaults to current directory).
@@ -172,6 +177,14 @@ pub enum ChannelsAction {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum ModelsAction {
+    /// List configured model providers and aliases.
+    List,
+    /// Show resolved default-model and credential readiness status.
+    Status,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ConfigAction {
     /// Dump the resolved configuration.
     Show,
@@ -264,6 +277,28 @@ mod tests {
             cli.command,
             Command::Channels {
                 action: ChannelsAction::Capabilities
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_models_list() {
+        let cli = Cli::try_parse_from(["rune", "models", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Models {
+                action: ModelsAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_models_status() {
+        let cli = Cli::try_parse_from(["rune", "models", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Models {
+                action: ModelsAction::Status
             }
         ));
     }

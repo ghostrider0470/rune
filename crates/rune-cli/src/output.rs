@@ -253,6 +253,97 @@ impl fmt::Display for ChannelCapabilitiesResponse {
     }
 }
 
+/// Per-provider model configuration detail.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelProviderDetail {
+    pub name: String,
+    pub kind: String,
+    pub base_url: String,
+    pub default_model: Option<String>,
+    pub model_alias: Option<String>,
+    pub deployment_name: Option<String>,
+    pub api_version: Option<String>,
+    pub credential_source: String,
+    pub credentials_ready: bool,
+    pub notes: Option<String>,
+}
+
+impl fmt::Display for ModelProviderDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} [{}] alias={} creds={} default={}",
+            self.name,
+            self.kind,
+            self.model_alias.as_deref().unwrap_or("-"),
+            if self.credentials_ready { "ready" } else { "missing" },
+            self.default_model.as_deref().unwrap_or("-")
+        )
+    }
+}
+
+/// Response for `models list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelListResponse {
+    pub default_model: Option<String>,
+    pub providers: Vec<ModelProviderDetail>,
+}
+
+impl fmt::Display for ModelListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(default_model) = &self.default_model {
+            writeln!(f, "Default model: {default_model}")?;
+        }
+        if self.providers.is_empty() {
+            return write!(f, "No model providers configured.");
+        }
+        for provider in &self.providers {
+            writeln!(f, "  {provider}")?;
+            writeln!(f, "    endpoint: {}", provider.base_url)?;
+            if let Some(deployment) = &provider.deployment_name {
+                writeln!(f, "    deployment: {deployment}")?;
+            }
+            if let Some(version) = &provider.api_version {
+                writeln!(f, "    api_version: {version}")?;
+            }
+            if let Some(notes) = &provider.notes {
+                writeln!(f, "    note: {notes}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Response for `models status`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelStatusResponse {
+    pub default_model: Option<String>,
+    pub total: usize,
+    pub credentials_ready: usize,
+    pub providers: Vec<ModelProviderDetail>,
+}
+
+impl fmt::Display for ModelStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Models")?;
+        writeln!(f, "  Total providers:      {}", self.total)?;
+        writeln!(f, "  Credentials ready:   {}", self.credentials_ready)?;
+        writeln!(
+            f,
+            "  Default model:       {}",
+            self.default_model.as_deref().unwrap_or("(not configured)")
+        )?;
+        for provider in &self.providers {
+            writeln!(f, "  - {provider}")?;
+            writeln!(f, "    credential_source: {}", provider.credential_source)?;
+            if let Some(notes) = &provider.notes {
+                writeln!(f, "    note: {notes}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Config validation result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigValidationResult {
@@ -506,5 +597,38 @@ mod tests {
         let out = render(&a, OutputFormat::Json);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["success"], true);
+    }
+
+    #[test]
+    fn render_model_list_empty() {
+        let response = ModelListResponse {
+            default_model: None,
+            providers: vec![],
+        };
+        assert_eq!(render(&response, OutputFormat::Human), "No model providers configured.");
+    }
+
+    #[test]
+    fn render_model_status_includes_default() {
+        let response = ModelStatusResponse {
+            default_model: Some("gpt-5.4".into()),
+            total: 1,
+            credentials_ready: 1,
+            providers: vec![ModelProviderDetail {
+                name: "azure-foundry".into(),
+                kind: "azure-foundry".into(),
+                base_url: "https://example.invalid".into(),
+                default_model: Some("gpt-5.4".into()),
+                model_alias: Some("fast".into()),
+                deployment_name: None,
+                api_version: None,
+                credential_source: "api_key".into(),
+                credentials_ready: true,
+                notes: None,
+            }],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Default model:       gpt-5.4"));
+        assert!(out.contains("credential_source: api_key"));
     }
 }
