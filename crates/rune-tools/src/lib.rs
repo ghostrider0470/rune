@@ -10,6 +10,7 @@ pub mod memory_tool;
 pub mod process_tool;
 mod registry;
 pub mod session_tool;
+pub mod spawn_tool;
 mod stubs;
 
 pub use definition::{ToolCall, ToolDefinition, ToolResult};
