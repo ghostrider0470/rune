@@ -332,7 +332,7 @@ pub struct JobUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Timelike;
+    use chrono::{TimeZone, Timelike};
 
     fn make_job(name: &str) -> Job {
         Job {
