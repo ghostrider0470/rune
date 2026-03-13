@@ -17,7 +17,8 @@ This document is the master instruction set for AI agents building this project 
 ## Project state
 
 - **15+ design docs** in `docs/` define architecture, parity contracts, protocols, and phasing
-- **Initial code now exists** — the Cargo workspace, crate skeletons, and early Wave 1 foundations are in progress; treat this document as the execution authority for sequencing and acceptance gates, not as a literal snapshot of repo emptiness
+- **A runnable implementation baseline already exists** — the Cargo workspace, crate graph, gateway/CLI binaries, PostgreSQL store wiring, embedded PostgreSQL fallback, runtime skeleton, and a growing parity-oriented test surface are already in the repo
+- **Treat this document as sequencing and acceptance authority** — not as a literal snapshot of an empty repository or planning-only state
 - **Crate prefix is `rune-`** — all crate names use `rune-*` (e.g., `rune-core`, `rune-runtime`)
 
 ---
@@ -53,6 +54,7 @@ apps/cli            (thin binary)
 Work is organized into **waves**. All agents within a wave run in parallel. A wave cannot start until the previous wave's outputs are committed and compiling.
 
 ### Wave 0 — Workspace bootstrap
+**Status:** completed baseline
 **Agents: 1**
 
 | Task | Details |
@@ -64,6 +66,8 @@ Work is organized into **waves**. All agents within a wave run in parallel. A wa
 | Verify | `cargo check` passes on the empty workspace |
 
 **Output gate:** `cargo check` succeeds. All 10 crates + 2 app binaries exist.
+
+**Current repo status:** satisfied. Treat Wave 0 as complete and build forward from the existing workspace unless a regression requires repair.
 
 ---
 

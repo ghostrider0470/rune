@@ -18,8 +18,9 @@ use cli::{
 use client::{GatewayClient, show_config, validate_config};
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
-    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, ModelListResponse,
-    ModelProviderDetail, ModelSetResponse, ModelStatusResponse, OutputFormat, render,
+    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, ModelAliasDetail,
+    ModelAliasesResponse, ModelListResponse, ModelProviderDetail, ModelSetResponse,
+    ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -242,6 +243,50 @@ fn channel_logs(filter: Option<&str>, limit: usize) -> ChannelLogsResponse {
     }
 }
 
+fn provider_credential_source(provider: &rune_config::ModelProviderConfig) -> String {
+    if provider
+        .api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty())
+    {
+        "api_key".to_string()
+    } else if let Some(env_var) = provider.api_key_env.as_deref() {
+        format!("env:{env_var}")
+    } else {
+        "env:OPENAI_API_KEY".to_string()
+    }
+}
+
+fn provider_credentials_ready(provider: &rune_config::ModelProviderConfig) -> bool {
+    provider
+        .api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty())
+        || provider
+            .api_key_env
+            .as_deref()
+            .and_then(|env_var| std::env::var(env_var).ok())
+            .is_some_and(|value| !value.trim().is_empty())
+        || (provider.api_key_env.is_none()
+            && std::env::var("OPENAI_API_KEY")
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty()))
+}
+
+fn provider_notes(provider: &rune_config::ModelProviderConfig) -> Option<String> {
+    match provider.kind.as_str() {
+        "azure-openai" | "azure_openai" | "azure"
+            if provider.deployment_name.is_none() || provider.api_version.is_none() =>
+        {
+            Some("Azure OpenAI requires deployment_name and api_version for parity.".to_string())
+        }
+        "azure-foundry" if !provider.base_url.contains("services.ai.azure.com") => Some(
+            "Azure Foundry is expected to use an Azure AI Foundry base URL.".to_string(),
+        ),
+        _ => None,
+    }
+}
+
 fn model_provider_details() -> ModelListResponse {
     let config = load_config();
     let default_model = config.models.default_model.clone().or_else(|| {
@@ -256,60 +301,17 @@ fn model_provider_details() -> ModelListResponse {
         .models
         .providers
         .iter()
-        .map(|provider| {
-            let credential_source = if provider
-                .api_key
-                .as_deref()
-                .is_some_and(|key| !key.trim().is_empty())
-            {
-                "api_key".to_string()
-            } else if let Some(env_var) = provider.api_key_env.as_deref() {
-                format!("env:{env_var}")
-            } else {
-                "env:OPENAI_API_KEY".to_string()
-            };
-
-            let credentials_ready = provider
-                .api_key
-                .as_deref()
-                .is_some_and(|key| !key.trim().is_empty())
-                || provider
-                    .api_key_env
-                    .as_deref()
-                    .and_then(|env_var| std::env::var(env_var).ok())
-                    .is_some_and(|value| !value.trim().is_empty())
-                || (provider.api_key_env.is_none()
-                    && std::env::var("OPENAI_API_KEY")
-                        .ok()
-                        .is_some_and(|value| !value.trim().is_empty()));
-
-            let notes = match provider.kind.as_str() {
-                "azure-openai" | "azure_openai" | "azure"
-                    if provider.deployment_name.is_none() || provider.api_version.is_none() =>
-                {
-                    Some(
-                        "Azure OpenAI requires deployment_name and api_version for parity."
-                            .to_string(),
-                    )
-                }
-                "azure-foundry" if !provider.base_url.contains("services.ai.azure.com") => Some(
-                    "Azure Foundry is expected to use an Azure AI Foundry base URL.".to_string(),
-                ),
-                _ => None,
-            };
-
-            ModelProviderDetail {
-                name: provider.name.clone(),
-                kind: provider.kind.clone(),
-                base_url: provider.base_url.clone(),
-                default_model: default_model.clone(),
-                model_alias: provider.model_alias.clone(),
-                deployment_name: provider.deployment_name.clone(),
-                api_version: provider.api_version.clone(),
-                credential_source,
-                credentials_ready,
-                notes,
-            }
+        .map(|provider| ModelProviderDetail {
+            name: provider.name.clone(),
+            kind: provider.kind.clone(),
+            base_url: provider.base_url.clone(),
+            default_model: default_model.clone(),
+            model_alias: provider.model_alias.clone(),
+            deployment_name: provider.deployment_name.clone(),
+            api_version: provider.api_version.clone(),
+            credential_source: provider_credential_source(provider),
+            credentials_ready: provider_credentials_ready(provider),
+            notes: provider_notes(provider),
         })
         .collect();
 
@@ -317,6 +319,30 @@ fn model_provider_details() -> ModelListResponse {
         default_model,
         providers,
     }
+}
+
+fn model_alias_details() -> ModelAliasesResponse {
+    let config = load_config();
+    let aliases = config
+        .models
+        .providers
+        .iter()
+        .filter_map(|provider| {
+            provider.model_alias.as_ref().map(|alias| ModelAliasDetail {
+                alias: alias.clone(),
+                provider: provider.name.clone(),
+                target_model: provider.models.first().map(|model| model.id().to_string()),
+                provider_kind: provider.kind.clone(),
+                base_url: provider.base_url.clone(),
+                deployment_name: provider.deployment_name.clone(),
+                api_version: provider.api_version.clone(),
+                credentials_ready: provider_credentials_ready(provider),
+                note: provider_notes(provider),
+            })
+        })
+        .collect();
+
+    ModelAliasesResponse { aliases }
 }
 
 async fn init_workspace(path: &std::path::Path) -> Result<()> {
@@ -543,6 +569,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                         providers: result.providers,
                     };
                     println!("{}", render(&status, format));
+                }
+                ModelsAction::Aliases => {
+                    let result = model_alias_details();
+                    println!("{}", render(&result, format));
                 }
                 ModelsAction::Set { model } => {
                     let result = set_default_model(&model)?;

@@ -11,7 +11,7 @@ Hard constraints:
 - functional parity with OpenClaw
 - full Azure compatibility
 - Docker-first deployment with mountable persistent storage
-- no coding in this planning folder; docs only
+- no speculative feature work beyond the parity inventory and operator instructions
 
 This inventory is organized by observable surface, not by idealized internal architecture.
 If a user, operator, channel adapter, tool client, scheduler, extension, or automation flow can observe it, it belongs here.

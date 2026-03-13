@@ -78,7 +78,7 @@ Interpretation rules:
 - [x] `models status`
 - [x] `models set`
 - [ ] `models set-image`
-- [ ] `models aliases`
+- [x] `models aliases`
 - [ ] `models auth`
 - [ ] `models fallbacks`
 - [ ] `models image-fallbacks`
@@ -262,7 +262,7 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 
 Implementation note (2026-03-13): the operator CLI now exposes a first inspectable channel surface with `channels list`, `channels status`, `channels capabilities`, `channels resolve`, and `channels logs`, backed by resolved config plus local Docker-first log-path inspection. `resolve` currently maps operator input/aliases onto the configured adapter inventory, and `logs` intentionally reports filesystem-backed log visibility from `paths.logs_dir` rather than pretending to offer remote provider log APIs. This still does not cover login/logout or dynamic registration, but it closes the earlier operator blind spot without violating parity constraints.
 
-Implementation note (2026-03-13): the operator CLI now also exposes `models list` and `models status`, giving a config-backed inventory of provider kind/base URL/default model/alias plus credential-readiness hints. This is intentionally read-only for now: it improves operator inspectability and Azure/provider debugging without pretending model mutation, auth-order management, or fallback editing are complete.
+Implementation note (2026-03-13): the operator CLI now also exposes `models list`, `models status`, `models set`, and `models aliases`, giving a config-backed inventory of provider kind/base URL/default model/alias plus credential-readiness hints, a validated local default-model update path, and a read-only alias map for operator routing visibility. This is still intentionally narrow: it improves operator inspectability and Azure/provider debugging without pretending auth-order management, fallback editing, or image-model routing are complete.
 
 Implementation note (2026-03-13): the operator CLI now exposes an initial read-only memory surface with `memory status`, `memory search`, and `memory get`, wired directly to the same file-oriented workspace conventions Rune/OpenClaw already use (`MEMORY.md` plus `memory/*.md`). This improves Tier-0 operator visibility without faking unfinished indexing infrastructure or inventing a remote gateway memory API before parity contracts for that surface are defined.
 

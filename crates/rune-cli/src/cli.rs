@@ -206,6 +206,8 @@ pub enum ModelsAction {
     List,
     /// Show resolved default-model and credential readiness status.
     Status,
+    /// Show configured alias-to-provider/model mappings.
+    Aliases,
     /// Set the default model in local config.toml after validating against configured inventory.
     Set {
         /// Model id to set. Accepts canonical `provider/model` ids and unambiguous short names.
@@ -409,6 +411,17 @@ mod tests {
             cli.command,
             Command::Models {
                 action: ModelsAction::Status
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_models_aliases() {
+        let cli = Cli::try_parse_from(["rune", "models", "aliases"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Models {
+                action: ModelsAction::Aliases
             }
         ));
     }

@@ -93,7 +93,11 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
         ),
         auth_enabled: state.config.gateway.auth_token.is_some(),
         configured_model_providers: state.config.models.providers.len(),
-        active_model_backend: "in-memory-demo",
+        active_model_backend: if state.config.models.providers.is_empty() {
+            "demo-echo"
+        } else {
+            "configured-provider"
+        },
         registered_tools: state.tool_count,
         session_count: sessions.len(),
         cron_job_count,

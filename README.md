@@ -37,7 +37,7 @@ Channels ──▶ Gateway ──▶ Session Engine ──▶ Model Provider
 | `rune-cli` | CLI interface |
 | `rune-testkit` | Test utilities and fixtures |
 
-**11 crates, 2 binaries, 200+ tests, 15k+ lines of Rust.**
+**10 library crates, 2 binaries, ~75 Rust source files, and an actively growing parity test surface.**
 
 ## Model Providers
 

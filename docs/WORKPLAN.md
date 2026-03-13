@@ -1,70 +1,27 @@
-# Overnight Workplan
+# Workplan Status
 
-Goal for morning: have a planning package that is materially closer to implementation, while preserving these hard constraints:
+This file is historical context, not current execution authority.
+
+The original overnight planning package described here has already been completed and materially superseded by:
+
+- the live Cargo workspace and crate skeletons
+- runnable gateway/CLI binaries
+- PostgreSQL-backed store wiring with embedded PostgreSQL fallback
+- initial runtime/tool/scheduler implementations
+- the current execution authority in `docs/AGENT-ORCHESTRATION.md`
+
+## Current interpretation
+
+Use this file as provenance for why the planning docs exist.
+Do **not** treat it as a no-coding or planning-only constraint anymore.
+
+## Original intent retained for reference
+
+The original goal was to establish a parity-first planning package while preserving these hard constraints:
 
 - functionally identical to OpenClaw
 - fully Azure compatible
 - Docker-friendly with mountable persistent filesystem
 - Rust-first runtime and extension path
 
-## Deliverables to prepare overnight
-
-1. `docs/CRATE-LAYOUT.md`
-   - Rust workspace/crate breakdown
-   - ownership boundaries
-   - dependency direction rules
-
-2. `docs/PROTOCOLS.md`
-   - internal runtime contracts
-   - gateway HTTP/WS surface outline
-   - tool execution contract
-   - session/event model
-
-3. `docs/PARITY-CONTRACTS.md`
-   - subsystem-level parity contracts
-   - invariants, required persisted state, failure expectations
-   - minimum evidence needed before claiming parity
-
-4. `docs/AZURE-COMPATIBILITY.md`
-   - Azure OpenAI / Foundry requirements
-   - Document Intelligence integration
-   - deployment/auth/config considerations
-   - Azure-specific parity constraints
-   - Azure data platform options (Cosmos DB, Azure Database family, storage services)
-
-5. `docs/DOCKER-DEPLOYMENT.md`
-   - container topology
-   - mount strategy
-   - persistent vs ephemeral state
-   - backup/restore expectations
-
-6. `docs/COMPETITIVE-RESEARCH.md`
-   - relevant Rust/open-source projects
-   - especially zeroclaw
-   - what to borrow / what to avoid
-
-7. `docs/IMPLEMENTATION-PHASES.md`
-   - strict delivery phases
-   - parity-first milestone sequence
-
-8. tighten existing docs
-   - `PLAN.md`
-   - `STACK.md`
-   - `DATABASES.md`
-   - `PARITY-SPEC.md`
-
-## Scope boundaries
-
-- no coding yet
-- no repo scaffolding yet
-- no speculative feature expansion beyond OpenClaw parity unless clearly marked optional
-
-## Priority order
-
-1. full OpenClaw parity inventory
-2. parity and protocol definitions
-3. crate architecture
-4. Azure compatibility
-5. Docker/mounted storage model
-6. ecosystem/competitive research
-7. implementation sequencing
+That planning work has already been converted into active implementation.

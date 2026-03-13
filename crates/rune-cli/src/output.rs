@@ -411,6 +411,70 @@ pub struct ModelStatusResponse {
     pub providers: Vec<ModelProviderDetail>,
 }
 
+/// Single configured model alias mapping.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAliasDetail {
+    pub alias: String,
+    pub provider: String,
+    pub target_model: Option<String>,
+    pub provider_kind: String,
+    pub base_url: String,
+    pub deployment_name: Option<String>,
+    pub api_version: Option<String>,
+    pub credentials_ready: bool,
+    pub note: Option<String>,
+}
+
+impl fmt::Display for ModelAliasDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} -> {}{} [{}] creds={}",
+            self.alias,
+            self.provider,
+            self
+                .target_model
+                .as_deref()
+                .map(|model| format!("/{model}"))
+                .unwrap_or_default(),
+            self.provider_kind,
+            if self.credentials_ready {
+                "ready"
+            } else {
+                "missing"
+            }
+        )
+    }
+}
+
+/// Response for `models aliases`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAliasesResponse {
+    pub aliases: Vec<ModelAliasDetail>,
+}
+
+impl fmt::Display for ModelAliasesResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.aliases.is_empty() {
+            return write!(f, "No model aliases configured.");
+        }
+        for alias in &self.aliases {
+            writeln!(f, "  {alias}")?;
+            writeln!(f, "    endpoint: {}", alias.base_url)?;
+            if let Some(deployment) = &alias.deployment_name {
+                writeln!(f, "    deployment: {deployment}")?;
+            }
+            if let Some(version) = &alias.api_version {
+                writeln!(f, "    api_version: {version}")?;
+            }
+            if let Some(note) = &alias.note {
+                writeln!(f, "    note: {note}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Result of updating local model routing configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSetResponse {
@@ -865,6 +929,26 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Default model:       gpt-5.4"));
         assert!(out.contains("credential_source: api_key"));
+    }
+
+    #[test]
+    fn render_model_aliases_response() {
+        let response = ModelAliasesResponse {
+            aliases: vec![ModelAliasDetail {
+                alias: "fast".into(),
+                provider: "hamza-eastus2".into(),
+                target_model: Some("gpt-5.4-mini".into()),
+                provider_kind: "azure-openai".into(),
+                base_url: "https://example.openai.azure.com".into(),
+                deployment_name: Some("gpt-5.4-mini".into()),
+                api_version: Some("2025-01-01-preview".into()),
+                credentials_ready: true,
+                note: None,
+            }],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("fast -> hamza-eastus2/gpt-5.4-mini"));
+        assert!(out.contains("deployment: gpt-5.4-mini"));
     }
 
     #[test]
