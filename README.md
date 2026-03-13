@@ -1,69 +1,200 @@
-# OpenClaw Rust Rewrite
+# Rune
 
-Goal: design and build a personal Rust rewrite of OpenClaw with near-identical end-user functionality, stronger performance characteristics, and an extension model that supports Rust-native skills/plugins.
+A Rust rewrite of [OpenClaw](https://github.com/openclaw/openclaw) — personal AI gateway with full Azure compatibility, Docker-first deployment, and PostgreSQL persistence.
 
-This repo is now in active implementation. The planning docs remain the execution authority for parity, sequencing, and acceptance criteria.
+## Quick Start
 
-## Current implementation snapshot
+### Prerequisites
 
-- Phase-1 skeleton is in place across the initial `rune-*` workspace and both app binaries.
-- `cargo test` and `cargo clippy --all-targets --all-features -- -D warnings` are currently green at the workspace root.
-- `apps/gateway` is no longer a stub exit path: it now boots a zero-config in-memory gateway/runtime stack so the current HTTP/WS control-plane surface is executable during development.
-- Current smoke-tested gateway surface:
-  - `GET /health`
-  - `GET /status`
-  - `GET /gateway/health`
-  - `POST /gateway/start`
-  - `POST /gateway/stop`
-  - `POST /gateway/restart`
-  - `GET /sessions`
-  - `POST /sessions`
-  - `GET /sessions/{id}`
-  - `POST /sessions/{id}/messages`
-  - `GET /sessions/{id}/transcript`
-- Current runnable CLI parity slice now includes:
-  - `rune gateway status`
-  - `rune gateway health`
-  - `rune gateway start`
-  - `rune gateway stop`
-  - `rune gateway restart`
-  - `rune status`
-  - `rune health`
-  - `rune doctor`
-  - `rune cron status`
-  - `rune cron list`
-  - `rune cron add --text ... --at ...`
-  - `rune cron edit <id> --name ...`
-  - `rune cron enable <id>` / `rune cron disable <id>`
-  - `rune cron rm <id>`
-  - `rune cron run <id>`
-  - `rune cron runs <id>`
-  - `rune sessions list`
-  - `rune sessions show <id>`
-  - `rune config show`
-  - `rune config validate`
-- Current smoke-tested runtime flow: create session -> send message -> receive assistant reply -> inspect persisted transcript.
-- This runnable path is transitional and intentionally zero-config. Release-target persistence remains PostgreSQL via Diesel + `diesel-async`, with embedded PostgreSQL fallback for local dev.
+- Rust 1.80+ (`rustup install stable`)
+- `build-essential`, `pkg-config`, `libssl-dev` (or use `rustls-tls` — default)
 
-## Current deliverables
+### Build
 
-- `docs/PLAN.md` — rewrite scope, architecture, subsystem breakdown, migration strategy
-- `docs/PARITY-SPEC.md` — governing parity definition and release gate
-- `docs/PARITY-CONTRACTS.md` — subsystem-by-subsystem implementation-grade parity contracts
-- `docs/PARITY-INVENTORY.md` — anchor OpenClaw surface inventory and parity map, including the evidence-tiered local CLI command-family census, sampled subcommand breadth, legacy-alias notes, minimum control-plane resource/event matrix, config-domain census, storage/database posture guardrails, and operator-visible parity priorities
-- `docs/FUNCTIONALITY-CHECKLIST.md` — detailed parity checklist
-- `docs/PROTOCOLS.md` — canonical entities, state machines, command/resource/event matrices, and runtime/control-plane protocol expectations
-- `docs/CRATE-LAYOUT.md` — Rust workspace/crate boundaries and dependency rules
-- `docs/AZURE-COMPATIBILITY.md` — Azure request semantics, storage mappings, hosting expectations, and release-blocker compatibility contract
-- `docs/DOCKER-DEPLOYMENT.md` — Docker-first persistent-state deployment model, restart/probe expectations, and mount-failure parity requirements
-- `docs/DATABASES.md` — storage/database options and phased recommendations
-- `docs/IMPLEMENTATION-PHASES.md` — parity-first sequencing and acceptance milestones
-- `docs/COMPETITIVE-RESEARCH.md` — external references and what to borrow/avoid
-- `notes/open-questions.md` — unresolved design decisions
+```bash
+cargo build --release
+```
 
-## Ground rules
+Binaries land in `target/release/`:
+- `rune` — CLI
+- `rune-gateway` — gateway server
 
-- Treat OpenClaw behavior as the compatibility target
-- Prefer protocol and behavior parity over implementation parity
-- Optimize for performance, observability, safety, and future extensibility
-- Keep code aligned to the docs, and reconcile stale contradictions explicitly when implementation overtakes old planning text
+### Configure
+
+```bash
+cp config.example.toml config.toml
+# Edit config.toml with your API keys and Telegram bot token
+```
+
+Key config sections:
+- `[models]` — model provider (Azure AI Foundry recommended for Azure)
+- `[channels]` — Telegram bot token
+- `[gateway]` — host/port
+- `[paths]` — workspace, data directories
+
+### Run (Development)
+
+**Foreground (see logs directly):**
+```bash
+cargo run --release --bin rune-gateway -- --config config.toml
+# Ctrl+C to stop
+```
+
+**Background via systemd (recommended — survives shell exits):**
+```bash
+# Install service (one-time)
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/rune-gateway.service << 'EOF'
+[Unit]
+Description=Rune Gateway
+
+[Service]
+Type=simple
+WorkingDirectory=/home/YOU/Development/rune
+ExecStart=/home/YOU/Development/rune/target/release/rune-gateway --config config.toml
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+
+# Start / stop / restart
+systemctl --user start rune-gateway
+systemctl --user stop rune-gateway
+systemctl --user restart rune-gateway
+
+# Check status
+systemctl --user status rune-gateway
+
+# Tail logs
+journalctl --user -u rune-gateway -f
+
+# Enable on boot
+systemctl --user enable rune-gateway
+```
+
+**Quick kill (any method):**
+```bash
+# If running in foreground: Ctrl+C
+# If systemd:
+systemctl --user stop rune-gateway
+# Nuclear option (kills gateway + embedded postgres):
+pkill -f rune-gateway; pkill postgres
+```
+
+### Run CLI
+
+```bash
+# Gateway management
+rune gateway status
+rune gateway health
+
+# Sessions
+rune sessions list
+rune sessions show <id>
+
+# Cron jobs
+rune cron list
+rune cron add --text "reminder" --at "2026-01-01T09:00:00"
+
+# Config
+rune config show
+rune config validate
+
+# Diagnostics
+rune doctor
+rune status
+rune health
+```
+
+### Database
+
+Rune uses **embedded PostgreSQL** by default — zero config needed. It downloads and manages its own PG instance in `.data/db/`.
+
+To use an external PostgreSQL instead:
+```toml
+[database]
+url = "postgres://user:pass@localhost/rune"
+```
+
+## Architecture
+
+```
+┌─────────────┐    ┌──────────────┐    ┌─────────────┐
+│  Telegram    │───▶│   Gateway    │───▶│   Model     │
+│  (channels)  │◀───│  (session    │◀───│  Provider   │
+│              │    │   loop)      │    │  (Azure AI) │
+└─────────────┘    └──────┬───────┘    └─────────────┘
+                          │
+                   ┌──────┴───────┐
+                   │  PostgreSQL  │
+                   │  (embedded   │
+                   │   or remote) │
+                   └──────────────┘
+```
+
+### Crate Layout
+
+| Crate | Purpose |
+|-------|---------|
+| `rune-config` | Configuration loading/validation |
+| `rune-store` | PostgreSQL persistence (Diesel) + embedded PG |
+| `rune-models` | Model providers (Azure AI Foundry, OpenAI, Anthropic) |
+| `rune-tools` | Tool registry + built-in tool executors |
+| `rune-runtime` | Session engine, turn executor, scheduler |
+| `rune-channels` | Channel adapters (Telegram, more planned) |
+| `rune-gateway` | Axum HTTP server, routes, middleware |
+| `rune-cli` | CLI commands |
+| `rune-testkit` | Test utilities |
+
+### Model Providers
+
+**Azure AI Foundry** (recommended) — single endpoint for all Azure-hosted models:
+```toml
+[[models.providers]]
+name = "azure-foundry"
+kind = "azure-foundry"
+base_url = "https://your-resource.services.ai.azure.com"
+api_key = "your-key"
+```
+
+Routes automatically: `claude-*` → Anthropic API, everything else → OpenAI API.
+
+Also supports: `openai`, `anthropic`, `azure-openai` provider kinds.
+
+## Development
+
+```bash
+# Run tests
+cargo test --workspace
+
+# Clippy (must pass with zero warnings)
+cargo clippy --workspace -- -D warnings
+
+# Check compilation
+cargo check --workspace
+```
+
+## Releases
+
+Tag-driven via GitHub Actions. Push a `v*` tag to build cross-compiled binaries:
+```bash
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+## Docs
+
+- `docs/PLAN.md` — scope and architecture
+- `docs/PARITY-INVENTORY.md` — OpenClaw feature parity map
+- `docs/AZURE-COMPATIBILITY.md` — Azure integration details
+- `docs/DOCKER-DEPLOYMENT.md` — Docker deployment model
+- `docs/PROTOCOLS.md` — protocol and API contracts
+
+## License
+
+Private — Horizon Tech d.o.o.
