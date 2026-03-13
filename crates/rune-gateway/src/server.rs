@@ -20,7 +20,7 @@ use crate::auth::bearer_auth;
 use crate::error::GatewayError;
 use crate::routes;
 use crate::state::{AppState, SessionEvent};
-use crate::supervisor::BackgroundSupervisor;
+use crate::supervisor::{BackgroundSupervisor, SupervisorDeps};
 use crate::ws;
 
 /// Handle returned by [`start`] to allow callers to await server completion.
@@ -92,6 +92,15 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         event_tx,
     };
 
+    let supervisor_deps = SupervisorDeps {
+        heartbeat: state.heartbeat.clone(),
+        scheduler: state.scheduler.clone(),
+        reminder_store: state.reminder_store.clone(),
+        session_engine: state.session_engine.clone(),
+        turn_executor: state.turn_executor.clone(),
+        workspace_root: state.config.agents.defaults.workspace.clone(),
+    };
+
     let app = build_router(state, auth_token);
 
     let listener = TcpListener::bind(addr)
@@ -101,7 +110,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     info!(%addr, "gateway listening");
 
     let mut supervisor = BackgroundSupervisor::new();
-    supervisor.start();
+    supervisor.start(supervisor_deps);
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let server_handle = tokio::spawn(async move {
