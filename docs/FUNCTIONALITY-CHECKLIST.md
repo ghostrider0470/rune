@@ -192,23 +192,25 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 - [ ] exact approval-prompt command presentation
 
 ### Scheduler/orchestration tools
-- [ ] `cron`
-- [ ] `sessions_list`
-- [ ] `sessions_history`
-- [ ] `sessions_send`
-- [ ] `sessions_spawn`
-- [ ] `subagents`
-- [ ] `session_status`
+- [x] `cron`
+- [x] `sessions_list`
+- [x] `sessions_history`
+- [x] `sessions_send`
+- [x] `sessions_spawn`
+- [x] `subagents`
+- [x] `session_status`
 
 ### Memory tools
-- [ ] `memory_search`
-- [ ] `memory_get`
+- [x] `memory_search`
+- [x] `memory_get`
 
 ### Tooling contract quality
-- [ ] stable names and schemas
+- [x] stable names and schemas
 - [ ] transcript/audit linkage
-- [ ] structured errors
-- [ ] durable handles for long-running work
+- [x] structured errors
+- [x] durable handles for long-running work
+
+Implementation note (2026-03-13): executable parity progress now includes concrete `cron`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `subagents`, `session_status`, `memory_search`, and `memory_get` tool executors in `rune-tools`, plus runtime scheduler primitives in `rune-runtime`. Remaining work is the full parity layer around approvals, transcript/audit linkage, persistence/restart durability, and exact OpenClaw semantics for `exec`/`process` plus runtime-backed subagent lifecycle persistence.
 
 ---
 
