@@ -297,8 +297,8 @@ Different Azure services fit different domains.
 ### Weaknesses for this rewrite
 
 - poor fit for parity-first local-first architecture
-- does not map naturally to the runtime’s likely relational/transactional core
-- increases divergence from SQLite-first development and testing
+- does not map naturally to the runtime’s relational/transactional core
+- increases divergence from the confirmed PostgreSQL-first architecture and embedded local fallback
 - can encourage redesigning behavior around document-store constraints
 - operational cost/model complexity is unnecessary for a single-operator or small deployment baseline
 
@@ -356,16 +356,16 @@ If a future enterprise/multi-tenant/server edition appears and scale-out Postgre
 ### Strengths
 
 - clean managed PostgreSQL option
-- best Azure-managed relational candidate if the runtime needs server-grade DB beyond SQLite
+- best Azure-managed relational candidate when the runtime needs server-grade DB beyond the embedded PostgreSQL local fallback
 - strong fit for operator-facing relational queries, job state, approvals, channel state, and metadata
 - relatively portable compared with Azure-specific NoSQL services
 - lowest lock-in among major Azure managed database options considered here
 
 ### Weaknesses
 
-- higher ops and cost than SQLite local mode
+- higher ops and cost than the embedded PostgreSQL local mode
 - unnecessary for single-node local-first baseline
-- requires deliberate schema/repository design to preserve SQLite compatibility
+- requires deliberate schema/repository design to preserve parity between embedded/local and managed PostgreSQL deployments
 
 ### Recommendation
 
@@ -383,8 +383,8 @@ Do **not** use it as a reason to eliminate filesystem-based memory/transcript la
 
 ### Verdict
 
-- **Local-first mode:** SQLite instead
-- **Hosted Azure mode:** strong recommended option when moving beyond embedded DB
+- **Local-first mode:** embedded PostgreSQL fallback instead
+- **Hosted Azure mode:** strong recommended option when moving beyond embedded local DB
 - **Primary recommendation:** preferred managed relational backend
 
 ---
@@ -399,10 +399,10 @@ Do **not** use it as a reason to eliminate filesystem-based memory/transcript la
 
 ### Weaknesses for this rewrite
 
-- weaker local-first symmetry with SQLite/Postgres path
+- weaker local-first symmetry with the embedded/local PostgreSQL path
 - higher portability friction than PostgreSQL
 - more likely to pull the runtime toward Azure/SQL Server-specific behavior
-- less natural fit for a Rust local-first project if the baseline stack is SQLite-first
+- less natural fit for a Rust local-first project when the baseline stack is PostgreSQL-first
 
 ### Recommendation
 
@@ -468,7 +468,7 @@ It should not replace the canonical local workspace/memory file semantics unless
 ### Weaknesses
 
 - slower and less elegant than local disk for hot-path database workloads
-- not ideal as the primary DB disk for SQLite under heavy concurrent write patterns
+- not ideal as the primary database disk for embedded PostgreSQL under heavy concurrent write patterns
 - may introduce latency for fine-grained filesystem-heavy operations
 
 ### Recommendation
@@ -486,7 +486,7 @@ Good uses:
 
 Use caution for:
 
-- SQLite primary database file
+- embedded PostgreSQL primary data directory
 - high-churn search indexes
 - write-heavy hot-path runtime metadata
 
@@ -508,9 +508,9 @@ This should remain the reference behavior and easiest development/testing path.
 
 ### Recommended stack
 
-- **Operational DB:** SQLite
+- **Operational DB:** embedded PostgreSQL via `postgresql_embedded`
 - **Durable files:** local filesystem / Docker bind mounts or named volumes
-- **Search:** SQLite FTS or Tantivy
+- **Search:** PostgreSQL FTS + pgvector when vector retrieval is enabled
 - **Media/attachments:** local mounted filesystem
 - **Memory docs:** local mounted filesystem
 - **Secrets:** env vars, local secret files, or OS-native secret store
@@ -538,7 +538,7 @@ This mode should preserve the same logical layout while adopting managed Azure s
 
 ### Recommended stack
 
-- **Operational DB:** SQLite on mounted persistent storage, or Azure Database for PostgreSQL if managed DB is preferred
+- **Operational DB:** embedded PostgreSQL on mounted persistent storage, or Azure Database for PostgreSQL if managed DB is preferred
 - **Mount-friendly durable files:** Azure Files
 - **Object/archive storage:** Azure Blob Storage
 - **Secrets:** Azure Key Vault references or injected env/file secrets
@@ -553,7 +553,7 @@ This mode should preserve the same logical layout while adopting managed Azure s
 
 ### Notes
 
-If SQLite is used in hosted Azure mode, place it on reliable persistent storage with clear backup expectations. For stronger multi-instance or server-grade durability, Azure Database for PostgreSQL is the better managed step up.
+If the embedded PostgreSQL fallback is used in hosted Azure mode, place it on reliable persistent storage with clear backup expectations. For stronger multi-instance or server-grade durability, Azure Database for PostgreSQL is the better managed step up.
 
 ---
 
@@ -715,14 +715,14 @@ These are the planning-default decisions unless later evidence forces a revision
 
 ### Default local-first mode
 
-- operational metadata: **SQLite**
+- operational metadata: **embedded PostgreSQL**
 - durable human-visible files: **mounted local filesystem**
 - object/archive payloads: **mounted local filesystem**, optionally copied elsewhere
-- search: **SQLite FTS first**, **Tantivy if needed**
+- search: **PostgreSQL FTS first**, **pgvector when semantic retrieval is enabled**
 
 ### Default hosted Azure mode
 
-- operational metadata: **Azure Database for PostgreSQL** when managed relational storage is desired; **SQLite on persistent volume** only for conservative single-instance deployments
+- operational metadata: **Azure Database for PostgreSQL** when managed relational storage is desired; **embedded PostgreSQL on persistent volume** only for conservative single-instance deployments
 - mount-style durable file domains: **Azure Files**
 - archive/backup/large-object payloads: **Azure Blob Storage**
 - secrets source: **Azure Key Vault** or equivalent secret injection path
@@ -759,9 +759,9 @@ Before claiming Azure compatibility, capture black-box evidence for:
 
 Use:
 
-- SQLite
+- embedded PostgreSQL
 - local mounted filesystem
-- embedded search
+- PostgreSQL-backed search
 
 Do not make Azure services mandatory for correctness.
 
@@ -797,8 +797,8 @@ For the planning phase, the safest architecture choice is:
 
 1. design around local-first logical storage domains
 2. make all durable paths mount-friendly
-3. support SQLite as the baseline operational store
-4. define PostgreSQL as the primary managed relational upgrade path
+3. support embedded PostgreSQL as the baseline operational store
+4. define Azure Database for PostgreSQL as the primary managed relational upgrade path
 5. treat Azure Files and Blob Storage as hosted deployment mappings, not core behavioral dependencies
 6. treat Azure request semantics and Document Intelligence as release-blocker parity surfaces
 

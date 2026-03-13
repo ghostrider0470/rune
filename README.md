@@ -5,7 +5,7 @@ A high-performance personal AI gateway written in Rust. Drop-in replacement for 
 ## Why Rune?
 
 - **Fast** — native Rust binary, no Node.js runtime overhead
-- **Azure-native** — Azure AI Foundry provider handles all Azure-hosted models (OpenAI + Anthropic) through a single endpoint
+- **Azure-native** — first-class Azure OpenAI and Azure AI Foundry compatibility, including deployment-aware request construction and Azure-specific auth/version handling
 - **Zero-config local dev** — embedded PostgreSQL starts automatically, no external DB needed
 - **Docker-first** — mountable persistent storage at `/data/*`, `/config/*`, `/secrets/*`
 - **OpenClaw compatible** — same user/operator experience, same channel integrations, same tool surface
@@ -37,7 +37,7 @@ Channels ──▶ Gateway ──▶ Session Engine ──▶ Model Provider
 | `rune-cli` | CLI interface |
 | `rune-testkit` | Test utilities and fixtures |
 
-**10 library crates, 2 binaries, ~75 Rust source files, and an actively growing parity test surface.**
+**10 library crates, 2 binaries, and an actively growing parity-oriented test surface.**
 
 ## Model Providers
 

@@ -30,9 +30,10 @@ use client::{
 };
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
-    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, HeartbeatPresenceResponse,
-    ModelAliasDetail, ModelAliasesResponse, ModelListResponse, ModelProviderDetail,
-    ModelSetResponse, ModelStatusResponse, OutputFormat, render,
+    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
+    DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary,
+    HeartbeatPresenceResponse, ModelAliasDetail, ModelAliasesResponse, ModelListResponse,
+    ModelProviderDetail, ModelSetResponse, ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -586,6 +587,45 @@ pub async fn run(cli: Cli) -> Result<()> {
             } else {
                 print!("{output}");
             }
+        }
+        Command::Dashboard => {
+            let gateway = client.status().await?;
+            let health = client.health().await?;
+            let cron = client.cron_status().await?;
+            let sessions = client.sessions_list(None, None, 5).await?;
+            let channels = channel_details();
+            let models = model_provider_details();
+            let memory = memory::status().await?;
+
+            let dashboard = DashboardResponse {
+                gateway,
+                health,
+                cron,
+                sessions: DashboardSessionsSummary {
+                    total: sessions.sessions.len(),
+                    sample: sessions.sessions,
+                },
+                models: DashboardModelsSummary {
+                    total: models.providers.len(),
+                    credentials_ready: models
+                        .providers
+                        .iter()
+                        .filter(|provider| provider.credentials_ready)
+                        .count(),
+                    default_model: models.default_model,
+                },
+                channels: DashboardChannelsSummary {
+                    total: channels.len(),
+                    enabled: channels.iter().filter(|channel| channel.enabled).count(),
+                    configured: channels.iter().filter(|channel| channel.configured).count(),
+                    ready: channels
+                        .iter()
+                        .filter(|channel| channel.status == "ready")
+                        .count(),
+                },
+                memory,
+            };
+            println!("{}", render(&dashboard, format));
         }
         Command::Init { path } => {
             let target = std::path::Path::new(&path);

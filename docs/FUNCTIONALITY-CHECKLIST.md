@@ -45,7 +45,7 @@ Interpretation rules:
 - [x] `openclaw doctor`
 - [x] `openclaw health`
 - [x] `openclaw status`
-- [ ] `openclaw dashboard`
+- [x] `openclaw dashboard`
 - [ ] `openclaw configure`
 - [ ] shell completion
 - [x] help/usage text aligned with actual command families
@@ -155,7 +155,7 @@ Interpretation rules:
 - [x] structured error envelopes
 - [x] durable IDs returned by create/mutate flows
 
-Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, `GET /reminders`, `POST /reminders`, `DELETE /reminders/{id}`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs|wake`), `system event`, `system heartbeat last|presence|enable|disable|status`, `reminders add|list|cancel`, `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|probe|discover|call|usage-cost|start|stop|restart|run`, with human and `--json` output modes. `gateway probe` now distinguishes bare process reachability via `/health` from protected RPC/operator reachability via `/status`; `gateway discover` surfaces the effective gateway/health/WebSocket URLs plus local config binding; `gateway call` provides a raw HTTP parity/debug surface; and `gateway usage-cost` currently reports persisted token aggregates only, explicitly stopping short of speculative provider-specific price calculation. `sessions list` now also has parity-shaped operator filters for `--active`, `--channel`, and `--limit`, backed by gateway query filtering and route coverage. `gateway run`/`daemon run` now exec the local `rune-gateway` binary in foreground mode and forward `RUNE_CONFIG` as `--config` when present. This is still not full parity, but it is now runnable instead of planning-only.
+Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, `GET /reminders`, `POST /reminders`, `DELETE /reminders/{id}`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, `dashboard`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs|wake`), `system event`, `system heartbeat last|presence|enable|disable|status`, `reminders add|list|cancel`, `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|probe|discover|call|usage-cost|start|stop|restart|run`, with human and `--json` output modes. `dashboard` is intentionally a compact operator summary rather than a speculative web UI: it aggregates gateway health/status, recent sessions, cron counts, model readiness, channel readiness, and memory state into one parity-shaped inspection command. `gateway probe` now distinguishes bare process reachability via `/health` from protected RPC/operator reachability via `/status`; `gateway discover` surfaces the effective gateway/health/WebSocket URLs plus local config binding; `gateway call` provides a raw HTTP parity/debug surface; and `gateway usage-cost` currently reports persisted token aggregates only, explicitly stopping short of speculative provider-specific price calculation. `sessions list` now also has parity-shaped operator filters for `--active`, `--channel`, and `--limit`, backed by gateway query filtering and route coverage. `gateway run`/`daemon run` now exec the local `rune-gateway` binary in foreground mode and forward `RUNE_CONFIG` as `--config` when present. This is still not full parity, but it is now runnable instead of planning-only.
 
 ---
 
@@ -348,7 +348,7 @@ Implementation note (2026-03-13): the operator CLI now exposes an initial read-o
 - [ ] local Docker deployment with restart durability
 - [ ] image stateless by design
 - [ ] fail-fast behavior for missing/unwritable persistent paths
-- [ ] SQLite reference mode
+- [ ] embedded PostgreSQL zero-config local mode
 - [ ] PostgreSQL managed mode
 - [ ] Azure Files mapping for file domains
 - [ ] Azure Blob mapping for archive/object domains

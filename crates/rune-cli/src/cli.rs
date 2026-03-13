@@ -41,6 +41,8 @@ pub enum Command {
     Health,
     /// Run diagnostic checks (config, connectivity, etc.).
     Doctor,
+    /// Show a compact operator dashboard summary.
+    Dashboard,
     /// Manage cron jobs.
     Cron {
         #[command(subcommand)]
@@ -424,6 +426,12 @@ mod tests {
     fn parse_doctor() {
         let cli = Cli::try_parse_from(["rune", "doctor"]).unwrap();
         assert!(matches!(cli.command, Command::Doctor));
+    }
+
+    #[test]
+    fn parse_dashboard() {
+        let cli = Cli::try_parse_from(["rune", "dashboard"]).unwrap();
+        assert!(matches!(cli.command, Command::Dashboard));
     }
 
     #[test]

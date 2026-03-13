@@ -522,6 +522,98 @@ impl fmt::Display for ModelStatusResponse {
     }
 }
 
+/// Compact operator dashboard summary spanning gateway, scheduler, sessions, models, channels, and memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardResponse {
+    pub gateway: StatusResponse,
+    pub health: HealthResponse,
+    pub cron: CronStatusResponse,
+    pub sessions: DashboardSessionsSummary,
+    pub models: DashboardModelsSummary,
+    pub channels: DashboardChannelsSummary,
+    pub memory: MemoryStatusResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardSessionsSummary {
+    pub total: usize,
+    pub sample: Vec<SessionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardModelsSummary {
+    pub total: usize,
+    pub credentials_ready: usize,
+    pub default_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardChannelsSummary {
+    pub total: usize,
+    pub enabled: usize,
+    pub configured: usize,
+    pub ready: usize,
+}
+
+impl fmt::Display for DashboardResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Dashboard")?;
+        writeln!(f, "  Gateway:   {}", self.gateway.status)?;
+        if let Some(version) = &self.gateway.version {
+            writeln!(f, "  Version:   {version}")?;
+        }
+        if let Some(uptime_seconds) = self.gateway.uptime_seconds {
+            writeln!(f, "  Uptime:    {uptime_seconds}s")?;
+        }
+        writeln!(f, "  Health:    {}", if self.health.healthy { "healthy" } else { "degraded" })?;
+        writeln!(f, "  Sessions:  {} total", self.sessions.total)?;
+        if !self.sessions.sample.is_empty() {
+            writeln!(f, "  Recent:")?;
+            for session in &self.sessions.sample {
+                writeln!(f, "    - {session}")?;
+            }
+        }
+        writeln!(
+            f,
+            "  Cron:      {} total / {} enabled / {} due",
+            self.cron.total_jobs, self.cron.enabled_jobs, self.cron.due_jobs
+        )?;
+        writeln!(
+            f,
+            "  Models:    {} providers / {} ready",
+            self.models.total, self.models.credentials_ready
+        )?;
+        writeln!(
+            f,
+            "  Default:   {}",
+            self.models
+                .default_model
+                .as_deref()
+                .unwrap_or("(not configured)")
+        )?;
+        writeln!(
+            f,
+            "  Channels:  {} total / {} enabled / {} configured / {} ready",
+            self.channels.total, self.channels.enabled, self.channels.configured, self.channels.ready
+        )?;
+        writeln!(
+            f,
+            "  Memory:    daily={} long-term={} semantic-search={}",
+            self.memory.daily_file_count,
+            self.memory.long_term_exists,
+            self.memory.semantic_search_enabled
+        )?;
+        write!(
+            f,
+            "  Latest:    {}",
+            self.memory
+                .latest_daily_file
+                .as_deref()
+                .unwrap_or("(none)")
+        )
+    }
+}
+
 /// Summary status for workspace memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryStatusResponse {
@@ -1337,5 +1429,57 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("MEMORY.md (from line 1, 2 lines)"));
         assert!(out.contains("Entry"));
+    }
+
+    #[test]
+    fn render_dashboard_response() {
+        let response = DashboardResponse {
+            gateway: StatusResponse {
+                status: "running".into(),
+                version: Some("0.1.0".into()),
+                uptime_seconds: Some(42),
+            },
+            health: HealthResponse {
+                healthy: true,
+                message: "Gateway is healthy.".into(),
+            },
+            cron: CronStatusResponse {
+                total_jobs: 3,
+                enabled_jobs: 2,
+                due_jobs: 1,
+            },
+            sessions: DashboardSessionsSummary {
+                total: 2,
+                sample: vec![SessionSummary {
+                    id: "session-1".into(),
+                    status: "running".into(),
+                    channel: Some("telegram".into()),
+                    created_at: None,
+                }],
+            },
+            models: DashboardModelsSummary {
+                total: 2,
+                credentials_ready: 1,
+                default_model: Some("hamza-eastus2/gpt-5.4".into()),
+            },
+            channels: DashboardChannelsSummary {
+                total: 1,
+                enabled: 1,
+                configured: 1,
+                ready: 1,
+            },
+            memory: MemoryStatusResponse {
+                workspace_root: "/workspace".into(),
+                memory_dir: "/workspace/memory".into(),
+                semantic_search_enabled: true,
+                long_term_exists: true,
+                daily_file_count: 4,
+                latest_daily_file: Some("memory/2026-03-13.md".into()),
+            },
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Dashboard"));
+        assert!(out.contains("Cron:      3 total / 2 enabled / 1 due"));
+        assert!(out.contains("Default:   hamza-eastus2/gpt-5.4"));
     }
 }
