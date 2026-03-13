@@ -91,40 +91,47 @@ impl FileToolExecutor {
             })
     }
 
+    fn required_str_any<'a>(call: &'a ToolCall, keys: &[&str]) -> Result<&'a str, ToolError> {
+        keys.iter()
+            .find_map(|key| call.arguments.get(*key).and_then(|value| value.as_str()))
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: call.tool_name.clone(),
+                reason: format!("missing required parameter: one of {}", keys.join(", ")),
+            })
+    }
+
+    fn optional_u64_any(call: &ToolCall, keys: &[&str]) -> Option<u64> {
+        keys.iter()
+            .find_map(|key| call.arguments.get(*key).and_then(|value| value.as_u64()))
+    }
+
     #[instrument(skip(self, call), fields(tool = %call.tool_name))]
     async fn read_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let path_str = Self::required_str(call, "path")?;
+        let path_str = Self::required_str_any(call, &["path", "file_path"])?;
         let path = self.resolve_path(&call.tool_name, path_str)?;
 
         let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
             Self::execution_failed(format!("failed to read {}: {e}", path.display()))
         })?;
 
-        let offset = call
-            .arguments
-            .get("offset")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1) as usize;
-        let limit = call
-            .arguments
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize);
+        let offset = Self::optional_u64_any(call, &["offset", "from"]).unwrap_or(1) as usize;
+        let limit = Self::optional_u64_any(call, &["limit", "lines"]).map(|v| v as usize);
 
         let lines: Vec<&str> = content.lines().collect();
         let start = offset.saturating_sub(1).min(lines.len());
         let end = limit.map_or(lines.len(), |value| (start + value).min(lines.len()));
+        let output = lines[start..end].join("\n");
 
         Ok(ToolResult {
             tool_call_id: call.tool_call_id,
-            output: lines[start..end].join("\n"),
+            output: truncate_read_output(&output),
             is_error: false,
         })
     }
 
     #[instrument(skip(self, call), fields(tool = %call.tool_name))]
     async fn write_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let path_str = Self::required_str(call, "path")?;
+        let path_str = Self::required_str_any(call, &["path", "file_path"])?;
         let content = Self::required_str(call, "content")?;
         let path = self.resolve_path(&call.tool_name, path_str)?;
 
@@ -150,9 +157,9 @@ impl FileToolExecutor {
 
     #[instrument(skip(self, call), fields(tool = %call.tool_name))]
     async fn edit_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let path_str = Self::required_str(call, "path")?;
-        let old_string = Self::required_str(call, "old_string")?;
-        let new_string = Self::required_str(call, "new_string")?;
+        let path_str = Self::required_str_any(call, &["path", "file_path"])?;
+        let old_string = Self::required_str_any(call, &["old_string", "oldText", "old_text"])?;
+        let new_string = Self::required_str_any(call, &["new_string", "newText", "new_text"])?;
         let path = self.resolve_path(&call.tool_name, path_str)?;
 
         let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
@@ -227,6 +234,23 @@ impl FileToolExecutor {
     }
 }
 
+fn truncate_read_output(content: &str) -> String {
+    const MAX_BYTES: usize = 50_000;
+    const MAX_LINES: usize = 2_000;
+
+    let mut truncated = content
+        .lines()
+        .take(MAX_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if truncated.len() > MAX_BYTES {
+        truncated.truncate(MAX_BYTES);
+    }
+
+    truncated
+}
+
 #[async_trait]
 impl ToolExecutor for FileToolExecutor {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
@@ -294,6 +318,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_accepts_openclaw_aliases() {
+        let tmp = TempDir::new().expect("tempdir");
+        let exec = FileToolExecutor::new(tmp.path());
+
+        let write_call = make_call(
+            "write",
+            serde_json::json!({"file_path": "alias.txt", "content": "a\nb\nc\nd"}),
+        );
+        exec.execute(write_call).await.expect("write succeeds");
+
+        let read_call = make_call(
+            "read",
+            serde_json::json!({"file_path": "alias.txt", "from": 2, "lines": 2}),
+        );
+        let result = exec.execute(read_call).await.expect("read succeeds");
+        assert_eq!(result.output, "b\nc");
+    }
+
+    #[tokio::test]
     async fn edit_replaces_exact_match() {
         let tmp = TempDir::new().expect("tempdir");
         let exec = FileToolExecutor::new(tmp.path());
@@ -314,6 +357,29 @@ mod tests {
         let read_call = make_call("read_file", serde_json::json!({"path": "edit.txt"}));
         let result = exec.execute(read_call).await.expect("read succeeds");
         assert_eq!(result.output, "foo qux baz");
+    }
+
+    #[tokio::test]
+    async fn edit_accepts_openclaw_aliases() {
+        let tmp = TempDir::new().expect("tempdir");
+        let exec = FileToolExecutor::new(tmp.path());
+
+        let write_call = make_call(
+            "write",
+            serde_json::json!({"file_path": "edit_alias.txt", "content": "one two three"}),
+        );
+        exec.execute(write_call).await.expect("write succeeds");
+
+        let edit_call = make_call(
+            "edit",
+            serde_json::json!({"file_path": "edit_alias.txt", "oldText": "two", "newText": "TWO"}),
+        );
+        let result = exec.execute(edit_call).await.expect("edit succeeds");
+        assert!(!result.is_error);
+
+        let read_call = make_call("read", serde_json::json!({"path": "edit_alias.txt"}));
+        let result = exec.execute(read_call).await.expect("read succeeds");
+        assert_eq!(result.output, "one TWO three");
     }
 
     #[tokio::test]
@@ -408,5 +474,16 @@ mod tests {
         let call = make_call("list_files", serde_json::json!({"path": "."}));
         let result = exec.execute(call).await.expect("list succeeds");
         assert_eq!(result.output, "alpha.txt\nmiddle.txt\nnested/\nzebra.txt");
+    }
+
+    #[test]
+    fn truncate_read_output_caps_lines_and_bytes() {
+        let many_lines = (0..2_100).map(|i| format!("line-{i}")).collect::<Vec<_>>().join("\n");
+        let truncated = truncate_read_output(&many_lines);
+        assert_eq!(truncated.lines().count(), 2_000);
+
+        let huge = "x".repeat(60_000);
+        let truncated = truncate_read_output(&huge);
+        assert_eq!(truncated.len(), 50_000);
     }
 }

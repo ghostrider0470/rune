@@ -178,11 +178,11 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 ## 4. Tool system
 
 ### File tools
-- [ ] `read`
-- [ ] `write`
-- [ ] `edit`
-- [ ] exact truncation/offset semantics
-- [ ] exact-match edit failure behavior
+- [x] `read`
+- [x] `write`
+- [x] `edit`
+- [x] exact truncation/offset semantics
+- [x] exact-match edit failure behavior
 
 ### Process tools
 - [ ] `exec`
@@ -210,7 +210,7 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 - [x] structured errors
 - [x] durable handles for long-running work
 
-Implementation note (2026-03-13): executable parity progress now includes concrete `cron`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `subagents`, `session_status`, `memory_search`, and `memory_get` tool executors in `rune-tools`, plus runtime scheduler primitives in `rune-runtime`. Remaining work is the full parity layer around approvals, transcript/audit linkage, persistence/restart durability, and exact OpenClaw semantics for `exec`/`process` plus runtime-backed subagent lifecycle persistence.
+Implementation note (2026-03-13): executable parity progress now includes concrete `read`, `write`, `edit`, `cron`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `subagents`, `session_status`, `memory_search`, and `memory_get` tool executors in `rune-tools`, plus runtime scheduler primitives in `rune-runtime`. File tools now accept OpenClaw-compatible argument aliases (`file_path`, `oldText`, `newText`, `from`, `lines`) and `read` enforces the 2000-line / 50KB truncation contract. Remaining work is the full parity layer around approvals, transcript/audit linkage, persistence/restart durability, and exact OpenClaw semantics for `exec`/`process` plus runtime-backed subagent lifecycle persistence.
 
 ---
 
