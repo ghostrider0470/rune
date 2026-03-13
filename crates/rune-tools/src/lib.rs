@@ -2,6 +2,7 @@
 
 mod definition;
 mod error;
+pub mod exec_tool;
 mod executor;
 pub mod file_tools;
 mod registry;
