@@ -1,5 +1,6 @@
 #![doc = "Tool system skeleton for Rune: definitions, registry, executor trait, and built-in stubs."]
 
+pub mod cron_tool;
 mod definition;
 mod error;
 pub mod exec_tool;
