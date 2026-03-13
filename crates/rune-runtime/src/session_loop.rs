@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
+const HELP_TEXT: &str = "Rune commands:\n/start - show welcome text\n/help - show this help\n/status - show runtime status";
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
 use rune_core::SessionKind;
 use rune_store::models::SessionRow;
@@ -72,6 +73,10 @@ impl SessionLoop {
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
         match event {
             InboundEvent::Message(msg) => {
+                if self.handle_command(&msg).await? {
+                    return Ok(());
+                }
+
                 let routing_key = format!("{}:{}", msg.channel_id, msg.sender);
                 debug!(routing_key = %routing_key, "received inbound message");
 
@@ -129,6 +134,54 @@ impl SessionLoop {
         }
 
         Ok(())
+    }
+
+    async fn handle_command(&self, msg: &rune_channels::ChannelMessage) -> Result<bool, RuntimeError> {
+        let command = msg.content.trim();
+        let response = match command {
+            "/start" => Some(
+                "Rune is online. Send a message to start a session, or use /help for commands."
+                    .to_string(),
+            ),
+            "/help" => Some(HELP_TEXT.to_string()),
+            "/status" => Some(self.render_status().await?),
+            _ => None,
+        };
+
+        if let Some(content) = response {
+            let ch = self.channel.lock().await;
+            if let Err(e) = ch
+                .send(OutboundAction::Reply {
+                    channel_id: msg.channel_id,
+                    chat_id: msg.raw_chat_id.clone(),
+                    reply_to: msg.provider_message_id.clone(),
+                    content,
+                })
+                .await
+            {
+                error!(error = %e, command = %command, "failed to send command reply");
+            }
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    async fn render_status(&self) -> Result<String, RuntimeError> {
+        let sessions = self.session_repo.list(10, 0).await?;
+        let active = sessions
+            .iter()
+            .filter(|s| matches!(s.status.as_str(), "created" | "ready" | "running" | "waiting_for_tool" | "waiting_for_approval" | "waiting_for_subagent"))
+            .count();
+
+        let newest = sessions.first().map(|s| {
+            format!("latest={} {}", s.id, s.status)
+        });
+
+        Ok(match newest {
+            Some(newest) => format!("Rune status: ok | sessions={} | active={} | {}", sessions.len(), active, newest),
+            None => "Rune status: ok | sessions=0 | active=0 | no sessions yet".to_string(),
+        })
     }
 
     async fn find_or_create_session(
