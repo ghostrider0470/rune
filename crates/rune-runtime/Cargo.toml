@@ -14,6 +14,8 @@ rune-models = { path = "../rune-models" }
 rune-tools = { path = "../rune-tools" }
 async-trait.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
+cron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

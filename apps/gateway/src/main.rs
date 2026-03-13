@@ -12,8 +12,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tokio::signal;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
+use rune_channels::TelegramAdapter;
 use rune_config::AppConfig;
 use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
@@ -22,6 +23,7 @@ use rune_models::{
 };
 use rune_runtime::{
     ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor, scheduler::Scheduler,
+    session_loop::SessionLoop,
 };
 use rune_store::EmbeddedPg;
 use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
@@ -51,8 +53,20 @@ async fn main() -> Result<()> {
         }
     }
 
-    let (services, _embedded_pg) = build_services(config).await?;
+    let (services, _embedded_pg, session_loop) = build_services(config).await?;
     let handle = start(services).await.context("failed to start gateway")?;
+
+    // Start the session loop (channel listener) if a channel is configured.
+    if let Some(loop_handle) = session_loop {
+        let loop_handle = Arc::new(loop_handle);
+        let lh = loop_handle.clone();
+        tokio::spawn(async move {
+            if let Err(e) = lh.run().await {
+                error!(error = %e, "session loop exited with error");
+            }
+        });
+        info!("session loop started for Telegram channel");
+    }
 
     shutdown_signal().await;
     info!("shutdown signal received");
@@ -109,7 +123,9 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
 
 /// Build all services, returning an optional `EmbeddedPg` handle that
 /// must be kept alive for the lifetime of the process.
-async fn build_services(config: AppConfig) -> Result<(Services, Option<EmbeddedPg>)> {
+async fn build_services(
+    config: AppConfig,
+) -> Result<(Services, Option<EmbeddedPg>, Option<SessionLoop>)> {
     // Resolve the database URL — either from config or by starting embedded PG.
     let (database_url, embedded_pg) = if let Some(ref url) = config.database.database_url {
         info!("using external PostgreSQL");
@@ -175,6 +191,25 @@ async fn build_services(config: AppConfig) -> Result<(Services, Option<EmbeddedP
         Arc::new(NoOpCompaction),
     ));
 
+    // Build session loop if Telegram channel is configured.
+    let session_loop = if let Some(ref tg) = config.channels.telegram_token {
+        if !tg.is_empty() {
+            info!(token_len = tg.len(), "configuring Telegram channel adapter");
+            let adapter = TelegramAdapter::new(tg);
+            Some(SessionLoop::new(
+                session_engine.clone(),
+                turn_executor.clone(),
+                session_repo.clone(),
+                Box::new(adapter),
+            ))
+        } else {
+            None
+        }
+    } else {
+        info!("no Telegram bot token configured — session loop disabled");
+        None
+    };
+
     let services = Services {
         config,
         session_engine,
@@ -186,7 +221,7 @@ async fn build_services(config: AppConfig) -> Result<(Services, Option<EmbeddedP
         tool_count,
     };
 
-    Ok((services, embedded_pg))
+    Ok((services, embedded_pg, session_loop))
 }
 
 async fn shutdown_signal() {

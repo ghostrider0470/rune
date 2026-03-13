@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
+use cron::Schedule as CronSchedule;
 use rune_core::JobId;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Schedule definition for a job.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,29 +226,91 @@ impl Scheduler {
             .collect()
     }
 
-    /// Compute and set the next run time for interval-based jobs.
+    /// Compute and set the next run time for a job after a firing attempt.
     pub async fn advance_next_run(&self, id: &JobId) {
         let mut jobs = self.jobs.lock().await;
         if let Some(job) = jobs.get_mut(id) {
+            let now = Utc::now();
+            let base = job.last_run_at.or(job.next_run_at).unwrap_or(now);
             match &job.schedule {
                 Schedule::At { .. } => {
                     // One-shot: disable after firing
                     job.enabled = false;
                     job.next_run_at = None;
                 }
-                Schedule::Every { every_ms, .. } => {
-                    let now = Utc::now();
-                    let next = now + chrono::Duration::milliseconds(*every_ms as i64);
-                    job.next_run_at = Some(next);
+                Schedule::Every {
+                    every_ms,
+                    anchor_ms,
+                } => {
+                    job.next_run_at =
+                        Some(compute_next_interval_run(*every_ms, *anchor_ms, base, now));
                 }
-                Schedule::Cron { .. } => {
-                    // TODO: parse cron expression to compute next fire time
-                    // For now, set 1 hour ahead as placeholder
-                    let now = Utc::now();
-                    job.next_run_at = Some(now + chrono::Duration::hours(1));
+                Schedule::Cron { expr, tz } => {
+                    job.next_run_at = compute_next_cron_run(expr, tz.as_deref(), base, now);
+                    if job.next_run_at.is_none() {
+                        warn!(job_id = %job.id, expr = %expr, tz = ?tz, "failed to compute next cron run; disabling job");
+                        job.enabled = false;
+                    }
                 }
             }
         }
+    }
+}
+
+fn compute_next_interval_run(
+    every_ms: u64,
+    anchor_ms: Option<u64>,
+    base: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> DateTime<Utc> {
+    let duration = chrono::Duration::milliseconds(every_ms as i64);
+
+    if let Some(anchor_ms) = anchor_ms {
+        let Some(anchor) = DateTime::<Utc>::from_timestamp_millis(anchor_ms as i64) else {
+            return now + duration;
+        };
+
+        if anchor > now {
+            return anchor;
+        }
+
+        let elapsed_ms = (now - anchor).num_milliseconds();
+        if elapsed_ms < 0 {
+            return anchor;
+        }
+
+        let steps = (elapsed_ms / every_ms as i64) + 1;
+        return anchor + chrono::Duration::milliseconds(steps * every_ms as i64);
+    }
+
+    let candidate = base + duration;
+    if candidate <= now {
+        now + duration
+    } else {
+        candidate
+    }
+}
+
+fn compute_next_cron_run(
+    expr: &str,
+    tz: Option<&str>,
+    base: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let timezone = parse_timezone(tz)?;
+    let schedule = expr.parse::<CronSchedule>().ok()?;
+    let after = base.max(now);
+    let after_local = after.with_timezone(&timezone);
+    schedule
+        .after(&after_local)
+        .next()
+        .map(|next| next.with_timezone(&Utc))
+}
+
+fn parse_timezone(tz: Option<&str>) -> Option<Tz> {
+    match tz {
+        None => Some(chrono_tz::UTC),
+        Some(value) => value.parse::<Tz>().ok(),
     }
 }
 
@@ -268,6 +332,7 @@ pub struct JobUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     fn make_job(name: &str) -> Job {
         Job {
@@ -421,7 +486,7 @@ mod tests {
                 anchor_ms: None,
             },
             Schedule::Cron {
-                expr: "0 9 * * MON".into(),
+                expr: "0 0 9 * * MON".into(),
                 tz: Some("Europe/Sarajevo".into()),
             },
         ];
@@ -431,5 +496,87 @@ mod tests {
             let restored: Schedule = serde_json::from_str(&json).unwrap();
             assert_eq!(schedule, restored);
         }
+    }
+
+    #[test]
+    fn compute_next_interval_respects_anchor() {
+        let anchor = Utc.with_ymd_and_hms(2026, 3, 13, 15, 0, 0).unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 3, 13, 15, 2, 30).unwrap();
+
+        let next =
+            compute_next_interval_run(60_000, Some(anchor.timestamp_millis() as u64), anchor, now);
+
+        assert_eq!(next, Utc.with_ymd_and_hms(2026, 3, 13, 15, 3, 0).unwrap());
+    }
+
+    #[test]
+    fn compute_next_cron_run_honors_timezone() {
+        let base = Utc.with_ymd_and_hms(2026, 3, 13, 7, 30, 0).unwrap();
+        let next =
+            compute_next_cron_run("0 0 9 * * *", Some("Europe/Sarajevo"), base, base).unwrap();
+        let local = next.with_timezone(&"Europe/Sarajevo".parse::<Tz>().unwrap());
+
+        assert_eq!(local.hour(), 9);
+        assert_eq!(local.minute(), 0);
+        assert_eq!(local.second(), 0);
+        assert_eq!(
+            local.date_naive(),
+            base.with_timezone(&local.timezone()).date_naive()
+        );
+    }
+
+    #[tokio::test]
+    async fn advance_sets_next_for_cron() {
+        let scheduler = Scheduler::new();
+        let mut job = make_job("cron");
+        job.schedule = Schedule::Cron {
+            expr: "0 0 9 * * *".into(),
+            tz: Some("UTC".into()),
+        };
+        job.last_run_at = Some(Utc.with_ymd_and_hms(2026, 3, 13, 8, 0, 0).unwrap());
+        job.next_run_at = Some(Utc.with_ymd_and_hms(2026, 3, 13, 8, 0, 0).unwrap());
+        let id = scheduler.add_job(job).await;
+
+        scheduler.advance_next_run(&id).await;
+
+        let job = scheduler.get_job(&id).await.unwrap();
+        let next = job.next_run_at.expect("cron next run should be set");
+        assert_eq!(next.hour(), 9);
+        assert_eq!(next.minute(), 0);
+        assert_eq!(next.second(), 0);
+    }
+
+    #[tokio::test]
+    async fn invalid_cron_expression_disables_job() {
+        let scheduler = Scheduler::new();
+        let mut job = make_job("invalid-cron");
+        job.schedule = Schedule::Cron {
+            expr: "not a cron".into(),
+            tz: Some("UTC".into()),
+        };
+        let id = scheduler.add_job(job).await;
+
+        scheduler.advance_next_run(&id).await;
+
+        let job = scheduler.get_job(&id).await.unwrap();
+        assert!(!job.enabled);
+        assert!(job.next_run_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn invalid_timezone_disables_job() {
+        let scheduler = Scheduler::new();
+        let mut job = make_job("invalid-tz");
+        job.schedule = Schedule::Cron {
+            expr: "0 0 9 * * *".into(),
+            tz: Some("Mars/Olympus".into()),
+        };
+        let id = scheduler.add_job(job).await;
+
+        scheduler.advance_next_run(&id).await;
+
+        let job = scheduler.get_job(&id).await.unwrap();
+        assert!(!job.enabled);
+        assert!(job.next_run_at.is_none());
     }
 }

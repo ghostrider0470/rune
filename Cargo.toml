@@ -27,7 +27,9 @@ async-trait = "0.1"
 axum = "0.8"
 figment = { version = "0.10", features = ["env", "toml"] }
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
+cron = "0.15"
 diesel = { version = "2", features = ["postgres", "uuid", "chrono", "serde_json"] }
 diesel-async = { version = "0.6", features = ["postgres", "deadpool"] }
 diesel_migrations = "2"

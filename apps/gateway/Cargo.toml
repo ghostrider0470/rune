@@ -10,6 +10,7 @@ name = "rune-gateway"
 path = "src/main.rs"
 
 [dependencies]
+rune-channels = { path = "../../crates/rune-channels" }
 rune-config = { path = "../../crates/rune-config" }
 rune-core = { path = "../../crates/rune-core" }
 rune-gateway = { path = "../../crates/rune-gateway" }
