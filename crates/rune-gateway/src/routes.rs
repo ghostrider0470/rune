@@ -416,6 +416,10 @@ pub struct CreateSessionRequest {
     pub kind: String,
     /// Optional workspace root.
     pub workspace_root: Option<String>,
+    /// Optional parent/requester session ID (for subagent/scheduled sessions).
+    pub requester_session_id: Option<Uuid>,
+    /// Optional channel reference (e.g. `telegram`, `discord`).
+    pub channel_ref: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -428,6 +432,10 @@ pub struct SessionResponse {
     pub id: Uuid,
     pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requester_session_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_ref: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -473,7 +481,7 @@ pub async fn create_session(
 
     let row = state
         .session_engine
-        .create_session(kind, body.workspace_root)
+        .create_session_full(kind, body.workspace_root, body.requester_session_id, body.channel_ref)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
@@ -495,6 +503,8 @@ pub async fn create_session(
             id: row.id,
             kind: row.kind,
             status: row.status,
+            requester_session_id: row.requester_session_id,
+            channel_ref: row.channel_ref,
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
         }),
@@ -516,6 +526,8 @@ pub async fn get_session(
         id: row.id,
         kind: row.kind,
         status: row.status,
+        requester_session_id: row.requester_session_id,
+        channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),
         updated_at: row.updated_at.to_rfc3339(),
     }))

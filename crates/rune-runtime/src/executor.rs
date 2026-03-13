@@ -4,7 +4,7 @@ use chrono::Utc;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
-use rune_core::{NormalizedMessage, ToolCallId, TranscriptItem, TurnId, TurnStatus};
+use rune_core::{ApprovalDecision, ApprovalId, NormalizedMessage, ToolCallId, TranscriptItem, TurnId, TurnStatus};
 use rune_models::{CompletionRequest, ModelProvider};
 use rune_store::models::{NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
 use rune_store::repos::{TranscriptRepo, TurnRepo};
@@ -219,6 +219,40 @@ impl TurnExecutor {
 
                     let tool_result = match self.tool_executor.execute(call).await {
                         Ok(result) => result,
+                        Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
+                            warn!(tool = %tool, "tool execution requires approval");
+
+                            let approval_id = ApprovalId::new();
+                            let approval_request = TranscriptItem::ApprovalRequest {
+                                approval_id,
+                                summary: details.clone(),
+                                command: extract_approval_command(&details),
+                            };
+                            self.append_transcript(
+                                session_id,
+                                Some(turn_id.into_uuid()),
+                                &approval_request,
+                            )
+                            .await?;
+
+                            let approval_response = TranscriptItem::ApprovalResponse {
+                                approval_id,
+                                decision: ApprovalDecision::Deny,
+                                note: Some("approval required before execution".to_string()),
+                            };
+                            self.append_transcript(
+                                session_id,
+                                Some(turn_id.into_uuid()),
+                                &approval_response,
+                            )
+                            .await?;
+
+                            ToolResult {
+                                tool_call_id,
+                                output: format!("Approval required for tool {tool}: {details}"),
+                                is_error: true,
+                            }
+                        }
                         Err(e) => {
                             warn!(error = %e, tool = %tc.function.name, "tool execution failed");
                             ToolResult {
@@ -295,6 +329,29 @@ fn status_str(status: TurnStatus) -> String {
         .as_str()
         .unwrap()
         .to_string()
+}
+
+fn extract_approval_command(details: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(details)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("command")
+                .and_then(|v| v.as_str())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    value
+                        .get("arguments_summary")
+                        .and_then(|v| v.as_str())
+                        .and_then(|summary| serde_json::from_str::<serde_json::Value>(summary).ok())
+                        .and_then(|summary| {
+                            summary
+                                .get("command")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string)
+                        })
+                })
+        })
 }
 
 fn transcript_item_kind(item: &TranscriptItem) -> String {

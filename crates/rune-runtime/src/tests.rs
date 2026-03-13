@@ -13,6 +13,7 @@ use rune_store::StoreError;
 use rune_store::models::*;
 use rune_store::repos::*;
 use rune_tools::{
+    approval::{ApprovalRequest, RiskLevel},
     ToolCall, ToolDefinition as RtToolDefinition, ToolError, ToolExecutor, ToolRegistry, ToolResult,
 };
 
@@ -585,6 +586,96 @@ async fn max_tool_iterations_enforced() {
 }
 
 #[tokio::test]
+async fn approval_required_is_attributed_in_transcript() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(SessionKind::Direct, None)
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"rm -rf /tmp/demo"}"#),
+        FakeModelProvider::text_response("Execution blocked pending approval."),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    struct ApprovalRequiringTool;
+
+    #[async_trait]
+    impl ToolExecutor for ApprovalRequiringTool {
+        async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
+            Err(ToolError::ApprovalRequired {
+                tool: call.tool_name,
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    arguments_summary: serde_json::json!({
+                        "command": "rm -rf /tmp/demo",
+                        "workdir": "/workspace",
+                        "background": false,
+                        "timeout": 30,
+                        "pty": false,
+                        "elevated": false,
+                        "ask": "always",
+                        "security": "allowlist"
+                    })
+                    .to_string(),
+                    risk_level: RiskLevel::Medium,
+                })
+                .unwrap(),
+            })
+        }
+    }
+
+    let executor = h.turn_executor(model, Arc::new(ApprovalRequiringTool), registry);
+    let (turn, _) = executor.execute(session.id, "Run it", None).await.unwrap();
+    assert_eq!(turn.status, "completed");
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let kinds: Vec<&str> = transcript.iter().map(|t| t.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        [
+            "user_message",
+            "tool_request",
+            "approval_request",
+            "approval_response",
+            "tool_result",
+            "assistant_message"
+        ]
+    );
+
+    let approval_request_payload = &transcript[2].payload;
+    assert_eq!(approval_request_payload["kind"], "approval_request");
+    assert_eq!(
+        approval_request_payload["command"],
+        serde_json::Value::String("rm -rf /tmp/demo".to_string())
+    );
+
+    let approval_response_payload = &transcript[3].payload;
+    assert_eq!(approval_response_payload["kind"], "approval_response");
+    assert_eq!(approval_response_payload["decision"], "deny");
+
+    let tool_result_payload = &transcript[4].payload;
+    assert_eq!(tool_result_payload["kind"], "tool_result");
+    assert_eq!(tool_result_payload["is_error"], true);
+    assert!(tool_result_payload["output"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Approval required for tool exec"));
+}
+
+#[tokio::test]
 async fn session_not_found_returns_error() {
     let h = TestHarness::new();
     let engine = h.session_engine();
@@ -625,4 +716,50 @@ async fn usage_tracking_accumulates_across_tool_loop() {
     assert_eq!(usage.prompt_tokens, 20); // 10 + 10
     assert_eq!(usage.completion_tokens, 13); // 8 + 5
     assert_eq!(usage.total_tokens, 33); // 18 + 15
+}
+
+#[tokio::test]
+async fn session_parent_linkage() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    // Create a parent session
+    let parent = engine
+        .create_session(SessionKind::Direct, Some("/workspace".to_string()))
+        .await
+        .unwrap();
+
+    // Create a subagent child session linked to the parent
+    let child = engine
+        .create_session_full(
+            SessionKind::Subagent,
+            Some("/workspace".to_string()),
+            Some(parent.id),
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(child.kind, "subagent");
+    assert_eq!(child.requester_session_id, Some(parent.id));
+    assert!(child.channel_ref.is_none());
+
+    // Create a channel session with channel_ref
+    let channel_session = engine
+        .create_session_full(
+            SessionKind::Channel,
+            None,
+            None,
+            Some("telegram".to_string()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(channel_session.kind, "channel");
+    assert_eq!(channel_session.channel_ref, Some("telegram".to_string()));
+    assert!(channel_session.requester_session_id.is_none());
+
+    // Verify parent session has no linkage
+    assert!(parent.requester_session_id.is_none());
+    assert!(parent.channel_ref.is_none());
 }

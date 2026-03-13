@@ -20,11 +20,27 @@ impl SessionEngine {
         Self { session_repo }
     }
 
-    /// Create a new session with the given kind and optional workspace root.
+    /// Create a new session with the given kind, optional workspace root,
+    /// optional parent (requester) session, and optional channel reference.
     pub async fn create_session(
         &self,
         kind: SessionKind,
         workspace_root: Option<String>,
+    ) -> Result<SessionRow, RuntimeError> {
+        self.create_session_full(kind, workspace_root, None, None)
+            .await
+    }
+
+    /// Create a new session with full linkage options.
+    ///
+    /// `requester_session_id` links this session to a parent (for subagent/scheduled sessions).
+    /// `channel_ref` associates the session with a specific channel context.
+    pub async fn create_session_full(
+        &self,
+        kind: SessionKind,
+        workspace_root: Option<String>,
+        requester_session_id: Option<Uuid>,
+        channel_ref: Option<String>,
     ) -> Result<SessionRow, RuntimeError> {
         let id = SessionId::new();
         let now = Utc::now();
@@ -42,8 +58,8 @@ impl SessionEngine {
                 .unwrap()
                 .to_string(),
             workspace_root,
-            channel_ref: None,
-            requester_session_id: None,
+            channel_ref,
+            requester_session_id,
             created_at: now,
             updated_at: now,
             last_activity_at: now,
