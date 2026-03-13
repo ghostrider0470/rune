@@ -99,7 +99,8 @@ impl SessionLoop {
                             if let Err(e) = ch
                                 .send(OutboundAction::Reply {
                                     channel_id: msg.channel_id,
-                                    reply_to: msg.provider_message_id,
+                                    chat_id: msg.raw_chat_id.clone(),
+                                    reply_to: msg.provider_message_id.clone(),
                                     content: reply,
                                 })
                                 .await
@@ -114,7 +115,8 @@ impl SessionLoop {
                         let _ = ch
                             .send(OutboundAction::Reply {
                                 channel_id: msg.channel_id,
-                                reply_to: msg.provider_message_id,
+                                chat_id: msg.raw_chat_id.clone(),
+                                reply_to: msg.provider_message_id.clone(),
                                 content: format!("⚠️ Turn failed: {e}"),
                             })
                             .await;

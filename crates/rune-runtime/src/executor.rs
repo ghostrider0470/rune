@@ -34,6 +34,7 @@ pub struct TurnExecutor {
     tool_registry: Arc<ToolRegistry>,
     context_assembler: ContextAssembler,
     compaction: Arc<dyn CompactionStrategy>,
+    default_model: Option<String>,
     max_tool_iterations: u32,
 }
 
@@ -58,8 +59,15 @@ impl TurnExecutor {
             tool_registry,
             context_assembler,
             compaction,
+            default_model: None,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
         }
+    }
+
+    /// Set the default model name for completion requests.
+    pub fn with_default_model(mut self, model: impl Into<String>) -> Self {
+        self.default_model = Some(model.into());
+        self
     }
 
     /// Access the transcript repo (used by session loop to read replies).
@@ -192,7 +200,7 @@ impl TurnExecutor {
 
             let request = CompletionRequest {
                 messages,
-                model: None,
+                model: self.default_model.clone(),
                 temperature: None,
                 max_tokens: None,
                 tools: if tool_defs.is_empty() {

@@ -107,6 +107,7 @@ impl TelegramAdapter {
 
             Some(InboundEvent::Message(ChannelMessage {
                 channel_id: ChannelId::new(),
+                raw_chat_id: msg.chat.id.to_string(),
                 sender: msg
                     .from
                     .as_ref()
@@ -245,11 +246,12 @@ impl ChannelAdapter for TelegramAdapter {
                     .await
             }
             OutboundAction::Reply {
-                channel_id,
+                chat_id,
                 reply_to,
                 content,
+                ..
             } => {
-                self.send_message(&channel_id.to_string(), &content, Some(&reply_to))
+                self.send_message(&chat_id, &content, Some(&reply_to))
                     .await
             }
             OutboundAction::Edit {
@@ -342,11 +344,17 @@ struct TelegramUpdate {
 #[derive(Debug, Deserialize)]
 struct TelegramMessage {
     message_id: i64,
+    chat: TelegramChat,
     date: i64,
     text: Option<String>,
     from: Option<TelegramUser>,
     document: Option<TelegramDocument>,
     photo: Option<Vec<TelegramPhotoSize>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramChat {
+    id: i64,
 }
 
 #[derive(Debug, Deserialize)]

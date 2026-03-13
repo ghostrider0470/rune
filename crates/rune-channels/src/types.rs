@@ -7,6 +7,9 @@ use thiserror::Error;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChannelMessage {
     pub channel_id: ChannelId,
+    /// Provider-native channel/chat identifier (e.g. Telegram chat_id as string).
+    /// Used for sending replies back to the correct channel.
+    pub raw_chat_id: String,
     pub sender: String,
     pub content: String,
     pub attachments: Vec<AttachmentRef>,
@@ -61,6 +64,8 @@ pub enum OutboundAction {
     },
     Reply {
         channel_id: ChannelId,
+        /// Provider-native chat identifier for routing the reply.
+        chat_id: String,
         reply_to: String,
         content: String,
     },

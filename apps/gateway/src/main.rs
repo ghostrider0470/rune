@@ -180,7 +180,7 @@ async fn build_services(
         memory: MemoryToolExecutor::new(workspace_root),
     });
 
-    let turn_executor = Arc::new(TurnExecutor::new(
+    let mut turn_executor = TurnExecutor::new(
         session_repo.clone(),
         turn_repo,
         transcript_repo.clone(),
@@ -188,10 +188,17 @@ async fn build_services(
         tool_executor,
         tool_registry,
         ContextAssembler::new(
-            "You are Rune, the Rust gateway runtime for OpenClaw parity testing.",
+            "You are Rune, a Rust-powered AI assistant built for speed and reliability.",
         ),
         Arc::new(NoOpCompaction),
-    ));
+    );
+
+    if let Some(ref model) = config.models.default_model {
+        turn_executor = turn_executor.with_default_model(model);
+        info!(model = %model, "default model configured");
+    }
+
+    let turn_executor = Arc::new(turn_executor);
 
     // Build session loop if Telegram channel is configured.
     let session_loop = if let Some(ref tg) = config.channels.telegram_token {
@@ -438,8 +445,18 @@ fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
                 ))
             }
             "openai" => {
-                info!(provider = %provider_cfg.name, "using OpenAI provider");
-                Arc::new(OpenAiProvider::new(&provider_cfg.base_url, &api_key))
+                let is_azure = provider_cfg.base_url.contains(".azure.com")
+                    || provider_cfg.base_url.contains("azure");
+                info!(
+                    provider = %provider_cfg.name,
+                    azure = is_azure,
+                    "using OpenAI provider"
+                );
+                if is_azure {
+                    Arc::new(OpenAiProvider::azure(&provider_cfg.base_url, &api_key))
+                } else {
+                    Arc::new(OpenAiProvider::new(&provider_cfg.base_url, &api_key))
+                }
             }
             "azure-openai" => {
                 let deployment = provider_cfg
