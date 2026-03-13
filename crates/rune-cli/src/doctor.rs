@@ -210,6 +210,8 @@ fn check_docker_path_layout(config: &AppConfig) -> CheckResult {
 async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
     let mut results = Vec::new();
 
+    let using_embedded = config.database.database_url.is_none();
+
     results.push(if let Some(url) = &config.database.database_url {
         let scheme = url.split(':').next().unwrap_or_default();
         CheckResult {
@@ -236,6 +238,10 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             hint: Some("Fine for zero-config local dev; production should usually point at durable PostgreSQL".into()),
         }
     });
+
+    if using_embedded {
+        results.extend(check_embedded_postgres_layout(config));
+    }
 
     results.push(CheckResult {
         name: "database.migrations".into(),
@@ -270,6 +276,108 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             None
         } else {
             Some("Set database.max_connections to a positive value".into())
+        },
+    });
+
+    results
+}
+
+fn check_embedded_postgres_layout(config: &AppConfig) -> Vec<CheckResult> {
+    let db_dir = &config.paths.db_dir;
+    let install_dir = db_dir.join("pg_install");
+    let cluster_dir = db_dir.join("pg_data");
+    let password_file = db_dir.join(".pg_password");
+
+    let mut results = vec![CheckResult {
+        name: "database.embedded.mode".into(),
+        category: "database".into(),
+        status: CheckStatus::Pass,
+        message: format!(
+            "Embedded PostgreSQL fallback selected; durable state root is {}",
+            db_dir.display()
+        ),
+        hint: Some(
+            "For zero-config local dev this is expected; production can switch to external PostgreSQL via database_url".into(),
+        ),
+    }];
+
+    results.push(CheckResult {
+        name: "database.embedded.db_dir".into(),
+        category: "database".into(),
+        status: if db_dir.exists() && db_dir.is_dir() {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Warn
+        },
+        message: if db_dir.exists() && db_dir.is_dir() {
+            format!("Embedded PostgreSQL root exists at {}", db_dir.display())
+        } else {
+            format!("Embedded PostgreSQL root missing at {}", db_dir.display())
+        },
+        hint: if db_dir.exists() && db_dir.is_dir() {
+            None
+        } else {
+            Some("Create/mount db_dir so embedded PostgreSQL state survives restarts".into())
+        },
+    });
+
+    results.push(CheckResult {
+        name: "database.embedded.install_dir".into(),
+        category: "database".into(),
+        status: if install_dir.exists() && install_dir.is_dir() {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Skip
+        },
+        message: if install_dir.exists() && install_dir.is_dir() {
+            format!("Embedded PostgreSQL installation cache present at {}", install_dir.display())
+        } else {
+            format!("Embedded PostgreSQL installation cache not initialized yet ({})", install_dir.display())
+        },
+        hint: if install_dir.exists() && install_dir.is_dir() {
+            None
+        } else {
+            Some("This is expected before first embedded-Postgres startup".into())
+        },
+    });
+
+    results.push(CheckResult {
+        name: "database.embedded.cluster_dir".into(),
+        category: "database".into(),
+        status: if cluster_dir.exists() && cluster_dir.is_dir() {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Skip
+        },
+        message: if cluster_dir.exists() && cluster_dir.is_dir() {
+            format!("Embedded PostgreSQL cluster data present at {}", cluster_dir.display())
+        } else {
+            format!("Embedded PostgreSQL cluster data not initialized yet ({})", cluster_dir.display())
+        },
+        hint: if cluster_dir.exists() && cluster_dir.is_dir() {
+            None
+        } else {
+            Some("This is expected before first embedded-Postgres startup".into())
+        },
+    });
+
+    results.push(CheckResult {
+        name: "database.embedded.password_file".into(),
+        category: "database".into(),
+        status: if password_file.exists() {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Skip
+        },
+        message: if password_file.exists() {
+            format!("Embedded PostgreSQL password state present at {}", password_file.display())
+        } else {
+            format!("Embedded PostgreSQL password state not initialized yet ({})", password_file.display())
+        },
+        hint: if password_file.exists() {
+            None
+        } else {
+            Some("Will be created automatically on first embedded-Postgres startup".into())
         },
     });
 
@@ -865,6 +973,46 @@ mod tests {
                 .iter()
                 .any(|r| r.name.ends_with(".azure") && r.status == CheckStatus::Warn)
         );
+    }
+
+    #[tokio::test]
+    async fn embedded_postgres_checks_reflect_zero_config_layout() {
+        let tmp = TempDir::new().unwrap();
+        create_path_layout(tmp.path()).await;
+        let mut config = test_config_with_paths(tmp.path());
+        config.database.database_url = None;
+
+        let initial = check_database_config(&config).await;
+        assert!(initial.iter().any(|r| {
+            r.name == "database.embedded.mode" && r.status == CheckStatus::Pass
+        }));
+        assert!(initial.iter().any(|r| {
+            r.name == "database.embedded.install_dir" && r.status == CheckStatus::Skip
+        }));
+        assert!(initial.iter().any(|r| {
+            r.name == "database.embedded.cluster_dir" && r.status == CheckStatus::Skip
+        }));
+
+        tokio::fs::create_dir_all(config.paths.db_dir.join("pg_install"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(config.paths.db_dir.join("pg_data"))
+            .await
+            .unwrap();
+        tokio::fs::write(config.paths.db_dir.join(".pg_password"), "runedev")
+            .await
+            .unwrap();
+
+        let warmed = check_database_config(&config).await;
+        assert!(warmed.iter().any(|r| {
+            r.name == "database.embedded.install_dir" && r.status == CheckStatus::Pass
+        }));
+        assert!(warmed.iter().any(|r| {
+            r.name == "database.embedded.cluster_dir" && r.status == CheckStatus::Pass
+        }));
+        assert!(warmed.iter().any(|r| {
+            r.name == "database.embedded.password_file" && r.status == CheckStatus::Pass
+        }));
     }
 
     #[test]

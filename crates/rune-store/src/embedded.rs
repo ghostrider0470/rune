@@ -51,12 +51,22 @@ impl EmbeddedPg {
         let password_file = data_dir.join(".pg_password");
         let password = if password_file.exists() {
             std::fs::read_to_string(&password_file)
-                .unwrap_or_else(|_| "runedev".to_string())
+                .map_err(|e| {
+                    StoreError::Database(format!(
+                        "failed to read embedded PG password file {}: {e}",
+                        password_file.display()
+                    ))
+                })?
                 .trim()
                 .to_string()
         } else {
             let pw = "runedev".to_string();
-            let _ = std::fs::write(&password_file, &pw);
+            std::fs::write(&password_file, &pw).map_err(|e| {
+                StoreError::Database(format!(
+                    "failed to write embedded PG password file {}: {e}",
+                    password_file.display()
+                ))
+            })?;
             pw
         };
 
@@ -99,7 +109,11 @@ impl EmbeddedPg {
         }
 
         // Create the application database if it doesn't exist yet.
-        let db_exists = pg.database_exists(database_name).await.unwrap_or(false);
+        let db_exists = pg.database_exists(database_name).await.map_err(|e| {
+            StoreError::Database(format!(
+                "failed to check whether database '{database_name}' exists: {e}"
+            ))
+        })?;
         if !db_exists {
             info!(database = database_name, "creating application database");
             pg.create_database(database_name).await.map_err(|e| {

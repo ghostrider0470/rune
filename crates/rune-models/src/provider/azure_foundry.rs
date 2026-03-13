@@ -11,7 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Serialize;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::ModelProvider;
 use super::response::{ApiResponse, map_error_response, parse_response};

@@ -179,6 +179,7 @@ impl TelegramAdapter {
 
         let url = format!("{}/sendMessage", self.base_url);
 
+        // Try with Markdown first, fall back to plain text if parsing fails.
         let response = self
             .client
             .post(&url)
@@ -193,6 +194,34 @@ impl TelegramAdapter {
             response.json().await.map_err(|e| ChannelError::Provider {
                 message: format!("failed to parse send response: {e}"),
             })?;
+
+        // If Markdown parsing failed, retry without parse_mode.
+        let body = if !body.ok
+            && body
+                .description
+                .as_deref()
+                .map_or(false, |d| d.contains("parse entities") || d.contains("can't parse"))
+        {
+            tracing::warn!("Markdown parse failed, retrying without parse_mode");
+            params.as_object_mut().unwrap().remove("parse_mode");
+            let retry_resp = self
+                .client
+                .post(&url)
+                .json(&params)
+                .send()
+                .await
+                .map_err(|e| ChannelError::Provider {
+                    message: format!("failed to send message (retry): {e}"),
+                })?;
+            retry_resp
+                .json::<TelegramResponse<TelegramMessage>>()
+                .await
+                .map_err(|e| ChannelError::Provider {
+                    message: format!("failed to parse retry response: {e}"),
+                })?
+        } else {
+            body
+        };
 
         if !body.ok {
             return Err(ChannelError::Provider {
@@ -388,6 +417,7 @@ mod tests {
             update_id: 1,
             message: Some(TelegramMessage {
                 message_id: 42,
+                chat: TelegramChat { id: 999 },
                 date: 1710320000,
                 text: Some("hello".into()),
                 from: Some(TelegramUser {
@@ -418,6 +448,7 @@ mod tests {
             message: None,
             edited_message: Some(TelegramMessage {
                 message_id: 43,
+                chat: TelegramChat { id: 999 },
                 date: 1710320100,
                 text: Some("edited text".into()),
                 from: None,
@@ -446,6 +477,7 @@ mod tests {
             update_id: 3,
             message: Some(TelegramMessage {
                 message_id: 44,
+                chat: TelegramChat { id: 999 },
                 date: 1710320200,
                 text: None,
                 from: None,
@@ -462,6 +494,7 @@ mod tests {
     fn extract_document_attachment() {
         let msg = TelegramMessage {
             message_id: 45,
+            chat: TelegramChat { id: 999 },
             date: 1710320300,
             text: Some("here's a file".into()),
             from: None,

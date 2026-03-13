@@ -32,6 +32,7 @@ async fn telegram_send_with_bad_token_returns_provider_error() {
 fn inbound_event_message_roundtrips_via_serde() {
     let msg = ChannelMessage {
         channel_id: ChannelId::new(),
+        raw_chat_id: "chat-1".into(),
         sender: "user-1".into(),
         content: "hello".into(),
         attachments: vec![],
@@ -113,6 +114,7 @@ fn outbound_action_variants_roundtrip() {
         (
             OutboundAction::Reply {
                 channel_id: cid,
+                chat_id: "chat-1".into(),
                 reply_to: "m1".into(),
                 content: "re".into(),
             },
