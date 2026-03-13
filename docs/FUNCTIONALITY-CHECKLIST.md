@@ -155,7 +155,7 @@ Interpretation rules:
 - [x] structured error envelopes
 - [x] durable IDs returned by create/mutate flows
 
-Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs|wake`), `system event`, `system heartbeat last|presence`, `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|start|stop|restart|run`, with human and `--json` output modes. `gateway run`/`daemon run` now exec the local `rune-gateway` binary in foreground mode and forward `RUNE_CONFIG` as `--config` when present. This is still not full parity, but it is now runnable instead of planning-only.
+Implementation note (2026-03-13): the current executable control-plane slice is smoke-tested for `GET /health`, `GET /status`, `GET /gateway/health`, `POST /gateway/start`, `POST /gateway/stop`, `POST /gateway/restart`, `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, `GET /cron/{id}/runs`, `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, `GET /reminders`, `POST /reminders`, `DELETE /reminders/{id}`, `GET /sessions`, `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/messages`, and `GET /sessions/{id}/transcript`. The operator CLI currently exposes working `status`, `health`, `doctor`, full baseline `cron` management (`status|list|add|edit|enable|disable|rm|run|runs|wake`), `system event`, `system heartbeat last|presence|enable|disable|status`, `reminders add|list|cancel`, `sessions list`, `sessions show`, `config show`, and `config validate` flows, plus `gateway status|health|start|stop|restart|run`, with human and `--json` output modes. `sessions list` now also has parity-shaped operator filters for `--active`, `--channel`, and `--limit`, backed by gateway query filtering and route coverage. `gateway run`/`daemon run` now exec the local `rune-gateway` binary in foreground mode and forward `RUNE_CONFIG` as `--config` when present. This is still not full parity, but it is now runnable instead of planning-only.
 
 ---
 
@@ -235,9 +235,9 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 ## 6. Scheduler / automation
 
 - [x] cron jobs
-- [ ] reminders
+- [x] reminders
 - [x] wake events
-- [ ] heartbeats
+- [x] heartbeats
 - [ ] isolated scheduled agent runs
 - [ ] run history durability
 - [x] enable/disable semantics

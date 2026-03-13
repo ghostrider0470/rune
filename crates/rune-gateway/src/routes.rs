@@ -151,6 +151,14 @@ pub struct CronListQuery {
     pub include_disabled: Option<bool>,
 }
 
+#[derive(Deserialize)]
+pub struct SessionsListQuery {
+    #[serde(rename = "active")]
+    pub active_minutes: Option<u64>,
+    pub channel: Option<String>,
+    pub limit: Option<usize>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CronWakeRequest {
     pub text: String,
@@ -499,15 +507,32 @@ pub struct SessionListItem {
 /// `GET /sessions` — list sessions.
 pub async fn list_sessions(
     State(state): State<AppState>,
+    Query(query): Query<SessionsListQuery>,
 ) -> Result<Json<Vec<SessionListItem>>, GatewayError> {
+    let limit = query.limit.unwrap_or(100).min(500) as i64;
+    let active_cutoff = query
+        .active_minutes
+        .map(|minutes| Utc::now() - chrono::Duration::minutes(minutes as i64));
+    let channel_filter = query.channel.as_deref();
+
     let rows = state
         .session_repo
-        .list(100, 0)
+        .list(limit, 0)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
     let items = rows
         .into_iter()
+        .filter(|row| {
+            channel_filter
+                .map(|channel| row.channel_ref.as_deref() == Some(channel))
+                .unwrap_or(true)
+        })
+        .filter(|row| {
+            active_cutoff
+                .map(|cutoff| row.last_activity_at >= cutoff)
+                .unwrap_or(true)
+        })
         .map(|row| SessionListItem {
             id: row.id.to_string(),
             status: row.status,

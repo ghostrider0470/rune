@@ -184,8 +184,18 @@ pub enum CronAction {
 
 #[derive(Debug, Subcommand)]
 pub enum SessionsAction {
-    /// List all sessions.
-    List,
+    /// List sessions with optional activity/channel filters.
+    List {
+        /// Only include sessions active within the last N minutes.
+        #[arg(long = "active")]
+        active_minutes: Option<u64>,
+        /// Only include sessions for the given channel reference.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Maximum number of sessions to return.
+        #[arg(long, default_value_t = 100)]
+        limit: u64,
+    },
     /// Show details for a specific session.
     Show {
         /// Session ID to inspect.
@@ -877,9 +887,44 @@ mod tests {
         assert!(matches!(
             cli.command,
             Command::Sessions {
-                action: SessionsAction::List
+                action: SessionsAction::List {
+                    active_minutes: None,
+                    channel: None,
+                    limit: 100
+                }
             }
         ));
+    }
+
+    #[test]
+    fn parse_sessions_list_with_filters() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "sessions",
+            "list",
+            "--active",
+            "30",
+            "--channel",
+            "telegram",
+            "--limit",
+            "25",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Sessions {
+                action:
+                    SessionsAction::List {
+                        active_minutes,
+                        channel,
+                        limit,
+                    },
+            } => {
+                assert_eq!(active_minutes, Some(30));
+                assert_eq!(channel.as_deref(), Some("telegram"));
+                assert_eq!(limit, 25);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

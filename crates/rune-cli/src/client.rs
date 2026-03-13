@@ -557,10 +557,24 @@ impl GatewayClient {
     }
 
     /// `GET /sessions`
-    pub async fn sessions_list(&self) -> Result<SessionListResponse> {
+    pub async fn sessions_list(
+        &self,
+        active_minutes: Option<u64>,
+        channel: Option<&str>,
+        limit: u64,
+    ) -> Result<SessionListResponse> {
+        let mut query: Vec<(&str, String)> = vec![("limit", limit.to_string())];
+        if let Some(active_minutes) = active_minutes {
+            query.push(("active", active_minutes.to_string()));
+        }
+        if let Some(channel) = channel {
+            query.push(("channel", channel.to_string()));
+        }
+
         let resp = self
             .http
             .get(self.url("/sessions"))
+            .query(&query)
             .send()
             .await
             .context("failed to reach gateway")?;
@@ -1127,7 +1141,7 @@ mod tests {
             .await;
 
         let client = GatewayClient::new(&server.uri());
-        let resp = client.sessions_list().await.unwrap();
+        let resp = client.sessions_list(None, None, 100).await.unwrap();
         assert_eq!(resp.sessions.len(), 2);
         assert_eq!(resp.sessions[0].id, "s1");
         assert_eq!(resp.sessions[1].channel, None);

@@ -665,3 +665,96 @@ async fn list_sessions_empty() {
     let json = body_json(response).await;
     assert!(json.as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn list_sessions_filters_by_channel_and_activity() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let now = chrono::Utc::now();
+
+    session_repo
+        .create(NewSession {
+            id: Uuid::now_v7(),
+            kind: "channel".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: Some("telegram".into()),
+            requester_session_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    session_repo
+        .create(NewSession {
+            id: Uuid::now_v7(),
+            kind: "channel".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: Some("discord".into()),
+            requester_session_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now - chrono::Duration::minutes(90),
+            updated_at: now - chrono::Duration::minutes(90),
+            last_activity_at: now - chrono::Duration::minutes(90),
+        })
+        .await
+        .unwrap();
+
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo) as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_count: 0,
+        event_tx,
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get("/sessions?channel=telegram&active=30&limit=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["channel"], "telegram");
+}

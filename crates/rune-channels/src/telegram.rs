@@ -2,6 +2,8 @@
 //!
 //! Implements long-polling for inbound messages and HTTP Bot API for outbound actions.
 
+use std::time::Duration;
+
 use chrono::{TimeZone, Utc};
 use reqwest::Client;
 use rune_core::{AttachmentRef, ChannelId};
@@ -23,12 +25,19 @@ pub struct TelegramAdapter {
 }
 
 impl TelegramAdapter {
+    fn build_client(timeout: Duration) -> Client {
+        Client::builder()
+            .timeout(timeout)
+            .build()
+            .unwrap_or_else(|_| Client::new())
+    }
+
     /// Create a new Telegram adapter with the given bot token.
     pub fn new(token: impl Into<String>) -> Self {
         let token = token.into();
         let base_url = format!("https://api.telegram.org/bot{token}");
         Self {
-            client: Client::new(),
+            client: Self::build_client(Duration::from_secs(35)),
             base_url,
             last_update_id: None,
             pending_events: Vec::new(),
@@ -38,7 +47,7 @@ impl TelegramAdapter {
     /// Create with a custom base URL (for testing).
     pub fn with_base_url(_token: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: Self::build_client(Duration::from_secs(2)),
             base_url: base_url.into(),
             last_update_id: None,
             pending_events: Vec::new(),

@@ -643,8 +643,14 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         },
         Command::Sessions { action } => match action {
-            SessionsAction::List => {
-                let result = client.sessions_list().await?;
+            SessionsAction::List {
+                active_minutes,
+                channel,
+                limit,
+            } => {
+                let result = client
+                    .sessions_list(active_minutes, channel.as_deref(), limit)
+                    .await?;
                 println!("{}", render(&result, format));
             }
             SessionsAction::Show { id } => {

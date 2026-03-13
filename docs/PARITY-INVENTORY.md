@@ -1153,6 +1153,8 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 - mention that it is a reminder depending on timing/context
 - target chat/session delivery
 
+Implementation note (2026-03-13): Rune now ships an executable reminder surface end-to-end: gateway routes for `GET /reminders`, `POST /reminders`, and `DELETE /reminders/{id}`; CLI flows for `reminders add|list|cancel`; runtime due-checking and delivered-state tracking in the scheduler; and supervisor-driven delivery by executing reminder text as a scheduled turn. Remaining parity work is durability across restart and evidence that final delivered wording consistently matches the OpenClaw reminder-shaping contract.
+
 ---
 
 ## 9.3 Wake events
@@ -1180,6 +1182,8 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 - suppress outbound delivery when heartbeat result is no-op ack
 - respect quiet windows and anti-spam behavior
 - maintain minimal state for proactive checks
+
+Implementation note (2026-03-13): Rune now has a real heartbeat runner with persisted runner state, `HEARTBEAT.md` prompt loading, due-checking, suppression of no-op `HEARTBEAT_OK` responses, supervisor execution, and operator surfaces through `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, and CLI `system heartbeat presence|last|enable|disable|status`. Remaining work is fuller parity around quiet-window/duplicate-notification policy and restart durability evidence.
 
 ---
 
