@@ -7,6 +7,7 @@ mod executor;
 pub mod file_tools;
 pub mod memory_tool;
 mod registry;
+pub mod session_tool;
 mod stubs;
 
 pub use definition::{ToolCall, ToolDefinition, ToolResult};
