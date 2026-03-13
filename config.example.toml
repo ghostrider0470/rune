@@ -19,6 +19,26 @@ base_url = "https://your-resource.services.ai.azure.com/anthropic"
 # api_key = "your-key"  # or use api_key_env
 api_key_env = "ANTHROPIC_API_KEY"
 
+[agents.defaults]
+model = "gpt-5.4"
+workspace = "/home/hamza/.openclaw/workspace"
+system_prompt = "You are a helpful assistant."
+
+[[agents.list]]
+id = "main"
+default = true
+model = "gpt-5.4"
+workspace = "/home/hamza/.openclaw/workspace"
+
+[[agents.list]]
+id = "coder"
+model = "gpt-5.3-codex"
+workspace = "/home/hamza/.openclaw/workspace"
+
+[[agents.list]]
+id = "fast"
+model = "claude-sonnet-4-6"
+
 [logging]
 level = "info"
 

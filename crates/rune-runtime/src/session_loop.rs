@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 const HELP_TEXT: &str = "Rune commands:\n/start - show welcome text\n/help - show this help\n/status - show runtime status";
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
+use rune_config::AgentsConfig;
 use rune_core::SessionKind;
 use rune_store::models::SessionRow;
 use rune_store::repos::SessionRepo;
@@ -29,6 +30,7 @@ pub struct SessionLoop {
     session_repo: Arc<dyn SessionRepo>,
     channel: Arc<Mutex<Box<dyn ChannelAdapter>>>,
     sessions: Mutex<SessionIndex>,
+    agents: AgentsConfig,
 }
 
 impl SessionLoop {
@@ -37,6 +39,7 @@ impl SessionLoop {
         turn_executor: Arc<TurnExecutor>,
         session_repo: Arc<dyn SessionRepo>,
         channel: Box<dyn ChannelAdapter>,
+        agents: AgentsConfig,
     ) -> Self {
         Self {
             engine,
@@ -44,6 +47,7 @@ impl SessionLoop {
             session_repo,
             channel: Arc::new(Mutex::new(channel)),
             sessions: Mutex::new(HashMap::new()),
+            agents,
         }
     }
 
@@ -207,11 +211,16 @@ impl SessionLoop {
         }
 
         // 3. Create new session with routing_key as channel_ref
+        let workspace = self
+            .agents
+            .default_agent()
+            .and_then(|a| self.agents.effective_workspace(a))
+            .map(String::from);
         let session = self
             .engine
             .create_session_full(
                 SessionKind::Channel,
-                None,
+                workspace,
                 None,
                 Some(routing_key.to_string()),
             )

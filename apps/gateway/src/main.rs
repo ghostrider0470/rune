@@ -210,6 +210,7 @@ async fn build_services(
                 turn_executor.clone(),
                 session_repo.clone(),
                 Box::new(adapter),
+                config.agents.clone(),
             ))
         } else {
             None

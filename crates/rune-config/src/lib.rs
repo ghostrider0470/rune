@@ -16,6 +16,8 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub models: ModelsConfig,
     pub channels: ChannelsConfig,
+    #[serde(default)]
+    pub agents: AgentsConfig,
     pub memory: MemoryConfig,
     pub media: MediaConfig,
     pub logging: LoggingConfig,
@@ -232,6 +234,80 @@ impl Default for PathsConfig {
             secrets_dir: PathBuf::from("/secrets"),
         }
     }
+}
+
+/// Multi-agent configuration.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AgentsConfig {
+    /// Defaults applied to every agent unless overridden.
+    #[serde(default)]
+    pub defaults: AgentDefaults,
+    /// Named agent definitions.
+    #[serde(default)]
+    pub list: Vec<AgentConfig>,
+}
+
+impl AgentsConfig {
+    /// Return the agent marked `default = true`, or the first agent if none is marked.
+    pub fn default_agent(&self) -> Option<&AgentConfig> {
+        self.list
+            .iter()
+            .find(|a| a.default.unwrap_or(false))
+            .or_else(|| self.list.first())
+    }
+
+    /// Find an agent by id.
+    pub fn find(&self, id: &str) -> Option<&AgentConfig> {
+        self.list.iter().find(|a| a.id == id)
+    }
+
+    /// Resolve the effective model for an agent (agent override → defaults → None).
+    pub fn effective_model<'a>(&'a self, agent: &'a AgentConfig) -> Option<&'a str> {
+        agent
+            .model
+            .as_deref()
+            .or(self.defaults.model.as_deref())
+    }
+
+    /// Resolve the effective workspace for an agent.
+    pub fn effective_workspace<'a>(&'a self, agent: &'a AgentConfig) -> Option<&'a str> {
+        agent
+            .workspace
+            .as_deref()
+            .or(self.defaults.workspace.as_deref())
+    }
+
+    /// Resolve the effective system prompt for an agent.
+    pub fn effective_system_prompt<'a>(&'a self, agent: &'a AgentConfig) -> Option<&'a str> {
+        agent
+            .system_prompt
+            .as_deref()
+            .or(self.defaults.system_prompt.as_deref())
+    }
+}
+
+/// Defaults that apply to all agents unless individually overridden.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AgentDefaults {
+    pub model: Option<String>,
+    pub workspace: Option<String>,
+    pub system_prompt: Option<String>,
+}
+
+/// A single agent definition.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Unique identifier for this agent.
+    pub id: String,
+    /// Whether this is the default agent for direct messages.
+    #[serde(default)]
+    pub default: Option<bool>,
+    /// Model override (falls back to agents.defaults.model).
+    pub model: Option<String>,
+    /// Workspace path override.
+    pub workspace: Option<String>,
+    /// System prompt override.
+    pub system_prompt: Option<String>,
 }
 
 /// Configuration loading and validation failures.
