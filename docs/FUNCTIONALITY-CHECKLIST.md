@@ -100,8 +100,9 @@ Interpretation rules:
 - [ ] `secrets reload|audit|configure|apply`
 - [ ] `security audit`
 - [x] `system event`
-- [ ] `system heartbeat enable|disable`
+- [x] `system heartbeat enable|disable`
 - [x] `system heartbeat last|presence`
+- [x] `system heartbeat status`
 - [ ] `sandbox` command family
 - [ ] `logs` command family
 

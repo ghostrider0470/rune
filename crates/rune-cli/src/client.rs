@@ -9,8 +9,8 @@ use toml_edit::{DocumentMut, Item, Table, Value};
 use crate::output::{
     ActionResult, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DoctorCheck, DoctorReport, HealthResponse, SessionDetailResponse,
-    SessionListResponse, SessionSummary, StatusResponse,
+    CronStatusResponse, DoctorCheck, DoctorReport, HealthResponse, HeartbeatStatusResponse,
+    SessionDetailResponse, SessionListResponse, SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -71,6 +71,84 @@ impl GatewayClient {
                 status: body["status"].as_str().unwrap_or("unknown").to_string(),
                 version: body["version"].as_str().map(String::from),
                 uptime_seconds: body["uptime_seconds"].as_u64(),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /heartbeat/status`
+    pub async fn heartbeat_status(&self) -> Result<HeartbeatStatusResponse> {
+        let resp = self
+            .http
+            .get(self.url("/heartbeat/status"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /heartbeat/status")?;
+            Ok(HeartbeatStatusResponse {
+                enabled: body["enabled"].as_bool().unwrap_or(false),
+                interval_secs: body["interval_secs"].as_u64().unwrap_or(0),
+                last_run_at: body["last_run_at"].as_str().map(str::to_string),
+                run_count: body["run_count"].as_u64().unwrap_or(0),
+                suppressed_count: body["suppressed_count"].as_u64().unwrap_or(0),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /heartbeat/enable`
+    pub async fn heartbeat_enable(&self) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url("/heartbeat/enable"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /heartbeat/enable")?;
+            Ok(ActionResult {
+                success: body["success"].as_bool().unwrap_or(true),
+                message: body["message"]
+                    .as_str()
+                    .unwrap_or("heartbeat enabled")
+                    .to_string(),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /heartbeat/disable`
+    pub async fn heartbeat_disable(&self) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url("/heartbeat/disable"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /heartbeat/disable")?;
+            Ok(ActionResult {
+                success: body["success"].as_bool().unwrap_or(true),
+                message: body["message"]
+                    .as_str()
+                    .unwrap_or("heartbeat disabled")
+                    .to_string(),
             })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());

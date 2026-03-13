@@ -743,6 +743,30 @@ impl fmt::Display for HeartbeatPresenceResponse {
     }
 }
 
+/// Runtime heartbeat runner state from the gateway.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatStatusResponse {
+    pub enabled: bool,
+    pub interval_secs: u64,
+    pub last_run_at: Option<String>,
+    pub run_count: u64,
+    pub suppressed_count: u64,
+}
+
+impl fmt::Display for HeartbeatStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Heartbeat Runner")?;
+        writeln!(f, "  Enabled:          {}", self.enabled)?;
+        writeln!(f, "  Interval:         {}s", self.interval_secs)?;
+        writeln!(f, "  Runs:             {}", self.run_count)?;
+        writeln!(f, "  Suppressed no-op: {}", self.suppressed_count)?;
+        if let Some(last_run_at) = &self.last_run_at {
+            write!(f, "  Last run:         {last_run_at}")?;
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for ActionResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let icon = if self.success { "✓" } else { "✗" };

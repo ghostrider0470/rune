@@ -684,19 +684,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                     println!("{}", render(&result, format));
                 }
                 SystemHeartbeatAction::Enable => {
-                    anyhow::bail!(
-                        "system heartbeat enable is not implemented yet; runtime heartbeat state is not persisted/exposed via the gateway"
-                    );
+                    let result = client.heartbeat_enable().await?;
+                    println!("{}", render(&result, format));
                 }
                 SystemHeartbeatAction::Disable => {
-                    anyhow::bail!(
-                        "system heartbeat disable is not implemented yet; runtime heartbeat state is not persisted/exposed via the gateway"
-                    );
+                    let result = client.heartbeat_disable().await?;
+                    println!("{}", render(&result, format));
                 }
                 SystemHeartbeatAction::Status => {
-                    anyhow::bail!(
-                        "system heartbeat status is not implemented yet; runtime heartbeat state is not persisted/exposed via the gateway"
-                    );
+                    let result = client.heartbeat_status().await?;
+                    println!("{}", render(&result, format));
                 }
             },
         },
