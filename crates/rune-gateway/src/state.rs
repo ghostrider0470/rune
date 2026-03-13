@@ -25,6 +25,8 @@ pub struct SessionEvent {
 pub struct AppState {
     /// Resolved application configuration.
     pub config: Arc<AppConfig>,
+    /// Process start time for uptime/status reporting.
+    pub started_at: Arc<Instant>,
     /// Session engine for lifecycle management.
     pub session_engine: Arc<SessionEngine>,
     /// Turn executor for processing messages.
@@ -35,8 +37,8 @@ pub struct AppState {
     pub transcript_repo: Arc<dyn TranscriptRepo>,
     /// Model provider for status reporting.
     pub model_provider: Arc<dyn ModelProvider>,
+    /// Number of registered tools in the runtime graph.
+    pub tool_count: usize,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
-    /// Process start time for uptime/status reporting.
-    pub started_at: Arc<Instant>,
 }

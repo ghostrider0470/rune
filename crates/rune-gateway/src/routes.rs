@@ -4,27 +4,47 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tracing::info;
 use uuid::Uuid;
 
 use rune_core::SessionKind;
 
 use crate::error::GatewayError;
-use crate::state::AppState;
+use crate::state::{AppState, SessionEvent};
 
-// ── Health & Status ────────────────────────────────────────────────────────────
+// ── Health & Status ───────────────────────────────────────────────────────────
 
 /// Response for `GET /health`.
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
+    pub service: &'static str,
+    pub version: &'static str,
+    pub uptime_seconds: u64,
+    pub session_count: usize,
+    pub ws_subscribers: usize,
 }
 
-/// Health check — always returns 200.
-pub async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
+/// Health check with runtime counters.
+pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, GatewayError> {
+    let sessions = state
+        .session_repo
+        .list(i64::MAX / 4, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(HealthResponse {
+        status: "ok",
+        service: "rune-gateway",
+        version: env!("CARGO_PKG_VERSION"),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        session_count: sessions.len(),
+        ws_subscribers: state.event_tx.receiver_count(),
+    }))
 }
 
 /// Response for `GET /status`.
@@ -32,16 +52,49 @@ pub async fn health() -> Json<HealthResponse> {
 pub struct StatusResponse {
     pub status: &'static str,
     pub version: &'static str,
+    pub bind: String,
+    pub auth_enabled: bool,
+    pub configured_model_providers: usize,
+    pub active_model_backend: &'static str,
+    pub registered_tools: usize,
+    pub session_count: usize,
+    pub ws_subscribers: usize,
     pub uptime_seconds: u64,
+    pub config_paths: StatusPaths,
 }
 
-/// Daemon status with version info.
-pub async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
-    Json(StatusResponse {
+#[derive(Serialize)]
+pub struct StatusPaths {
+    pub sessions_dir: String,
+    pub memory_dir: String,
+    pub logs_dir: String,
+}
+
+/// Daemon status with useful runtime metadata.
+pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, GatewayError> {
+    let sessions = state
+        .session_repo
+        .list(i64::MAX / 4, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(StatusResponse {
         status: "running",
         version: env!("CARGO_PKG_VERSION"),
+        bind: format!("{}:{}", state.config.gateway.host, state.config.gateway.port),
+        auth_enabled: state.config.gateway.auth_token.is_some(),
+        configured_model_providers: state.config.models.providers.len(),
+        active_model_backend: "in-memory-demo",
+        registered_tools: state.tool_count,
+        session_count: sessions.len(),
+        ws_subscribers: state.event_tx.receiver_count(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
-    })
+        config_paths: StatusPaths {
+            sessions_dir: state.config.paths.sessions_dir.display().to_string(),
+            memory_dir: state.config.paths.memory_dir.display().to_string(),
+            logs_dir: state.config.paths.logs_dir.display().to_string(),
+        },
+    }))
 }
 
 /// Response for control actions that are acknowledged but not yet fully wired.
@@ -75,7 +128,7 @@ pub async fn gateway_restart() -> Json<ActionResponse> {
     })
 }
 
-// ── Sessions ───────────────────────────────────────────────────────────────────
+// ── Sessions ──────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /sessions`.
 #[derive(Deserialize)]
@@ -137,7 +190,7 @@ pub async fn list_sessions(
 pub async fn create_session(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionRequest>,
-) -> Result<Json<SessionResponse>, GatewayError> {
+) -> Result<(StatusCode, Json<SessionResponse>), GatewayError> {
     let kind = parse_session_kind(&body.kind)?;
 
     let row = state
@@ -146,15 +199,28 @@ pub async fn create_session(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: row.id.to_string(),
+        kind: "session_created".to_string(),
+        payload: json!({
+            "session_id": row.id,
+            "kind": row.kind,
+            "status": row.status,
+        }),
+    });
+
     info!(session_id = %row.id, "session created");
 
-    Ok(Json(SessionResponse {
-        id: row.id,
-        kind: row.kind,
-        status: row.status,
-        created_at: row.created_at.to_rfc3339(),
-        updated_at: row.updated_at.to_rfc3339(),
-    }))
+    Ok((
+        StatusCode::CREATED,
+        Json(SessionResponse {
+            id: row.id,
+            kind: row.kind,
+            status: row.status,
+            created_at: row.created_at.to_rfc3339(),
+            updated_at: row.updated_at.to_rfc3339(),
+        }),
+    ))
 }
 
 /// `GET /sessions/{id}` — get session by ID.
@@ -177,7 +243,7 @@ pub async fn get_session(
     }))
 }
 
-// ── Messages ───────────────────────────────────────────────────────────────────
+// ── Messages ──────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /sessions/{id}/messages`.
 #[derive(Deserialize)]
@@ -192,6 +258,7 @@ pub struct MessageResponse {
     pub turn_id: Uuid,
     pub assistant_reply: Option<String>,
     pub usage: UsageInfo,
+    pub latency_ms: u128,
 }
 
 /// Token usage summary.
@@ -207,6 +274,8 @@ pub async fn send_message(
     Path(session_id): Path<Uuid>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Json<MessageResponse>, GatewayError> {
+    let started = Instant::now();
+
     state
         .session_engine
         .get_session(session_id)
@@ -231,12 +300,13 @@ pub async fn send_message(
         .find(|t| t.turn_id == Some(turn_row.id) && t.kind == "assistant_message")
         .and_then(|t| t.payload.get("content").and_then(|v| v.as_str()).map(String::from));
 
-    let _ = state.event_tx.send(crate::state::SessionEvent {
+    let _ = state.event_tx.send(SessionEvent {
         session_id: session_id.to_string(),
         kind: "turn_completed".to_string(),
-        payload: serde_json::json!({
+        payload: json!({
+            "session_id": session_id,
             "turn_id": turn_row.id,
-            "assistant_reply": assistant_reply,
+            "assistant_reply": assistant_reply.clone(),
             "prompt_tokens": usage.prompt_tokens,
             "completion_tokens": usage.completion_tokens,
         }),
@@ -251,10 +321,11 @@ pub async fn send_message(
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
         },
+        latency_ms: started.elapsed().as_millis(),
     }))
 }
 
-// ── Transcript ─────────────────────────────────────────────────────────────────
+// ── Transcript ────────────────────────────────────────────────────────────────
 
 /// A single transcript entry in the response.
 #[derive(Serialize)]
@@ -299,7 +370,7 @@ pub async fn get_transcript(
     Ok(Json(entries))
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
 fn _started_at_for_tests() -> Arc<Instant> {
