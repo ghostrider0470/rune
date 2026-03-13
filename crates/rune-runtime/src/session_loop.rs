@@ -77,11 +77,11 @@ impl SessionLoop {
                     return Ok(());
                 }
 
-                let routing_key = format!("{}:{}", msg.channel_id, msg.sender);
+                let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
                 debug!(routing_key = %routing_key, "received inbound message");
 
                 let session = self
-                    .find_or_create_session(&routing_key, &msg.channel_id.to_string())
+                    .find_or_create_session(&routing_key)
                     .await?;
 
                 info!(session_id = %session.id, len = msg.content.len(), "executing turn");
@@ -187,8 +187,8 @@ impl SessionLoop {
     async fn find_or_create_session(
         &self,
         routing_key: &str,
-        channel_ref: &str,
     ) -> Result<SessionRow, RuntimeError> {
+        // 1. Check in-memory cache
         {
             let index = self.sessions.lock().await;
             if let Some(session_id) = index.get(routing_key) {
@@ -198,13 +198,22 @@ impl SessionLoop {
             }
         }
 
+        // 2. Check database (survives restarts)
+        if let Some(session) = self.session_repo.find_by_channel_ref(routing_key).await? {
+            info!(session_id = %session.id, routing_key = %routing_key, "resumed existing session from DB");
+            let mut index = self.sessions.lock().await;
+            index.insert(routing_key.to_string(), session.id);
+            return Ok(session);
+        }
+
+        // 3. Create new session with routing_key as channel_ref
         let session = self
             .engine
             .create_session_full(
                 SessionKind::Channel,
                 None,
                 None,
-                Some(channel_ref.to_string()),
+                Some(routing_key.to_string()),
             )
             .await?;
 

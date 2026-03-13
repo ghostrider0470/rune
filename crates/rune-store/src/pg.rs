@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use diesel::OptionalExtension;
 use uuid::Uuid;
 
 use crate::error::StoreError;
@@ -74,6 +75,23 @@ impl SessionRepo for PgSessionRepo {
             .offset(offset)
             .load(&mut conn)
             .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_by_channel_ref(
+        &self,
+        channel_ref: &str,
+    ) -> Result<Option<SessionRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let terminal = vec!["completed", "failed", "cancelled"];
+        sessions::table
+            .filter(sessions::channel_ref.eq(channel_ref))
+            .filter(sessions::status.ne_all(terminal))
+            .select(SessionRow::as_select())
+            .order(sessions::created_at.desc())
+            .first(&mut conn)
+            .await
+            .optional()
             .map_err(StoreError::from)
     }
 

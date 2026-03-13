@@ -25,6 +25,12 @@ pub trait SessionRepo: Send + Sync {
     /// List sessions, most recent first.
     async fn list(&self, limit: i64, offset: i64) -> Result<Vec<SessionRow>, StoreError>;
 
+    /// Find the most recent non-terminal session by channel_ref.
+    async fn find_by_channel_ref(
+        &self,
+        channel_ref: &str,
+    ) -> Result<Option<SessionRow>, StoreError>;
+
     /// Update session status and last_activity_at.
     async fn update_status(
         &self,

@@ -187,6 +187,22 @@ impl SessionRepo for MemSessionRepo {
             .collect())
     }
 
+    async fn find_by_channel_ref(
+        &self,
+        channel_ref: &str,
+    ) -> Result<Option<SessionRow>, StoreError> {
+        let sessions = self.sessions.lock().await;
+        let terminal = ["completed", "failed", "cancelled"];
+        Ok(sessions
+            .iter()
+            .rev()
+            .find(|s| {
+                s.channel_ref.as_deref() == Some(channel_ref)
+                    && !terminal.contains(&s.status.as_str())
+            })
+            .cloned())
+    }
+
     async fn update_status(
         &self,
         id: Uuid,
