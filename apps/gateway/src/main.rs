@@ -180,6 +180,14 @@ async fn build_services(
         memory: MemoryToolExecutor::new(workspace_root),
     });
 
+    // Resolve system prompt: agent config → hardcoded default
+    let system_prompt = config
+        .agents
+        .default_agent()
+        .and_then(|a| config.agents.effective_system_prompt(a))
+        .unwrap_or("You are Rune, a Rust-powered AI assistant built for speed and reliability.")
+        .to_string();
+
     let mut turn_executor = TurnExecutor::new(
         session_repo.clone(),
         turn_repo,
@@ -187,13 +195,19 @@ async fn build_services(
         model_provider.clone(),
         tool_executor,
         tool_registry,
-        ContextAssembler::new(
-            "You are Rune, a Rust-powered AI assistant built for speed and reliability.",
-        ),
+        ContextAssembler::new(&system_prompt),
         Arc::new(NoOpCompaction),
     );
 
-    if let Some(ref model) = config.models.default_model {
+    // Resolve default model: agent config → models.default_model
+    let default_model = config
+        .agents
+        .default_agent()
+        .and_then(|a| config.agents.effective_model(a))
+        .map(String::from)
+        .or_else(|| config.models.default_model.clone());
+
+    if let Some(ref model) = default_model {
         turn_executor = turn_executor.with_default_model(model);
         info!(model = %model, "default model configured");
     }
