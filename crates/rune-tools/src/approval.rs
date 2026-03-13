@@ -141,6 +141,12 @@ impl ApprovalCheck for PolicyBasedApproval {
         // Medium/High risk without approval
         Err(ToolError::ApprovalRequired {
             tool: call.tool_name.clone(),
+            details: serde_json::to_string(&ApprovalRequest {
+                tool_name: call.tool_name.clone(),
+                arguments_summary: call.arguments.to_string(),
+                risk_level: risk,
+            })
+            .unwrap_or_else(|_| call.arguments.to_string()),
         })
     }
 }

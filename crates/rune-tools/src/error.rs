@@ -21,8 +21,8 @@ pub enum ToolError {
     #[error("tool execution failed: {message}")]
     ExecutionFailedStructured { message: String },
 
-    #[error("approval required for tool {tool}")]
-    ApprovalRequired { tool: String },
+    #[error("approval required for tool {tool}: {details}")]
+    ApprovalRequired { tool: String, details: String },
 
     #[error("approval denied for tool {tool}")]
     ApprovalDenied { tool: String },

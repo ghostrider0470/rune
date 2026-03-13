@@ -1,6 +1,7 @@
 use rune_core::{ToolCallId, ToolCategory};
 
 use crate::definition::{ToolCall, ToolDefinition};
+use crate::approval::PolicyBasedApproval;
 use crate::executor::{AlwaysAllow, ApprovalCheck, ToolExecutor};
 use crate::registry::ToolRegistry;
 use crate::stubs::{StubExecutor, register_builtin_stubs, validate_arguments};
@@ -156,6 +157,25 @@ async fn always_allow_approval_check_permits() {
 
     assert!(checker.check(&call, true).await.is_ok());
     assert!(checker.check(&call, false).await.is_ok());
+}
+
+#[tokio::test]
+async fn policy_approval_error_contains_details_payload() {
+    let checker = PolicyBasedApproval::new(std::collections::HashSet::new());
+    let call = ToolCall {
+        tool_call_id: ToolCallId::new(),
+        tool_name: "exec".into(),
+        arguments: serde_json::json!({"command": "echo hi", "workdir": "/tmp"}),
+    };
+
+    match checker.check(&call, true).await {
+        Err(crate::ToolError::ApprovalRequired { tool, details }) => {
+            assert_eq!(tool, "exec");
+            assert!(details.contains("echo hi"));
+            assert!(details.contains("medium") || details.contains("Medium"));
+        }
+        other => panic!("expected approval-required error, got {other:?}"),
+    }
 }
 
 #[test]

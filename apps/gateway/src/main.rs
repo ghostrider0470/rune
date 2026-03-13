@@ -30,6 +30,7 @@ use rune_tools::file_tools::FileToolExecutor;
 use rune_tools::memory_tool::MemoryToolExecutor;
 use rune_tools::process_tool::{ProcessManager, ProcessToolExecutor};
 use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolRegistry};
+use rune_tools::approval::{ApprovalRequest, RiskLevel};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -223,7 +224,35 @@ impl ToolExecutor for AppToolExecutor {
         match call.tool_name.as_str() {
             "read" | "read_file" | "write" | "write_file" | "edit" | "edit_file"
             | "list_files" => self.file.execute(call).await,
-            "exec" | "execute_command" => self.exec.execute(call).await,
+            "exec" | "execute_command" => {
+                let details = serde_json::to_string_pretty(&ApprovalRequest {
+                    tool_name: call.tool_name.clone(),
+                    arguments_summary: serde_json::json!({
+                        "command": call.arguments.get("command").and_then(|v| v.as_str()).unwrap_or(""),
+                        "workdir": call.arguments.get("workdir").and_then(|v| v.as_str()),
+                        "background": call.arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "timeout": call.arguments.get("timeout").and_then(|v| v.as_u64()),
+                        "pty": call.arguments.get("pty").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "elevated": call.arguments.get("elevated").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "ask": call.arguments.get("ask").and_then(|v| v.as_str()),
+                        "security": call.arguments.get("security").and_then(|v| v.as_str())
+                    }).to_string(),
+                    risk_level: if call.arguments.get("elevated").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        RiskLevel::High
+                    } else {
+                        RiskLevel::Medium
+                    },
+                }).unwrap_or_else(|_| call.arguments.to_string());
+
+                let approval_bypassed = matches!(call.arguments.get("ask").and_then(|v| v.as_str()), Some("off"));
+                if !approval_bypassed {
+                    return Err(ToolError::ApprovalRequired {
+                        tool: call.tool_name.clone(),
+                        details,
+                    });
+                }
+                self.exec.execute(call).await
+            }
             "process" => self.process.execute(call).await,
             "memory_search" | "memory_get" => self.memory.execute(call).await,
             other => Err(ToolError::UnknownTool {
