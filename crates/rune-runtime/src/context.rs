@@ -4,6 +4,7 @@ use rune_store::models::TranscriptItemRow;
 
 use crate::compaction::CompactionStrategy;
 use crate::memory::MemoryContext;
+use crate::workspace::WorkspaceContext;
 
 /// Builds the prompt messages from session history, system instructions, and context.
 pub struct ContextAssembler {
@@ -19,27 +20,35 @@ impl ContextAssembler {
 
     /// Assemble prompt messages from persisted transcript rows.
     ///
-    /// Produces: [system (with optional memory)] + transcript items converted to ChatMessages,
-    /// then passed through the compaction strategy.
+    /// Produces: [system (with optional workspace + memory context)] + transcript items
+    /// converted to ChatMessages, then passed through the compaction strategy.
     pub fn assemble(
         &self,
         transcript_rows: &[TranscriptItemRow],
         compaction: &dyn CompactionStrategy,
+        workspace: Option<&WorkspaceContext>,
         memory: Option<&MemoryContext>,
     ) -> Vec<ChatMessage> {
         let mut messages = Vec::with_capacity(transcript_rows.len() + 1);
 
-        // System message with optional memory context
-        let system_content = if let Some(mem) = memory {
-            let mem_section = mem.format_for_prompt();
-            if mem_section.is_empty() {
-                self.system_instructions.clone()
-            } else {
-                format!("{}\n\n{mem_section}", self.system_instructions)
+        // System message with optional workspace + memory context
+        let mut sections = vec![self.system_instructions.clone()];
+
+        if let Some(workspace) = workspace {
+            let workspace_section = workspace.format_for_prompt();
+            if !workspace_section.is_empty() {
+                sections.push(workspace_section);
             }
-        } else {
-            self.system_instructions.clone()
-        };
+        }
+
+        if let Some(mem) = memory {
+            let mem_section = mem.format_for_prompt();
+            if !mem_section.is_empty() {
+                sections.push(mem_section);
+            }
+        }
+
+        let system_content = sections.join("\n\n");
 
         messages.push(ChatMessage {
             role: Role::System,

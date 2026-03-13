@@ -304,7 +304,7 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
     });
 
     for provider in &config.models.providers {
-        let prefix = format!("models.provider.{}", provider.provider_name);
+        let prefix = format!("models.provider.{}", provider.name);
         let api_key_state = provider
             .api_key_env
             .as_deref()
@@ -312,28 +312,28 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
             .filter(|value| !value.trim().is_empty());
 
         results.push(CheckResult {
-            name: format!("{prefix}.endpoint"),
+            name: format!("{prefix}.base_url"),
             category: "models".into(),
-            status: if provider.endpoint.trim().is_empty() {
+            status: if provider.base_url.trim().is_empty() {
                 CheckStatus::Fail
             } else {
                 CheckStatus::Pass
             },
-            message: if provider.endpoint.trim().is_empty() {
+            message: if provider.base_url.trim().is_empty() {
                 "Provider endpoint is missing".into()
             } else {
-                format!("Endpoint configured: {}", provider.endpoint)
+                format!("Endpoint configured: {}", provider.base_url)
             },
-            hint: if provider.endpoint.trim().is_empty() {
+            hint: if provider.base_url.trim().is_empty() {
                 Some("Set a reachable provider endpoint".into())
             } else {
                 None
             },
         });
 
-        let looks_azure = provider.endpoint.contains("openai.azure.com")
+        let looks_azure = provider.base_url.contains("openai.azure.com")
             || provider
-                .provider_name
+                .name
                 .to_ascii_lowercase()
                 .contains("azure");
         results.push(CheckResult {
@@ -779,8 +779,10 @@ mod tests {
             .models
             .providers
             .push(rune_config::ModelProviderConfig {
-                provider_name: "azure-openai".into(),
-                endpoint: "https://example.openai.azure.com".into(),
+                name: "azure-openai".into(),
+                kind: "azure-openai".into(),
+                base_url: "https://example.openai.azure.com".into(),
+                api_key: None,
                 deployment_name: Some("gpt-4.1".into()),
                 api_version: Some("2024-10-21".into()),
                 api_key_env: Some("RUNE_TEST_AZURE_KEY".into()),
@@ -838,8 +840,10 @@ mod tests {
             .models
             .providers
             .push(rune_config::ModelProviderConfig {
-                provider_name: "azure-openai".into(),
-                endpoint: "https://example.openai.azure.com".into(),
+                name: "azure-openai".into(),
+                kind: "azure-openai".into(),
+                base_url: "https://example.openai.azure.com".into(),
+                api_key: None,
                 deployment_name: None,
                 api_version: None,
                 api_key_env: Some("RUNE_TEST_MISSING_KEY".into()),

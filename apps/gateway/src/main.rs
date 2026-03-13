@@ -20,6 +20,7 @@ use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
+    AnthropicProvider, AzureOpenAiProvider, OpenAiProvider,
 };
 use rune_runtime::{
     ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor, scheduler::Scheduler,
@@ -157,7 +158,7 @@ async fn build_services(
 
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(EchoModelProvider);
+    let model_provider: Arc<dyn ModelProvider> = build_model_provider(&config);
     let scheduler = Arc::new(Scheduler::new());
 
     let process_manager = ProcessManager::new();
@@ -180,6 +181,7 @@ async fn build_services(
     });
 
     let turn_executor = Arc::new(TurnExecutor::new(
+        session_repo.clone(),
         turn_repo,
         transcript_repo.clone(),
         model_provider.clone(),
@@ -420,8 +422,73 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry) {
     }
 }
 
-/// Demo model provider that echoes back user messages.
-/// Used when no real model providers are configured.
+/// Build the model provider from config, falling back to echo if none configured.
+fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
+    if let Some(provider_cfg) = config.models.providers.first() {
+        let api_key = provider_cfg
+            .api_key
+            .clone()
+            .or_else(|| {
+                provider_cfg
+                    .api_key_env
+                    .as_ref()
+                    .and_then(|env_var| std::env::var(env_var).ok())
+            })
+            .unwrap_or_default();
+
+        match provider_cfg.kind.as_str() {
+            "anthropic" => {
+                info!(
+                    provider = %provider_cfg.name,
+                    base_url = %provider_cfg.base_url,
+                    "using Anthropic provider"
+                );
+                let api_version = provider_cfg
+                    .api_version
+                    .as_deref()
+                    .unwrap_or("2023-06-01");
+                Arc::new(AnthropicProvider::azure(
+                    &provider_cfg.base_url,
+                    &api_key,
+                    api_version,
+                ))
+            }
+            "openai" => {
+                info!(provider = %provider_cfg.name, "using OpenAI provider");
+                Arc::new(OpenAiProvider::new(&provider_cfg.base_url, &api_key))
+            }
+            "azure-openai" => {
+                let deployment = provider_cfg
+                    .deployment_name
+                    .as_deref()
+                    .unwrap_or("gpt-4o");
+                let api_version = provider_cfg
+                    .api_version
+                    .as_deref()
+                    .unwrap_or("2024-06-01");
+                info!(
+                    provider = %provider_cfg.name,
+                    deployment,
+                    "using Azure OpenAI provider"
+                );
+                Arc::new(AzureOpenAiProvider::new(
+                    &provider_cfg.base_url,
+                    deployment,
+                    api_version,
+                    &api_key,
+                ))
+            }
+            other => {
+                warn!(kind = other, "unknown provider kind, falling back to echo");
+                Arc::new(EchoModelProvider)
+            }
+        }
+    } else {
+        info!("no model providers configured — using echo fallback");
+        Arc::new(EchoModelProvider)
+    }
+}
+
 #[derive(Debug)]
 struct EchoModelProvider;
 

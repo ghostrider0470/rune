@@ -26,12 +26,12 @@ pub fn provider_from_config(
 ) -> Result<Box<dyn ModelProvider>, ModelError> {
     let api_key = resolve_api_key(cfg)?;
 
-    match cfg.provider_name.to_lowercase().as_str() {
+    match cfg.name.to_lowercase().as_str() {
         "anthropic" => Ok(Box::new(AnthropicProvider::direct(&api_key))),
         "anthropic_azure" | "azure_anthropic" => {
             let api_version = cfg.api_version.as_deref().unwrap_or("2023-06-01");
             Ok(Box::new(AnthropicProvider::azure(
-                &cfg.endpoint,
+                &cfg.base_url,
                 &api_key,
                 api_version,
             )))
@@ -44,22 +44,29 @@ pub fn provider_from_config(
                 ModelError::Configuration("Azure provider requires api_version".into())
             })?;
             Ok(Box::new(AzureOpenAiProvider::new(
-                &cfg.endpoint,
+                &cfg.base_url,
                 deployment,
                 api_version,
                 &api_key,
             )))
         }
-        _ => Ok(Box::new(OpenAiProvider::new(&cfg.endpoint, &api_key))),
+        _ => Ok(Box::new(OpenAiProvider::new(&cfg.base_url, &api_key))),
     }
 }
 
 fn resolve_api_key(cfg: &ModelProviderConfig) -> Result<String, ModelError> {
+    // Direct api_key takes precedence
+    if let Some(ref key) = cfg.api_key {
+        if !key.is_empty() {
+            return Ok(key.clone());
+        }
+    }
+    // Fall back to env var
     let env_var = cfg.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY");
     std::env::var(env_var).map_err(|_| {
         ModelError::Auth(format!(
             "API key env var '{env_var}' not set for provider '{}'",
-            cfg.provider_name
+            cfg.name
         ))
     })
 }

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -5,23 +6,27 @@ use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use rune_core::{
-    ApprovalDecision, ApprovalId, NormalizedMessage, ToolCallId, TranscriptItem, TurnId, TurnStatus,
+    ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, ToolCallId, TranscriptItem,
+    TurnId, TurnStatus,
 };
 use rune_models::{CompletionRequest, ModelProvider};
 use rune_store::models::{NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
-use rune_store::repos::{TranscriptRepo, TurnRepo};
+use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
 use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
 use crate::compaction::CompactionStrategy;
 use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
+use crate::memory::MemoryLoader;
 use crate::usage::UsageAccumulator;
+use crate::workspace::WorkspaceLoader;
 
 /// Maximum tool-call loop iterations before aborting.
 const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 25;
 
 /// Executes a single turn: load context → prompt → model → tool loop → persist.
 pub struct TurnExecutor {
+    session_repo: Arc<dyn SessionRepo>,
     turn_repo: Arc<dyn TurnRepo>,
     transcript_repo: Arc<dyn TranscriptRepo>,
     model_provider: Arc<dyn ModelProvider>,
@@ -35,6 +40,7 @@ pub struct TurnExecutor {
 impl TurnExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        session_repo: Arc<dyn SessionRepo>,
         turn_repo: Arc<dyn TurnRepo>,
         transcript_repo: Arc<dyn TranscriptRepo>,
         model_provider: Arc<dyn ModelProvider>,
@@ -44,6 +50,7 @@ impl TurnExecutor {
         compaction: Arc<dyn CompactionStrategy>,
     ) -> Self {
         Self {
+            session_repo,
             turn_repo,
             transcript_repo,
             model_provider,
@@ -85,7 +92,7 @@ impl TurnExecutor {
                 id: turn_id.into_uuid(),
                 session_id,
                 trigger_kind: "user_message".to_string(),
-                status: status_str(TurnStatus::Started),
+                status: status_str(TurnStatus::Started).to_string(),
                 model_ref: model_ref.map(String::from),
                 started_at: now,
                 ended_at: None,
@@ -115,7 +122,7 @@ impl TurnExecutor {
 
         let final_turn = self
             .turn_repo
-            .update_status(turn.id, &status_str(final_status), ended_at)
+            .update_status(turn.id, status_str(final_status), ended_at)
             .await?;
 
         // If the loop failed, propagate the error
@@ -131,6 +138,16 @@ impl TurnExecutor {
         turn_id: TurnId,
         usage: &mut UsageAccumulator,
     ) -> Result<(), RuntimeError> {
+        let session = self.session_repo.find_by_id(session_id).await?;
+        let session_kind = parse_session_kind(&session.kind)?;
+        let workspace_root = session
+            .workspace_root
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let workspace_context = WorkspaceLoader::new(&workspace_root).load().await;
+        let memory_context = MemoryLoader::new(&workspace_root).load(session_kind).await;
+
         let mut iterations: u32 = 0;
 
         loop {
@@ -143,7 +160,7 @@ impl TurnExecutor {
             self.turn_repo
                 .update_status(
                     turn_id.into_uuid(),
-                    &status_str(TurnStatus::ModelCalling),
+                    status_str(TurnStatus::ModelCalling),
                     None,
                 )
                 .await?;
@@ -151,9 +168,12 @@ impl TurnExecutor {
             // Load transcript and assemble prompt
             let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;
 
-            let messages =
-                self.context_assembler
-                    .assemble(&transcript_rows, self.compaction.as_ref(), None);
+            let messages = self.context_assembler.assemble(
+                &transcript_rows,
+                self.compaction.as_ref(),
+                Some(&workspace_context),
+                Some(&memory_context),
+            );
 
             // Build tool definitions for the request
             let tool_defs: Vec<rune_models::ToolDefinition> = self
@@ -212,7 +232,7 @@ impl TurnExecutor {
                     self.turn_repo
                         .update_status(
                             turn_id.into_uuid(),
-                            &status_str(TurnStatus::ToolExecuting),
+                            status_str(TurnStatus::ToolExecuting),
                             None,
                         )
                         .await?;
@@ -320,7 +340,7 @@ impl TurnExecutor {
                 session_id,
                 turn_id,
                 seq,
-                kind,
+                kind: kind.to_string(),
                 payload,
                 created_at: Utc::now(),
             })
@@ -330,38 +350,30 @@ impl TurnExecutor {
     }
 }
 
-fn status_str(status: TurnStatus) -> String {
-    serde_json::to_value(status)
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string()
+fn parse_session_kind(kind: &str) -> Result<SessionKind, RuntimeError> {
+    match kind {
+        "direct" => Ok(SessionKind::Direct),
+        "channel" => Ok(SessionKind::Channel),
+        "scheduled" => Ok(SessionKind::Scheduled),
+        "subagent" => Ok(SessionKind::Subagent),
+        other => Err(RuntimeError::ContextAssembly(format!(
+            "unknown session kind: {other}"
+        ))),
+    }
 }
 
-fn extract_approval_command(details: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(details)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("command")
-                .and_then(|v| v.as_str())
-                .map(ToString::to_string)
-                .or_else(|| {
-                    value
-                        .get("arguments_summary")
-                        .and_then(|v| v.as_str())
-                        .and_then(|summary| serde_json::from_str::<serde_json::Value>(summary).ok())
-                        .and_then(|summary| {
-                            summary
-                                .get("command")
-                                .and_then(|v| v.as_str())
-                                .map(ToString::to_string)
-                        })
-                })
-        })
+fn status_str(status: TurnStatus) -> &'static str {
+    match status {
+        TurnStatus::Started => "started",
+        TurnStatus::ModelCalling => "model_calling",
+        TurnStatus::ToolExecuting => "tool_executing",
+        TurnStatus::Completed => "completed",
+        TurnStatus::Failed => "failed",
+        TurnStatus::Cancelled => "cancelled",
+    }
 }
 
-fn transcript_item_kind(item: &TranscriptItem) -> String {
+fn transcript_item_kind(item: &TranscriptItem) -> &'static str {
     match item {
         TranscriptItem::UserMessage { .. } => "user_message",
         TranscriptItem::AssistantMessage { .. } => "assistant_message",
@@ -372,5 +384,24 @@ fn transcript_item_kind(item: &TranscriptItem) -> String {
         TranscriptItem::StatusNote { .. } => "status_note",
         TranscriptItem::SubagentResult { .. } => "subagent_result",
     }
-    .to_string()
+}
+
+fn extract_approval_command(details: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(details) {
+        if let Some(command) = value.get("command").and_then(|v| v.as_str()) {
+            return Some(command.to_string());
+        }
+
+        if let Some(arguments_summary) = value.get("arguments_summary").and_then(|v| v.as_str()) {
+            if let Ok(args) = serde_json::from_str::<serde_json::Value>(arguments_summary) {
+                if let Some(command) = args.get("command").and_then(|v| v.as_str()) {
+                    return Some(command.to_string());
+                }
+            }
+        }
+    }
+
+    details
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("command:").map(|s| s.trim().to_string()))
 }

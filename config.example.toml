@@ -1,0 +1,26 @@
+[gateway]
+host = "127.0.0.1"
+port = 18790
+
+[database]
+run_migrations = true
+# database_url = "postgresql://user:pass@localhost/rune"
+
+[channels]
+# telegram_token = "YOUR_BOT_TOKEN"
+
+[models]
+default_model = "claude-sonnet-4-6"
+
+[[models.providers]]
+name = "anthropic-azure"
+kind = "anthropic"
+base_url = "https://your-resource.services.ai.azure.com/anthropic"
+# api_key = "your-key"  # or use api_key_env
+api_key_env = "ANTHROPIC_API_KEY"
+
+[logging]
+level = "info"
+
+[paths]
+workspace_root = "/path/to/workspace"

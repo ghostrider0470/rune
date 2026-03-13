@@ -146,7 +146,7 @@ impl SessionLoop {
         let session = self
             .engine
             .create_session_full(
-                SessionKind::Direct,
+                SessionKind::Channel,
                 None,
                 None,
                 Some(channel_ref.to_string()),

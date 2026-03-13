@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use std::path::PathBuf;
+
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -29,13 +31,19 @@ use crate::executor::TurnExecutor;
 #[derive(Debug)]
 struct FakeModelProvider {
     responses: Mutex<Vec<CompletionResponse>>,
+    requests: Mutex<Vec<CompletionRequest>>,
 }
 
 impl FakeModelProvider {
     fn new(responses: Vec<CompletionResponse>) -> Self {
         Self {
             responses: Mutex::new(responses),
+            requests: Mutex::new(Vec::new()),
         }
+    }
+
+    async fn requests(&self) -> Vec<CompletionRequest> {
+        self.requests.lock().await.clone()
     }
 
     fn text_response(content: &str) -> CompletionResponse {
@@ -76,8 +84,9 @@ impl FakeModelProvider {
 impl ModelProvider for FakeModelProvider {
     async fn complete(
         &self,
-        _request: &CompletionRequest,
+        request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
+        self.requests.lock().await.push(request.clone());
         let mut responses = self.responses.lock().await;
         if responses.is_empty() {
             return Err(ModelError::Provider("no more fake responses".into()));
@@ -332,14 +341,29 @@ struct TestHarness {
     session_repo: Arc<MemSessionRepo>,
     turn_repo: Arc<MemTurnRepo>,
     transcript_repo: Arc<MemTranscriptRepo>,
+    workspace_root: PathBuf,
 }
 
 impl TestHarness {
     fn new() -> Self {
+        let workspace_root = std::env::temp_dir().join(format!("rune-runtime-test-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
+        std::fs::write(workspace_root.join("AGENTS.md"), "# AGENTS\nWorkspace rules.").unwrap();
+        std::fs::write(workspace_root.join("SOUL.md"), "# SOUL\nBe sharp.").unwrap();
+        std::fs::write(workspace_root.join("USER.md"), "# USER\nHamza").unwrap();
+        std::fs::write(workspace_root.join("MEMORY.md"), "# MEMORY\nLong-term fact.").unwrap();
+        let today = chrono::Utc::now().date_naive();
+        std::fs::write(
+            workspace_root.join(format!("memory/{}.md", today.format("%Y-%m-%d"))),
+            "# Today\nRuntime note.",
+        )
+        .unwrap();
+
         Self {
             session_repo: Arc::new(MemSessionRepo::new()),
             turn_repo: Arc::new(MemTurnRepo::new()),
             transcript_repo: Arc::new(MemTranscriptRepo::new()),
+            workspace_root,
         }
     }
 
@@ -350,6 +374,7 @@ impl TestHarness {
         tool_registry: ToolRegistry,
     ) -> TurnExecutor {
         TurnExecutor::new(
+            self.session_repo.clone(),
             self.turn_repo.clone(),
             self.transcript_repo.clone(),
             model,
@@ -374,7 +399,7 @@ async fn full_turn_cycle_no_tools() {
 
     // Create session
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     assert_eq!(session.status, "created");
@@ -418,7 +443,7 @@ async fn tool_loop_with_multi_step_calls() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -481,7 +506,7 @@ async fn failed_model_call_sets_turn_failed() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -510,7 +535,7 @@ async fn session_status_transitions() {
     let engine = h.session_engine();
 
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     assert_eq!(session.status, "created");
@@ -531,7 +556,7 @@ async fn invalid_session_transition_rejected() {
     let engine = h.session_engine();
 
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
 
@@ -548,7 +573,7 @@ async fn max_tool_iterations_enforced() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -591,7 +616,7 @@ async fn approval_required_is_attributed_in_transcript() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -656,26 +681,33 @@ async fn approval_required_is_attributed_in_transcript() {
         ]
     );
 
-    let approval_request_payload = &transcript[2].payload;
-    assert_eq!(approval_request_payload["kind"], "approval_request");
-    assert_eq!(
-        approval_request_payload["command"],
-        serde_json::Value::String("rm -rf /tmp/demo".to_string())
-    );
+    let approval_request_item: rune_core::TranscriptItem =
+        serde_json::from_value(transcript[2].payload.clone()).unwrap();
+    match approval_request_item {
+        rune_core::TranscriptItem::ApprovalRequest { command, .. } => {
+            assert_eq!(command.as_deref(), Some("rm -rf /tmp/demo"));
+        }
+        other => panic!("unexpected transcript item: {other:?}"),
+    }
 
-    let approval_response_payload = &transcript[3].payload;
-    assert_eq!(approval_response_payload["kind"], "approval_response");
-    assert_eq!(approval_response_payload["decision"], "deny");
+    let approval_response_item: rune_core::TranscriptItem =
+        serde_json::from_value(transcript[3].payload.clone()).unwrap();
+    match approval_response_item {
+        rune_core::TranscriptItem::ApprovalResponse { decision, .. } => {
+            assert_eq!(decision, rune_core::ApprovalDecision::Deny);
+        }
+        other => panic!("unexpected transcript item: {other:?}"),
+    }
 
-    let tool_result_payload = &transcript[4].payload;
-    assert_eq!(tool_result_payload["kind"], "tool_result");
-    assert_eq!(tool_result_payload["is_error"], true);
-    assert!(
-        tool_result_payload["output"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("Approval required for tool exec")
-    );
+    let tool_result_item: rune_core::TranscriptItem =
+        serde_json::from_value(transcript[4].payload.clone()).unwrap();
+    match tool_result_item {
+        rune_core::TranscriptItem::ToolResult { is_error, output, .. } => {
+            assert!(is_error);
+            assert!(output.contains("Approval required for tool exec"));
+        }
+        other => panic!("unexpected transcript item: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -692,7 +724,7 @@ async fn usage_tracking_accumulates_across_tool_loop() {
     let h = TestHarness::new();
     let engine = h.session_engine();
     let session = engine
-        .create_session(SessionKind::Direct, None)
+        .create_session(SessionKind::Direct, Some(h.workspace_root.to_string_lossy().to_string()))
         .await
         .unwrap();
     engine.mark_ready(session.id).await.unwrap();
@@ -765,4 +797,65 @@ async fn session_parent_linkage() {
     // Verify parent session has no linkage
     assert!(parent.requester_session_id.is_none());
     assert!(parent.channel_ref.is_none());
+}
+
+#[tokio::test]
+async fn direct_session_prompt_includes_workspace_and_memory_context() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
+        "Context loaded",
+    )]));
+    let model_handle = model.clone();
+    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new());
+
+    executor.execute(session.id, "hello", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    let system = requests[0].messages[0].content.clone().unwrap();
+    assert!(system.contains("AGENTS.md"));
+    assert!(system.contains("SOUL.md"));
+    assert!(system.contains("USER.md"));
+    assert!(system.contains("Long-term Memory"));
+    assert!(system.contains("Today's Notes"));
+}
+
+#[tokio::test]
+async fn channel_session_prompt_excludes_long_term_memory() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session_full(
+            SessionKind::Channel,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            None,
+            Some("telegram".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
+        "Channel context",
+    )]));
+    let model_handle = model.clone();
+    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new());
+
+    executor.execute(session.id, "ping", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    let system = requests[0].messages[0].content.clone().unwrap();
+    assert!(system.contains("AGENTS.md"));
+    assert!(system.contains("Today's Notes"));
+    assert!(!system.contains("Long-term Memory"));
+    assert!(!system.contains("Long-term fact."));
 }

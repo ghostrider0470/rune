@@ -211,11 +211,13 @@ async fn parses_tool_calls() {
 fn selects_azure_provider() {
     unsafe { std::env::set_var("TEST_AZURE_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
-        provider_name: "azure".into(),
-        endpoint: "https://test.openai.azure.com".into(),
+        name: "azure".into(),
+        kind: "azure-openai".into(),
+        base_url: "https://test.openai.azure.com".into(),
         deployment_name: Some("gpt-4o".into()),
         api_version: Some("2024-06-01".into()),
         api_key_env: Some("TEST_AZURE_KEY_SEL".into()),
+        api_key: None,
         model_alias: None,
     };
     let provider = provider_from_config(&cfg).unwrap();
@@ -228,11 +230,13 @@ fn selects_azure_provider() {
 fn selects_openai_provider() {
     unsafe { std::env::set_var("TEST_OAI_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
-        provider_name: "openai".into(),
-        endpoint: "https://api.openai.com/v1".into(),
+        name: "openai".into(),
+        kind: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
         deployment_name: None,
         api_version: None,
         api_key_env: Some("TEST_OAI_KEY_SEL".into()),
+        api_key: None,
         model_alias: None,
     };
     let provider = provider_from_config(&cfg).unwrap();
@@ -244,11 +248,13 @@ fn selects_openai_provider() {
 fn azure_requires_deployment_name() {
     unsafe { std::env::set_var("TEST_AZURE_KEY_DEP", "fake") };
     let cfg = ModelProviderConfig {
-        provider_name: "azure".into(),
-        endpoint: "https://test.openai.azure.com".into(),
+        name: "azure".into(),
+        kind: "azure-openai".into(),
+        base_url: "https://test.openai.azure.com".into(),
         deployment_name: None,
         api_version: Some("2024-06-01".into()),
         api_key_env: Some("TEST_AZURE_KEY_DEP".into()),
+        api_key: None,
         model_alias: None,
     };
     let err = provider_from_config(&cfg).unwrap_err();
@@ -260,11 +266,13 @@ fn azure_requires_deployment_name() {
 fn azure_requires_api_version() {
     unsafe { std::env::set_var("TEST_AZURE_KEY_VER", "fake") };
     let cfg = ModelProviderConfig {
-        provider_name: "azure".into(),
-        endpoint: "https://test.openai.azure.com".into(),
+        name: "azure".into(),
+        kind: "azure-openai".into(),
+        base_url: "https://test.openai.azure.com".into(),
         deployment_name: Some("gpt-4o".into()),
         api_version: None,
         api_key_env: Some("TEST_AZURE_KEY_VER".into()),
+        api_key: None,
         model_alias: None,
     };
     let err = provider_from_config(&cfg).unwrap_err();
@@ -275,11 +283,13 @@ fn azure_requires_api_version() {
 #[test]
 fn missing_api_key_env_returns_auth_error() {
     let cfg = ModelProviderConfig {
-        provider_name: "openai".into(),
-        endpoint: "https://api.openai.com/v1".into(),
+        name: "openai".into(),
+        kind: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
         deployment_name: None,
         api_version: None,
         api_key_env: Some("DEFINITELY_NOT_SET_12345".into()),
+        api_key: None,
         model_alias: None,
     };
     let err = provider_from_config(&cfg).unwrap_err();

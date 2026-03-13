@@ -4,3 +4,4 @@ Cargo.lock
 /secrets/
 .DS_Store
 *.log
+config.toml

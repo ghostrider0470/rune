@@ -121,16 +121,30 @@ impl Default for DatabaseConfig {
 /// Provider inventory and routing aliases.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ModelsConfig {
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
     pub providers: Vec<ModelProviderConfig>,
 }
 
 /// A single configured model-provider target.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProviderConfig {
-    pub provider_name: String,
-    pub endpoint: String,
+    /// Display/routing name for this provider.
+    #[serde(alias = "provider_name")]
+    pub name: String,
+    /// Provider kind: "anthropic", "openai", "azure-openai".
+    #[serde(default)]
+    pub kind: String,
+    /// API endpoint / base URL.
+    #[serde(alias = "endpoint")]
+    pub base_url: String,
+    /// Direct API key (takes precedence over api_key_env).
+    #[serde(default)]
+    pub api_key: Option<String>,
     pub deployment_name: Option<String>,
     pub api_version: Option<String>,
+    /// Environment variable holding the API key.
     pub api_key_env: Option<String>,
     pub model_alias: Option<String>,
 }
