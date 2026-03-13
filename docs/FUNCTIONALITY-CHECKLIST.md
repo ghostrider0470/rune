@@ -163,7 +163,7 @@ Implementation note (2026-03-13): the current executable control-plane slice is 
 - [x] agent turn loop
 - [x] context assembly
 - [x] transcript ordering
-- [ ] transcript attribution of tool/approval/subagent events
+- [x] transcript attribution of tool/approval/subagent events
 - [ ] transcript compaction/pruning
 - [x] usage/cost tracking
 - [ ] model failover / fallback behavior
@@ -210,17 +210,17 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 - [x] structured errors
 - [x] durable handles for long-running work
 
-Implementation note (2026-03-13): executable parity progress now includes concrete `read`, `write`, `edit`, `cron`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `subagents`, `session_status`, `memory_search`, and `memory_get` tool executors in `rune-tools`, plus runtime scheduler primitives in `rune-runtime`. File tools now accept OpenClaw-compatible argument aliases (`file_path`, `oldText`, `newText`, `from`, `lines`) and `read` enforces the 2000-line / 50KB truncation contract. Remaining work is the full parity layer around approvals, transcript/audit linkage, persistence/restart durability, and exact OpenClaw semantics for `exec` PTY plus runtime-backed subagent lifecycle persistence. The `exec` executor now supports foreground execution and background handle registration via the shared process manager, while the `process` executor covers `list`, `poll`, `log`, `write`, `submit`, `paste`, `send-keys` (`keys`, `hex`, `literal`), and `kill` in the OpenClaw-shaped surface. Approval-required `exec` calls now surface a structured payload containing the exact command/workdir/background/timeout/pty/elevated/ask/security details for operator review, but allow-once/allow-always persistence, transcript/audit linkage, restart durability, and PTY fidelity are still outstanding.
+Implementation note (2026-03-13): executable parity progress now includes concrete `read`, `write`, `edit`, `cron`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `subagents`, `session_status`, `memory_search`, and `memory_get` tool executors in `rune-tools`, plus runtime scheduler primitives in `rune-runtime`. File tools now accept OpenClaw-compatible argument aliases (`file_path`, `oldText`, `newText`, `from`, `lines`) and `read` enforces the 2000-line / 50KB truncation contract. The `exec` executor now supports foreground execution and background handle registration via the shared process manager, while the `process` executor covers `list`, `poll`, `log`, `write`, `submit`, `paste`, `send-keys` (`keys`, `hex`, `literal`), and `kill` in the OpenClaw-shaped surface. Approval-required `exec` calls now surface a structured payload containing the exact command/workdir/background/timeout/pty/elevated/ask/security details for operator review, and runtime coverage now proves transcript attribution for approval-request, approval-response, and denied tool-result audit entries. Remaining work is allow-once/allow-always persistence, restart durability, PTY fidelity, and runtime-backed subagent lifecycle persistence.
 
 ---
 
 ## 5. Approvals / security / sandboxing
 
-- [ ] approval request lifecycle
+- [x] approval request lifecycle
 - [ ] `allow-once` exact scope binding
 - [ ] `allow-always` persistence semantics
-- [ ] `deny` audit trail semantics
-- [ ] exact command/payload presentation for approval
+- [x] `deny` audit trail semantics
+- [x] exact command/payload presentation for approval
 - [ ] ask mode behavior (`off|on-miss|always` equivalent)
 - [ ] security mode behavior (`deny|allowlist|full` equivalent)
 - [ ] elevated execution behavior
