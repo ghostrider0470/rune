@@ -20,7 +20,7 @@ use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
-    AnthropicProvider, AzureOpenAiProvider, OpenAiProvider,
+    AnthropicProvider, AzureFoundryProvider, AzureOpenAiProvider, OpenAiProvider,
 };
 use rune_runtime::{
     ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor, scheduler::Scheduler,
@@ -457,6 +457,22 @@ fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
                 } else {
                     Arc::new(OpenAiProvider::new(&provider_cfg.base_url, &api_key))
                 }
+            }
+            "azure-foundry" | "azure-ai" => {
+                info!(
+                    provider = %provider_cfg.name,
+                    base_url = %provider_cfg.base_url,
+                    "using Azure AI Foundry provider (multi-model)"
+                );
+                let api_version = provider_cfg
+                    .api_version
+                    .as_deref()
+                    .unwrap_or("2023-06-01");
+                Arc::new(AzureFoundryProvider::with_api_version(
+                    &provider_cfg.base_url,
+                    &api_key,
+                    api_version,
+                ))
             }
             "azure-openai" => {
                 let deployment = provider_cfg

@@ -1,5 +1,6 @@
 pub mod anthropic;
 pub mod azure;
+pub mod azure_foundry;
 pub mod openai;
 pub(crate) mod response;
 

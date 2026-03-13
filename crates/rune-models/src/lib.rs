@@ -8,6 +8,7 @@ pub use error::ModelError;
 pub use provider::ModelProvider;
 pub use provider::anthropic::AnthropicProvider;
 pub use provider::azure::AzureOpenAiProvider;
+pub use provider::azure_foundry::AzureFoundryProvider;
 pub use provider::openai::OpenAiProvider;
 pub use types::{
     ChatMessage, CompletionRequest, CompletionResponse, FinishReason, FunctionCall,

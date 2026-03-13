@@ -102,6 +102,44 @@ async fn openai_sends_bearer_token() {
     assert_eq!(resp.content.as_deref(), Some("Hello! How can I help?"));
 }
 
+#[tokio::test]
+async fn openai_azure_mode_sends_api_key_header() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(header("api-key", "azure-openai-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = OpenAiProvider::azure(&server.uri(), "azure-openai-key");
+    let resp = p.complete(&simple_request()).await.unwrap();
+    assert_eq!(resp.content.as_deref(), Some("Hello! How can I help?"));
+}
+
+#[tokio::test]
+async fn openai_uses_max_completion_tokens_field() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = OpenAiProvider::new(&server.uri(), "my-openai-key");
+    let mut request = simple_request();
+    request.max_tokens = Some(123);
+
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(body.get("max_completion_tokens"), Some(&serde_json::json!(123)));
+    assert!(body.get("max_tokens").is_none());
+}
+
 // --- Error mapping ---
 
 #[tokio::test]

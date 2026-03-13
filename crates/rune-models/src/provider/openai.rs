@@ -27,7 +27,7 @@ impl OpenAiProvider {
             url,
             api_key: api_key.to_owned(),
             use_azure_auth: false,
-            client: Client::new(),
+            client: Client::builder().timeout(std::time::Duration::from_secs(120)).build().unwrap_or_default(),
         }
     }
 
@@ -39,7 +39,7 @@ impl OpenAiProvider {
             url,
             api_key: api_key.to_owned(),
             use_azure_auth: true,
-            client: Client::new(),
+            client: Client::builder().timeout(std::time::Duration::from_secs(120)).build().unwrap_or_default(),
         }
     }
 
@@ -70,8 +70,6 @@ impl ModelProvider for OpenAiProvider {
         &self,
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
-        debug!(url = %self.url, azure = self.use_azure_auth, "OpenAI completion request");
-
         let body = OpenAiRequest {
             messages: &request.messages,
             model: &request.model,
@@ -79,6 +77,16 @@ impl ModelProvider for OpenAiProvider {
             max_completion_tokens: request.max_tokens,
             tools: &request.tools,
         };
+
+        let body_json = serde_json::to_string(&body).unwrap_or_default();
+        debug!(
+            url = %self.url,
+            azure = self.use_azure_auth,
+            model = ?body.model,
+            msg_count = body.messages.len(),
+            body_len = body_json.len(),
+            "OpenAI completion request"
+        );
 
         let mut req = self
             .client
