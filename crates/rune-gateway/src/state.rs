@@ -1,6 +1,7 @@
 //! Shared application state for Axum handlers.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
@@ -24,6 +25,8 @@ pub struct SessionEvent {
 pub struct AppState {
     /// Resolved application configuration.
     pub config: Arc<AppConfig>,
+    /// Process start time for health/status uptime reporting.
+    pub started_at: Instant,
     /// Session engine for lifecycle management.
     pub session_engine: Arc<SessionEngine>,
     /// Turn executor for processing messages.
@@ -34,6 +37,8 @@ pub struct AppState {
     pub transcript_repo: Arc<dyn TranscriptRepo>,
     /// Model provider for status reporting.
     pub model_provider: Arc<dyn ModelProvider>,
+    /// Number of registered tools in the runtime graph.
+    pub tool_count: usize,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
 }

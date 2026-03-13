@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::middleware;
 use axum::routing::{get, post};
@@ -25,6 +26,7 @@ use crate::ws;
 /// Handle returned by [`start`] to allow callers to await server completion.
 pub struct GatewayHandle {
     server_handle: tokio::task::JoinHandle<Result<(), GatewayError>>,
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
     supervisor: BackgroundSupervisor,
 }
 
@@ -39,7 +41,9 @@ impl GatewayHandle {
     /// Initiate graceful shutdown.
     pub fn shutdown(mut self) {
         self.supervisor.shutdown();
-        self.server_handle.abort();
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
     }
 }
 
@@ -51,6 +55,7 @@ pub struct Services {
     pub session_repo: Arc<dyn SessionRepo>,
     pub transcript_repo: Arc<dyn TranscriptRepo>,
     pub model_provider: Arc<dyn ModelProvider>,
+    pub tool_count: usize,
 }
 
 /// Start the gateway HTTP server.
@@ -69,11 +74,13 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
 
     let state = AppState {
         config: Arc::new(services.config),
+        started_at: Instant::now(),
         session_engine: services.session_engine,
         turn_executor: services.turn_executor,
         session_repo: services.session_repo,
         transcript_repo: services.transcript_repo,
         model_provider: services.model_provider,
+        tool_count: services.tool_count,
         event_tx,
     };
 
@@ -89,14 +96,19 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let mut supervisor = BackgroundSupervisor::new();
     supervisor.start();
 
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let server_handle = tokio::spawn(async move {
         axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
             .await
             .map_err(|e| GatewayError::Internal(e.to_string()))
     });
 
     Ok(GatewayHandle {
         server_handle,
+        shutdown_tx: Some(shutdown_tx),
         supervisor,
     })
 }
