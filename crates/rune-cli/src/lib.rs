@@ -2,14 +2,16 @@
 
 pub mod cli;
 pub mod client;
+pub mod doctor;
 pub mod output;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 
 pub use cli::Cli;
-use cli::{Command, ConfigAction, GatewayAction, SessionsAction};
-use client::{show_config, validate_config, GatewayClient};
-use output::{render, OutputFormat};
+use cli::{Command, ConfigAction, CronAction, GatewayAction, SessionsAction};
+use client::{GatewayClient, show_config, validate_config};
+use output::{OutputFormat, render};
 
 /// Execute the parsed CLI command against the configured gateway and print output.
 pub async fn run(cli: Cli) -> Result<()> {
@@ -51,6 +53,54 @@ pub async fn run(cli: Cli) -> Result<()> {
             let result = client.doctor().await?;
             println!("{}", render(&result, format));
         }
+        Command::Cron { action } => match action {
+            CronAction::Status => {
+                let result = client.cron_status().await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::List { include_disabled } => {
+                let result = client.cron_list(include_disabled).await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Add {
+                name,
+                text,
+                at,
+                session_target,
+            } => {
+                let at = DateTime::parse_from_rfc3339(&at)
+                    .with_context(|| format!("invalid --at timestamp: {at}"))?
+                    .with_timezone(&Utc);
+                let result = client
+                    .cron_add_system_event(name.as_deref(), &text, at, &session_target)
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Edit { id, name } => {
+                let result = client.cron_edit_name(&id, &name).await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Enable { id } => {
+                let result = client.cron_enable(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Disable { id } => {
+                let result = client.cron_disable(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Rm { id } => {
+                let result = client.cron_remove(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Run { id } => {
+                let result = client.cron_run(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Runs { id } => {
+                let result = client.cron_runs(&id).await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Sessions { action } => match action {
             SessionsAction::List => {
                 let result = client.sessions_list().await?;

@@ -1,10 +1,13 @@
 //! Gateway HTTP client for CLI commands.
 
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Utc};
 use reqwest::Client;
+use serde_json::json;
 
 use crate::output::{
-    ActionResult, ConfigValidationResult, DoctorCheck, DoctorReport, HealthResponse,
+    ActionResult, ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary,
+    CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport, HealthResponse,
     SessionDetailResponse, SessionListResponse, SessionSummary, StatusResponse,
 };
 
@@ -156,6 +159,200 @@ impl GatewayClient {
         })
     }
 
+    /// `GET /cron/status`
+    pub async fn cron_status(&self) -> Result<CronStatusResponse> {
+        let resp = self
+            .http
+            .get(self.url("/cron/status"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            resp.json().await.context("invalid JSON from /cron/status")
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /cron`
+    pub async fn cron_list(&self, include_disabled: bool) -> Result<CronListResponse> {
+        let resp = self
+            .http
+            .get(self.url("/cron"))
+            .query(&[("includeDisabled", include_disabled)])
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let items: serde_json::Value = resp.json().await.context("invalid JSON from /cron")?;
+            let jobs = items
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|job| CronJobSummary {
+                    id: job["id"].as_str().unwrap_or("?").to_string(),
+                    name: job["name"].as_str().map(String::from),
+                    enabled: job["enabled"].as_bool().unwrap_or(false),
+                    session_target: job["session_target"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    schedule_kind: job["schedule"]["kind"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    next_run_at: job["next_run_at"].as_str().map(String::from),
+                    run_count: job["run_count"].as_u64().unwrap_or(0),
+                })
+                .collect();
+            Ok(CronListResponse { jobs })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /cron`
+    pub async fn cron_add_system_event(
+        &self,
+        name: Option<&str>,
+        text: &str,
+        at: DateTime<Utc>,
+        session_target: &str,
+    ) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url("/cron"))
+            .json(&json!({
+                "name": name,
+                "schedule": { "kind": "at", "at": at.to_rfc3339() },
+                "payload": { "kind": "system_event", "text": text },
+                "sessionTarget": session_target,
+                "enabled": true
+            }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let body: serde_json::Value =
+                resp.json().await.context("invalid JSON from POST /cron")?;
+            Ok(ActionResult {
+                success: true,
+                message: format!(
+                    "Cron job created: {}",
+                    body["job_id"].as_str().unwrap_or("unknown")
+                ),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /cron/{id}`
+    pub async fn cron_edit_name(&self, id: &str, name: &str) -> Result<ActionResult> {
+        self.cron_patch(id, json!({ "name": name }), "Cron job updated")
+            .await
+    }
+
+    pub async fn cron_enable(&self, id: &str) -> Result<ActionResult> {
+        self.cron_patch(id, json!({ "enabled": true }), "Cron job enabled")
+            .await
+    }
+
+    pub async fn cron_disable(&self, id: &str) -> Result<ActionResult> {
+        self.cron_patch(id, json!({ "enabled": false }), "Cron job disabled")
+            .await
+    }
+
+    async fn cron_patch(
+        &self,
+        id: &str,
+        payload: serde_json::Value,
+        ok_message: &str,
+    ) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/cron/{id}")))
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        Ok(ActionResult {
+            success: resp.status().is_success(),
+            message: if resp.status().is_success() {
+                ok_message.to_string()
+            } else {
+                format!("Gateway returned HTTP {}", resp.status())
+            },
+        })
+    }
+
+    /// `DELETE /cron/{id}`
+    pub async fn cron_remove(&self, id: &str) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .delete(self.url(&format!("/cron/{id}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        Ok(ActionResult {
+            success: resp.status().is_success(),
+            message: if resp.status().is_success() {
+                "Cron job removed".to_string()
+            } else {
+                format!("Gateway returned HTTP {}", resp.status())
+            },
+        })
+    }
+
+    /// `POST /cron/{id}/run`
+    pub async fn cron_run(&self, id: &str) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/cron/{id}/run")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        Ok(ActionResult {
+            success: resp.status().is_success(),
+            message: if resp.status().is_success() {
+                "Cron job triggered".to_string()
+            } else {
+                format!("Gateway returned HTTP {}", resp.status())
+            },
+        })
+    }
+
+    /// `GET /cron/{id}/runs`
+    pub async fn cron_runs(&self, id: &str) -> Result<CronRunsResponse> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/cron/{id}/runs")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let items: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /cron/{id}/runs")?;
+            let runs = items
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|run| CronRunSummary {
+                    job_id: run["job_id"].as_str().unwrap_or("?").to_string(),
+                    status: run["status"].as_str().unwrap_or("unknown").to_string(),
+                    started_at: run["started_at"].as_str().unwrap_or("?").to_string(),
+                    finished_at: run["finished_at"].as_str().map(String::from),
+                    output: run["output"].as_str().map(String::from),
+                })
+                .collect();
+            Ok(CronRunsResponse { runs })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(&self) -> Result<SessionListResponse> {
         let resp = self
@@ -166,7 +363,8 @@ impl GatewayClient {
             .context("failed to reach gateway")?;
 
         if resp.status().is_success() {
-            let body: serde_json::Value = resp.json().await.context("invalid JSON from /sessions")?;
+            let body: serde_json::Value =
+                resp.json().await.context("invalid JSON from /sessions")?;
             let sessions = body
                 .as_array()
                 .unwrap_or(&vec![])
@@ -194,7 +392,10 @@ impl GatewayClient {
             .context("failed to reach gateway")?;
 
         if resp.status().is_success() {
-            let v: serde_json::Value = resp.json().await.context("invalid JSON from /sessions/:id")?;
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /sessions/:id")?;
             Ok(SessionDetailResponse {
                 id: v["id"].as_str().unwrap_or("?").to_string(),
                 status: v["status"].as_str().unwrap_or("unknown").to_string(),
@@ -213,7 +414,6 @@ impl GatewayClient {
     pub async fn doctor(&self) -> Result<DoctorReport> {
         let mut checks = Vec::new();
 
-        // Check 1: config loads
         let config_check = match rune_config::AppConfig::load(None::<&str>) {
             Ok(_) => DoctorCheck {
                 name: "config".into(),
@@ -228,7 +428,6 @@ impl GatewayClient {
         };
         checks.push(config_check);
 
-        // Check 2: gateway reachable
         let gw_check = match self.health().await {
             Ok(h) if h.healthy => DoctorCheck {
                 name: "gateway".into(),
@@ -283,7 +482,8 @@ pub fn validate_config(file: Option<&str>) -> ConfigValidationResult {
 
 /// Show resolved config as pretty-printed JSON.
 pub fn show_config() -> Result<String> {
-    let config = rune_config::AppConfig::load(None::<&str>).context("failed to load configuration")?;
+    let config =
+        rune_config::AppConfig::load(None::<&str>).context("failed to load configuration")?;
     serde_json::to_string_pretty(&config).context("failed to serialize config")
 }
 
@@ -326,13 +526,11 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/status"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "status": "running",
-                    "version": "0.1.0",
-                    "uptime_seconds": 300
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "running",
+                "version": "0.1.0",
+                "uptime_seconds": 300
+            })))
             .mount(&server)
             .await;
 
@@ -341,6 +539,47 @@ mod tests {
         assert_eq!(resp.status, "running");
         assert_eq!(resp.version.as_deref(), Some("0.1.0"));
         assert_eq!(resp.uptime_seconds, Some(300));
+    }
+
+    #[tokio::test]
+    async fn cron_status_parses_json_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/cron/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "total_jobs": 1,
+                "enabled_jobs": 1,
+                "due_jobs": 0
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.cron_status().await.unwrap();
+        assert_eq!(resp.total_jobs, 1);
+    }
+
+    #[tokio::test]
+    async fn cron_list_parses_array() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/cron"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "id": "job-1",
+                    "name": "test",
+                    "enabled": true,
+                    "session_target": "main",
+                    "schedule": { "kind": "at" },
+                    "run_count": 0
+                }
+            ])))
+            .mount(&server)
+            .await;
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.cron_list(false).await.unwrap();
+        assert_eq!(resp.jobs.len(), 1);
+        assert_eq!(resp.jobs[0].id, "job-1");
     }
 
     #[tokio::test]
@@ -420,9 +659,7 @@ mod tests {
 
     #[test]
     fn validate_config_with_defaults_reports_path_errors() {
-        // Default paths (/data/db etc.) won't exist on dev machines
         let result = validate_config(None);
-        // Should either be valid (if paths exist) or report errors
         assert!(!result.errors.is_empty() || result.valid);
     }
 

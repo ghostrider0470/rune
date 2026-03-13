@@ -11,7 +11,12 @@ pub struct Cli {
     pub json: bool,
 
     /// Gateway base URL (default: http://127.0.0.1:8787).
-    #[arg(long, global = true, env = "RUNE_GATEWAY_URL", default_value = "http://127.0.0.1:8787")]
+    #[arg(
+        long,
+        global = true,
+        env = "RUNE_GATEWAY_URL",
+        default_value = "http://127.0.0.1:8787"
+    )]
     pub gateway_url: String,
 
     #[command(subcommand)]
@@ -31,6 +36,11 @@ pub enum Command {
     Health,
     /// Run diagnostic checks (config, connectivity, etc.).
     Doctor,
+    /// Manage cron jobs.
+    Cron {
+        #[command(subcommand)]
+        action: CronAction,
+    },
     /// Manage sessions.
     Sessions {
         #[command(subcommand)]
@@ -55,6 +65,66 @@ pub enum GatewayAction {
     Stop,
     /// Restart the gateway daemon.
     Restart,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CronAction {
+    /// Show scheduler status.
+    Status,
+    /// List cron jobs.
+    List {
+        /// Include disabled jobs in the listing.
+        #[arg(long)]
+        include_disabled: bool,
+    },
+    /// Add a one-shot reminder/system event job.
+    Add {
+        /// Human-readable name for the job.
+        #[arg(long)]
+        name: Option<String>,
+        /// Text for the system event payload.
+        #[arg(long)]
+        text: String,
+        /// Fire time as RFC3339/ISO-8601.
+        #[arg(long)]
+        at: String,
+        /// Session target (`main` or `isolated`). Defaults to `main`.
+        #[arg(long, default_value = "main")]
+        session_target: String,
+    },
+    /// Update a job's display name.
+    Edit {
+        /// Job ID.
+        id: String,
+        /// New name.
+        #[arg(long)]
+        name: String,
+    },
+    /// Enable a job.
+    Enable {
+        /// Job ID.
+        id: String,
+    },
+    /// Disable a job.
+    Disable {
+        /// Job ID.
+        id: String,
+    },
+    /// Remove a job.
+    Rm {
+        /// Job ID.
+        id: String,
+    },
+    /// Trigger a job immediately.
+    Run {
+        /// Job ID.
+        id: String,
+    },
+    /// Show run history for a job.
+    Runs {
+        /// Job ID.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -166,6 +236,119 @@ mod tests {
     }
 
     #[test]
+    fn parse_cron_status() {
+        let cli = Cli::try_parse_from(["rune", "cron", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Cron {
+                action: CronAction::Status
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_cron_list_with_include_disabled() {
+        let cli = Cli::try_parse_from(["rune", "cron", "list", "--include-disabled"]).unwrap();
+        match cli.command {
+            Command::Cron {
+                action: CronAction::List { include_disabled },
+            } => assert!(include_disabled),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cron_add() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "cron",
+            "add",
+            "--text",
+            "hello",
+            "--at",
+            "2026-03-13T13:00:00Z",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Cron {
+                action:
+                    CronAction::Add {
+                        text,
+                        at,
+                        session_target,
+                        ..
+                    },
+            } => {
+                assert_eq!(text, "hello");
+                assert_eq!(at, "2026-03-13T13:00:00Z");
+                assert_eq!(session_target, "main");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cron_edit() {
+        let cli =
+            Cli::try_parse_from(["rune", "cron", "edit", "job-1", "--name", "renamed"]).unwrap();
+        match cli.command {
+            Command::Cron {
+                action: CronAction::Edit { id, name },
+            } => {
+                assert_eq!(id, "job-1");
+                assert_eq!(name, "renamed");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cron_enable_disable_rm_run_runs() {
+        for (subcommand, matcher) in [
+            ("enable", "enable"),
+            ("disable", "disable"),
+            ("rm", "rm"),
+            ("run", "run"),
+            ("runs", "runs"),
+        ] {
+            let cli = Cli::try_parse_from(["rune", "cron", subcommand, "job-1"]).unwrap();
+            match (matcher, cli.command) {
+                (
+                    "enable",
+                    Command::Cron {
+                        action: CronAction::Enable { id },
+                    },
+                )
+                | (
+                    "disable",
+                    Command::Cron {
+                        action: CronAction::Disable { id },
+                    },
+                )
+                | (
+                    "rm",
+                    Command::Cron {
+                        action: CronAction::Rm { id },
+                    },
+                )
+                | (
+                    "run",
+                    Command::Cron {
+                        action: CronAction::Run { id },
+                    },
+                )
+                | (
+                    "runs",
+                    Command::Cron {
+                        action: CronAction::Runs { id },
+                    },
+                ) => assert_eq!(id, "job-1"),
+                other => panic!("unexpected parse result: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn parse_sessions_list() {
         let cli = Cli::try_parse_from(["rune", "sessions", "list"]).unwrap();
         assert!(matches!(
@@ -222,7 +405,8 @@ mod tests {
 
     #[test]
     fn parse_custom_gateway_url() {
-        let cli = Cli::try_parse_from(["rune", "--gateway-url", "http://localhost:9999", "health"]).unwrap();
+        let cli = Cli::try_parse_from(["rune", "--gateway-url", "http://localhost:9999", "health"])
+            .unwrap();
         assert_eq!(cli.gateway_url, "http://localhost:9999");
     }
 

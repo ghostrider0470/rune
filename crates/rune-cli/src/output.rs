@@ -1,6 +1,6 @@
 //! Output formatting: JSON and human-readable modes.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Output format selector.
@@ -24,13 +24,14 @@ impl OutputFormat {
 /// For human mode, uses the `Display` implementation.
 pub fn render<T: Serialize + fmt::Display>(value: &T, format: OutputFormat) -> String {
     match format {
-        OutputFormat::Json => serde_json::to_string_pretty(value).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}")),
+        OutputFormat::Json => serde_json::to_string_pretty(value)
+            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}")),
         OutputFormat::Human => value.to_string(),
     }
 }
 
 /// A simple status response from the gateway.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub status: String,
     pub version: Option<String>,
@@ -51,7 +52,7 @@ impl fmt::Display for StatusResponse {
 }
 
 /// Health check response.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub healthy: bool,
     pub message: String,
@@ -65,7 +66,7 @@ impl fmt::Display for HealthResponse {
 }
 
 /// A single diagnostic check result used by `rune doctor`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorCheck {
     pub name: String,
     pub passed: bool,
@@ -80,7 +81,7 @@ impl fmt::Display for DoctorCheck {
 }
 
 /// Full doctor report.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub checks: Vec<DoctorCheck>,
 }
@@ -99,7 +100,7 @@ impl fmt::Display for DoctorReport {
 }
 
 /// Session summary for list output.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: String,
     pub status: String,
@@ -118,7 +119,7 @@ impl fmt::Display for SessionSummary {
 }
 
 /// Session list response.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionSummary>,
 }
@@ -136,7 +137,7 @@ impl fmt::Display for SessionListResponse {
 }
 
 /// Detailed session view.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetailResponse {
     pub id: String,
     pub status: String,
@@ -163,7 +164,7 @@ impl fmt::Display for SessionDetailResponse {
 }
 
 /// Config validation result.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigValidationResult {
     pub valid: bool,
     pub errors: Vec<String>,
@@ -184,7 +185,7 @@ impl fmt::Display for ConfigValidationResult {
 }
 
 /// Simple action acknowledgment (gateway start/stop).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResult {
     pub success: bool,
     pub message: String,
@@ -194,6 +195,109 @@ impl fmt::Display for ActionResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let icon = if self.success { "✓" } else { "✗" };
         write!(f, "{icon} {}", self.message)
+    }
+}
+
+/// Scheduler status response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronStatusResponse {
+    pub total_jobs: usize,
+    pub enabled_jobs: usize,
+    pub due_jobs: usize,
+}
+
+impl fmt::Display for CronStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Cron scheduler")?;
+        writeln!(f, "  Total jobs:   {}", self.total_jobs)?;
+        writeln!(f, "  Enabled jobs: {}", self.enabled_jobs)?;
+        write!(f, "  Due jobs:     {}", self.due_jobs)
+    }
+}
+
+/// A cron job summary/detail item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronJobSummary {
+    pub id: String,
+    pub name: Option<String>,
+    pub enabled: bool,
+    pub session_target: String,
+    pub schedule_kind: String,
+    pub next_run_at: Option<String>,
+    pub run_count: u64,
+}
+
+impl fmt::Display for CronJobSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} [{}] {} target={} runs={}",
+            self.id,
+            if self.enabled { "enabled" } else { "disabled" },
+            self.name.as_deref().unwrap_or("(unnamed)"),
+            self.session_target,
+            self.run_count
+        )?;
+        if let Some(next) = &self.next_run_at {
+            write!(f, " next={next}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Cron list response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronListResponse {
+    pub jobs: Vec<CronJobSummary>,
+}
+
+impl fmt::Display for CronListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.jobs.is_empty() {
+            return write!(f, "No cron jobs.");
+        }
+        for job in &self.jobs {
+            writeln!(f, "  {job}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Cron run history item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronRunSummary {
+    pub job_id: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub output: Option<String>,
+}
+
+impl fmt::Display for CronRunSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.status, self.started_at)?;
+        if let Some(output) = &self.output {
+            write!(f, " — {output}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Cron run history response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronRunsResponse {
+    pub runs: Vec<CronRunSummary>,
+}
+
+impl fmt::Display for CronRunsResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.runs.is_empty() {
+            return write!(f, "No recorded runs.");
+        }
+        for run in &self.runs {
+            writeln!(f, "  {run}")?;
+        }
+        Ok(())
     }
 }
 
@@ -295,6 +399,12 @@ mod tests {
     fn render_session_list_empty() {
         let l = SessionListResponse { sessions: vec![] };
         assert_eq!(render(&l, OutputFormat::Human), "No active sessions.");
+    }
+
+    #[test]
+    fn render_cron_list_empty() {
+        let l = CronListResponse { jobs: vec![] };
+        assert_eq!(render(&l, OutputFormat::Human), "No cron jobs.");
     }
 
     #[test]
