@@ -46,6 +46,11 @@ pub enum Command {
         #[command(subcommand)]
         action: SessionsAction,
     },
+    /// Inspect configured channel adapters.
+    Channels {
+        #[command(subcommand)]
+        action: ChannelsAction,
+    },
     /// Initialize a new workspace with default files.
     Init {
         /// Directory to initialize (defaults to current directory).
@@ -157,6 +162,16 @@ pub enum SessionsAction {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum ChannelsAction {
+    /// List configured channel adapters and whether they are enabled.
+    List,
+    /// Show detailed channel status from resolved config.
+    Status,
+    /// Show channel capability inventory.
+    Capabilities,
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ConfigAction {
     /// Dump the resolved configuration.
     Show,
@@ -216,6 +231,39 @@ mod tests {
             cli.command,
             Command::Gateway {
                 action: GatewayAction::Health
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_channels_list() {
+        let cli = Cli::try_parse_from(["rune", "channels", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Channels {
+                action: ChannelsAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_channels_status() {
+        let cli = Cli::try_parse_from(["rune", "channels", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Channels {
+                action: ChannelsAction::Status
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_channels_capabilities() {
+        let cli = Cli::try_parse_from(["rune", "channels", "capabilities"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Channels {
+                action: ChannelsAction::Capabilities
             }
         ));
     }

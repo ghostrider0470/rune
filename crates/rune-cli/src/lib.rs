@@ -9,11 +9,50 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 pub use cli::Cli;
-use cli::{Command, ConfigAction, CronAction, GatewayAction, SessionsAction};
+use cli::{ChannelsAction, Command, ConfigAction, CronAction, GatewayAction, SessionsAction};
 use client::{GatewayClient, show_config, validate_config};
-use output::{OutputFormat, render};
+use output::{
+    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelStatusResponse,
+    OutputFormat, render,
+};
 
 /// Initialize a workspace directory with default files.
+fn channel_details() -> Vec<ChannelDetail> {
+    let config = rune_config::AppConfig::load(None::<&std::path::Path>).unwrap_or_default();
+    let telegram_configured = config
+        .channels
+        .telegram_token
+        .as_deref()
+        .is_some_and(|token| !token.trim().is_empty());
+    let telegram_enabled = config.channels.enabled.iter().any(|name| name == "telegram");
+
+    vec![ChannelDetail {
+        name: "telegram".to_string(),
+        enabled: telegram_enabled,
+        configured: telegram_configured,
+        status: if telegram_enabled && telegram_configured {
+            "ready".to_string()
+        } else if telegram_configured {
+            "configured".to_string()
+        } else {
+            "disabled".to_string()
+        },
+        capabilities: vec![
+            "receive.message".to_string(),
+            "receive.edit".to_string(),
+            "send.message".to_string(),
+            "send.reply".to_string(),
+            "edit.message".to_string(),
+            "delete.message".to_string(),
+        ],
+        notes: if telegram_configured {
+            None
+        } else {
+            Some("Set channels.telegram_token and enable telegram in channels.enabled".to_string())
+        },
+    }]
+}
+
 async fn init_workspace(path: &std::path::Path) -> Result<()> {
     tokio::fs::create_dir_all(path)
         .await
@@ -184,6 +223,33 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::Channels { action } => {
+            let channels = channel_details();
+            match action {
+                ChannelsAction::List => {
+                    let result = ChannelListResponse { channels };
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Status => {
+                    let ready = channels
+                        .iter()
+                        .filter(|channel| channel.status == "ready")
+                        .count();
+                    let result = ChannelStatusResponse {
+                        total: channels.len(),
+                        enabled: channels.iter().filter(|channel| channel.enabled).count(),
+                        configured: channels.iter().filter(|channel| channel.configured).count(),
+                        ready,
+                        channels,
+                    };
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Capabilities => {
+                    let result = ChannelCapabilitiesResponse { channels };
+                    println!("{}", render(&result, format));
+                }
+            }
+        }
         Command::Config { action } => match action {
             ConfigAction::Show => {
                 let result = show_config()?;

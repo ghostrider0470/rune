@@ -163,6 +163,96 @@ impl fmt::Display for SessionDetailResponse {
     }
 }
 
+/// Per-channel configuration/availability detail.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelDetail {
+    pub name: String,
+    pub enabled: bool,
+    pub configured: bool,
+    pub status: String,
+    pub capabilities: Vec<String>,
+    pub notes: Option<String>,
+}
+
+impl fmt::Display for ChannelDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} [{} | enabled={} configured={}]",
+            self.name, self.status, self.enabled, self.configured
+        )
+    }
+}
+
+/// Response for `channels list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelListResponse {
+    pub channels: Vec<ChannelDetail>,
+}
+
+impl fmt::Display for ChannelListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.channels.is_empty() {
+            return write!(f, "No channels configured.");
+        }
+        for channel in &self.channels {
+            writeln!(f, "  {channel}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `channels status`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelStatusResponse {
+    pub total: usize,
+    pub enabled: usize,
+    pub configured: usize,
+    pub ready: usize,
+    pub channels: Vec<ChannelDetail>,
+}
+
+impl fmt::Display for ChannelStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Channels")?;
+        writeln!(f, "  Total:      {}", self.total)?;
+        writeln!(f, "  Enabled:    {}", self.enabled)?;
+        writeln!(f, "  Configured: {}", self.configured)?;
+        writeln!(f, "  Ready:      {}", self.ready)?;
+        for channel in &self.channels {
+            writeln!(f, "  - {channel}")?;
+            if !channel.capabilities.is_empty() {
+                writeln!(f, "    capabilities: {}", channel.capabilities.join(", "))?;
+            }
+            if let Some(notes) = &channel.notes {
+                writeln!(f, "    note: {notes}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Response for `channels capabilities`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelCapabilitiesResponse {
+    pub channels: Vec<ChannelDetail>,
+}
+
+impl fmt::Display for ChannelCapabilitiesResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.channels.is_empty() {
+            return write!(f, "No channel capabilities available.");
+        }
+        for channel in &self.channels {
+            writeln!(f, "{}:", channel.name)?;
+            for capability in &channel.capabilities {
+                writeln!(f, "  - {capability}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Config validation result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigValidationResult {

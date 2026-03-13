@@ -63,9 +63,9 @@ Interpretation rules:
 - [x] `cron runs`
 
 ### Channels CLI
-- [ ] `channels list`
-- [ ] `channels status`
-- [ ] `channels capabilities`
+- [x] `channels list`
+- [x] `channels status`
+- [x] `channels capabilities`
 - [ ] `channels resolve`
 - [ ] `channels logs`
 - [ ] `channels add`
@@ -258,6 +258,9 @@ Implementation note (2026-03-13): executable parity progress now includes concre
 ---
 
 ## 8. Channels
+
+Implementation note (2026-03-13): the operator CLI now exposes a first inspectable channel surface with `channels list`, `channels status`, and `channels capabilities`, backed by resolved config and the currently implemented Telegram adapter/runtime wiring. This does not yet cover login/logout, dynamic registration, resolution helpers, or provider log inspection, but it removes the previous blind spot where channel support existed in code yet had no operator-facing visibility.
+
 
 ### Common abstractions
 - [ ] normalized inbound envelope
