@@ -1,0 +1,15 @@
+[package]
+name = "rune-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rune-core = { path = "../rune-core" }
+serde.workspace = true
+thiserror.workspace = true
+figment = { version = "0.10", features = ["env", "toml"] }
+
+[dev-dependencies]
+serde_json.workspace = true

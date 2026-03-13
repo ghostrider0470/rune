@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/rune-core",
+  "crates/rune-config",
+  "crates/rune-store",
+  "crates/rune-runtime",
+  "crates/rune-tools",
+  "crates/rune-models",
+  "crates/rune-channels",
+  "crates/rune-gateway",
+  "crates/rune-cli",
+  "crates/rune-testkit",
+  "apps/gateway",
+  "apps/cli",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = "0.8"
+clap = { version = "4", features = ["derive", "env"] }
+diesel = { version = "2", features = ["postgres", "uuid", "chrono", "serde_json"] }
+diesel-async = { version = "0.6", features = ["postgres", "deadpool"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
