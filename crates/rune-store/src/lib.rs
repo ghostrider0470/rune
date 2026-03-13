@@ -2,6 +2,8 @@
 
 pub mod error;
 pub mod models;
+pub mod pg;
+pub mod pool;
 pub mod repos;
 pub mod schema;
 

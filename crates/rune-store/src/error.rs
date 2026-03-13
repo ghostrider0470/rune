@@ -34,3 +34,19 @@ impl From<serde_json::Error> for StoreError {
         Self::Serialization(err.to_string())
     }
 }
+
+impl From<diesel::result::Error> for StoreError {
+    fn from(err: diesel::result::Error) -> Self {
+        match err {
+            diesel::result::Error::NotFound => Self::NotFound {
+                entity: "record",
+                id: "unknown".to_string(),
+            },
+            diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                info,
+            ) => Self::Conflict(info.message().to_string()),
+            other => Self::Database(other.to_string()),
+        }
+    }
+}

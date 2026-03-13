@@ -20,5 +20,7 @@ rune-tools = { path = "../../crates/rune-tools" }
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 uuid.workspace = true

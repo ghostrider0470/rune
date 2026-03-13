@@ -1,10 +1,8 @@
 //! Thin gateway binary — loads config and starts the Rune gateway daemon.
 //!
-//! This keeps a zero-config runnable path alive during the rewrite by wiring the
-//! existing runtime stack with in-memory repos and a canned model provider.
-//! It is intentionally transitional: PostgreSQL-backed service wiring remains
-//! the release-target path, but the binary now actually boots and serves the
-//! current HTTP/WS surface instead of exiting immediately.
+//! When `database.database_url` is configured, uses PostgreSQL-backed
+//! repositories. Otherwise falls back to in-memory repos for zero-config
+//! local development.
 
 use std::sync::Arc;
 
@@ -28,9 +26,33 @@ async fn main() -> Result<()> {
     let config = AppConfig::load(config_path.as_deref())?;
     init_logging(&config.logging);
 
-    let session_repo: Arc<dyn SessionRepo> = Arc::new(MemSessionRepo::default());
-    let turn_repo: Arc<dyn TurnRepo> = Arc::new(MemTurnRepo::default());
-    let transcript_repo: Arc<dyn TranscriptRepo> = Arc::new(MemTranscriptRepo::default());
+    let (session_repo, turn_repo, transcript_repo): (
+        Arc<dyn SessionRepo>,
+        Arc<dyn TurnRepo>,
+        Arc<dyn TranscriptRepo>,
+    ) = if let Some(ref database_url) = config.database.database_url {
+        tracing::info!("Using PostgreSQL persistence");
+        if config.database.run_migrations {
+            tracing::info!("Running pending database migrations");
+            rune_store::pool::run_migrations(database_url)?;
+        }
+        let pool = rune_store::pool::create_pool(
+            database_url,
+            config.database.max_connections as usize,
+        )?;
+        (
+            Arc::new(rune_store::pg::PgSessionRepo::new(pool.clone())),
+            Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone())),
+            Arc::new(rune_store::pg::PgTranscriptRepo::new(pool)),
+        )
+    } else {
+        tracing::info!("No DATABASE_URL configured — using in-memory persistence");
+        (
+            Arc::new(MemSessionRepo::default()),
+            Arc::new(MemTurnRepo::default()),
+            Arc::new(MemTranscriptRepo::default()),
+        )
+    };
 
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
