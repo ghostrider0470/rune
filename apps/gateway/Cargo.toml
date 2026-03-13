@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 rune-config = { path = "../../crates/rune-config" }
+rune-core = { path = "../../crates/rune-core" }
 rune-gateway = { path = "../../crates/rune-gateway" }
 rune-models = { path = "../../crates/rune-models" }
 rune-runtime = { path = "../../crates/rune-runtime" }

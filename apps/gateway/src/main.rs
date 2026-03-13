@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -14,6 +15,7 @@ use tokio::signal;
 use tracing::{info, warn};
 
 use rune_config::AppConfig;
+use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
@@ -23,7 +25,11 @@ use rune_runtime::{
 };
 use rune_store::EmbeddedPg;
 use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
-use rune_tools::{StubExecutor, ToolRegistry, register_builtin_stubs};
+use rune_tools::exec_tool::ExecToolExecutor;
+use rune_tools::file_tools::FileToolExecutor;
+use rune_tools::memory_tool::MemoryToolExecutor;
+use rune_tools::process_tool::{ProcessManager, ProcessToolExecutor};
+use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolRegistry};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -140,11 +146,19 @@ async fn build_services(config: AppConfig) -> Result<(Services, Option<EmbeddedP
     let model_provider: Arc<dyn ModelProvider> = Arc::new(EchoModelProvider);
     let scheduler = Arc::new(Scheduler::new());
 
+    let process_manager = ProcessManager::new();
+    let workspace_root = config.paths.config_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
     let mut registry = ToolRegistry::new();
-    register_builtin_stubs(&mut registry);
+    register_real_tool_definitions(&mut registry);
     let tool_count = registry.len();
     let tool_registry = Arc::new(registry);
-    let tool_executor = Arc::new(StubExecutor);
+    let tool_executor = Arc::new(AppToolExecutor {
+        file: FileToolExecutor::new(workspace_root.clone()),
+        exec: ExecToolExecutor::new(workspace_root.clone(), Duration::from_secs(30))
+            .with_process_manager(process_manager.clone()),
+        process: ProcessToolExecutor::new(process_manager),
+        memory: MemoryToolExecutor::new(workspace_root),
+    });
 
     let turn_executor = Arc::new(TurnExecutor::new(
         turn_repo,
@@ -193,6 +207,146 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+}
+
+struct AppToolExecutor {
+    file: FileToolExecutor,
+    exec: ExecToolExecutor,
+    process: ProcessToolExecutor,
+    memory: MemoryToolExecutor,
+}
+
+#[async_trait]
+impl ToolExecutor for AppToolExecutor {
+    async fn execute(&self, call: ToolCall) -> Result<rune_tools::ToolResult, ToolError> {
+        match call.tool_name.as_str() {
+            "read" | "read_file" | "write" | "write_file" | "edit" | "edit_file"
+            | "list_files" => self.file.execute(call).await,
+            "exec" | "execute_command" => self.exec.execute(call).await,
+            "process" => self.process.execute(call).await,
+            "memory_search" | "memory_get" => self.memory.execute(call).await,
+            other => Err(ToolError::UnknownTool {
+                name: other.to_string(),
+            }),
+        }
+    }
+}
+
+fn register_real_tool_definitions(registry: &mut ToolRegistry) {
+    let builtins = [
+        ToolDefinition {
+            name: "read".into(),
+            description: "Read the contents of a file. Supports text files with offset/limit truncation semantics.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "file_path": { "type": "string" },
+                    "offset": { "type": "integer" },
+                    "limit": { "type": "integer" },
+                    "from": { "type": "integer" },
+                    "lines": { "type": "integer" }
+                }
+            }),
+            category: ToolCategory::FileRead,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "write".into(),
+            description: "Create or overwrite a file, creating parent directories as needed.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "file_path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["content"]
+            }),
+            category: ToolCategory::FileWrite,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "edit".into(),
+            description: "Make an exact text replacement in a file.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "file_path": { "type": "string" },
+                    "oldText": { "type": "string" },
+                    "newText": { "type": "string" },
+                    "old_string": { "type": "string" },
+                    "new_string": { "type": "string" }
+                }
+            }),
+            category: ToolCategory::FileWrite,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "exec".into(),
+            description: "Execute a shell command in the workspace with optional timeout/background execution.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string" },
+                    "workdir": { "type": "string" },
+                    "timeout": { "type": "integer" },
+                    "background": { "type": "boolean" }
+                },
+                "required": ["command"]
+            }),
+            category: ToolCategory::ProcessExec,
+            requires_approval: true,
+        },
+        ToolDefinition {
+            name: "process".into(),
+            description: "Inspect and control background processes started by exec.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string" },
+                    "sessionId": { "type": "string" }
+                },
+                "required": ["action"]
+            }),
+            category: ToolCategory::ProcessBackground,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "memory_search".into(),
+            description: "Search MEMORY.md and memory/*.md for relevant snippets.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "maxResults": { "type": "integer" }
+                },
+                "required": ["query"]
+            }),
+            category: ToolCategory::MemoryAccess,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "memory_get".into(),
+            description: "Read a bounded snippet from MEMORY.md or memory/*.md.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "from": { "type": "integer" },
+                    "lines": { "type": "integer" }
+                },
+                "required": ["path"]
+            }),
+            category: ToolCategory::MemoryAccess,
+            requires_approval: false,
+        },
+    ];
+
+    for tool in builtins {
+        registry.register(tool);
     }
 }
 

@@ -185,9 +185,9 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 - [x] exact-match edit failure behavior
 
 ### Process tools
-- [ ] `exec`
+- [x] `exec`
 - [x] `process`
-- [ ] background continuation semantics
+- [x] background continuation semantics
 - [ ] PTY semantics
 - [ ] exact approval-prompt command presentation
 
@@ -210,7 +210,7 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 - [x] structured errors
 - [x] durable handles for long-running work
 
-Implementation note (2026-03-13): executable parity progress now includes concrete `read`, `write`, `edit`, `cron`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `subagents`, `session_status`, `memory_search`, and `memory_get` tool executors in `rune-tools`, plus runtime scheduler primitives in `rune-runtime`. File tools now accept OpenClaw-compatible argument aliases (`file_path`, `oldText`, `newText`, `from`, `lines`) and `read` enforces the 2000-line / 50KB truncation contract. Remaining work is the full parity layer around approvals, transcript/audit linkage, persistence/restart durability, and exact OpenClaw semantics for `exec` PTY/background/approval presentation plus runtime-backed subagent lifecycle persistence. The `process` executor now covers `list`, `poll`, `log`, `write`, `submit`, `paste`, `send-keys` (`keys`, `hex`, `literal`), and `kill` in the OpenClaw-shaped surface, but restart durability and transcript/audit linkage are still outstanding.
+Implementation note (2026-03-13): executable parity progress now includes concrete `read`, `write`, `edit`, `cron`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `subagents`, `session_status`, `memory_search`, and `memory_get` tool executors in `rune-tools`, plus runtime scheduler primitives in `rune-runtime`. File tools now accept OpenClaw-compatible argument aliases (`file_path`, `oldText`, `newText`, `from`, `lines`) and `read` enforces the 2000-line / 50KB truncation contract. Remaining work is the full parity layer around approvals, transcript/audit linkage, persistence/restart durability, and exact OpenClaw semantics for `exec` PTY/approval presentation plus runtime-backed subagent lifecycle persistence. The `exec` executor now supports foreground execution and background handle registration via the shared process manager, while the `process` executor covers `list`, `poll`, `log`, `write`, `submit`, `paste`, `send-keys` (`keys`, `hex`, `literal`), and `kill` in the OpenClaw-shaped surface. Restart durability, PTY fidelity, approval prompt exactness, and transcript/audit linkage are still outstanding.
 
 ---
 
