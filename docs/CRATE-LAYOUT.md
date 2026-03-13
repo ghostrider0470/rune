@@ -1,5 +1,7 @@
 # Crate Layout Draft — OpenClaw Rust Rewrite
 
+> **Note:** The wave model in `AGENT-ORCHESTRATION.md` is the execution authority for crate ordering and implementation sequence. Phase mappings below are from an earlier planning draft and may not match the wave model. Crates listed as "later" or "split when justified" are speculative and not yet in the workspace.
+
 ## Goal
 
 Propose a practical Rust monorepo layout for an OpenClaw-compatible rewrite.

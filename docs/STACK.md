@@ -10,10 +10,10 @@ Azure compatibility is mandatory.
 | Async runtime | **Tokio** | — |
 | HTTP / WS framework | **Axum** | REST API + WebSocket for realtime |
 | CLI | **Clap** | — |
-| Serialization | **Serde** / serde_json / serde_yaml | — |
+| Serialization | **Serde** / serde_json / toml (via figment) | — |
 | Config | **figment** | Layered: defaults → file → env → CLI args |
 | Logging | **tracing** + tracing-subscriber | — |
-| Metrics | **prometheus** + OpenTelemetry | — |
+| Metrics | **prometheus** + OpenTelemetry *(planned, not yet implemented)* | — |
 | Scheduling | Tokio tasks + custom scheduler or cron parser crate | — |
 | Process supervision | Tokio process + explicit state machine | — |
 
@@ -60,6 +60,8 @@ Channels are provider adapters with a shared normalized message/event model and 
 - Both served from the Axum gateway daemon
 
 ## Frontend
+
+> Frontend implementation is Phase 11 (last). Stack choices below are confirmed but not yet in the workspace.
 
 Target style: Horizon Tech design system.
 

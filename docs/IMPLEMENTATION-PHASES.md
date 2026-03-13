@@ -505,7 +505,7 @@ Every phase must test:
 
 ## 3.4 Do not overbuild infrastructure early
 
-Do not introduce Postgres, distributed queues, or complex plugin ABI work before the parity-critical local-first path is proven.
+Do not introduce distributed queues, complex plugin ABI work, or additional storage backends before the parity-critical path on PostgreSQL is proven.
 
 ---
 
@@ -551,8 +551,8 @@ If a milestone does not clearly retire a risk, it is probably too broad or poorl
 
 Preserve explicit escape hatches for:
 
-- SQLite -> PostgreSQL
-- SQLite FTS -> Tantivy
+- embedded PG -> external PostgreSQL
+- PostgreSQL FTS -> dedicated search engine (Tantivy / Meilisearch)
 - process plugins -> WASI plugins
 - local files -> Azure Files / object archive mapping
 
