@@ -8,6 +8,7 @@ mod executor;
 pub mod memory;
 pub mod scheduler;
 mod usage;
+pub mod workspace;
 
 pub use compaction::{CompactionStrategy, NoOpCompaction};
 pub use context::ContextAssembler;
