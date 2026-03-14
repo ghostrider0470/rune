@@ -189,7 +189,11 @@ async fn build_services(
     let process_audit_store: Arc<dyn ProcessAuditStore> =
         Arc::new(DbProcessAuditStore::new(tool_execution_repo));
     let process_manager = ProcessManager::new().with_audit_store(process_audit_store.clone());
-    let lane_queue = Arc::new(LaneQueue::new());
+    let lane_queue = Arc::new(LaneQueue::with_capacities(
+        config.runtime.lanes.main_capacity,
+        config.runtime.lanes.subagent_capacity,
+        config.runtime.lanes.cron_capacity,
+    ));
     let workspace_root = config
         .paths
         .config_dir
@@ -1076,19 +1080,13 @@ struct LiveSessionSpawner {
 
 fn set_metadata_string(metadata: &mut serde_json::Value, key: &str, value: impl Into<String>) {
     if let Some(object) = metadata.as_object_mut() {
-        object.insert(
-            key.to_string(),
-            serde_json::Value::String(value.into()),
-        );
+        object.insert(key.to_string(), serde_json::Value::String(value.into()));
     }
 }
 
 fn set_metadata_u64(metadata: &mut serde_json::Value, key: &str, value: u64) {
     if let Some(object) = metadata.as_object_mut() {
-        object.insert(
-            key.to_string(),
-            serde_json::Value::Number(value.into()),
-        );
+        object.insert(key.to_string(), serde_json::Value::Number(value.into()));
     }
 }
 
@@ -1175,7 +1173,11 @@ impl SessionSpawner for LiveSessionSpawner {
                 requester_session_id.to_string(),
             );
         }
-        set_metadata_string(&mut metadata, "spawn_mode", mode.unwrap_or("run").to_string());
+        set_metadata_string(
+            &mut metadata,
+            "spawn_mode",
+            mode.unwrap_or("run").to_string(),
+        );
         if let Some(model) = model {
             set_metadata_string(&mut metadata, "selected_model", model.to_string());
         }
@@ -1764,9 +1766,7 @@ mod tests {
             Some("22222222-2222-2222-2222-222222222222")
         );
         assert_eq!(
-            listed[0]
-                .get("subagent_lifecycle")
-                .and_then(Value::as_str),
+            listed[0].get("subagent_lifecycle").and_then(Value::as_str),
             Some("spawned")
         );
         assert_eq!(

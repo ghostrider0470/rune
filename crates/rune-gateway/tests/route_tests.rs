@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use chrono::Timelike;
 
-use rune_config::{AppConfig, ConfiguredModel, ModelProviderConfig};
+use rune_config::{AppConfig, ConfiguredModel, LaneQueueConfig, ModelProviderConfig};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };
@@ -751,6 +751,87 @@ enabled: true
 }
 
 #[tokio::test]
+async fn status_reports_configured_lane_capacities() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_capacities(6, 9, 128));
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model")
+        .with_lane_queue(lane_queue),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let mut config = AppConfig::default();
+    config.runtime.lanes = LaneQueueConfig {
+        main_capacity: 6,
+        subagent_capacity: 9,
+        cron_capacity: 128,
+    };
+
+    let state = AppState {
+        config: Arc::new(config),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(Request::builder().uri("/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["lane_stats"]["main_capacity"], 6);
+    assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
+    assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
+}
+
+#[tokio::test]
 async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     use rune_gateway::ws_rpc::RpcDispatcher;
     use rune_runtime::LaneQueue;
@@ -1199,7 +1280,10 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     assert_eq!(subscribe_json["type"], "res");
     assert_eq!(subscribe_json["id"], "1");
     assert_eq!(subscribe_json["ok"], true);
-    assert_eq!(subscribe_json["payload"]["subscribed"]["session_id"], "sess-1");
+    assert_eq!(
+        subscribe_json["payload"]["subscribed"]["session_id"],
+        "sess-1"
+    );
     assert_eq!(subscribe_json["payload"]["subscribed"]["all"], false);
     assert!(subscribe_json["stateVersion"].as_u64().unwrap() >= 1);
 
@@ -1214,7 +1298,10 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     .to_string();
     let unsubscribe_json: Value = serde_json::from_str(&unsubscribe).unwrap();
     assert_eq!(unsubscribe_json["ok"], true);
-    assert_eq!(unsubscribe_json["payload"]["unsubscribed"]["session_id"], "sess-1");
+    assert_eq!(
+        unsubscribe_json["payload"]["unsubscribed"]["session_id"],
+        "sess-1"
+    );
     assert_eq!(unsubscribe_json["payload"]["unsubscribed"]["all"], false);
     assert!(unsubscribe_json["stateVersion"].as_u64().unwrap() >= 1);
 
@@ -1230,20 +1317,18 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     let missing_json: Value = serde_json::from_str(&missing_session).unwrap();
     assert_eq!(missing_json["ok"], false);
     assert_eq!(missing_json["error"]["code"], "bad_request");
-    assert!(missing_json["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("missing subscription target"));
+    assert!(
+        missing_json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("missing subscription target")
+    );
 
-    let parse_error: String = handle_text_message(
-        "not-json",
-        &mut conn,
-        &dispatcher,
-        &state_version,
-    )
-    .await
-    .unwrap()
-    .to_string();
+    let parse_error: String =
+        handle_text_message("not-json", &mut conn, &dispatcher, &state_version)
+            .await
+            .unwrap()
+            .to_string();
     let parse_json: Value = serde_json::from_str(&parse_error).unwrap();
     assert_eq!(parse_json["ok"], false);
     assert_eq!(parse_json["id"], "unknown");
@@ -1327,7 +1412,10 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
     .to_string();
     let subscribe_event_json: Value = serde_json::from_str(&subscribe_event).unwrap();
     assert_eq!(subscribe_event_json["ok"], true);
-    assert_eq!(subscribe_event_json["payload"]["subscribed"]["event"], "wake_event");
+    assert_eq!(
+        subscribe_event_json["payload"]["subscribed"]["event"],
+        "wake_event"
+    );
     assert_eq!(subscribe_event_json["payload"]["subscribed"]["all"], false);
     assert!(subscribe_event_json["stateVersion"].as_u64().unwrap() >= 1);
 
@@ -1356,7 +1444,10 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
     .to_string();
     let unsubscribe_event_json: Value = serde_json::from_str(&unsubscribe_event).unwrap();
     assert_eq!(unsubscribe_event_json["ok"], true);
-    assert_eq!(unsubscribe_event_json["payload"]["unsubscribed"]["event"], "wake_event");
+    assert_eq!(
+        unsubscribe_event_json["payload"]["unsubscribed"]["event"],
+        "wake_event"
+    );
     assert!(unsubscribe_event_json["stateVersion"].as_u64().unwrap() >= 1);
 
     let unsubscribe_all = handle_text_message(
@@ -1376,8 +1467,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
 
 #[tokio::test]
 async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not() {
-    use rune_gateway::ws::handle_text_message;
     use rune_gateway::ws::ConnState;
+    use rune_gateway::ws::handle_text_message;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -1465,7 +1556,10 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
     let status_json: Value = serde_json::from_str(&status).unwrap();
     assert_eq!(status_json["stateVersion"], 101);
     assert_eq!(state_version.load(Ordering::Relaxed), 101);
-    assert_ne!(status_json["stateVersion"].as_u64().unwrap(), subscribed_version);
+    assert_ne!(
+        status_json["stateVersion"].as_u64().unwrap(),
+        subscribed_version
+    );
 }
 
 #[tokio::test]
@@ -1546,10 +1640,12 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
     let method_json: Value = serde_json::from_str(&method_not_found).unwrap();
     assert_eq!(method_json["ok"], false);
     assert_eq!(method_json["error"]["code"], "method_not_found");
-    assert!(method_json["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("unknown method: unknown.method"));
+    assert!(
+        method_json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown method: unknown.method")
+    );
     assert_eq!(method_json["stateVersion"], 10);
 
     let invalid_uuid: String = handle_text_message(
@@ -1564,10 +1660,12 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
     let invalid_uuid_json: Value = serde_json::from_str(&invalid_uuid).unwrap();
     assert_eq!(invalid_uuid_json["ok"], false);
     assert_eq!(invalid_uuid_json["error"]["code"], "bad_request");
-    assert!(invalid_uuid_json["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("invalid UUID for session_id"));
+    assert!(
+        invalid_uuid_json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid UUID for session_id")
+    );
 }
 
 #[tokio::test]
@@ -2622,18 +2720,31 @@ enabled: false
     let alpha = items.iter().find(|item| item["name"] == "alpha").unwrap();
     assert_eq!(alpha["description"], "Alpha skill");
     assert_eq!(alpha["enabled"], true);
-    assert!(alpha["binary_path"].as_str().unwrap().contains("run-alpha.sh"));
+    assert!(
+        alpha["binary_path"]
+            .as_str()
+            .unwrap()
+            .contains("run-alpha.sh")
+    );
 
     let response = app
         .clone()
-        .oneshot(Request::post("/skills/alpha/disable").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::post("/skills/alpha/disable")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     let response = app
         .clone()
-        .oneshot(Request::post("/skills/beta/enable").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::post("/skills/beta/enable")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);

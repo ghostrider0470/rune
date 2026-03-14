@@ -19,6 +19,8 @@ pub struct AppConfig {
     pub channels: ChannelsConfig,
     #[serde(default)]
     pub agents: AgentsConfig,
+    #[serde(default)]
+    pub runtime: RuntimeConfig,
     pub memory: MemoryConfig,
     pub media: MediaConfig,
     pub logging: LoggingConfig,
@@ -117,6 +119,39 @@ impl Default for DatabaseConfig {
             database_url: None,
             max_connections: 10,
             run_migrations: true,
+        }
+    }
+}
+
+/// Runtime execution controls.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeConfig {
+    #[serde(default)]
+    pub lanes: LaneQueueConfig,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            lanes: LaneQueueConfig::default(),
+        }
+    }
+}
+
+/// Per-lane concurrency caps for turn execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneQueueConfig {
+    pub main_capacity: usize,
+    pub subagent_capacity: usize,
+    pub cron_capacity: usize,
+}
+
+impl Default for LaneQueueConfig {
+    fn default() -> Self {
+        Self {
+            main_capacity: 4,
+            subagent_capacity: 8,
+            cron_capacity: 1024,
         }
     }
 }
@@ -596,6 +631,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
+            std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
         }
 
         let path = temp_config_path("file-override");
@@ -609,6 +645,11 @@ port = 9999
 [database]
 max_connections = 42
 run_migrations = false
+
+[runtime.lanes]
+main_capacity = 6
+subagent_capacity = 9
+cron_capacity = 128
 "#,
         )
         .unwrap();
@@ -618,6 +659,9 @@ run_migrations = false
         assert_eq!(config.gateway.port, 9999);
         assert_eq!(config.database.max_connections, 42);
         assert!(!config.database.run_migrations);
+        assert_eq!(config.runtime.lanes.main_capacity, 6);
+        assert_eq!(config.runtime.lanes.subagent_capacity, 9);
+        assert_eq!(config.runtime.lanes.cron_capacity, 128);
 
         let _ = fs::remove_file(path);
     }
@@ -632,17 +676,23 @@ run_migrations = false
             r#"
 [gateway]
 port = 8787
+
+[runtime.lanes]
+main_capacity = 4
 "#,
         )
         .unwrap();
 
         unsafe {
             std::env::set_var("RUNE_GATEWAY__PORT", "9090");
+            std::env::set_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY", "12");
         }
         let config = AppConfig::load(Some(&path)).unwrap();
         assert_eq!(config.gateway.port, 9090);
+        assert_eq!(config.runtime.lanes.main_capacity, 12);
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
+            std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
         }
 
         let _ = fs::remove_file(path);
@@ -860,11 +910,26 @@ signal_api_url = "http://signal.local:8080"
             config.channels.enabled,
             vec!["telegram", "discord", "slack", "whatsapp", "signal"]
         );
-        assert_eq!(config.channels.telegram_token.as_deref(), Some("telegram-token"));
-        assert_eq!(config.channels.discord_token.as_deref(), Some("discord-token"));
-        assert_eq!(config.channels.discord_guild_id.as_deref(), Some("guild-123"));
-        assert_eq!(config.channels.slack_bot_token.as_deref(), Some("xoxb-token"));
-        assert_eq!(config.channels.slack_app_token.as_deref(), Some("xapp-token"));
+        assert_eq!(
+            config.channels.telegram_token.as_deref(),
+            Some("telegram-token")
+        );
+        assert_eq!(
+            config.channels.discord_token.as_deref(),
+            Some("discord-token")
+        );
+        assert_eq!(
+            config.channels.discord_guild_id.as_deref(),
+            Some("guild-123")
+        );
+        assert_eq!(
+            config.channels.slack_bot_token.as_deref(),
+            Some("xoxb-token")
+        );
+        assert_eq!(
+            config.channels.slack_app_token.as_deref(),
+            Some("xapp-token")
+        );
         assert_eq!(
             config.channels.whatsapp_access_token.as_deref(),
             Some("wa-token")
@@ -877,7 +942,10 @@ signal_api_url = "http://signal.local:8080"
             config.channels.whatsapp_verify_token.as_deref(),
             Some("verify-token")
         );
-        assert_eq!(config.channels.signal_number.as_deref(), Some("+15551234567"));
+        assert_eq!(
+            config.channels.signal_number.as_deref(),
+            Some("+15551234567")
+        );
         assert_eq!(
             config.channels.signal_api_url.as_deref(),
             Some("http://signal.local:8080")
@@ -903,15 +971,15 @@ signal_api_url = "http://file-signal:8080"
 
         unsafe {
             std::env::set_var("RUNE_CHANNELS__DISCORD_TOKEN", "discord-from-env");
-            std::env::set_var(
-                "RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN",
-                "verify-from-env",
-            );
+            std::env::set_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN", "verify-from-env");
             std::env::set_var("RUNE_CHANNELS__SIGNAL_API_URL", "http://env-signal:8080");
         }
 
         let config = AppConfig::load(Some(&path)).unwrap();
-        assert_eq!(config.channels.discord_token.as_deref(), Some("discord-from-env"));
+        assert_eq!(
+            config.channels.discord_token.as_deref(),
+            Some("discord-from-env")
+        );
         assert_eq!(
             config.channels.whatsapp_verify_token.as_deref(),
             Some("verify-from-env")
@@ -1076,9 +1144,18 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
         }
 
         let config = AppConfig::load(None::<&std::path::Path>).unwrap();
-        assert_eq!(config.channels.telegram_token.as_deref(), Some("telegram-env"));
-        assert_eq!(config.channels.discord_token.as_deref(), Some("discord-env"));
-        assert_eq!(config.channels.discord_guild_id.as_deref(), Some("guild-env"));
+        assert_eq!(
+            config.channels.telegram_token.as_deref(),
+            Some("telegram-env")
+        );
+        assert_eq!(
+            config.channels.discord_token.as_deref(),
+            Some("discord-env")
+        );
+        assert_eq!(
+            config.channels.discord_guild_id.as_deref(),
+            Some("guild-env")
+        );
         assert_eq!(config.channels.slack_bot_token.as_deref(), Some("xoxb-env"));
         assert_eq!(config.channels.slack_app_token.as_deref(), Some("xapp-env"));
         assert_eq!(
