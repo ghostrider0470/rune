@@ -1567,6 +1567,13 @@ mod tests {
             row.updated_at = updated_at;
             Ok(row.clone())
         }
+
+        async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
+            let mut rows = self.sessions.lock().await;
+            let before = rows.len();
+            rows.retain(|row| row.id != id);
+            Ok(rows.len() != before)
+        }
     }
 
     struct MemTranscriptRepo {
@@ -1614,6 +1621,13 @@ mod tests {
                 .collect();
             rows.sort_by_key(|row| row.seq);
             Ok(rows)
+        }
+
+        async fn delete_by_session(&self, session_id: Uuid) -> Result<usize, StoreError> {
+            let mut rows = self.items.lock().await;
+            let before = rows.len();
+            rows.retain(|row| row.session_id != session_id);
+            Ok(before - rows.len())
         }
     }
 
