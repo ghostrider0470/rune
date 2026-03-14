@@ -1,0 +1,106 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
+import type {
+  HealthResponse,
+  StatusResponse,
+  HeartbeatState,
+  ActionResponse,
+  ReminderResponse,
+  ReminderAddRequest,
+} from "@/lib/api-types";
+
+export function useHealth() {
+  return useQuery({
+    queryKey: ["health"],
+    queryFn: () => api.get<HealthResponse>("/health"),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useStatus() {
+  return useQuery({
+    queryKey: ["status"],
+    queryFn: () => api.get<StatusResponse>("/status"),
+  });
+}
+
+export function useHeartbeatStatus() {
+  return useQuery({
+    queryKey: ["heartbeat", "status"],
+    queryFn: () => api.get<HeartbeatState>("/heartbeat/status"),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useHeartbeatEnable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<ActionResponse>("/heartbeat/enable"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["heartbeat"] });
+    },
+  });
+}
+
+export function useHeartbeatDisable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<ActionResponse>("/heartbeat/disable"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["heartbeat"] });
+    },
+  });
+}
+
+export function useGatewayStart() {
+  return useMutation({
+    mutationFn: () => api.post<ActionResponse>("/gateway/start"),
+  });
+}
+
+export function useGatewayStop() {
+  return useMutation({
+    mutationFn: () => api.post<ActionResponse>("/gateway/stop"),
+  });
+}
+
+export function useGatewayRestart() {
+  return useMutation({
+    mutationFn: () => api.post<ActionResponse>("/gateway/restart"),
+  });
+}
+
+export function useReminders(includeDelivered = false) {
+  return useQuery({
+    queryKey: ["reminders", { includeDelivered }],
+    queryFn: () =>
+      api.get<ReminderResponse[]>(`/reminders?includeDelivered=${includeDelivered}`),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useCreateReminder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ReminderAddRequest) =>
+      api.post<ActionResponse>("/reminders", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
+    },
+  });
+}
+
+export function useCancelReminder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete<ActionResponse>(`/reminders/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
+    },
+  });
+}

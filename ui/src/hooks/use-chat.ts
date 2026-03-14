@@ -6,6 +6,7 @@ import { useSessions, useCreateSession } from "@/hooks/use-sessions";
 import {
   getEntrySignature,
   getPayloadText,
+  getSessionPreviewText,
   normalizeTranscriptKind,
   truncatePreview,
 } from "@/components/chat/chat-utils";
@@ -37,7 +38,7 @@ export function useChatSessions() {
         "transcript",
       ]);
 
-      const preview = buildSessionPreview(transcript, session.status);
+      const preview = buildSessionPreview(transcript, session.status, session.preview);
       return { ...session, preview };
     });
   }, [query.data, queryClient]);
@@ -64,19 +65,8 @@ export function useChatSend(sessionId: string | undefined) {
         throw new Error("Select a session before sending a message.");
       }
 
-      const attachmentBlock = data.attachments?.length
-        ? [
-            "", 
-            "Attached images (metadata only until binary upload is wired):",
-            ...data.attachments.map(
-              (file) =>
-                `- ${file.name} (${file.type || "image"}, ${file.size} bytes)`,
-            ),
-          ].join("\n")
-        : "";
-
       return api.post<MessageResponse>(`/sessions/${sessionId}/messages`, {
-        content: `${data.content}${attachmentBlock}`.trim(),
+        content: data.content,
         model: data.model,
       });
     },
@@ -323,37 +313,22 @@ export function useChatMergedTranscript(sessionId: string | undefined) {
 function buildSessionPreview(
   transcript: TranscriptEntry[] | undefined,
   status: string,
+  existingPreview?: string,
 ): string {
   if (!transcript || transcript.length === 0) {
+    if (existingPreview?.trim()) {
+      return truncatePreview(existingPreview, 140);
+    }
+
     return status === "active" ? "Live session waiting for transcript…" : "No transcript yet";
   }
 
-  const sorted = transcript.slice().sort((a, b) => b.seq - a.seq);
-  const candidate = sorted.find((entry) => {
-    const kind = normalizeTranscriptKind(entry.kind);
-    if (kind !== "user" && kind !== "assistant") {
-      return false;
-    }
-
-    const cleaned = getPayloadText(entry.payload)
-      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    return cleaned.length > 0;
-  });
-
-  if (!candidate) {
-    return status === "active" ? "Tooling activity in progress…" : "Transcript has no readable messages yet";
-  }
-
-  return truncatePreview(
-    getPayloadText(candidate.payload)
-      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim(),
-    140,
+  const preview = getSessionPreviewText(
+    transcript,
+    status === "active" ? "Tooling activity in progress…" : "Transcript has no readable messages yet",
   );
+
+  return truncatePreview(preview, 140);
 }
 
 function syncSessionPreview(

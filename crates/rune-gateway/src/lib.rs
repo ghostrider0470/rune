@@ -3,11 +3,13 @@
 mod auth;
 mod error;
 mod logging;
+pub mod pairing;
 mod routes;
 mod server;
 mod state;
 mod supervisor;
-mod ws;
+pub mod ws;
+pub mod ws_rpc;
 
 pub use error::GatewayError;
 pub use logging::init_logging;

@@ -570,6 +570,7 @@ async fn body_text(response: axum::http::Response<Body>) -> String {
 #[tokio::test]
 async fn ws_rpc_status_matches_http_status_basics() {
     use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_runtime::{Lane, LaneQueue};
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -584,6 +585,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
+    let lane_queue = Arc::new(LaneQueue::with_capacities(4, 8, 16));
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
@@ -596,7 +598,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
             context_assembler,
             compaction,
         )
-        .with_default_model("fake-model"),
+        .with_default_model("fake-model")
+        .with_lane_queue(lane_queue.clone()),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
     let skill_registry = Arc::new(SkillRegistry::new());
@@ -628,6 +631,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
         event_tx,
     };
 
+    let main_permit = lane_queue.acquire(Lane::Main).await;
+
     let dispatcher = RpcDispatcher::new(state);
     let payload = dispatcher
         .dispatch("status", serde_json::json!({}))
@@ -639,6 +644,12 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["registered_tools"], 3);
     assert!(payload["ws_subscribers"].is_number());
     assert!(payload["config_paths"].is_object());
+    assert_eq!(payload["lane_stats"]["main_active"], 1);
+    assert_eq!(payload["lane_stats"]["main_capacity"], 4);
+    assert_eq!(payload["lane_stats"]["subagent_active"], 0);
+    assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
+
+    drop(main_permit);
 }
 
 #[tokio::test]
@@ -839,7 +850,7 @@ async fn status_reports_configured_lane_capacities() {
 #[tokio::test]
 async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     use rune_gateway::ws_rpc::RpcDispatcher;
-    use rune_runtime::LaneQueue;
+    use rune_runtime::{Lane, LaneQueue};
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -868,7 +879,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
             compaction,
         )
         .with_default_model("fake-model")
-        .with_lane_queue(lane_queue),
+        .with_lane_queue(lane_queue.clone()),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
     let skill_registry = Arc::new(SkillRegistry::new());
@@ -900,6 +911,9 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         event_tx,
     };
 
+    let main_permit = lane_queue.acquire(Lane::Main).await;
+    let subagent_permit = lane_queue.acquire(Lane::Subagent).await;
+
     let dispatcher = RpcDispatcher::new(state);
     let payload = dispatcher
         .dispatch("runtime.lanes", serde_json::json!({}))
@@ -907,10 +921,15 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         .unwrap();
 
     assert_eq!(payload["enabled"], true);
-    assert_eq!(payload["lanes"]["main"]["active"], 0);
+    assert_eq!(payload["lanes"]["main"]["active"], 1);
     assert_eq!(payload["lanes"]["main"]["capacity"], 2);
+    assert_eq!(payload["lanes"]["subagent"]["active"], 1);
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
+    assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+
+    drop(main_permit);
+    drop(subagent_permit);
 }
 
 #[tokio::test]
@@ -1121,14 +1140,132 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
 
     assert_eq!(payload["session_id"], session_id.to_string());
     assert_eq!(payload["channel_ref"], "telegram:chat-1");
+    assert_eq!(payload["runtime"], "kind=direct | channel=telegram:chat-1 | status=created");
     assert_eq!(payload["current_model"], "fake-model");
+    assert_eq!(payload["model_override"], Value::Null);
     assert_eq!(payload["turn_count"], 1);
     assert_eq!(payload["prompt_tokens"], 12);
     assert_eq!(payload["completion_tokens"], 7);
     assert_eq!(payload["total_tokens"], 19);
+    assert_eq!(payload["estimated_cost"], "not available");
     assert_eq!(payload["approval_mode"], "on-miss");
     assert_eq!(payload["security_mode"], "allowlist");
     assert_eq!(payload["reasoning"], "off");
+    assert_eq!(payload["verbose"], false);
+    assert_eq!(payload["elevated"], false);
+    assert!(payload["last_turn_started_at"].is_string());
+    assert!(payload["last_turn_ended_at"].is_string());
+    let unresolved = payload["unresolved"].as_array().unwrap();
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("cost posture is estimate-only; provider pricing is not wired yet")));
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
+}
+
+#[tokio::test]
+async fn ws_rpc_session_get_includes_last_turn_timestamps() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let session_id = Uuid::now_v7();
+    let now = chrono::Utc::now();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "direct".into(),
+            status: "created".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id,
+            trigger_kind: "user_message".into(),
+            status: "completed".into(),
+            model_ref: Some("fake-model".into()),
+            started_at: now,
+            ended_at: Some(now),
+            usage_prompt_tokens: Some(3),
+            usage_completion_tokens: Some(4),
+        })
+        .await
+        .unwrap();
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let payload = dispatcher
+        .dispatch("session.get", serde_json::json!({ "session_id": session_id.to_string() }))
+        .await
+        .unwrap();
+
+    assert_eq!(payload["id"], session_id.to_string());
+    assert_eq!(payload["latest_model"], "fake-model");
+    assert_eq!(payload["usage_prompt_tokens"], 3);
+    assert_eq!(payload["usage_completion_tokens"], 4);
+    assert!(payload["last_turn_started_at"].is_string());
+    assert!(payload["last_turn_ended_at"].is_string());
 }
 
 #[tokio::test]
@@ -1963,6 +2100,173 @@ async fn health_is_public_even_with_auth() {
 }
 
 #[tokio::test]
+async fn device_management_requires_gateway_token_even_when_auth_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/devices").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::get("/devices")
+                .header(header::AUTHORIZATION, "Bearer wrong-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "paired-phone",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pairing_request = body_json(response).await;
+    assert_eq!(pairing_request["device_name"], "paired-phone");
+    let request_id = pairing_request["id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+
+    let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
+
+    let response = app
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let approved = body_json(response).await;
+    assert_eq!(approved["name"], "paired-phone");
+    assert!(approved["token"].as_str().unwrap().len() >= 32);
+}
+
+#[tokio::test]
+async fn paired_device_token_can_access_general_protected_routes_but_not_device_management() {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[8u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "ops-tablet",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let approved = body_json(response).await;
+    let device_token = approved["token"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/status")
+                .header(header::AUTHORIZATION, format!("Bearer {device_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert_eq!(payload["status"], "running");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/devices")
+                .header(header::AUTHORIZATION, format!("Bearer {device_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let payload = body_json(response).await;
+    assert_eq!(payload["code"], "forbidden");
+
+    let response = app
+        .oneshot(
+            Request::get("/devices")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+
+#[tokio::test]
 async fn patch_and_delete_session_routes_work() {
     let app = build_test_app(None);
 
@@ -2344,8 +2648,13 @@ async fn get_session_status_surfaces_subagent_metadata() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["session_id"], session_id.to_string());
+    assert_eq!(json["runtime"], "kind=subagent | channel=local | status=running");
     assert_eq!(json["status"], "running");
     assert_eq!(json["current_model"], "gpt-5.4");
+    assert_eq!(json["model_override"], "gpt-5.4");
+    assert_eq!(json["estimated_cost"], "not available");
+    assert_eq!(json["verbose"], false);
+    assert_eq!(json["elevated"], false);
     assert_eq!(json["subagent_lifecycle"], "steered");
     assert_eq!(json["subagent_runtime_status"], "not_attached");
     assert_eq!(json["subagent_runtime_attached"], false);
@@ -2354,6 +2663,9 @@ async fn get_session_status_surfaces_subagent_metadata() {
         "Steering message queued for subagent/session: tighten the tests"
     );
     let unresolved = json["unresolved"].as_array().unwrap();
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("cost posture is estimate-only; provider pricing is not wired yet")));
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
     assert!(unresolved.iter().any(|item| item.as_str() == Some("subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete")));
 }
 

@@ -1516,7 +1516,9 @@ mod tests {
             subagent_runtime_status: Some("not_attached".into()),
             subagent_runtime_attached: Some(false),
             subagent_status_updated_at: Some("2026-03-14T02:00:00Z".into()),
-            subagent_last_note: Some("Steering message queued for subagent/session: tighten the tests".into()),
+            subagent_last_note: Some(
+                "Steering message queued for subagent/session: tighten the tests".into(),
+            ),
             unresolved: vec!["cost posture is estimate-only".into()],
         };
         let out = render(&status, OutputFormat::Human);
@@ -1525,7 +1527,9 @@ mod tests {
         assert!(out.contains("Tokens:          1200/340 total=1540"));
         assert!(out.contains("Approval mode:   on-miss"));
         assert!(out.contains("Subagent state:  steered"));
-        assert!(out.contains("Subagent note:   Steering message queued for subagent/session: tighten the tests"));
+        assert!(out.contains(
+            "Subagent note:   Steering message queued for subagent/session: tighten the tests"
+        ));
         assert!(out.contains("- cost posture is estimate-only"));
     }
 

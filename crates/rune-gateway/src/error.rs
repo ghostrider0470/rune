@@ -39,6 +39,10 @@ pub enum GatewayError {
     #[error("unauthorized")]
     Unauthorized,
 
+    /// Authenticated but not permitted for this action.
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+
     /// Internal error forwarded from runtime or store.
     #[error("internal error: {0}")]
     Internal(String),
@@ -78,6 +82,13 @@ impl IntoResponse for GatewayError {
             Self::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
+                false,
+                false,
+                self.to_string(),
+            ),
+            Self::Forbidden(_) => (
+                StatusCode::FORBIDDEN,
+                "forbidden",
                 false,
                 false,
                 self.to_string(),

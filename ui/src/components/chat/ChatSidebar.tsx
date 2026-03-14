@@ -233,14 +233,16 @@ export function ChatSidebar({
     if (!sessions) return [];
     if (!search.trim()) return sessions;
     const q = search.toLowerCase();
-    return sessions.filter(
-      (s) =>
+    return sessions.filter((s) => {
+      const preview = s.preview ?? "";
+      return (
         s.id.toLowerCase().includes(q) ||
         s.status.toLowerCase().includes(q) ||
-        s.preview.toLowerCase().includes(q) ||
+        preview.toLowerCase().includes(q) ||
         (s.channel && s.channel.toLowerCase().includes(q)) ||
-        (s.latest_model && s.latest_model.toLowerCase().includes(q)),
-    );
+        (s.latest_model && s.latest_model.toLowerCase().includes(q))
+      );
+    });
   }, [sessions, search]);
 
   const summary = useMemo(() => {

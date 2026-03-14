@@ -1,4 +1,4 @@
-#![doc = "Tool system skeleton for Rune: definitions, registry, executor trait, and built-in stubs."]
+#![doc = "Tool system primitives and built-in executors for Rune: shared definitions, registry, approval/policy helpers, process/file/session/memory tool implementations, and compatibility test scaffolding."]
 
 pub mod approval;
 pub mod cron_tool;
@@ -8,6 +8,7 @@ pub mod exec_tool;
 mod executor;
 pub mod file_tools;
 pub mod gateway_tool;
+pub mod memory_index;
 pub mod memory_tool;
 pub mod message_tool;
 pub mod process_audit;

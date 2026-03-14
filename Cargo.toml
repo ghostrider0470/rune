@@ -9,7 +9,11 @@ members = [
   "crates/rune-models",
   "crates/rune-channels",
   "crates/rune-gateway",
+  "crates/rune-tts",
+  "crates/rune-stt",
   "crates/rune-cli",
+  "crates/rune-mcp",
+  "crates/rune-browser",
   "crates/rune-testkit",
   "apps/gateway",
   "apps/cli",
@@ -25,6 +29,8 @@ version = "0.1.0"
 anyhow = "1"
 async-trait = "0.1"
 axum = "0.8"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hex = "0.4"
 figment = { version = "0.10", features = ["env", "toml"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"

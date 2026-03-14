@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,7 @@ use serde_json::Value;
 use crate::error::GatewayError;
 use crate::pairing::{PairedDevice, PairingError, PairingRequest};
 use crate::state::{AppState, SessionEvent};
+use crate::ws::active_ws_connections;
 use crate::{SupervisorDeps, run_job_lifecycle};
 
 // ── Health & Status ───────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ pub struct HealthResponse {
     pub uptime_seconds: u64,
     pub session_count: usize,
     pub ws_subscribers: usize,
+    pub ws_connections: usize,
 }
 
 /// Health check with runtime counters.
@@ -56,6 +58,7 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         uptime_seconds: state.started_at.elapsed().as_secs(),
         session_count: sessions.len(),
         ws_subscribers: state.event_tx.receiver_count(),
+        ws_connections: active_ws_connections(),
     }))
 }
 
@@ -2309,7 +2312,9 @@ pub async fn device_pair_reject(
 /// `GET /devices/pair/pending` — list all pending pairing requests.
 pub async fn device_pair_pending(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<PairingRequest>>, GatewayError> {
+    require_gateway_operator_token(&headers, &state)?;
     let pending = state.device_registry.list_pending().await;
     Ok(Json(pending))
 }
@@ -2353,7 +2358,9 @@ impl From<PairedDevice> for DeviceListEntry {
 /// `GET /devices` — list all paired devices with masked tokens.
 pub async fn device_list(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<DeviceListEntry>>, GatewayError> {
+    require_gateway_operator_token(&headers, &state)?;
     let devices = state.device_registry.list_devices().await;
     let entries: Vec<DeviceListEntry> = devices.into_iter().map(DeviceListEntry::from).collect();
     Ok(Json(entries))
@@ -2363,7 +2370,9 @@ pub async fn device_list(
 pub async fn device_revoke(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
 ) -> Result<Json<ActionResponse>, GatewayError> {
+    require_gateway_operator_token(&headers, &state)?;
     state
         .device_registry
         .revoke_device(id)
@@ -2382,7 +2391,9 @@ pub async fn device_revoke(
 pub async fn device_rotate_token(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
 ) -> Result<Json<PairedDevice>, GatewayError> {
+    require_gateway_operator_token(&headers, &state)?;
     let device = state
         .device_registry
         .rotate_token(id)
@@ -2403,5 +2414,30 @@ fn pairing_err(e: PairingError) -> GatewayError {
             GatewayError::BadRequest(e.to_string())
         }
         PairingError::VerificationFailed => GatewayError::Unauthorized,
+    }
+}
+
+fn require_gateway_operator_token(headers: &HeaderMap, state: &AppState) -> Result<(), GatewayError> {
+    let expected = state
+        .config
+        .gateway
+        .auth_token
+        .as_deref()
+        .ok_or_else(|| GatewayError::Forbidden("device management requires gateway operator auth".to_string()))?;
+
+    let Some(token) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+    else {
+        return Err(GatewayError::Unauthorized);
+    };
+
+    if token == expected {
+        Ok(())
+    } else {
+        Err(GatewayError::Forbidden(
+            "device management requires the gateway operator token".to_string(),
+        ))
     }
 }

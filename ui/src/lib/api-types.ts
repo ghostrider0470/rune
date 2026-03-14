@@ -187,6 +187,7 @@ export interface SessionListItem {
   usage_prompt_tokens: number;
   usage_completion_tokens: number;
   latest_model: string | null;
+  preview?: string;
 }
 
 export interface SessionResponse {

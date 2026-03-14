@@ -6,18 +6,27 @@ use uuid::Uuid;
 use rune_core::{SessionId, SessionKind, SessionStatus};
 use rune_store::StoreError;
 use rune_store::models::{NewSession, SessionRow};
-use rune_store::repos::SessionRepo;
+use rune_store::repos::{SessionRepo, TranscriptRepo};
 
 use crate::error::RuntimeError;
 
 /// Creates and manages session lifecycle. Persists state via store repo traits.
 pub struct SessionEngine {
     session_repo: Arc<dyn SessionRepo>,
+    transcript_repo: Option<Arc<dyn TranscriptRepo>>,
 }
 
 impl SessionEngine {
     pub fn new(session_repo: Arc<dyn SessionRepo>) -> Self {
-        Self { session_repo }
+        Self {
+            session_repo,
+            transcript_repo: None,
+        }
+    }
+
+    pub fn with_transcript_repo(mut self, transcript_repo: Arc<dyn TranscriptRepo>) -> Self {
+        self.transcript_repo = Some(transcript_repo);
+        self
     }
 
     /// Create a new session with the given kind, optional workspace root,
@@ -138,6 +147,36 @@ impl SessionEngine {
             .map_err(RuntimeError::Store)
     }
 
+    /// Merge a metadata patch into the current session metadata and persist it.
+    pub async fn patch_metadata(
+        &self,
+        session_id: Uuid,
+        patch: serde_json::Value,
+    ) -> Result<SessionRow, RuntimeError> {
+        let row = self.get_session(session_id).await?;
+        let mut metadata = row.metadata;
+        merge_json(&mut metadata, patch);
+        self.session_repo
+            .update_metadata(session_id, metadata, Utc::now())
+            .await
+            .map_err(RuntimeError::Store)
+    }
+
+    /// Delete a session and any transcript rows if transcript storage is attached.
+    pub async fn delete_session(&self, session_id: Uuid) -> Result<(), RuntimeError> {
+        self.get_session(session_id).await?;
+
+        if let Some(transcript_repo) = &self.transcript_repo {
+            transcript_repo.delete_by_session(session_id).await?;
+        }
+
+        let deleted = self.session_repo.delete(session_id).await?;
+        if !deleted {
+            return Err(RuntimeError::SessionNotFound(session_id.to_string()));
+        }
+        Ok(())
+    }
+
     async fn transition_session(
         &self,
         session_id: Uuid,
@@ -156,5 +195,28 @@ impl SessionEngine {
             .update_status(session_id, to, Utc::now())
             .await?;
         Ok(updated)
+    }
+}
+
+fn merge_json(target: &mut serde_json::Value, patch: serde_json::Value) {
+    match (target, patch) {
+        (serde_json::Value::Object(target_map), serde_json::Value::Object(patch_map)) => {
+            for (key, value) in patch_map {
+                match value {
+                    serde_json::Value::Null => {
+                        target_map.remove(&key);
+                    }
+                    other => {
+                        merge_json(
+                            target_map.entry(key).or_insert(serde_json::Value::Null),
+                            other,
+                        );
+                    }
+                }
+            }
+        }
+        (target_slot, patch_value) => {
+            *target_slot = patch_value;
+        }
     }
 }

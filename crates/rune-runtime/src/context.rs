@@ -7,6 +7,7 @@ use crate::memory::MemoryContext;
 use crate::workspace::WorkspaceContext;
 
 /// Builds the prompt messages from session history, system instructions, and context.
+#[derive(Clone)]
 pub struct ContextAssembler {
     system_instructions: String,
 }
@@ -28,6 +29,7 @@ impl ContextAssembler {
         compaction: &dyn CompactionStrategy,
         workspace: Option<&WorkspaceContext>,
         memory: Option<&MemoryContext>,
+        extra_system_sections: &[String],
     ) -> Vec<ChatMessage> {
         let mut messages = Vec::with_capacity(transcript_rows.len() + 1);
 
@@ -47,6 +49,13 @@ impl ContextAssembler {
                 sections.push(mem_section);
             }
         }
+
+        sections.extend(
+            extra_system_sections
+                .iter()
+                .filter(|section| !section.trim().is_empty())
+                .cloned(),
+        );
 
         let system_content = sections.join("\n\n");
 

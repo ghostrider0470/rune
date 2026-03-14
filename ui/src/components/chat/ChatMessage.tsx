@@ -10,6 +10,7 @@ import type { PendingAttachment, TranscriptEntry } from "@/lib/api-types";
 interface ChatMessageProps {
   entry: TranscriptEntry;
   isLive?: boolean;
+  showThinking?: boolean;
 }
 
 function getMessageAttachments(payload: unknown): PendingAttachment[] {
@@ -23,7 +24,7 @@ function getMessageAttachments(payload: unknown): PendingAttachment[] {
   });
 }
 
-export function ChatMessage({ entry, isLive }: ChatMessageProps) {
+export function ChatMessage({ entry, isLive, showThinking = true }: ChatMessageProps) {
   const normalizedKind = normalizeTranscriptKind(entry.kind);
   const isUser = normalizedKind === "user";
   const isAssistant = normalizedKind === "assistant";
@@ -58,9 +59,8 @@ export function ChatMessage({ entry, isLive }: ChatMessageProps) {
           </Badge>
         )}
 
-        {thinking.map((block, i) => (
-          <ThinkingBlock key={i} content={block} className="mb-2" />
-        ))}
+        {showThinking &&
+          thinking.map((block, i) => <ThinkingBlock key={i} content={block} className="mb-2" />)}
 
         {cleaned.trim().length > 0 ? (
           isAssistant ? (
@@ -70,7 +70,9 @@ export function ChatMessage({ entry, isLive }: ChatMessageProps) {
           )
         ) : thinking.length > 0 ? (
           <p className="text-xs italic text-muted-foreground">
-            Response only contained hidden thinking.
+            {showThinking
+              ? "Response only contained hidden thinking."
+              : "Thinking hidden by preference for this view."}
           </p>
         ) : attachments.length > 0 ? null : (
           <p className="text-xs italic text-muted-foreground">Empty message payload.</p>
@@ -79,7 +81,7 @@ export function ChatMessage({ entry, isLive }: ChatMessageProps) {
         {attachments.length > 0 && (
           <div className="mt-3 space-y-2 rounded-2xl border border-border/60 bg-background/60 p-3">
             <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-              Attachments queued
+              Attached input assets
             </p>
             <div className="space-y-2">
               {attachments.map((attachment, index) => (
@@ -97,7 +99,7 @@ export function ChatMessage({ entry, isLive }: ChatMessageProps) {
                     </p>
                   </div>
                   <Badge variant="outline" className="shrink-0 text-[10px]">
-                    metadata only
+                    pending input asset
                   </Badge>
                 </div>
               ))}

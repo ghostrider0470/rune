@@ -20,6 +20,8 @@ interface ChatThreadProps {
   className?: string;
   onInspectTool?: (entry: TranscriptEntry, pairedEntry?: TranscriptEntry) => void;
   selectedToolEntryId?: string | null;
+  showThinking?: boolean;
+  focusMode?: boolean;
 }
 
 const TOOL_KINDS = new Set(["tool_request", "tool_use", "tool_result"]);
@@ -199,6 +201,8 @@ export function ChatThread({
   className,
   onInspectTool,
   selectedToolEntryId,
+  showThinking = true,
+  focusMode = false,
 }: ChatThreadProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -269,7 +273,10 @@ export function ChatThread({
       <div
         ref={containerRef}
         onScroll={checkScrollPosition}
-        className="flex h-full flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-4"
+        className={cn(
+          "flex h-full flex-col gap-4 overflow-y-auto py-4",
+          focusMode ? "px-4 sm:px-8 lg:px-12" : "px-3 sm:px-4",
+        )}
       >
         {groups.map((group, gi) => {
           if (group.type === "date_divider") {
@@ -305,7 +312,11 @@ export function ChatThread({
                     {lane.label}
                   </Badge>
                 </div>
-                <ChatMessage entry={entry} isLive={isLiveEntry(entry)} />
+                <ChatMessage
+                  entry={entry}
+                  isLive={isLiveEntry(entry)}
+                  showThinking={showThinking}
+                />
               </div>
             );
           }
@@ -354,7 +365,12 @@ export function ChatThread({
                 {lane.label}
               </Badge>
               {group.entries.map((entry) => (
-                <ChatMessage key={entry.id} entry={entry} isLive={isLiveEntry(entry)} />
+                <ChatMessage
+                  key={entry.id}
+                  entry={entry}
+                  isLive={isLiveEntry(entry)}
+                  showThinking={showThinking}
+                />
               ))}
             </div>
           );

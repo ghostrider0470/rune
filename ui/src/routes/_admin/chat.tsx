@@ -3,6 +3,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -21,6 +23,8 @@ import {
   Activity,
   Clock3,
   PanelRight,
+  Focus,
+  Brain,
 } from "lucide-react";
 import {
   useChatSessions,
@@ -30,6 +34,12 @@ import {
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { ChatInput } from "@/components/chat/ChatInput";
+import {
+  CHAT_FOCUS_MODE_KEY,
+  CHAT_SHOW_THINKING_KEY,
+  loadChatFocusMode,
+  loadChatShowThinking,
+} from "@/components/chat/chat-preferences";
 import { designSystem } from "@/lib/design-system";
 import type { TranscriptEntry } from "@/lib/api-types";
 
@@ -82,6 +92,8 @@ function ChatPage() {
   const [selectedToolPair, setSelectedToolPair] = useState<TranscriptEntry | null>(null);
   const [inspectorRatio, setInspectorRatio] = useState(loadInspectorRatio);
   const [showMobileInspector, setShowMobileInspector] = useState(false);
+  const [focusMode, setFocusMode] = useState(loadChatFocusMode);
+  const [showThinking, setShowThinking] = useState(loadChatShowThinking);
   const splitContainerRef = useRef<HTMLDivElement>(null);
 
   const activeSessionId = search.session;
@@ -216,6 +228,18 @@ function ChatPage() {
       window.localStorage.setItem(INSPECTOR_RATIO_KEY, String(inspectorRatio));
     }
   }, [inspectorRatio]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(CHAT_FOCUS_MODE_KEY, String(focusMode));
+    }
+  }, [focusMode]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(CHAT_SHOW_THINKING_KEY, String(showThinking));
+    }
+  }, [showThinking]);
 
   const inspectorOpen = Boolean(selectedToolEntry);
 
@@ -357,6 +381,37 @@ function ChatPage() {
       </section>
 
       <div className="grid min-h-[calc(100dvh-17.5rem)] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="space-y-3 lg:hidden">
+          <div className="grid grid-cols-1 gap-2 rounded-3xl border border-border/70 bg-card/80 p-3 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur sm:grid-cols-2">
+            <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-background/70 px-3 py-2">
+              <Label htmlFor="chat-focus-mode-mobile" className="gap-1.5 text-xs text-muted-foreground">
+                <Focus className="h-3.5 w-3.5" />
+                Focus mode
+              </Label>
+              <Switch
+                id="chat-focus-mode-mobile"
+                size="sm"
+                checked={focusMode}
+                onCheckedChange={setFocusMode}
+                aria-label="Toggle focus mode"
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-background/70 px-3 py-2">
+              <Label htmlFor="chat-show-thinking-mobile" className="gap-1.5 text-xs text-muted-foreground">
+                <Brain className="h-3.5 w-3.5" />
+                Show thinking
+              </Label>
+              <Switch
+                id="chat-show-thinking-mobile"
+                size="sm"
+                checked={showThinking}
+                onCheckedChange={setShowThinking}
+                aria-label="Toggle thinking visibility"
+              />
+            </div>
+          </div>
+        </div>
+
         <div className="hidden min-h-0 lg:block">
           <ChatSidebar
             sessions={sessions}
@@ -422,7 +477,31 @@ function ChatPage() {
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="hidden items-center gap-3 rounded-2xl border border-border/70 bg-background/70 px-3 py-2 lg:flex">
+                  <Label htmlFor="chat-focus-mode" className="gap-1.5 text-[11px] text-muted-foreground">
+                    <Focus className="h-3.5 w-3.5" />
+                    Focus mode
+                  </Label>
+                  <Switch
+                    id="chat-focus-mode"
+                    size="sm"
+                    checked={focusMode}
+                    onCheckedChange={setFocusMode}
+                    aria-label="Toggle focus mode"
+                  />
+                  <Label htmlFor="chat-show-thinking" className="gap-1.5 text-[11px] text-muted-foreground">
+                    <Brain className="h-3.5 w-3.5" />
+                    Show thinking
+                  </Label>
+                  <Switch
+                    id="chat-show-thinking"
+                    size="sm"
+                    checked={showThinking}
+                    onCheckedChange={setShowThinking}
+                    aria-label="Toggle thinking visibility"
+                  />
+                </div>
                 {selectedToolEntry && (
                   <Button
                     variant="outline"
@@ -487,6 +566,8 @@ function ChatPage() {
                       className="min-h-0 h-full flex-1"
                       onInspectTool={handleInspectTool}
                       selectedToolEntryId={selectedToolEntry?.id ?? null}
+                      showThinking={showThinking}
+                      focusMode={focusMode}
                     />
                   </div>
 
@@ -522,6 +603,8 @@ function ChatPage() {
                     className="min-h-0 h-full flex-1"
                     onInspectTool={handleInspectTool}
                     selectedToolEntryId={selectedToolEntry?.id ?? null}
+                    showThinking={showThinking}
+                    focusMode={focusMode}
                   />
                 </div>
               </>
@@ -557,6 +640,7 @@ function ChatPage() {
                 </div>
               )}
               <ChatInput
+                sessionId={activeSessionId}
                 onSend={handleSend}
                 disabled={sendMutation.isPending}
                 placeholder={

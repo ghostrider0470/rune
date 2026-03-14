@@ -6,10 +6,13 @@ mod engine;
 mod error;
 mod executor;
 pub mod heartbeat;
+pub mod lane_queue;
 pub mod memory;
 pub mod scheduler;
 pub mod session_loop;
 mod session_metadata;
+pub mod skill;
+pub mod skill_loader;
 mod usage;
 pub mod workspace;
 
@@ -18,6 +21,9 @@ pub use context::ContextAssembler;
 pub use engine::SessionEngine;
 pub use error::RuntimeError;
 pub use executor::TurnExecutor;
+pub use lane_queue::{Lane, LanePermit, LaneQueue, LaneStats};
+pub use skill::{Skill, SkillRegistry};
+pub use skill_loader::{SkillLoader, SkillScanSummary};
 pub use usage::UsageAccumulator;
 
 #[cfg(test)]

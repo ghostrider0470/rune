@@ -1,0 +1,922 @@
+# Rune — Full OpenClaw Parity Implementation Plan
+
+## For LLM Coding Agents (Claude Code, Codex, etc.)
+
+> **This document is an instruction set for autonomous coding agents.**
+> Each phase is designed to be executed independently. Read the full phase before writing any code.
+
+---
+
+## CRITICAL: Pre-Implementation Research Protocol
+
+Before implementing ANY phase, you MUST research the reference implementations listed below.
+These are real, production Rust rewrites of OpenClaw. Study their source code for patterns, trait designs, and architectural decisions relevant to the phase you are working on.
+
+### Reference Repositories (All Real — Verified March 2026)
+
+| Project | Repository URL | Language | Key Relevance |
+|---------|---------------|----------|---------------|
+| **OpenClaw** (canonical) | `https://github.com/openclaw/openclaw` | TypeScript/Node.js | The reference specification. 310k+ stars. Study for protocol specs, message framing, SKILL.md format, SOUL.md taxonomy, heartbeat behavior, A2UI protocol, and all channel adapter contracts. |
+| **ZeroClaw** | `https://github.com/zeroclaw-labs/zeroclaw` | Rust | Closest architectural match to Rune. Trait-based provider/channel/tool system. Hybrid memory search (70% vector + 30% FTS5 in SQLite). Study for: Provider trait, Channel trait, Tool trait, LaneQueue-equivalent concurrency, daemon lifecycle, and config hot-reload. |
+| **ZeptoClaw** | `https://github.com/qhkm/zeptoclaw` | Rust | Security-focused. Container isolation per request, prompt injection detection, circuit breaker provider stack, policy engine. Study for: sandbox security modes, agent swarm spawning, batch processing, multi-tenant patterns. |
+| **OpenCrust** | `https://github.com/opencrust-org/opencrust` | Rust | PostgreSQL + pgvector for memory (closest to Rune's DB choice). WASM plugin system. AES-256-GCM encrypted credential vault. Study for: pgvector integration patterns, rolling conversation summarization, config hot-reload, and WASM extensibility. |
+| **IronClaw** | `https://github.com/nearai/ironclaw` | Rust | PostgreSQL + pgvector, WASM channel architecture, host-managed event model. Study for: pgvector Diesel integration, WASM-based channel isolation, and database-backed session management. |
+| **TitanClaw** | `https://github.com/PhantomReaper2025/titanclaw` | Rust | Built on IronClaw. AST graph memory, shadow-worker speculative cache, kernel monitor. Study for: advanced memory graph patterns and multi-agent orchestration. |
+
+### How to Research a Reference Repo
+
+For each phase, before writing code:
+
+```
+1. Clone or fetch the relevant repo(s) listed in the phase header
+2. Read the specific files/modules called out in "Reference Files" 
+3. Extract: trait signatures, struct layouts, error handling patterns, async patterns
+4. Adapt to Rune's conventions (see CONVENTIONS section below) — do NOT copy verbatim
+5. Note any deviations and document why in code comments
+```
+
+### DO NOT reference these projects:
+- **"Panther"** — does not exist, was hallucinated in earlier drafts
+- Any repo not listed above without verifying it exists first
+
+---
+
+## CONVENTIONS (Apply to ALL Phases)
+
+Before implementing any phase, read the existing codebase to extract and confirm these patterns.
+Run `find crates/ -name "*.rs" | head -30` and read key files to understand conventions.
+
+### Step 0 for Every Phase
+
+```bash
+# ALWAYS do this before writing any code in a phase:
+
+# 1. Read the files you're about to modify
+cat crates/rune-gateway/src/routes.rs    # (or whatever files the phase lists)
+cat crates/rune-config/src/lib.rs
+
+# 2. Identify these patterns from existing code:
+#    - Error type: What does the codebase use? (anyhow? thiserror? custom AppError?)
+#    - Handler signature: What's the async fn signature for route handlers?
+#    - Serialization: What serde attributes are used? (camelCase? snake_case?)
+#    - State sharing: How is AppState structured and passed?
+#    - Database: What ORM/query layer? (Diesel? sqlx? sea-orm?)
+#    - Testing: Are there integration tests? What's the test pattern?
+
+# 3. Document what you found in a comment block at the top of new files:
+# // Conventions extracted from existing codebase:
+# // - Error type: AppError from crates/rune-gateway/src/error.rs
+# // - Handlers: async fn(State<AppState>, ...) -> Result<Json<T>, AppError>
+# // - Serde: #[serde(rename_all = "camelCase")]
+# // - DB: Diesel with PostgreSQL
+```
+
+### Coding Rules (Non-Negotiable)
+
+- **DO NOT** add a new HTTP framework — use whatever the existing codebase uses (likely axum)
+- **DO NOT** create separate binaries unless the phase explicitly says to — library crates only
+- **DO NOT** use `unwrap()` or `expect()` in library code — propagate errors
+- **DO NOT** add dependencies without checking if an existing dep covers the need
+- **DO** run `cargo check` after every file you create or modify
+- **DO** run `cargo clippy` before marking a phase complete
+- **DO** match the existing code style exactly (indent, naming, module organization)
+
+---
+
+## Current State Audit
+
+| Pillar | Status | Notes |
+|--------|--------|-------|
+| WebSocket Gateway | ✅ Basic | Event broadcast only, no req/res/RPC framing |
+| Multi-channel Routing | ✅ Telegram only | Adapter trait exists, Discord/Slack/WhatsApp/Signal missing |
+| Device Pairing | ❌ Missing | No Ed25519, no crypto |
+| LaneQueue Concurrency | ❌ Missing | Sequential per-session, no lane caps |
+| File-based Identity | ✅ Done | SOUL.md, USER.md, AGENTS.md, TOOLS.md, IDENTITY.md |
+| Session History | ✅ Done | PostgreSQL-based (not JSONL) |
+| Hybrid Memory Search | ⚠️ Keyword only | No vector embeddings, no FTS |
+| Hot-reloading Skills | ❌ Missing | Static tool registry, no SKILL.md scanning |
+| MCP Client | ❌ Missing | No STDIO/HTTP MCP transport |
+| PTY Execution Sandbox | ✅ Basic | Via Unix script, no advanced PTY |
+| Heartbeat + Silent Eval | ✅ Done | HEARTBEAT_OK suppression works |
+| Sub-agents | ✅ Done | Session spawning + manager trait |
+| Semantic Browser Snapshots | ❌ Missing | No accessibility tree parsing |
+| A2UI Protocol | ❌ Missing | No streaming UI components |
+| TTS | ❌ Missing | No text-to-speech providers |
+| STT | ❌ Missing | No speech-to-text providers |
+| LLM Providers | ✅ Partial | Anthropic, OpenAI, Azure only |
+| Admin UI | ✅ Basic | Shell + basic pages, missing chat/usage/debug/config/logs/agents/skills |
+
+---
+
+## Phase 1 — Chat Page (UI Only)
+
+**Priority:** Highest — most user-visible missing feature
+**Dependencies:** None (backend endpoints already exist)
+**Estimated scope:** ~10 new UI files, 1 hook
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study the WebChat UI component architecture:
+openclaw/openclaw: src/web/  (or equivalent webchat directory)
+
+# From ZeroClaw — study the TUI/CLI chat rendering:
+zeroclaw: src/tui/  (if present)
+```
+
+### Step 0: Read Existing Code
+
+```bash
+# Read these files BEFORE writing anything:
+cat ui/src/routes/_admin/sessions.tsx        # Existing session page pattern
+cat ui/src/components/layout/AdminNavbar.tsx  # Nav structure
+cat ui/src/components/layout/AdminBottomNav.tsx
+cat ui/src/lib/api-types.ts                  # Existing type patterns
+ls ui/src/hooks/                              # Existing hook patterns
+cat ui/package.json                          # Existing dependencies
+
+# Identify:
+# - Router: Is this React Router? TanStack Router? File-based?
+# - State management: React Query? SWR? Custom hooks?
+# - Styling: Tailwind? CSS modules? Styled components?
+# - Component patterns: Functional components? Props typing?
+```
+
+### Tasks (Ordered)
+
+1. **Install dependencies:**
+   ```bash
+   cd ui && npm install marked dompurify @types/dompurify
+   ```
+
+2. **Create hook** — `ui/src/hooks/use-chat.ts`
+   - Transcript polling via `GET /sessions/{id}/transcript`
+   - Send message via `POST /sessions/{id}/messages`
+   - WebSocket subscription for real-time events
+   - Match the hook pattern used in existing hooks (check `ui/src/hooks/`)
+
+3. **Create components** (in `ui/src/components/chat/`):
+   - `ChatThread.tsx` — Message list with role-based grouping (user/assistant/system/tool)
+   - `ChatMessage.tsx` — Message bubble with markdown rendering via marked + DOMPurify
+   - `ChatInput.tsx` — Enter to send, Shift+Enter for newline, image paste support
+   - `ToolCard.tsx` — Inline tool call/result display, collapsible
+   - `ThinkingBlock.tsx` — Collapsible `<thinking>` block extraction and display
+   - `MarkdownRenderer.tsx` — Sanitized markdown rendering component
+   - `ChatSidebar.tsx` — Resizable split panel for long tool outputs (0.4–0.7 ratio)
+   - `CopyMarkdown.tsx` — Copy-as-markdown button with copied/error feedback state
+   - `ImageAttachment.tsx` — Clipboard paste → base64 preview
+
+4. **Create page** — `ui/src/routes/_admin/chat.tsx`
+   - Session selector (list/search sessions)
+   - Message thread using ChatThread
+   - Compose area using ChatInput
+
+5. **Update navigation:**
+   - Add "Chat" as **first item** in `AdminNavbar.tsx`
+   - Add "Chat" as **first item** in `AdminBottomNav.tsx`
+
+### Verification
+
+```bash
+cd ui && npm run build   # Must compile with zero errors
+# Visual check: navigate to /admin/chat, verify layout renders
+```
+
+### NOT in Scope
+- Do NOT modify any backend files
+- Do NOT add WebSocket reconnection logic yet (Phase 2 handles WS upgrade)
+- Do NOT implement file upload — only clipboard paste for images
+
+---
+
+## Phase 2 — WebSocket Gateway RPC Protocol (Backend)
+
+**Priority:** High — enables real-time chat and future features
+**Dependencies:** None
+**Estimated scope:** 1 new file, 1 modified file
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study the WS protocol specification:
+# Look for message framing types, sequence numbering, stateVersion tracking
+openclaw/openclaw: src/gateway/ or src/ws/ or docs/gateway*.md
+
+# From ZeroClaw — study the Rust WS implementation:
+zeroclaw: src/gateway/ or src/ws/
+# Pay attention to: how they dispatch RPC methods, error framing, event sequencing
+```
+
+### Step 0: Read Existing Code
+
+```bash
+cat crates/rune-gateway/src/ws.rs           # Current WS implementation
+cat crates/rune-gateway/src/routes.rs       # Existing route handlers (these become RPC targets)
+cat crates/rune-gateway/src/state.rs        # AppState structure
+```
+
+### Protocol Specification
+
+**Request frame** (client → server):
+```json
+{"type": "req", "id": "<uuid>", "method": "<string>", "params": {...}}
+```
+
+**Response frame** (server → client):
+```json
+{"type": "res", "id": "<uuid>", "ok": true, "payload": {...}}
+// or on error:
+{"type": "res", "id": "<uuid>", "ok": false, "error": {"code": "<string>", "message": "<string>"}}
+```
+
+**Event frame** (server → client, unchanged but add sequence):
+```json
+{"type": "event", "event": "<string>", "payload": {...}, "seq": <number>}
+```
+
+### Tasks (Ordered)
+
+1. **Read** `ws.rs` completely — understand current message handling
+2. **Create** `crates/rune-gateway/src/ws_rpc.rs`:
+   - Define `WsRequest`, `WsResponse`, `WsEvent` structs with serde
+   - RPC method dispatcher: maps method strings to existing service/handler calls
+   - Sequence number counter (atomic u64)
+   - Error types for RPC failures
+3. **Modify** `crates/rune-gateway/src/ws.rs`:
+   - Parse incoming frames: if `type == "req"` → route through RPC dispatcher
+   - Keep existing event broadcast, add `seq` field
+   - Add stateVersion tracking for connection health
+
+### Verification
+
+```bash
+cargo check -p rune-gateway
+cargo clippy -p rune-gateway
+cargo test -p rune-gateway
+
+# Manual test with websocat:
+# websocat ws://127.0.0.1:18789/ws
+# Send: {"type":"req","id":"test-1","method":"status","params":{}}
+# Expect: {"type":"res","id":"test-1","ok":true,"payload":{...}}
+```
+
+### NOT in Scope
+- Do NOT implement authentication on WS — that's Phase 11 (Device Pairing)
+- Do NOT change the WS port or connection handling
+
+---
+
+## Phase 3 — Multi-Channel Adapters (Backend)
+
+**Priority:** High — core feature parity
+**Dependencies:** None (ChannelAdapter trait already exists)
+**Estimated scope:** 4 new files, 2 modified files
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study channel adapter contracts:
+openclaw/openclaw: src/channels/  (telegram.ts, discord.ts, slack.ts, whatsapp.ts, signal.ts)
+# Extract: message normalization, attachment handling, typing indicators, rate limiting
+
+# From ZeroClaw — study the Rust Channel trait:
+zeroclaw: src/channels/  
+# Extract: trait Channel { async fn send(...); async fn listen(...); async fn health_check(...); }
+
+# From ZeptoClaw — study multi-channel message bus:
+zeptoclaw: src/channels/
+# Extract: MessageBus architecture, unified message interface
+```
+
+### Step 0: Read Existing Code
+
+```bash
+cat crates/rune-channels/src/lib.rs         # ChannelAdapter trait definition
+cat crates/rune-channels/src/telegram.rs    # Reference implementation to match
+cat crates/rune-config/src/lib.rs           # Config structure
+```
+
+### Tasks (Ordered — implement one adapter at a time)
+
+1. **Read** the existing Telegram adapter completely — this is your template
+2. **Create** `crates/rune-channels/src/discord.rs`:
+   - Discord bot via Gateway WebSocket (tokio-tungstenite) + REST API (reqwest)
+   - Implement the same ChannelAdapter trait as Telegram
+   - Handle: text messages, embeds, reactions, typing indicators
+   - Gateway intents: GUILD_MESSAGES, DIRECT_MESSAGES, MESSAGE_CONTENT
+3. **Create** `crates/rune-channels/src/slack.rs`:
+   - Slack bot via Socket Mode (app-level token) + Web API
+   - Implement ChannelAdapter trait
+   - Handle: messages, threads, reactions, file uploads
+4. **Create** `crates/rune-channels/src/whatsapp.rs`:
+   - WhatsApp Cloud API (Meta Business platform)
+   - Webhook receiver for inbound + REST for outbound
+   - Handle: text, images, documents, location
+5. **Create** `crates/rune-channels/src/signal.rs`:
+   - Signal via signal-cli REST API or linked device protocol
+   - Implement ChannelAdapter trait
+6. **Modify** `crates/rune-channels/src/lib.rs` — register new adapters in factory
+7. **Modify** `crates/rune-config/src/lib.rs` — add config sections for each channel
+
+### Verification (per adapter)
+
+```bash
+cargo check -p rune-channels
+cargo clippy -p rune-channels
+# Each adapter should compile independently even without API keys configured
+```
+
+### NOT in Scope
+- Do NOT implement media transcoding between channels
+- Do NOT implement group chat features beyond basic message routing
+
+---
+
+## Phase 4 — LaneQueue Concurrency Model (Backend)
+
+**Priority:** High — prevents state corruption
+**Dependencies:** None
+**Estimated scope:** 1 new file, 1 modified file
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study the LaneQueue specification:
+openclaw/openclaw: search for "LaneQueue", "lane", "concurrency", "serial"
+# Extract: lane types, cap values, queuing behavior, "Default Serial Explicit Parallel"
+
+# From ZeroClaw — study their concurrency model:
+zeroclaw: search for concurrency, queue, semaphore patterns
+```
+
+### Step 0: Read Existing Code
+
+```bash
+cat crates/rune-runtime/src/executor.rs     # Current execution model — this is what you're replacing
+# Understand: How are turns currently executed? What's the entry point?
+# Find: The function that receives a message and runs the LLM turn
+```
+
+### Design
+
+```
+Lane enum:
+  Main      — cap 4  (user-initiated turns)
+  Subagent  — cap 8  (spawned sub-agent turns)
+  Cron      — independent (heartbeat/scheduled, no cap sharing)
+  Nested    — recursive (tool calls within a turn, inherits parent lane)
+
+Implementation:
+  Per-lane: tokio::sync::Semaphore(cap) + VecDeque<PendingTask>
+  FIFO ordering: tasks dequeue in submission order
+  Task submission returns a JoinHandle-like future
+  Lane routing: based on session kind (main session → Main, sub-agent session → Subagent, etc.)
+```
+
+### Tasks (Ordered)
+
+1. **Read** `executor.rs` — understand the current turn execution flow
+2. **Create** `crates/rune-runtime/src/lane_queue.rs`:
+   - `Lane` enum with `Main`, `Subagent`, `Cron`, `Nested` variants
+   - `LaneQueue` struct with per-lane `Semaphore` + `VecDeque`
+   - `submit(lane, task) -> impl Future<Output = Result<T>>` method
+   - Lane routing function: `fn route_lane(session: &Session) -> Lane`
+3. **Modify** `crates/rune-runtime/src/executor.rs`:
+   - Replace direct execution with `lane_queue.submit(lane, turn_task)`
+   - Keep the existing turn execution logic inside the task closure
+
+### Verification
+
+```bash
+cargo check -p rune-runtime
+cargo test -p rune-runtime
+# Write a unit test that submits 6 Main tasks and verifies only 4 run concurrently
+```
+
+---
+
+## Phase 5 — Hot-Reloading Skills System (Backend)
+
+**Priority:** High — core extensibility feature
+**Dependencies:** None
+**Estimated scope:** 2 new files, 2 modified files, 3 new routes
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study SKILL.md format and loading:
+openclaw/openclaw: search for "SKILL.md", "skill", "ClawHub"
+# Extract: YAML frontmatter schema, directory scanning pattern, system prompt injection
+
+# From ZeroClaw — study Rust skill loading:
+zeroclaw: search for "skill", "SKILL.md"
+# Extract: how they parse frontmatter, hot-reload via file watcher, dynamic registration
+
+# From OpenCrust — study skill auto-discovery:
+opencrust: search for "skill", "SKILL.md"
+# They use: ~/.opencrust/skills/ auto-discovery, injected into system prompt
+```
+
+### Step 0: Read Existing Code
+
+```bash
+cat crates/rune-tools/src/lib.rs            # Current ToolRegistry — you're extending this
+cat crates/rune-runtime/src/executor.rs     # Where system prompt is assembled
+# Find: Where tools are registered, how system prompt is built before LLM call
+```
+
+### Tasks (Ordered)
+
+1. **Create** `crates/rune-runtime/src/skill.rs`:
+   - `Skill` struct: name, description, parameters_schema, binary_path, enabled
+   - `SkillRegistry`: HashMap-based, with add/remove/list/toggle methods
+   - Thread-safe: wrap in `Arc<RwLock<SkillRegistry>>`
+
+2. **Create** `crates/rune-runtime/src/skill_loader.rs`:
+   - Directory scanner for `skills/*/SKILL.md` files
+   - YAML frontmatter parser (extract between `---` delimiters)
+   - File watcher using `notify` crate for hot-reload on changes
+   - Caching: store parsed skills, only re-parse on file change
+   - Target: sub-millisecond directory scanning with cache hit
+
+3. **Modify** `crates/rune-runtime/src/executor.rs`:
+   - Before each LLM call, inject active skills into system prompt
+   - Skills are injected dynamically per turn, NOT at startup
+
+4. **Modify** `crates/rune-tools/src/lib.rs`:
+   - Make ToolRegistry support dynamic add/remove (not just static registration)
+
+5. **Add routes** to gateway:
+   - `GET /skills` — list all skills with status
+   - `POST /skills/{name}/enable` — enable a skill
+   - `POST /skills/{name}/disable` — disable a skill
+
+### Verification
+
+```bash
+cargo check -p rune-runtime
+cargo check -p rune-gateway
+
+# Test: Create a skills/test-skill/SKILL.md file, verify it appears in GET /skills
+# Test: Modify the file, verify hot-reload picks up changes within 1 second
+```
+
+---
+
+## Phase 6 — MCP Client (Backend)
+
+**Priority:** High — critical for tool ecosystem
+**Dependencies:** None
+**Estimated scope:** New crate with 5 files, 2 modified files
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study MCP client implementation:
+openclaw/openclaw: search for "mcp", "MCP", "model context protocol"
+# Extract: server config format, tool discovery, tool call routing
+
+# From ZeroClaw — study Rust MCP:
+zeroclaw: search for "mcp"
+# From ZeptoClaw:
+zeptoclaw: search for "mcp"
+
+# Official MCP specification:
+# https://spec.modelcontextprotocol.io/
+# Study: initialize handshake, tools/list, tools/call, resources/list, resources/read
+```
+
+### Step 0: Read Existing Code
+
+```bash
+cat crates/rune-tools/src/lib.rs            # ToolRegistry — MCP tools merge here
+cat crates/rune-runtime/src/executor.rs     # Tool call dispatch — MCP routes through here
+cat crates/rune-config/src/lib.rs           # Config — add [[mcp_servers]] section
+```
+
+### Tasks (Ordered)
+
+1. **Create crate** `crates/rune-mcp/Cargo.toml`:
+   - Dependencies: tokio, serde, serde_json, reqwest, tokio-process
+
+2. **Create** `crates/rune-mcp/src/protocol.rs`:
+   - MCP JSON-RPC types: Initialize, ToolsList, ToolsCall, ResourcesList, ResourcesRead
+   - Request/Response envelope types
+
+3. **Create** `crates/rune-mcp/src/transport_stdio.rs`:
+   - Spawn subprocess via `tokio::process::Command`
+   - Communicate via stdin/stdout JSON-RPC (newline-delimited JSON)
+   - Handle process lifecycle (start, health check, restart on crash)
+
+4. **Create** `crates/rune-mcp/src/transport_http.rs`:
+   - HTTP + SSE transport for remote MCP servers
+   - POST for requests, SSE stream for server-initiated events
+
+5. **Create** `crates/rune-mcp/src/discovery.rs`:
+   - Parse MCP server configs from `[[mcp_servers]]` in config.toml
+   - Auto-discover tools from each server on startup
+
+6. **Create** `crates/rune-mcp/src/lib.rs`:
+   - `McpManager`: manages multiple MCP server connections
+   - Tool registry integration: MCP tools appear alongside built-in tools
+   - Transparent routing: tool calls auto-route through MCP client
+
+7. **Modify** `crates/rune-config/src/lib.rs`:
+   - Add `mcp_servers: Vec<McpServerConfig>` with name, command/url, transport type
+
+8. **Modify** `crates/rune-runtime/src/executor.rs`:
+   - When a tool call matches an MCP tool, route through McpManager instead of local handler
+
+9. **Add to workspace** `Cargo.toml`:
+   - Add `"crates/rune-mcp"` to workspace members
+
+### Verification
+
+```bash
+cargo check -p rune-mcp
+cargo build --release -p rune-gateway   # Full build with MCP integrated
+
+# Test with a simple MCP server:
+# Configure an echo MCP server in config.toml
+# Verify tools appear in GET /tools
+# Verify tool call routes through MCP and returns result
+```
+
+---
+
+## Phase 7 — Expanded LLM Providers (Backend)
+
+**Priority:** Medium — broadens model support
+**Dependencies:** None
+**Estimated scope:** 6 new files, 2 modified files
+
+### Reference Files to Study
+
+```
+# From ZeroClaw — study provider trait and implementations:
+zeroclaw: src/providers/  (they support 22+ providers)
+# Extract: Provider trait signature, streaming pattern, error handling, retry logic
+
+# From OpenCrust — study provider implementations:
+opencrust: src/providers/
+# They default to NEAR AI but support OpenAI-compatible endpoints
+
+# From ZeptoClaw — study circuit breaker provider stack:
+zeptoclaw: src/providers/
+# Extract: fallback between providers, exponential backoff, token budget tracking
+```
+
+### Step 0: Read Existing Code
+
+```bash
+cat crates/rune-models/src/lib.rs           # Provider trait + routing layer
+cat crates/rune-models/src/anthropic.rs     # Reference implementation
+cat crates/rune-models/src/openai.rs        # Another reference
+cat crates/rune-config/src/lib.rs           # ModelProviderKind enum
+```
+
+### Strategy: Clone-and-Adapt
+
+Most new providers are **OpenAI-compatible** (same API shape, different base URL).
+Implement Groq first as the template, then clone for DeepSeek and Mistral with minimal changes.
+
+### Tasks (Ordered)
+
+1. **Implement OpenAI-compatible providers** (clone pattern):
+   - `groq.rs` — base URL: `api.groq.com`, OpenAI-compatible → implement first as template
+   - `deepseek.rs` — clone from groq.rs, change base URL + model names
+   - `mistral.rs` — clone from groq.rs, change base URL + model names
+
+2. **Implement non-OpenAI providers:**
+   - `google.rs` — Google Generative AI (Gemini). POST to `generativelanguage.googleapis.com`. Different request/response format. Study the Gemini API docs.
+   - `ollama.rs` — Ollama local. POST `/api/chat` for inference + `GET /api/tags` for model discovery. Handle: no API key needed, local network only.
+   - `bedrock.rs` — AWS Bedrock ConverseStream. Requires `aws-sdk-bedrockruntime` crate. Different auth (IAM/STS). This is the most complex — do last.
+
+3. **Modify** `crates/rune-config/src/lib.rs`:
+   - Extend `ModelProviderKind` enum with: Google, Ollama, Bedrock, Groq, DeepSeek, Mistral
+
+4. **Modify** `crates/rune-models/src/lib.rs`:
+   - Register all new providers in routing layer
+
+5. **Add discovery routes:**
+   - `POST /models/scan` — auto-discover models for Ollama (GET /api/tags) and Bedrock (list-foundation-models)
+   - `GET /models` — full model list with provider details
+
+### Verification (per provider)
+
+```bash
+cargo check -p rune-models
+
+# For each provider, write a unit test that:
+# 1. Constructs a request
+# 2. Serializes it to JSON
+# 3. Verifies the JSON matches the provider's expected format
+# (Do NOT make real API calls in tests — mock the HTTP layer)
+```
+
+---
+
+## Phase 8 — TTS Backend + UI
+
+**Dependencies:** None
+**Estimated scope:** New crate with 4 files
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study TTS integration:
+openclaw/openclaw: search for "tts", "speech", "voice"
+# Extract: auto_mode options (off/always/inbound/tagged), voice config
+
+# From ZeroClaw — if they have TTS:
+zeroclaw: search for "tts", "speech"
+```
+
+### Tasks
+
+1. **Create crate** `crates/rune-tts/` with:
+   - `src/lib.rs` — TTS engine + provider trait
+   - `src/openai.rs` — OpenAI TTS (POST `/v1/audio/speech`)
+   - `src/elevenlabs.rs` — ElevenLabs TTS API
+   - `src/config.rs` — provider, api_key, voice, model, auto_mode (off/always/inbound/tagged)
+
+2. **Add routes:** `GET /tts/status`, `POST /tts/enable`, `POST /tts/disable`, `POST /tts/convert`
+3. **Add config:** `[tts]` section in AppConfig
+4. **Add to AppState:** TTS engine reference
+5. **UI:** TTS controls in settings page
+
+### Verification
+
+```bash
+cargo check -p rune-tts
+cargo build --release -p rune-gateway
+```
+
+---
+
+## Phase 9 — STT Backend + UI
+
+**Dependencies:** None
+**Estimated scope:** New crate with 3 files
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study STT/Whisper integration:
+openclaw/openclaw: search for "stt", "whisper", "transcrib"
+
+# From ZeroClaw — Groq free Whisper transcription:
+zeroclaw: search for "whisper", "transcrib"
+# They use Groq's free Whisper endpoint for Telegram voice messages
+```
+
+### Tasks
+
+1. **Create crate** `crates/rune-stt/` with:
+   - `src/lib.rs` — STT engine + provider trait
+   - `src/openai.rs` — OpenAI Whisper (POST `/v1/audio/transcriptions`, multipart)
+   - `src/config.rs` — provider, api_key, model
+
+2. **Add routes:** `GET /stt/status`, `POST /stt/transcribe`
+3. **Integration:** Auto-transcribe audio attachments from channels before processing
+4. **Add config:** `[stt]` section in AppConfig
+5. **UI:** STT controls in settings page
+
+### Verification
+
+```bash
+cargo check -p rune-stt
+cargo build --release -p rune-gateway
+```
+
+---
+
+## Phase 10 — Hybrid Memory Search (Backend)
+
+**Priority:** High — major capability gap
+**Dependencies:** None
+**Estimated scope:** 1 migration, 1 new file, 2 modified files
+
+### Reference Files to Study
+
+```
+# From OpenCrust — study pgvector integration (closest to Rune's PostgreSQL choice):
+opencrust: search for "pgvector", "vector", "embedding", "memory"
+# IronClaw also uses pgvector — study their Diesel model for vector type
+
+# From ZeroClaw — study hybrid search algorithm:
+zeroclaw: search for "memory", "vector", "FTS5", "hybrid"
+# They use: 70% vector cosine similarity + 30% FTS5 BM25 keyword
+# Stored in SQLite with sqlite-vec extension
+
+# Rune uses PostgreSQL — we adapt to pgvector + tsvector instead
+```
+
+### Step 0: Read Existing Code
+
+```bash
+cat crates/rune-tools/src/memory_tool.rs    # Current keyword-only search — you're upgrading this
+cat crates/rune-store/src/                  # Database layer — check for migration patterns
+```
+
+### Tasks (Ordered)
+
+1. **Create migration:**
+   ```sql
+   CREATE EXTENSION IF NOT EXISTS vector;
+   
+   CREATE TABLE memory_embeddings (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     file_path TEXT NOT NULL,
+     chunk_text TEXT NOT NULL,
+     embedding vector(1536),  -- OpenAI text-embedding-ada-002 dimension
+     updated_at TIMESTAMPTZ DEFAULT now()
+   );
+   
+   CREATE INDEX ON memory_embeddings USING ivfflat (embedding vector_cosine_ops);
+   CREATE INDEX ON memory_embeddings USING gin (to_tsvector('english', chunk_text));
+   ```
+
+2. **Create** `crates/rune-tools/src/memory_index.rs`:
+   - Embedding provider abstraction (OpenAI text-embedding-ada-002 or configurable)
+   - File chunking: split by heading/paragraph, ~512 token chunks
+   - Batch embed + upsert to memory_embeddings table
+   - Background re-index on workspace file watcher events (use `notify` crate)
+
+3. **Modify** `crates/rune-tools/src/memory_tool.rs`:
+   - Replace word-hit scoring with hybrid PostgreSQL query:
+     ```sql
+     SELECT *, 
+       (0.3 * ts_rank(to_tsvector('english', chunk_text), plainto_tsquery($1))) +
+       (0.7 * (1 - (embedding <=> $2::vector))) AS score
+     FROM memory_embeddings
+     ORDER BY score DESC
+     LIMIT $3
+     ```
+   - Reciprocal Rank Fusion (RRF) to merge keyword + vector scores
+   - Lazy re-indexing: on file change → re-chunk → re-embed → upsert
+
+4. **Modify** `crates/rune-store/` — add MemoryEmbeddingRepo trait + model
+
+5. **Add dependency:** `pgvector` crate (for Diesel vector type support)
+
+### Verification
+
+```bash
+cargo check -p rune-tools
+cargo check -p rune-store
+
+# Test: Insert a few chunks, run a hybrid search, verify results rank correctly
+# Test: Verify keyword-only queries still work (fallback when no embeddings available)
+```
+
+---
+
+## Phase 11 — Device Pairing (Backend)
+
+**Dependencies:** None
+**Estimated scope:** 1 new file, new routes
+
+### Reference Files to Study
+
+```
+# From OpenClaw — study device pairing protocol:
+openclaw/openclaw: search for "pair", "device", "Ed25519", "challenge", "nonce"
+# Extract: pairing flow, token issuance, device registry, role/scope model
+
+# From ZeroClaw — study pairing-based auth:
+zeroclaw: search for "pair", "auth", "device"
+# They have: pairing-based auth enabled by default, strict sandboxing
+```
+
+### Tasks
+
+1. **Create** `crates/rune-gateway/src/pairing.rs`:
+   - Ed25519 key generation (use `ed25519-dalek` or `ring` crate)
+   - Challenge-response flow: server sends nonce, client signs with device key
+   - Token issuance with configurable expiry
+   - Device registry: paired devices with roles and scopes
+   - Pairing request approval/rejection flow
+
+2. **Add routes:**
+   - `POST /devices/pair/request` — initiate pairing (returns challenge)
+   - `POST /devices/pair/approve` — approve pending pair request
+   - `POST /devices/pair/reject` — reject pending pair request
+   - `GET /devices` — list paired devices
+   - `DELETE /devices/{id}` — revoke a device
+   - `POST /devices/{id}/rotate-token` — rotate device token
+
+### Verification
+
+```bash
+cargo check -p rune-gateway
+# Test: Full pairing flow — request → approve → authenticate → revoke
+```
+
+---
+
+## Phases 12–21 — Summary (Expand When Ready)
+
+These phases are lower priority or UI-focused. Expand each into the full format above when you're ready to implement.
+
+| Phase | Scope | Key Deliverables |
+|-------|-------|-----------------|
+| 12 — Session Enhancements | Backend + UI | DELETE/PATCH /sessions/{id}, usage columns, delete button |
+| 13 — Usage Analytics | Backend + UI | GET /api/dashboard/usage, token counts, cost charts, CSV export |
+| 14 — Config Editor | Backend + UI | GET/PUT /config with validation, form + raw JSON editor |
+| 15 — Log Viewer | Backend + UI | Ring buffer tracing subscriber, SSE streaming, level filter |
+| 16 — Debug Page | UI only | /status + /health tree views, manual API tester, WS event log |
+| 17 — Agents & Skills Pages | UI only | Agent list/detail, skills list with enable/disable (uses Phase 5 routes) |
+| 18 — Semantic Browser | Backend | New crate: rune-browser, chromiumoxide/fantoccini, accessibility tree parser |
+| 19 — A2UI Protocol | Backend + UI | Streaming JSONL transport, declarative UI components, React renderers |
+| 20 — Enhanced Existing Pages | UI | Cron upgrades, dashboard status, channel cards, settings sections |
+| 21 — UI Polish | UI | Focus mode, smart scroll, theme transitions, RTL detection |
+
+---
+
+## Dependency Graph
+
+```
+Independent (can parallelize):
+  Phase 1 (Chat UI)
+  Phase 2 (WS RPC)
+  Phase 3 (Channel Adapters)
+  Phase 4 (LaneQueue)
+  Phase 5 (Skills System)
+  Phase 6 (MCP Client)
+  Phase 7 (LLM Providers)
+  Phase 8 (TTS)
+  Phase 9 (STT)
+  Phase 10 (Hybrid Memory)
+  Phase 11 (Device Pairing)
+
+Depends on Phase 5:
+  Phase 17 (Skills Page UI — uses GET /skills routes)
+
+Depends on Phase 8 + 9 + 11:
+  Phase 20 (Enhanced Pages — settings sections for TTS/STT/devices)
+
+Depends on Phase 1:
+  Phase 21 (UI Polish — focus mode, smart scroll, etc.)
+
+Depends on Phase 2:
+  Phase 15 (Log Viewer — uses WS streaming)
+  Phase 16 (Debug Page — uses WS event log)
+```
+
+---
+
+## Final Verification (After All Phases)
+
+```bash
+cd ui && npm run build && cd ..
+cargo build --release --bin rune-gateway
+cargo test --workspace
+cargo clippy --workspace -- -D warnings
+systemctl --user restart rune-gateway
+```
+
+---
+
+## Files Summary
+
+### New Crates
+| Crate | Purpose |
+|-------|---------|
+| `crates/rune-tts/` | Text-to-speech providers (OpenAI, ElevenLabs) |
+| `crates/rune-stt/` | Speech-to-text providers (OpenAI Whisper) |
+| `crates/rune-mcp/` | Model Context Protocol client (STDIO + HTTP) |
+| `crates/rune-browser/` | Semantic browser snapshots via accessibility tree |
+
+### New Backend Files
+| File | Purpose |
+|------|---------|
+| `crates/rune-runtime/src/lane_queue.rs` | Lane-based FIFO concurrency |
+| `crates/rune-runtime/src/skill_loader.rs` | SKILL.md directory scanner + hot-reload |
+| `crates/rune-runtime/src/skill.rs` | Dynamic skill registry |
+| `crates/rune-tools/src/memory_index.rs` | pgvector + tsvector hybrid memory index |
+| `crates/rune-gateway/src/ws_rpc.rs` | WebSocket RPC method dispatcher |
+| `crates/rune-gateway/src/pairing.rs` | Ed25519 device pairing |
+| `crates/rune-gateway/src/a2ui.rs` | A2UI streaming protocol |
+| `crates/rune-models/src/google.rs` | Google Gemini provider |
+| `crates/rune-models/src/ollama.rs` | Ollama provider + discovery |
+| `crates/rune-models/src/bedrock.rs` | AWS Bedrock provider |
+| `crates/rune-models/src/groq.rs` | Groq provider |
+| `crates/rune-models/src/deepseek.rs` | DeepSeek provider |
+| `crates/rune-models/src/mistral.rs` | Mistral provider |
+
+### New UI Files
+| File | Purpose |
+|------|---------|
+| `ui/src/routes/_admin/chat.tsx` | Chat page |
+| `ui/src/routes/_admin/usage.tsx` | Usage analytics |
+| `ui/src/routes/_admin/debug.tsx` | Debug/API tester |
+| `ui/src/routes/_admin/config.tsx` | Config editor |
+| `ui/src/routes/_admin/logs.tsx` | Log viewer |
+| `ui/src/routes/_admin/agents.tsx` | Agents management |
+| `ui/src/routes/_admin/skills.tsx` | Skills/tools management |
+| `ui/src/components/chat/*.tsx` | 10 chat components |
+| `ui/src/components/a2ui/*.tsx` | A2UI renderer components |
+| `ui/src/hooks/use-chat.ts` | Chat hooks |
+| `ui/src/hooks/use-usage.ts` | Usage hooks |
+| `ui/src/hooks/use-models.ts` | Model management hooks |

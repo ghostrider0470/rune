@@ -46,6 +46,9 @@ pub trait SessionRepo: Send + Sync {
         metadata: serde_json::Value,
         updated_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<SessionRow, StoreError>;
+
+    /// Delete a session by ID. Returns true if a row was removed.
+    async fn delete(&self, id: Uuid) -> Result<bool, StoreError>;
 }
 
 // ── Turn repository ───────────────────────────────────────────────────
@@ -90,6 +93,9 @@ pub trait TranscriptRepo: Send + Sync {
     /// List transcript items for a session in sequence order.
     async fn list_by_session(&self, session_id: Uuid)
     -> Result<Vec<TranscriptItemRow>, StoreError>;
+
+    /// Delete all transcript items for a session. Returns the count removed.
+    async fn delete_by_session(&self, session_id: Uuid) -> Result<usize, StoreError>;
 }
 
 // ── Job repository ────────────────────────────────────────────────────

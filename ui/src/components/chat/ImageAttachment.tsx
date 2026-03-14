@@ -64,7 +64,7 @@ export function ImageAttachment({
         variant="ghost"
         size="icon-xs"
         onClick={onRemove}
-        className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100"
+        className="absolute right-1 top-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
         aria-label="Remove attachment"
       >
         <X className="h-3 w-3" />

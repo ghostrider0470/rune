@@ -47,4 +47,22 @@ impl ToolRegistry {
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
+
+    /// Unregister a tool by name. Returns the removed definition if it existed.
+    pub fn unregister(&mut self, name: &str) -> Option<ToolDefinition> {
+        self.tools.remove(name)
+    }
+
+    /// Check whether a tool with the given name is registered.
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
+    /// Register multiple tool definitions at once.
+    pub fn register_many(&mut self, tools: impl IntoIterator<Item = ToolDefinition>) {
+        for tool in tools {
+            self.register(tool);
+        }
+    }
 }

@@ -14,16 +14,18 @@ use tracing::info;
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
 use rune_runtime::{
-    SessionEngine, TurnExecutor,
+    SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
     ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
 };
+use rune_tools::process_tool::ProcessManager;
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
+use crate::pairing::DeviceRegistry;
 use crate::routes;
 use crate::state::{AppState, SessionEvent};
 use crate::supervisor::{BackgroundSupervisor, SupervisorDeps};
@@ -67,6 +69,7 @@ pub struct Services {
     pub reminder_store: Arc<ReminderStore>,
     pub approval_repo: Arc<dyn ApprovalRepo>,
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
+    pub process_manager: ProcessManager,
     pub tool_count: usize,
 }
 
@@ -84,11 +87,25 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     .parse()
     .map_err(|e: std::net::AddrParseError| GatewayError::Internal(e.to_string()))?;
 
+    let config = Arc::new(services.config);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        config.paths.skills_dir.clone(),
+        skill_registry.clone(),
+    ));
+    let _ = skill_loader.scan().await;
+
+    let turn_executor = Arc::new(
+        Arc::try_unwrap(services.turn_executor)
+            .unwrap_or_else(|executor| (*executor).clone())
+            .with_skill_registry(skill_registry.clone()),
+    );
+
     let state = AppState {
-        config: Arc::new(services.config),
+        config,
         started_at: Arc::new(Instant::now()),
         session_engine: services.session_engine,
-        turn_executor: services.turn_executor,
+        turn_executor,
         session_repo: services.session_repo,
         transcript_repo: services.transcript_repo,
         turn_repo: services.turn_repo,
@@ -98,7 +115,11 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         reminder_store: services.reminder_store,
         approval_repo: services.approval_repo,
         tool_approval_repo: services.tool_approval_repo,
+        process_manager: services.process_manager,
         tool_count: services.tool_count,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
@@ -141,17 +162,21 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
 
 /// Build the gateway router. Public for integration testing.
 pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
+    let device_registry = state.device_registry.clone();
+
     let public_routes = Router::new()
         .route("/health", get(routes::health))
         .route("/ws", get(ws::ws_handler))
         .route("/assets/{path}", get(routes::branded_asset))
         .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
+        .route("/devices/pair/request", post(routes::device_pair_request))
+        .route("/devices/pair/approve", post(routes::device_pair_approve))
         .with_state(state.clone());
 
     let protected_routes = Router::new()
         .route("/status", get(routes::status))
-        .route("/dashboard", get(routes::dashboard_page))
-        .route("/ui", get(routes::dashboard_page))
+        .route("/dashboard", get(routes::spa_index))
+        .route("/ui", get(routes::spa_index))
         .route("/api/dashboard/summary", get(routes::dashboard_summary))
         .route("/api/dashboard/models", get(routes::dashboard_models))
         .route("/api/dashboard/sessions", get(routes::dashboard_sessions))
@@ -176,7 +201,12 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             "/sessions",
             get(routes::list_sessions).post(routes::create_session),
         )
-        .route("/sessions/{id}", get(routes::get_session))
+        .route(
+            "/sessions/{id}",
+            get(routes::get_session)
+                .patch(routes::patch_session)
+                .delete(routes::delete_session),
+        )
         .route("/sessions/{id}/status", get(routes::get_session_status))
         .route("/sessions/{id}/messages", post(routes::send_message))
         .route("/sessions/{id}/transcript", get(routes::get_transcript))
@@ -185,12 +215,32 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             get(routes::list_pending_approvals).post(routes::submit_approval_decision),
         )
         .route("/approvals/policies", get(routes::list_approval_policies))
+        .route("/processes", get(routes::list_processes))
+        .route("/processes/{id}", get(routes::get_process))
+        .route("/processes/{id}/log", get(routes::get_process_log))
         .route(
             "/approvals/policies/{tool}",
             get(routes::get_approval_policy)
                 .put(routes::set_approval_policy)
                 .delete(routes::clear_approval_policy),
         )
+        // Device pairing routes
+        .route("/devices/pair/reject", post(routes::device_pair_reject))
+        .route("/devices/pair/pending", get(routes::device_pair_pending))
+        .route("/devices", get(routes::device_list))
+        .route("/devices/{id}", delete(routes::device_revoke))
+        .route(
+            "/devices/{id}/rotate-token",
+            post(routes::device_rotate_token),
+        )
+        // Model routes
+        .route("/models", get(routes::list_models))
+        .route("/models/scan", post(routes::scan_models))
+        // Skill routes
+        .route("/skills", get(routes::list_skills))
+        .route("/skills/reload", post(routes::reload_skills))
+        .route("/skills/{name}/enable", post(routes::enable_skill))
+        .route("/skills/{name}/disable", post(routes::disable_skill))
         // Heartbeat routes
         .route("/heartbeat/status", get(routes::heartbeat_status))
         .route("/heartbeat/enable", post(routes::heartbeat_enable))
@@ -202,9 +252,16 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         )
         .route("/reminders/{id}", delete(routes::reminders_cancel))
         .layer(middleware::from_fn(move |req, next| {
-            bearer_auth(req, next, auth_token.clone())
+            bearer_auth(req, next, auth_token.clone(), device_registry.clone())
         }))
         .with_state(state);
 
-    Router::new().merge(public_routes).merge(protected_routes)
+    let spa_routes = Router::new()
+        .route("/", get(routes::spa_handler))
+        .fallback(routes::spa_handler);
+
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
+        .merge(spa_routes)
 }

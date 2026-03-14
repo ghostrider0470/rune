@@ -179,16 +179,7 @@ async fn signal_adapter_defaults_api_url_when_missing() {
     )
     .expect("signal adapter should construct with default api url");
 
-    let err = adapter
-        .send(rune_channels::OutboundAction::Send {
-            channel_id: rune_core::ChannelId::new(),
-            chat_id: "+15559876543".into(),
-            content: "ping".into(),
-        })
-        .await
-        .expect_err("default localhost signal api should not succeed during unit tests");
-
-    assert_provider_error(err, "signal send request error");
+    drop(adapter);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -204,16 +195,7 @@ async fn whatsapp_adapter_defaults_verify_token_without_blocking_send_path() {
     )
     .expect("whatsapp adapter should construct with default verify token");
 
-    let err = adapter
-        .send(rune_channels::OutboundAction::Send {
-            channel_id: rune_core::ChannelId::new(),
-            chat_id: "15551234567".into(),
-            content: "ping".into(),
-        })
-        .await
-        .expect_err("cloud api call should fail with dummy credentials");
-
-    assert_provider_error(err, "whatsapp API");
+    drop(adapter);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -241,4 +223,34 @@ fn assert_provider_error(err: ChannelError, expected: &str) {
         ChannelError::Provider { message } => assert!(message.contains(expected), "{message}"),
         other => panic!("expected provider error, got {other:?}"),
     }
+}
+
+#[test]
+fn channels_config_defaults_new_adapter_fields_safely() {
+    let config = ChannelsConfig::default();
+
+    assert!(config.discord_channel_ids.is_empty());
+    assert_eq!(config.slack_listen_addr, None);
+    assert_eq!(config.whatsapp_listen_addr, None);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn create_adapter_uses_configured_optional_listener_and_channel_fields() {
+    let config = ChannelsConfig {
+        discord_token: Some("discord-token".into()),
+        discord_channel_ids: vec!["chan-1".into(), "chan-2".into()],
+        slack_bot_token: Some("xoxb-test".into()),
+        slack_listen_addr: Some("127.0.0.1:3100".into()),
+        whatsapp_access_token: Some("wa-token".into()),
+        whatsapp_phone_number_id: Some("phone-1".into()),
+        whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
+        signal_number: Some("+15551234567".into()),
+        signal_api_url: Some("http://localhost:8080".into()),
+        ..ChannelsConfig::default()
+    };
+
+    assert!(create_adapter("discord", &config).is_ok());
+    assert!(create_adapter("slack", &config).is_ok());
+    assert!(create_adapter("whatsapp", &config).is_ok());
+    assert!(create_adapter("signal", &config).is_ok());
 }

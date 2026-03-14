@@ -183,6 +183,10 @@ impl RpcDispatcher {
             .max_by_key(|t| t.started_at)
             .and_then(|t| t.model_ref.clone());
 
+        let latest_turn = turns.iter().max_by_key(|t| t.started_at);
+        let last_turn_started_at = latest_turn.map(|t| t.started_at.to_rfc3339());
+        let last_turn_ended_at = latest_turn.and_then(|t| t.ended_at.map(|dt| dt.to_rfc3339()));
+
         Ok(json!({
             "id": row.id,
             "kind": row.kind,
@@ -195,6 +199,8 @@ impl RpcDispatcher {
             "latest_model": latest_model,
             "usage_prompt_tokens": prompt_tokens,
             "usage_completion_tokens": completion_tokens,
+            "last_turn_started_at": last_turn_started_at,
+            "last_turn_ended_at": last_turn_ended_at,
         }))
     }
 
@@ -384,23 +390,72 @@ impl RpcDispatcher {
         let last_turn_ended_at = latest_turn.and_then(|t| t.ended_at.map(|dt| dt.to_rfc3339()));
 
         let metadata = &row.metadata;
+        let model_override = metadata_str(metadata, "selected_model").map(str::to_string);
+        let current_model = latest_model.clone().or_else(|| model_override.clone());
+        let approval_mode = metadata_str(metadata, "approval_mode").unwrap_or("on-miss");
+        let security_mode = metadata_str(metadata, "security_mode").unwrap_or("allowlist");
+        let reasoning = metadata_str(metadata, "reasoning").unwrap_or("off");
+        let verbose = metadata.get("verbose").and_then(Value::as_bool).unwrap_or(false);
+        let elevated = metadata.get("elevated").and_then(Value::as_bool).unwrap_or(false);
+        let subagent_lifecycle = metadata_str(metadata, "subagent_lifecycle");
+        let subagent_runtime_status = metadata_str(metadata, "subagent_runtime_status");
+        let subagent_runtime_attached = metadata
+            .get("subagent_runtime_attached")
+            .and_then(Value::as_bool);
+        let subagent_status_updated_at = metadata_str(metadata, "subagent_status_updated_at");
+        let subagent_last_note = metadata_str(metadata, "subagent_last_note");
+
+        let mut unresolved = vec![
+            "cost posture is estimate-only; provider pricing is not wired yet".to_string(),
+        ];
+        if approval_mode == "on-miss" {
+            unresolved.push(
+                "approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet".to_string(),
+            );
+        }
+        if security_mode == "allowlist" {
+            unresolved.push(
+                "host/node/sandbox parity and PTY fidelity are not yet parity-complete".to_string(),
+            );
+        }
+        if row.kind == "subagent" {
+            unresolved.push(
+                "subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete".to_string(),
+            );
+        }
 
         Ok(json!({
             "session_id": row.id.to_string(),
+            "runtime": format!(
+                "kind={} | channel={} | status={}",
+                row.kind,
+                row.channel_ref.as_deref().unwrap_or("local"),
+                row.status
+            ),
             "status": row.status,
             "kind": row.kind,
             "channel_ref": row.channel_ref,
-            "current_model": latest_model,
+            "current_model": current_model,
+            "model_override": model_override,
             "turn_count": turn_count,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
+            "estimated_cost": "not available",
             "uptime_seconds": self.state.started_at.elapsed().as_secs(),
             "last_turn_started_at": last_turn_started_at,
             "last_turn_ended_at": last_turn_ended_at,
-            "approval_mode": metadata_str(metadata, "approval_mode").unwrap_or("on-miss"),
-            "security_mode": metadata_str(metadata, "security_mode").unwrap_or("allowlist"),
-            "reasoning": metadata_str(metadata, "reasoning").unwrap_or("off"),
+            "approval_mode": approval_mode,
+            "security_mode": security_mode,
+            "reasoning": reasoning,
+            "verbose": verbose,
+            "elevated": elevated,
+            "subagent_lifecycle": subagent_lifecycle,
+            "subagent_runtime_status": subagent_runtime_status,
+            "subagent_runtime_attached": subagent_runtime_attached,
+            "subagent_status_updated_at": subagent_status_updated_at,
+            "subagent_last_note": subagent_last_note,
+            "unresolved": unresolved,
         }))
     }
 

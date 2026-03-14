@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use once_cell::sync::Lazy;
 
@@ -22,6 +22,20 @@ static EVENT_SEQ: AtomicU64 = AtomicU64::new(1);
 
 /// Global monotonic state version, bumped whenever connection-visible state changes.
 static STATE_VERSION: Lazy<Arc<AtomicU64>> = Lazy::new(|| Arc::new(AtomicU64::new(1)));
+/// Number of active upgraded WebSocket connections.
+static ACTIVE_WS_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+
+fn next_state_version(state_version: &AtomicU64) -> u64 {
+    state_version.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+fn current_state_version(state_version: &AtomicU64) -> u64 {
+    state_version.load(Ordering::Relaxed)
+}
+
+pub fn active_ws_connections() -> usize {
+    ACTIVE_WS_CONNECTIONS.load(Ordering::Relaxed)
+}
 
 // ── Wire frame types ─────────────────────────────────────────────────────────
 
@@ -85,6 +99,7 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> 
 }
 
 /// Per-connection state tracking subscribed sessions.
+#[derive(Default)]
 pub struct ConnState {
     subscribed_sessions: HashSet<String>,
     subscribed_events: HashSet<String>,
@@ -93,17 +108,28 @@ pub struct ConnState {
 
 impl ConnState {
     pub fn new() -> Self {
-        Self {
-            subscribed_sessions: HashSet::new(),
-            subscribed_events: HashSet::new(),
-            subscribe_all: false,
-        }
+        Self::default()
     }
 
     fn subscribes_to(&self, event: &SessionEvent) -> bool {
         self.subscribe_all
             || self.subscribed_sessions.contains(&event.session_id)
             || self.subscribed_events.contains(&event.kind)
+    }
+}
+
+struct ActiveConnectionGuard;
+
+impl ActiveConnectionGuard {
+    fn new() -> Self {
+        ACTIVE_WS_CONNECTIONS.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        ACTIVE_WS_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -115,6 +141,7 @@ async fn handle_socket<D>(
 ) where
     D: RpcDispatch,
 {
+    let _connection_guard = ActiveConnectionGuard::new();
     let mut conn = ConnState::new();
 
     loop {
@@ -140,9 +167,9 @@ async fn handle_socket<D>(
                     Ok(ev) if conn.subscribes_to(&ev) => {
                         let seq = EVENT_SEQ.fetch_add(1, Ordering::Relaxed);
                         let current_state_version = if ev.state_changed {
-                            state_version.fetch_add(1, Ordering::Relaxed) + 1
+                            next_state_version(state_version.as_ref())
                         } else {
-                            state_version.load(Ordering::Relaxed)
+                            current_state_version(state_version.as_ref())
                         };
                         let frame = EventFrame {
                             frame_type: "event",
@@ -168,7 +195,7 @@ async fn handle_socket<D>(
                         warn!(missed = n, "ws client lagged, dropped events");
                         // Send a gap notification so the client can re-sync
                         let seq = EVENT_SEQ.fetch_add(1, Ordering::Relaxed);
-                        let current_state_version = state_version.load(Ordering::Relaxed);
+                        let current_state_version = current_state_version(state_version.as_ref());
                         let frame = EventFrame {
                             frame_type: "event",
                             event: "system.lagged".to_string(),
@@ -207,7 +234,7 @@ where
                 frame_type: "res",
                 id: "unknown".to_string(),
                 ok: false,
-                state_version: state_version.load(Ordering::Relaxed),
+                state_version: current_state_version(state_version.as_ref()),
                 payload: None,
                 error: Some(ResError {
                     code: "parse_error".to_string(),
@@ -242,7 +269,7 @@ where
                                 "bad_request",
                                 "missing subscription target: session_id, event, or all",
                             )),
-                            state_version.load(Ordering::Relaxed),
+                            current_state_version(state_version.as_ref()),
                         ));
                     }
 
@@ -259,7 +286,7 @@ where
                         debug!("ws client subscribed to all events via RPC");
                     }
 
-                    let current_state_version = state_version.fetch_add(1, Ordering::Relaxed) + 1;
+                    let current_state_version = next_state_version(state_version.as_ref());
                     Some(encode_res(
                         &id,
                         true,
@@ -294,7 +321,7 @@ where
                                 "bad_request",
                                 "missing subscription target: session_id, event, or all",
                             )),
-                            state_version.load(Ordering::Relaxed),
+                            current_state_version(state_version.as_ref()),
                         ));
                     }
 
@@ -311,7 +338,7 @@ where
                         debug!("ws client unsubscribed from all events via RPC");
                     }
 
-                    let current_state_version = state_version.fetch_add(1, Ordering::Relaxed) + 1;
+                    let current_state_version = next_state_version(state_version.as_ref());
                     Some(encode_res(
                         &id,
                         true,
@@ -334,14 +361,14 @@ where
                             true,
                             Some(payload),
                             None,
-                            state_version.load(Ordering::Relaxed),
+                            current_state_version(state_version.as_ref()),
                         )),
                         Err(rpc_err) => Some(encode_res(
                             &id,
                             false,
                             None,
                             Some((&rpc_err.code, &rpc_err.message)),
-                            state_version.load(Ordering::Relaxed),
+                            current_state_version(state_version.as_ref()),
                         )),
                     }
                 }
@@ -353,7 +380,7 @@ where
             debug!(session_id = %session_id, "ws client subscribed (legacy)");
             // Legacy clients don't expect a response frame, but we send one for
             // consistency. They can ignore it.
-            let current_state_version = state_version.fetch_add(1, Ordering::Relaxed) + 1;
+            let current_state_version = next_state_version(state_version.as_ref());
             let res = ResFrame {
                 frame_type: "res",
                 id: "legacy".to_string(),
@@ -514,6 +541,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscribe_all_flag_controls_event_delivery_for_any_session() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({"ignored": true}));
+        let state_version = Arc::new(AtomicU64::new(50));
+
+        let subscribe_reply = handle_text_message(
+            r#"{"type":"req","id":"all-on","method":"subscribe","params":{"all":true}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+        let subscribe_decoded: JsonValue = serde_json::from_str(&subscribe_reply).unwrap();
+        assert_eq!(subscribe_decoded["ok"], true);
+        assert_eq!(subscribe_decoded["payload"]["subscribed"]["all"], true);
+        assert!(conn.subscribe_all);
+
+        let unrelated_event = SessionEvent {
+            session_id: "sess-unrelated".to_string(),
+            kind: "turn_completed".to_string(),
+            payload: json!({"ok": true}),
+            state_changed: true,
+        };
+        assert!(conn.subscribes_to(&unrelated_event));
+
+        let unsubscribe_reply = handle_text_message(
+            r#"{"type":"req","id":"all-off","method":"unsubscribe","params":{"all":true}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+        let unsubscribe_decoded: JsonValue = serde_json::from_str(&unsubscribe_reply).unwrap();
+        assert_eq!(unsubscribe_decoded["ok"], true);
+        assert_eq!(unsubscribe_decoded["payload"]["unsubscribed"]["all"], true);
+        assert!(!conn.subscribe_all);
+        assert!(!conn.subscribes_to(&unrelated_event));
+        assert_eq!(state_version.load(Ordering::Relaxed), 52);
+    }
+
+    #[tokio::test]
     async fn unsubscribe_req_updates_connection_state_and_returns_ack() {
         let mut conn = ConnState::new();
         conn.subscribed_sessions.insert("sess-1".to_string());
@@ -584,5 +654,49 @@ mod tests {
         assert_eq!(decoded["error"]["code"], "parse_error");
         assert_eq!(decoded["stateVersion"], 5);
         assert_eq!(state_version.load(Ordering::Relaxed), 5);
+    }
+
+    #[tokio::test]
+    async fn missing_subscription_target_does_not_bump_state_version() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({"ignored": true}));
+        let state_version = Arc::new(AtomicU64::new(77));
+
+        let reply = handle_text_message(
+            r#"{"type":"req","id":"bad-sub","method":"subscribe","params":{}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["ok"], false);
+        assert_eq!(decoded["error"]["code"], "bad_request");
+        assert_eq!(decoded["stateVersion"], 77);
+        assert_eq!(state_version.load(Ordering::Relaxed), 77);
+    }
+
+    #[tokio::test]
+    async fn legacy_subscribe_bumps_state_version_once() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({"ignored": true}));
+        let state_version = Arc::new(AtomicU64::new(13));
+
+        let reply = handle_text_message(
+            r#"{"type":"subscribe","session_id":"legacy-sess"}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["ok"], true);
+        assert_eq!(decoded["stateVersion"], 14);
+        assert_eq!(state_version.load(Ordering::Relaxed), 14);
+        assert!(conn.subscribed_sessions.contains("legacy-sess"));
     }
 }

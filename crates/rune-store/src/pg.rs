@@ -132,6 +132,15 @@ impl SessionRepo for PgSessionRepo {
             .await
             .map_err(|e| not_found_or(e, "session", id))
     }
+
+    async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let affected = diesel::delete(sessions::table.find(id))
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(affected > 0)
+    }
 }
 
 // ── PgTurnRepo ──────────────────────────────────────────────────────
@@ -264,6 +273,17 @@ impl TranscriptRepo for PgTranscriptRepo {
             .load(&mut conn)
             .await
             .map_err(StoreError::from)
+    }
+
+    async fn delete_by_session(&self, session_id: Uuid) -> Result<usize, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let affected = diesel::delete(
+            transcript_items::table.filter(transcript_items::session_id.eq(session_id)),
+        )
+        .execute(&mut conn)
+        .await
+        .map_err(StoreError::from)?;
+        Ok(affected)
     }
 }
 
