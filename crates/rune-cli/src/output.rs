@@ -218,6 +218,11 @@ pub struct SessionStatusCard {
     pub elevated: Option<bool>,
     pub approval_mode: Option<String>,
     pub security_mode: Option<String>,
+    pub subagent_lifecycle: Option<String>,
+    pub subagent_runtime_status: Option<String>,
+    pub subagent_runtime_attached: Option<bool>,
+    pub subagent_status_updated_at: Option<String>,
+    pub subagent_last_note: Option<String>,
     pub unresolved: Vec<String>,
 }
 
@@ -397,6 +402,21 @@ impl fmt::Display for SessionStatusCard {
         }
         if let Some(security_mode) = &self.security_mode {
             writeln!(f, "  Security mode:   {security_mode}")?;
+        }
+        if let Some(subagent_lifecycle) = &self.subagent_lifecycle {
+            writeln!(f, "  Subagent state:  {subagent_lifecycle}")?;
+        }
+        if let Some(subagent_runtime_status) = &self.subagent_runtime_status {
+            writeln!(f, "  Subagent runtime:{:>3}{subagent_runtime_status}", "")?;
+        }
+        if let Some(subagent_runtime_attached) = self.subagent_runtime_attached {
+            writeln!(f, "  Runtime attached:{:>3}{subagent_runtime_attached}", "")?;
+        }
+        if let Some(subagent_status_updated_at) = &self.subagent_status_updated_at {
+            writeln!(f, "  Subagent update: {subagent_status_updated_at}")?;
+        }
+        if let Some(subagent_last_note) = &self.subagent_last_note {
+            writeln!(f, "  Subagent note:   {subagent_last_note}")?;
         }
         if let Some(last_started) = &self.last_turn_started_at {
             writeln!(f, "  Last started:    {last_started}")?;
@@ -1492,6 +1512,11 @@ mod tests {
             elevated: Some(false),
             approval_mode: Some("on-miss".into()),
             security_mode: Some("allowlist".into()),
+            subagent_lifecycle: Some("steered".into()),
+            subagent_runtime_status: Some("not_attached".into()),
+            subagent_runtime_attached: Some(false),
+            subagent_status_updated_at: Some("2026-03-14T02:00:00Z".into()),
+            subagent_last_note: Some("Steering message queued for subagent/session: tighten the tests".into()),
             unresolved: vec!["cost posture is estimate-only".into()],
         };
         let out = render(&status, OutputFormat::Human);
@@ -1499,6 +1524,8 @@ mod tests {
         assert!(out.contains("Model:           gpt-5.4"));
         assert!(out.contains("Tokens:          1200/340 total=1540"));
         assert!(out.contains("Approval mode:   on-miss"));
+        assert!(out.contains("Subagent state:  steered"));
+        assert!(out.contains("Subagent note:   Steering message queued for subagent/session: tighten the tests"));
         assert!(out.contains("- cost posture is estimate-only"));
     }
 
@@ -1523,6 +1550,11 @@ mod tests {
             elevated: Some(false),
             approval_mode: Some("always".into()),
             security_mode: Some("full".into()),
+            subagent_lifecycle: Some("spawned".into()),
+            subagent_runtime_status: Some("not_attached".into()),
+            subagent_runtime_attached: Some(false),
+            subagent_status_updated_at: None,
+            subagent_last_note: None,
             unresolved: vec![],
         };
         let out = render(&status, OutputFormat::Json);
@@ -1531,6 +1563,8 @@ mod tests {
         assert_eq!(v["model_override"], "o3-mini");
         assert_eq!(v["total_tokens"], 15);
         assert_eq!(v["approval_mode"], "always");
+        assert_eq!(v["subagent_lifecycle"], "spawned");
+        assert_eq!(v["subagent_runtime_status"], "not_attached");
     }
 
     #[test]

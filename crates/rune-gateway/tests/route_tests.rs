@@ -985,6 +985,104 @@ async fn get_session_status_returns_parity_card_fields() {
 }
 
 #[tokio::test]
+async fn get_session_status_surfaces_subagent_metadata() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+
+    let session_id = Uuid::now_v7();
+    let now = chrono::Utc::now();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: Some(Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap()),
+            metadata: serde_json::json!({
+                "selected_model": "gpt-5.4",
+                "subagent_lifecycle": "steered",
+                "subagent_runtime_status": "not_attached",
+                "subagent_runtime_attached": false,
+                "subagent_status_updated_at": "2026-03-14T12:00:00Z",
+                "subagent_last_note": "Steering message queued for subagent/session: tighten the tests"
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_count: 0,
+        event_tx,
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["session_id"], session_id.to_string());
+    assert_eq!(json["status"], "running");
+    assert_eq!(json["current_model"], "gpt-5.4");
+    assert_eq!(json["subagent_lifecycle"], "steered");
+    assert_eq!(json["subagent_runtime_status"], "not_attached");
+    assert_eq!(json["subagent_runtime_attached"], false);
+    assert_eq!(
+        json["subagent_last_note"],
+        "Steering message queued for subagent/session: tighten the tests"
+    );
+    let unresolved = json["unresolved"].as_array().unwrap();
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete")));
+}
+
+#[tokio::test]
 async fn get_session_returns_aggregate_usage_and_turn_metadata() {
     let app = build_test_app(None);
 

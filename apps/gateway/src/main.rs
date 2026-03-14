@@ -889,6 +889,11 @@ fn render_session_status_card(
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
     let verbose = metadata_bool(metadata, "verbose").unwrap_or(false);
     let elevated = metadata_bool(metadata, "elevated").unwrap_or(false);
+    let subagent_lifecycle = metadata_string(metadata, "subagent_lifecycle");
+    let subagent_runtime_status = metadata_string(metadata, "subagent_runtime_status");
+    let subagent_runtime_attached = metadata_bool(metadata, "subagent_runtime_attached");
+    let subagent_status_updated_at = metadata_string(metadata, "subagent_status_updated_at");
+    let subagent_last_note = metadata_string(metadata, "subagent_last_note");
 
     let mut unresolved =
         vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
@@ -900,6 +905,11 @@ fn render_session_status_card(
     if security_mode == "allowlist" {
         unresolved.push(
             "host/node/sandbox parity and PTY fidelity are not yet parity-complete".to_string(),
+        );
+    }
+    if row.kind == "subagent" {
+        unresolved.push(
+            "subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete".to_string(),
         );
     }
 
@@ -927,6 +937,11 @@ fn render_session_status_card(
         "elevated": elevated,
         "approval_mode": approval_mode,
         "security_mode": security_mode,
+        "subagent_lifecycle": subagent_lifecycle,
+        "subagent_runtime_status": subagent_runtime_status,
+        "subagent_runtime_attached": subagent_runtime_attached,
+        "subagent_status_updated_at": subagent_status_updated_at,
+        "subagent_last_note": subagent_last_note,
         "unresolved": unresolved,
     })
 }
@@ -1221,19 +1236,39 @@ impl SessionSpawner for LiveSessionSpawner {
             .or(label)
             .ok_or_else(|| "missing target session".to_string())?;
         let session_id = Uuid::parse_str(target).map_err(|e| e.to_string())?;
+        let note = format!("Steering message queued for subagent/session: {message}");
 
         self.append_status_note(
             session_id,
             rune_core::SessionStatus::WaitingForSubagent,
-            format!("Steering message queued for subagent/session: {message}"),
+            note.clone(),
         )
         .await?;
+
+        if let Ok(row) = self.session_repo.find_by_id(session_id).await {
+            let mut metadata = row.metadata;
+            set_metadata_string(&mut metadata, "subagent_lifecycle", "steered");
+            set_metadata_string(&mut metadata, "subagent_runtime_status", "not_attached");
+            set_metadata_bool(&mut metadata, "subagent_runtime_attached", false);
+            set_metadata_string(
+                &mut metadata,
+                "subagent_status_updated_at",
+                chrono::Utc::now().to_rfc3339(),
+            );
+            set_metadata_string(&mut metadata, "subagent_last_note", note.clone());
+            self.session_repo
+                .update_metadata(session_id, metadata, chrono::Utc::now())
+                .await
+                .map_err(|e| e.to_string())?;
+        }
 
         serde_json::to_string(&json!({
             "delivered": true,
             "sessionId": session_id,
             "message": message,
-            "note": "Message persisted into transcript as a steering/status note."
+            "note": "Message persisted into transcript as a steering/status note.",
+            "subagentLifecycle": "steered",
+            "subagentRuntimeStatus": "not_attached"
         }))
         .map_err(|e| e.to_string())
     }
@@ -1766,6 +1801,45 @@ mod tests {
             Some("Subagent steering message: keep going")
         );
 
+        let send_response: Value = serde_json::from_str(
+            &spawner
+                .send_message(Some(&session_id), None, "tighten the tests")
+                .await
+                .expect("send_message works"),
+        )
+        .expect("valid send JSON");
+        assert_eq!(
+            send_response
+                .get("subagentLifecycle")
+                .and_then(Value::as_str),
+            Some("steered")
+        );
+        assert_eq!(
+            send_response
+                .get("subagentRuntimeStatus")
+                .and_then(Value::as_str),
+            Some("not_attached")
+        );
+
+        let sent_row = session_repo
+            .find_by_id(Uuid::parse_str(&session_id).expect("session uuid"))
+            .await
+            .expect("session row exists after sessions_send");
+        assert_eq!(
+            sent_row
+                .metadata
+                .get("subagent_lifecycle")
+                .and_then(Value::as_str),
+            Some("steered")
+        );
+        assert_eq!(
+            sent_row
+                .metadata
+                .get("subagent_last_note")
+                .and_then(Value::as_str),
+            Some("Steering message queued for subagent/session: tighten the tests")
+        );
+
         let killed: Value =
             serde_json::from_str(&manager.kill(&session_id).await.expect("kill works"))
                 .expect("valid kill JSON");
@@ -1797,7 +1871,7 @@ mod tests {
             .list_by_session(Uuid::parse_str(&session_id).expect("session uuid"))
             .await
             .expect("transcript exists");
-        assert_eq!(transcript.len(), 3);
+        assert_eq!(transcript.len(), 4);
     }
 }
 

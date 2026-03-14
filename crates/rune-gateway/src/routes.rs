@@ -848,6 +848,16 @@ pub struct SessionStatusResponse {
     pub elevated: bool,
     pub approval_mode: String,
     pub security_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_lifecycle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_runtime_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_runtime_attached: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_status_updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_last_note: Option<String>,
     pub unresolved: Vec<String>,
 }
 
@@ -917,6 +927,11 @@ pub async fn get_session_status(
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
     let verbose = metadata_bool(metadata, "verbose").unwrap_or(false);
     let elevated = metadata_bool(metadata, "elevated").unwrap_or(false);
+    let subagent_lifecycle = metadata_string(metadata, "subagent_lifecycle");
+    let subagent_runtime_status = metadata_string(metadata, "subagent_runtime_status");
+    let subagent_runtime_attached = metadata_bool(metadata, "subagent_runtime_attached");
+    let subagent_status_updated_at = metadata_string(metadata, "subagent_status_updated_at");
+    let subagent_last_note = metadata_string(metadata, "subagent_last_note");
 
     let mut unresolved = Vec::new();
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
@@ -928,6 +943,11 @@ pub async fn get_session_status(
     if security_mode == "allowlist" {
         unresolved.push(
             "host/node/sandbox parity and PTY fidelity are not yet parity-complete".to_string(),
+        );
+    }
+    if row.kind == "subagent" {
+        unresolved.push(
+            "subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete".to_string(),
         );
     }
 
@@ -955,6 +975,11 @@ pub async fn get_session_status(
         elevated,
         approval_mode,
         security_mode,
+        subagent_lifecycle,
+        subagent_runtime_status,
+        subagent_runtime_attached,
+        subagent_status_updated_at,
+        subagent_last_note,
         unresolved,
     }))
 }
