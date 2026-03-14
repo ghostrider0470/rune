@@ -307,6 +307,63 @@ fn selects_google_provider() {
 }
 
 #[test]
+fn selects_azure_foundry_provider_via_primary_kind() {
+    unsafe { std::env::set_var("TEST_FOUNDRY_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "foundry".into(),
+        kind: "azure-foundry".into(),
+        base_url: "https://foundry.services.ai.azure.com".into(),
+        deployment_name: None,
+        api_version: Some("2024-05-01-preview".into()),
+        api_key_env: Some("TEST_FOUNDRY_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_FOUNDRY_KEY_SEL") };
+}
+
+#[test]
+fn selects_azure_foundry_provider_via_alias_kind() {
+    unsafe { std::env::set_var("TEST_FOUNDRY_ALIAS_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "azure-ai".into(),
+        kind: "azure-ai".into(),
+        base_url: "https://foundry.services.ai.azure.com".into(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_FOUNDRY_ALIAS_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_FOUNDRY_ALIAS_KEY_SEL") };
+}
+
+#[test]
+fn selects_anthropic_provider_via_azure_alias_kind() {
+    unsafe { std::env::set_var("TEST_ANTHROPIC_AZURE_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "anthropic-azure".into(),
+        kind: "anthropic_azure".into(),
+        base_url: "https://my-anthropic.services.ai.azure.com".into(),
+        deployment_name: None,
+        api_version: Some("2023-06-01".into()),
+        api_key_env: Some("TEST_ANTHROPIC_AZURE_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_ANTHROPIC_AZURE_KEY_SEL") };
+}
+
+#[test]
 fn selects_ollama_provider_without_api_key() {
     let cfg = ModelProviderConfig {
         name: "ollama".into(),
@@ -423,6 +480,117 @@ fn selects_bedrock_provider_with_env_credentials_pair() {
 }
 
 #[test]
+fn selects_bedrock_provider_via_aws_bedrock_alias() {
+    let cfg = ModelProviderConfig {
+        name: "bedrock".into(),
+        kind: "aws-bedrock".into(),
+        base_url: String::new(),
+        deployment_name: Some("eu-west-1".into()),
+        api_version: None,
+        api_key_env: None,
+        api_key: Some("AKIA_ALIAS:SECRET_ALIAS".into()),
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+}
+
+#[test]
+fn selects_bedrock_provider_with_standard_aws_env_vars() {
+    unsafe {
+        std::env::remove_var("TEST_BEDROCK_STD_ENV");
+        std::env::set_var("AWS_ACCESS_KEY_ID", "ENV_AWS_ACCESS");
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", "ENV_AWS_SECRET");
+        std::env::set_var("AWS_REGION", "ap-southeast-2");
+    }
+    let cfg = ModelProviderConfig {
+        name: "bedrock".into(),
+        kind: "bedrock".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_BEDROCK_STD_ENV".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let debug = format!("{provider:?}");
+    assert!(debug.contains("BedrockProvider"));
+    let concrete = rune_models::BedrockProvider::new("", "ENV_AWS_ACCESS", "ENV_AWS_SECRET", None);
+    assert_eq!(concrete.region(), "ap-southeast-2");
+    unsafe {
+        std::env::remove_var("AWS_ACCESS_KEY_ID");
+        std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+        std::env::remove_var("AWS_REGION");
+    }
+}
+
+#[test]
+fn selects_bedrock_provider_with_aws_default_region_fallback() {
+    unsafe {
+        std::env::remove_var("TEST_BEDROCK_DEFAULT_REGION_ENV");
+        std::env::remove_var("AWS_REGION");
+        std::env::set_var("AWS_ACCESS_KEY_ID", "ENV_AWS_ACCESS_DEFAULT");
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", "ENV_AWS_SECRET_DEFAULT");
+        std::env::set_var("AWS_DEFAULT_REGION", "eu-central-1");
+    }
+    let cfg = ModelProviderConfig {
+        name: "bedrock".into(),
+        kind: "bedrock".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_BEDROCK_DEFAULT_REGION_ENV".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let debug = format!("{provider:?}");
+    assert!(debug.contains("BedrockProvider"));
+    let concrete = rune_models::BedrockProvider::new("", "ENV_AWS_ACCESS_DEFAULT", "ENV_AWS_SECRET_DEFAULT", None);
+    assert_eq!(concrete.region(), "eu-central-1");
+    unsafe {
+        std::env::remove_var("AWS_ACCESS_KEY_ID");
+        std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+        std::env::remove_var("AWS_DEFAULT_REGION");
+    }
+}
+
+#[test]
+fn selects_bedrock_provider_with_default_region_when_no_region_is_configured() {
+    unsafe {
+        std::env::remove_var("TEST_BEDROCK_DEFAULT_REGION_NONE");
+        std::env::remove_var("AWS_REGION");
+        std::env::remove_var("AWS_DEFAULT_REGION");
+        std::env::set_var("AWS_ACCESS_KEY_ID", "ENV_AWS_ACCESS_FALLBACK");
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", "ENV_AWS_SECRET_FALLBACK");
+    }
+    let cfg = ModelProviderConfig {
+        name: "bedrock".into(),
+        kind: "bedrock".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_BEDROCK_DEFAULT_REGION_NONE".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let debug = format!("{provider:?}");
+    assert!(debug.contains("BedrockProvider"));
+    let concrete = rune_models::BedrockProvider::new("", "ENV_AWS_ACCESS_FALLBACK", "ENV_AWS_SECRET_FALLBACK", None);
+    assert_eq!(concrete.region(), "us-east-1");
+    unsafe {
+        std::env::remove_var("AWS_ACCESS_KEY_ID");
+        std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+    }
+}
+
+#[test]
 fn falls_back_to_openai_for_unknown_provider_kind() {
     unsafe { std::env::set_var("TEST_FALLBACK_OAI_KEY", "fallback-key") };
     let cfg = ModelProviderConfig {
@@ -437,8 +605,50 @@ fn falls_back_to_openai_for_unknown_provider_kind() {
         models: vec![],
     };
     let provider = provider_from_config(&cfg).unwrap();
-    let _: Box<dyn ModelProvider> = provider;
+    let debug = format!("{provider:?}");
+    assert!(debug.contains("OpenAiProvider"));
+    assert!(debug.contains("https://api.example.com/v1"));
     unsafe { std::env::remove_var("TEST_FALLBACK_OAI_KEY") };
+}
+
+#[test]
+fn empty_kind_uses_provider_name_for_google_selection() {
+    unsafe { std::env::set_var("TEST_EMPTY_KIND_GOOGLE", "google-key") };
+    let cfg = ModelProviderConfig {
+        name: "google".into(),
+        kind: String::new(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_EMPTY_KIND_GOOGLE".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let debug = format!("{provider:?}");
+    assert!(debug.contains("GoogleProvider"));
+    unsafe { std::env::remove_var("TEST_EMPTY_KIND_GOOGLE") };
+}
+
+#[test]
+fn missing_api_key_uses_openai_api_key_env_by_default() {
+    let cfg = ModelProviderConfig {
+        name: "openai".into(),
+        kind: "openai".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let err = provider_from_config(&cfg).unwrap_err();
+    match err {
+        ModelError::Auth(message) => assert!(message.contains("OPENAI_API_KEY"), "{message}"),
+        other => panic!("expected auth error, got {other:?}"),
+    }
 }
 
 #[test]

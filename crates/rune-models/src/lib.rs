@@ -156,10 +156,7 @@ pub fn provider_from_config(
         }
         "bedrock" | "aws-bedrock" | "aws_bedrock" => {
             let (access_key_id, secret_access_key) = resolve_aws_credentials(cfg)?;
-            let region = cfg
-                .deployment_name
-                .as_deref()
-                .unwrap_or_default();
+            let region = cfg.deployment_name.as_deref().unwrap_or_default();
             let endpoint_override = if cfg.base_url.is_empty() {
                 None
             } else {
@@ -263,9 +260,7 @@ fn resolve_api_key(cfg: &ModelProviderConfig) -> Result<String, ModelError> {
 ///
 /// Checks the `api_key` field (format: `ACCESS_KEY_ID:SECRET_ACCESS_KEY`),
 /// then falls back to `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` env vars.
-fn resolve_aws_credentials(
-    cfg: &ModelProviderConfig,
-) -> Result<(String, String), ModelError> {
+fn resolve_aws_credentials(cfg: &ModelProviderConfig) -> Result<(String, String), ModelError> {
     // Check direct api_key with colon-separated format
     if let Some(ref key) = cfg.api_key {
         if !key.is_empty() {
@@ -309,4 +304,101 @@ fn resolve_aws_credentials(
 
 fn map_resolution_error(error: ModelResolutionError) -> ModelError {
     ModelError::Configuration(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider_cfg(name: &str, kind: &str) -> ModelProviderConfig {
+        ModelProviderConfig {
+            name: name.to_string(),
+            kind: kind.to_string(),
+            base_url: String::new(),
+            api_key: Some("test-key".to_string()),
+            deployment_name: None,
+            api_version: None,
+            api_key_env: None,
+            model_alias: None,
+            models: vec![],
+        }
+    }
+
+    #[test]
+    fn provider_aliases_construct_expected_implementations() {
+        let google = provider_from_config(&provider_cfg("google", "gemini"))
+            .expect("gemini alias should construct google provider");
+        assert!(format!("{google:?}").contains("GoogleProvider"));
+
+        let ollama = provider_from_config(&provider_cfg("ollama", "ollama"))
+            .expect("ollama kind should construct ollama provider");
+        assert!(format!("{ollama:?}").contains("OllamaProvider"));
+
+        let groq = provider_from_config(&provider_cfg("groq", "groq"))
+            .expect("groq kind should construct groq provider");
+        assert!(format!("{groq:?}").contains("GroqProvider"));
+
+        let deepseek = provider_from_config(&provider_cfg("deepseek", "deepseek"))
+            .expect("deepseek kind should construct deepseek provider");
+        assert!(format!("{deepseek:?}").contains("DeepSeekProvider"));
+
+        let mistral = provider_from_config(&provider_cfg("mistral", "mistral"))
+            .expect("mistral kind should construct mistral provider");
+        assert!(format!("{mistral:?}").contains("MistralProvider"));
+    }
+
+    #[test]
+    fn unknown_provider_kind_falls_back_to_openai_compatible_provider() {
+        let provider = provider_from_config(&provider_cfg("compat", "compat-openai"))
+            .expect("unknown provider kinds should fall back to openai-compatible provider");
+        assert!(format!("{provider:?}").contains("OpenAiProvider"));
+    }
+
+    #[test]
+    fn empty_kind_falls_back_to_provider_name() {
+        let mut cfg = provider_cfg("gemini", "");
+        cfg.api_key = Some("google-test-key".to_string());
+
+        let provider = provider_from_config(&cfg)
+            .expect("empty kind should fall back to provider name for routing");
+        assert!(format!("{provider:?}").contains("GoogleProvider"));
+    }
+
+    #[test]
+    fn bedrock_uses_env_credentials_and_region_fallbacks() {
+        let mut cfg = provider_cfg("bedrock", "bedrock");
+        cfg.api_key = None;
+        cfg.api_key_env = Some("RUNE_TEST_BEDROCK_CREDS".to_string());
+        cfg.deployment_name = None;
+
+        unsafe {
+            std::env::set_var("RUNE_TEST_BEDROCK_CREDS", "AKIDEXAMPLE:SECRETEXAMPLE");
+            std::env::set_var("AWS_REGION", "eu-central-1");
+        }
+
+        let provider = provider_from_config(&cfg)
+            .expect("bedrock provider should resolve credentials from configured env var");
+        let debug = format!("{provider:?}");
+        assert!(debug.contains("BedrockProvider"));
+
+        unsafe {
+            std::env::remove_var("RUNE_TEST_BEDROCK_CREDS");
+            std::env::remove_var("AWS_REGION");
+        }
+    }
+
+    #[test]
+    fn missing_api_key_reports_configured_env_var_name() {
+        let mut cfg = provider_cfg("google", "google");
+        cfg.api_key = None;
+        cfg.api_key_env = Some("RUNE_TEST_MISSING_KEY".to_string());
+
+        unsafe {
+            std::env::remove_var("RUNE_TEST_MISSING_KEY");
+        }
+
+        let err = provider_from_config(&cfg).expect_err("missing api key should error");
+        assert!(err.to_string().contains("RUNE_TEST_MISSING_KEY"));
+        assert!(err.to_string().contains("google"));
+    }
 }
