@@ -7,24 +7,34 @@ import { Separator } from "@/components/ui/separator";
 import {
   Plus,
   Search,
-  MessageSquare,
   Cpu,
   Hash,
   CircleDot,
   Sparkles,
   ChevronRight,
+  Wrench,
+  Clock3,
+  Copy,
+  PanelRightClose,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CopyMarkdown } from "./CopyMarkdown";
+import { buildToolInspectorData } from "./tool-inspector";
 import type { ChatSessionListItem } from "@/hooks/use-chat";
+import type { TranscriptEntry } from "@/lib/api-types";
 
 interface ChatSidebarProps {
-  sessions: ChatSessionListItem[] | undefined;
-  isLoading: boolean;
-  activeSessionId: string | undefined;
-  onSelectSession: (id: string) => void;
-  onCreateSession: () => void;
+  sessions?: ChatSessionListItem[];
+  isLoading?: boolean;
+  activeSessionId?: string;
+  onSelectSession?: (id: string) => void;
+  onCreateSession?: () => void;
   isCreating?: boolean;
   className?: string;
+  mode?: "sessions" | "inspector";
+  selectedToolEntry?: TranscriptEntry | null;
+  selectedToolPair?: TranscriptEntry | null;
+  onCloseInspector?: () => void;
 }
 
 function statusBadgeVariant(
@@ -57,14 +67,165 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
+function ToolInspectorPanel({
+  selectedToolEntry,
+  selectedToolPair,
+  onCloseInspector,
+}: Pick<
+  ChatSidebarProps,
+  "selectedToolEntry" | "selectedToolPair" | "onCloseInspector"
+>) {
+  if (!selectedToolEntry) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+        <div className="rounded-2xl border border-dashed border-border/70 bg-background/70 p-4 text-muted-foreground">
+          <Wrench className="h-8 w-8" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-foreground">No tool output selected</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Click any tool card in the transcript to pin its arguments and result here.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const details = buildToolInspectorData(selectedToolEntry, selectedToolPair ?? undefined);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="border-b border-border/70 bg-gradient-to-br from-background via-background to-primary/5 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <Badge variant="outline" className="border-primary/25 bg-primary/10 text-primary">
+              <PanelRightClose className="mr-1 h-3 w-3" />
+              Inspector
+            </Badge>
+            <h2 className="mt-3 text-sm font-semibold font-mono">{details.toolName}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Full request + result payload without expanding cards inline.
+            </p>
+          </div>
+          {onCloseInspector ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onCloseInspector}
+              aria-label="Close inspector"
+              className="rounded-xl"
+            >
+              <PanelRightClose className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Call id</p>
+            <p className="mt-1 truncate font-mono text-[11px]">
+              {details.callId ?? "Unavailable"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Duration</p>
+            <p className="mt-1 text-[11px] font-medium">
+              {details.durationMs !== null ? `${details.durationMs} ms` : "Unavailable"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        <section className="space-y-2 rounded-2xl border border-border/70 bg-background/75 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+              <Clock3 className="h-3.5 w-3.5" />
+              Selected event
+            </div>
+            <CopyMarkdown content={JSON.stringify(selectedToolEntry.payload, null, 2)} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {new Date(selectedToolEntry.created_at).toLocaleString()}
+          </p>
+          <pre className="overflow-x-auto rounded-xl bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+            {JSON.stringify(selectedToolEntry.payload, null, 2)}
+          </pre>
+        </section>
+
+        {details.args && (
+          <section className="space-y-2 rounded-2xl border border-border/70 bg-background/75 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                <Hash className="h-3.5 w-3.5" />
+                Tool arguments
+              </div>
+              <CopyMarkdown content={details.args} />
+            </div>
+            <pre className="overflow-x-auto rounded-xl bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+              {details.args}
+            </pre>
+          </section>
+        )}
+
+        {selectedToolPair && (
+          <section className="space-y-2 rounded-2xl border border-border/70 bg-background/75 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                <Copy className="h-3.5 w-3.5" />
+                Paired event
+              </div>
+              <CopyMarkdown content={JSON.stringify(selectedToolPair.payload, null, 2)} />
+            </div>
+            <pre className="overflow-x-auto rounded-xl bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+              {JSON.stringify(selectedToolPair.payload, null, 2)}
+            </pre>
+          </section>
+        )}
+
+        {details.result && (
+          <section className="space-y-2 rounded-2xl border border-border/70 bg-background/75 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                <Cpu className="h-3.5 w-3.5" />
+                Result
+              </div>
+              <CopyMarkdown content={details.result} />
+            </div>
+            <pre className="max-h-[22rem] overflow-auto rounded-xl bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+              {details.result}
+            </pre>
+          </section>
+        )}
+
+        {details.error && (
+          <section className="space-y-2 rounded-2xl border border-red-500/25 bg-red-500/5 p-3">
+            <div className="flex items-center justify-between gap-2 text-xs font-medium uppercase tracking-[0.16em] text-red-600 dark:text-red-400">
+              <span>Tool error</span>
+              <CopyMarkdown content={details.error} />
+            </div>
+            <pre className="max-h-[16rem] overflow-auto rounded-xl bg-red-500/10 p-3 font-mono text-xs leading-relaxed text-red-700 dark:text-red-300">
+              {details.error}
+            </pre>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ChatSidebar({
   sessions,
-  isLoading,
+  isLoading = false,
   activeSessionId,
   onSelectSession,
   onCreateSession,
   isCreating,
   className,
+  mode = "sessions",
+  selectedToolEntry,
+  selectedToolPair,
+  onCloseInspector,
 }: ChatSidebarProps) {
   const [search, setSearch] = useState("");
 
@@ -90,6 +251,23 @@ export function ChatSidebar({
       withModels: all.filter((session) => Boolean(session.latest_model)).length,
     };
   }, [sessions]);
+
+  if (mode === "inspector") {
+    return (
+      <div
+        className={cn(
+          "flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-border/70 bg-card/80 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur",
+          className,
+        )}
+      >
+        <ToolInspectorPanel
+          selectedToolEntry={selectedToolEntry}
+          selectedToolPair={selectedToolPair}
+          onCloseInspector={onCloseInspector}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -168,14 +346,14 @@ export function ChatSidebar({
         ) : (
           <div className="space-y-2 pt-2">
             {filtered.map((session) => {
-              const isActive = session.id === activeSessionId;
+              const isSessionActive = session.id === activeSessionId;
               return (
                 <button
                   key={session.id}
-                  onClick={() => onSelectSession(session.id)}
+                  onClick={() => onSelectSession?.(session.id)}
                   className={cn(
                     "group flex w-full flex-col gap-2 rounded-2xl border px-3 py-3 text-left transition-all",
-                    isActive
+                    isSessionActive
                       ? "border-primary/40 bg-primary/10 text-foreground shadow-[0_12px_30px_rgba(249,115,22,0.12)]"
                       : "border-border/70 bg-background/70 hover:border-primary/25 hover:bg-primary/5",
                   )}
@@ -193,9 +371,7 @@ export function ChatSidebar({
                                 : "text-muted-foreground",
                           )}
                         />
-                        <code className="block truncate text-xs font-medium">
-                          {session.id}
-                        </code>
+                        <code className="block truncate text-xs font-medium">{session.id}</code>
                       </div>
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {formatRelativeTime(
@@ -216,26 +392,22 @@ export function ChatSidebar({
                       <ChevronRight
                         className={cn(
                           "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                          isActive ? "translate-x-0.5 text-primary" : "group-hover:translate-x-0.5",
+                          isSessionActive ? "translate-x-0.5 text-primary" : "group-hover:translate-x-0.5",
                         )}
                       />
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                     {session.channel && (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-1">
-                        <Hash className="h-2.5 w-2.5" />
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 px-2 py-1">
+                        <Hash className="h-3 w-3" />
                         {session.channel}
                       </span>
                     )}
-                    <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-1">
-                      <MessageSquare className="h-2.5 w-2.5" />
-                      {session.turn_count} turns
-                    </span>
                     {session.latest_model && (
-                      <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2 py-1">
-                        <Cpu className="h-2.5 w-2.5 shrink-0" />
+                      <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-background/80 px-2 py-1">
+                        <Cpu className="h-3 w-3" />
                         <span className="truncate">{session.latest_model}</span>
                       </span>
                     )}

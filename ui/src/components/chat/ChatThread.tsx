@@ -18,6 +18,8 @@ interface ChatThreadProps {
   entries: TranscriptEntry[];
   isLoading?: boolean;
   className?: string;
+  onInspectTool?: (entry: TranscriptEntry, pairedEntry?: TranscriptEntry) => void;
+  selectedToolEntryId?: string | null;
 }
 
 const TOOL_KINDS = new Set(["tool_request", "tool_use", "tool_result"]);
@@ -191,7 +193,13 @@ function getLaneMeta(entry: TranscriptEntry) {
 
 const SCROLL_THRESHOLD = 80;
 
-export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
+export function ChatThread({
+  entries,
+  isLoading,
+  className,
+  onInspectTool,
+  selectedToolEntryId,
+}: ChatThreadProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -201,8 +209,7 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
   const checkScrollPosition = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    const atBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
     setIsAtBottom(atBottom);
     if (atBottom) setHasNewMessages(false);
   }, []);
@@ -233,15 +240,9 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
     return (
       <div className={cn("space-y-4 p-4", className)}>
         {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}
-          >
+          <div key={i} className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}>
             <Skeleton
-              className={cn(
-                "rounded-3xl",
-                i % 2 === 0 ? "h-24 w-3/4" : "h-14 w-1/2",
-              )}
+              className={cn("rounded-3xl", i % 2 === 0 ? "h-24 w-3/4" : "h-14 w-1/2")}
             />
           </div>
         ))}
@@ -293,9 +294,7 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
                 <div
                   className={cn(
                     "flex px-1",
-                    normalizeTranscriptKind(entry.kind) === "user"
-                      ? "justify-end"
-                      : "justify-start",
+                    normalizeTranscriptKind(entry.kind) === "user" ? "justify-end" : "justify-start",
                   )}
                 >
                   <Badge
@@ -322,19 +321,24 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
                   {lane.label}
                 </Badge>
                 <div className="flex flex-col gap-1">
-                  {group.entries.map((entry, ei) => (
-                    <ToolCard
-                      key={entry.id}
-                      entry={entry}
-                      pairedEntry={
-                        ei === 0 && group.entries.length > 1
-                          ? group.entries[1]
-                          : ei > 0
-                            ? group.entries[0]
-                            : undefined
-                      }
-                    />
-                  ))}
+                  {group.entries.map((entry, ei) => {
+                    const pairedEntry =
+                      ei === 0 && group.entries.length > 1
+                        ? group.entries[1]
+                        : ei > 0
+                          ? group.entries[0]
+                          : undefined;
+
+                    return (
+                      <ToolCard
+                        key={entry.id}
+                        entry={entry}
+                        pairedEntry={pairedEntry}
+                        onInspect={onInspectTool}
+                        isSelected={selectedToolEntryId === entry.id}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             );

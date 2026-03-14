@@ -15,6 +15,7 @@ import type {
   SendMessageRequest,
   SessionEvent,
   SessionListItem,
+  PendingAttachment,
 } from "@/lib/api-types";
 
 export interface ChatSessionListItem extends SessionListItem {
@@ -63,10 +64,21 @@ export function useChatSend(sessionId: string | undefined) {
         throw new Error("Select a session before sending a message.");
       }
 
-      return api.post<MessageResponse>(
-        `/sessions/${sessionId}/messages`,
-        data,
-      );
+      const attachmentBlock = data.attachments?.length
+        ? [
+            "", 
+            "Attached images (metadata only until binary upload is wired):",
+            ...data.attachments.map(
+              (file) =>
+                `- ${file.name} (${file.type || "image"}, ${file.size} bytes)`,
+            ),
+          ].join("\n")
+        : "";
+
+      return api.post<MessageResponse>(`/sessions/${sessionId}/messages`, {
+        content: `${data.content}${attachmentBlock}`.trim(),
+        model: data.model,
+      });
     },
     onMutate: async (variables) => {
       if (!sessionId) return;
@@ -81,12 +93,23 @@ export function useChatSend(sessionId: string | undefined) {
         "transcript",
       ]);
 
+      const attachmentRefs: PendingAttachment[] | undefined = variables.attachments?.map(
+        (file) => ({
+          name: file.name,
+          mime_type: file.type || undefined,
+          size_bytes: file.size,
+        }),
+      );
+
       const optimisticEntry: TranscriptEntry = {
         id: `optimistic-${Date.now()}`,
         turn_id: null,
         seq: (previousTranscript?.length ?? 0) + 1,
         kind: "user",
-        payload: variables.content,
+        payload: {
+          content: variables.content,
+          attachments: attachmentRefs,
+        },
         created_at: new Date().toISOString(),
       };
 

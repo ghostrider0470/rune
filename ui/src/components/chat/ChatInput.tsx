@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { ImageAttachment } from "./ImageAttachment";
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, attachments?: File[]) => void;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
@@ -44,13 +44,7 @@ export function ChatInput({
     const trimmed = value.trim();
     if ((!trimmed && !attachment) || disabled) return;
 
-    const composedMessage = attachment
-      ? [trimmed, `[image attachment: ${attachment.name} · ${attachment.type || "image"} · ${attachment.size} bytes]`]
-          .filter(Boolean)
-          .join("\n\n")
-      : trimmed;
-
-    onSend(composedMessage);
+    onSend(trimmed, attachment ? [attachment] : undefined);
     setValue("");
     setAttachment(null);
     requestAnimationFrame(() => {
@@ -136,6 +130,11 @@ export function ChatInput({
                 <CornerDownLeft className="h-3 w-3" />
                 Enter sends · Shift + Enter newline
               </span>
+              {attachment && (
+                <span className="w-full text-[10px] text-amber-600 dark:text-amber-400">
+                  Image is sent as attachment metadata for now; binary upload is not wired yet.
+                </span>
+              )}
             </div>
           </div>
           <Button

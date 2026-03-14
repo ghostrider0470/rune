@@ -17,6 +17,20 @@ type NavItem = {
   match?: "exact" | "prefix";
 };
 
+function getChatLinkSearch(pathname: string): { session: string | undefined } {
+  const fallback = { session: undefined };
+  const chatPrefix = "/chat";
+  if (!pathname.startsWith(chatPrefix)) {
+    return fallback;
+  }
+
+  const search = typeof window !== "undefined" ? window.location.search : "";
+  const params = new URLSearchParams(search);
+  const session = params.get("session");
+
+  return { session: session ?? undefined };
+}
+
 const navItems: NavItem[] = [
   {
     icon: <MessagesSquare className="h-6 w-6" />,
@@ -54,6 +68,8 @@ export function AdminBottomNav() {
   const location = useLocation();
   const pathname = location.pathname;
 
+  const chatLinkSearch = getChatLinkSearch(pathname);
+
   const isActive = (item: NavItem) => {
     if (item.match === "exact") {
       return pathname === item.href;
@@ -74,6 +90,7 @@ export function AdminBottomNav() {
               <Link
                 key={item.href}
                 to={item.href}
+                search={item.href === "/chat" ? chatLinkSearch : undefined}
                 aria-label={item.label}
                 className={cn(
                   "relative flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-medium transition-all duration-200",

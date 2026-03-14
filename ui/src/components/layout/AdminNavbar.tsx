@@ -48,6 +48,20 @@ const navItems: NavItem[] = [
   { label: "Diagnostics", href: "/diagnostics", icon: AlertTriangle, match: "prefix" },
 ];
 
+function getChatLinkSearch(pathname: string): { session: string | undefined } {
+  const fallback = { session: undefined };
+  const chatPrefix = "/chat";
+  if (!pathname.startsWith(chatPrefix)) {
+    return fallback;
+  }
+
+  const search = typeof window !== "undefined" ? window.location.search : "";
+  const params = new URLSearchParams(search);
+  const session = params.get("session");
+
+  return { session: session ?? undefined };
+}
+
 const moreItems: NavItem[] = [
   { label: "Agents", href: "/agents", icon: Bot, match: "prefix" },
   { label: "Skills", href: "/skills", icon: Wrench, match: "prefix" },
@@ -74,6 +88,7 @@ export function AdminNavbar() {
   const pathname = location.pathname;
 
   const allItems = [...navItems, ...moreItems];
+  const chatLinkSearch = getChatLinkSearch(pathname);
 
   return (
     <nav
@@ -93,7 +108,7 @@ export function AdminNavbar() {
           <div className="flex items-center gap-4">
             <Link
               to="/chat"
-              search={{ session: undefined }}
+              search={chatLinkSearch}
               className="flex items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <img
@@ -119,6 +134,7 @@ export function AdminNavbar() {
                   <Link
                     key={item.href}
                     to={item.href}
+                    search={item.href === "/chat" ? chatLinkSearch : undefined}
                     className={cn(
                       "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                       active
@@ -138,6 +154,7 @@ export function AdminNavbar() {
                   <Link
                     key={item.href}
                     to={item.href}
+                    search={item.href === "/chat" ? chatLinkSearch : undefined}
                     className={cn(
                       "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                       active
@@ -192,6 +209,7 @@ export function AdminNavbar() {
                           <Link
                             key={item.href}
                             to={item.href}
+                            search={item.href === "/chat" ? chatLinkSearch : undefined}
                             onClick={() => setMobileMenuOpen(false)}
                             className={cn(
                               "flex items-center gap-3 rounded-xl border px-4 py-3.5 font-medium transition-all",
