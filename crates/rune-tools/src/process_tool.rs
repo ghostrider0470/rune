@@ -105,6 +105,7 @@ impl ProcessManager {
                 exit_code: state.exit_code,
                 live: true,
                 durable_status: None,
+                persisted: None,
                 note: None,
             });
         }
@@ -124,7 +125,15 @@ impl ProcessManager {
                     running: record.ended_at.is_none() && record.status == "running",
                     exit_code: None,
                     live: false,
-                    durable_status: Some(record.status),
+                    durable_status: Some(record.status.clone()),
+                    persisted: Some(PersistedProcessInfo {
+                        tool_call_id: record.tool_call_id.to_string(),
+                        tool_execution_id: record.tool_execution_id.to_string(),
+                        command: record.command,
+                        workdir: record.workdir,
+                        started_at: record.started_at.to_rfc3339(),
+                        ended_at: record.ended_at.map(|t| t.to_rfc3339()),
+                    }),
                     note: Some(
                         "persisted process metadata is available, but the live handle is not attached in this gateway process".to_string(),
                     ),
@@ -147,6 +156,7 @@ impl ProcessManager {
                     exit_code: state.exit_code,
                     live: true,
                     durable_status: None,
+                    persisted: None,
                     note: None,
                 })
             }
@@ -162,7 +172,15 @@ impl ProcessManager {
                             running: record.ended_at.is_none() && record.status == "running",
                             exit_code: None,
                             live: false,
-                            durable_status: Some(record.status),
+                            durable_status: Some(record.status.clone()),
+                            persisted: Some(PersistedProcessInfo {
+                                tool_call_id: record.tool_call_id.to_string(),
+                                tool_execution_id: record.tool_execution_id.to_string(),
+                                command: record.command,
+                                workdir: record.workdir,
+                                started_at: record.started_at.to_rfc3339(),
+                                ended_at: record.ended_at.map(|t| t.to_rfc3339()),
+                            }),
                             note: Some(
                                 "persisted process metadata is available, but the live handle is not attached in this gateway process".to_string(),
                             ),
@@ -358,8 +376,27 @@ pub struct ProcessInfo {
     pub live: bool,
     /// Durable status recovered from persisted metadata when available.
     pub durable_status: Option<String>,
+    /// Persisted metadata recovered from durable process audit storage.
+    pub persisted: Option<PersistedProcessInfo>,
     /// Human-readable note about degraded restart visibility.
     pub note: Option<String>,
+}
+
+/// Restart-visible process metadata recovered from durable process audit storage.
+#[derive(Debug, Clone)]
+pub struct PersistedProcessInfo {
+    /// Tool-call ID correlated to this process launch.
+    pub tool_call_id: String,
+    /// Durable tool-execution ID correlated to this process launch.
+    pub tool_execution_id: String,
+    /// Original launched command.
+    pub command: String,
+    /// Working directory used for launch.
+    pub workdir: String,
+    /// Durable start timestamp.
+    pub started_at: String,
+    /// Durable completion timestamp, when available.
+    pub ended_at: Option<String>,
 }
 
 struct ProcessEntry {
@@ -512,6 +549,14 @@ impl ProcessToolExecutor {
                             "exitCode": i.exit_code,
                             "live": i.live,
                             "durableStatus": i.durable_status,
+                            "persisted": i.persisted.as_ref().map(|p| serde_json::json!({
+                                "toolCallId": p.tool_call_id,
+                                "toolExecutionId": p.tool_execution_id,
+                                "command": p.command,
+                                "workdir": p.workdir,
+                                "startedAt": p.started_at,
+                                "endedAt": p.ended_at,
+                            })),
                             "note": i.note,
                         })
                     })
@@ -545,6 +590,14 @@ impl ProcessToolExecutor {
                         "exitCode": info.exit_code,
                         "live": info.live,
                         "durableStatus": info.durable_status,
+                        "persisted": info.persisted.as_ref().map(|p| serde_json::json!({
+                            "toolCallId": p.tool_call_id,
+                            "toolExecutionId": p.tool_execution_id,
+                            "command": p.command,
+                            "workdir": p.workdir,
+                            "startedAt": p.started_at,
+                            "endedAt": p.ended_at,
+                        })),
                         "note": info.note,
                     })
                     .to_string(),
@@ -1096,10 +1149,14 @@ mod tests {
             .await
             .unwrap();
 
-        let err = mgr.write_stdin("persisted-only", "hello", false).await.unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("persisted metadata but no live handle is attached"));
+        let err = mgr
+            .write_stdin("persisted-only", "hello", false)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("persisted metadata but no live handle is attached")
+        );
     }
 
     #[tokio::test]
@@ -1123,8 +1180,88 @@ mod tests {
             .unwrap();
 
         let err = mgr.kill("persisted-kill").await.unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("persisted metadata but no live handle is attached"));
+        assert!(
+            err.to_string()
+                .contains("persisted metadata but no live handle is attached")
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_detached_process_includes_persisted_metadata() {
+        let audit_store = Arc::new(MemProcessAuditStore::default());
+        let mgr = ProcessManager::new().with_audit_store(audit_store.clone());
+        let exec = ProcessToolExecutor::new(mgr);
+
+        audit_store
+            .record_spawn(NewProcessAudit {
+                process_id: "persisted-poll".into(),
+                tool_call_id: Uuid::now_v7(),
+                session_id: None,
+                turn_id: None,
+                tool_name: "execute_command".into(),
+                command: "sleep 5".into(),
+                workdir: "/tmp".into(),
+                arguments: serde_json::json!({"background": true}),
+                started_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let result = exec
+            .execute(make_call(
+                "process",
+                serde_json::json!({"action": "poll", "sessionId": "persisted-poll"}),
+            ))
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+
+        assert_eq!(value["live"], false);
+        assert_eq!(value["durableStatus"], "running");
+        assert_eq!(value["persisted"]["command"], "sleep 5");
+        assert_eq!(value["persisted"]["workdir"], "/tmp");
+        assert!(value["persisted"]["toolCallId"].as_str().is_some());
+        assert!(value["persisted"]["toolExecutionId"].as_str().is_some());
+        assert!(value["persisted"]["startedAt"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn list_includes_persisted_metadata_for_detached_processes() {
+        let audit_store = Arc::new(MemProcessAuditStore::default());
+        let mgr = ProcessManager::new().with_audit_store(audit_store.clone());
+        let exec = ProcessToolExecutor::new(mgr);
+
+        audit_store
+            .record_spawn(NewProcessAudit {
+                process_id: "persisted-list".into(),
+                tool_call_id: Uuid::now_v7(),
+                session_id: None,
+                turn_id: None,
+                tool_name: "execute_command".into(),
+                command: "echo hi".into(),
+                workdir: "/tmp".into(),
+                arguments: serde_json::json!({"background": true}),
+                started_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let result = exec
+            .execute(make_call("process", serde_json::json!({"action": "list"})))
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        let item = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["processId"] == "persisted-list")
+            .unwrap();
+
+        assert_eq!(item["live"], false);
+        assert_eq!(item["persisted"]["command"], "echo hi");
+        assert_eq!(item["persisted"]["workdir"], "/tmp");
+        assert!(item["persisted"]["toolCallId"].as_str().is_some());
+        assert!(item["persisted"]["toolExecutionId"].as_str().is_some());
     }
 }
