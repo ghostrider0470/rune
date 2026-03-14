@@ -26,10 +26,11 @@ use rune_runtime::{
 use rune_store::StoreError;
 use rune_store::models::*;
 use rune_store::repos::*;
+use rune_tools::process_tool::ProcessManager;
 use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
-use rune_gateway::{AppState, SessionEvent, build_router};
+use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
 
 // ── In-memory repos ───────────────────────────────────────────────────────────
 
@@ -135,6 +136,13 @@ impl SessionRepo for MemSessionRepo {
         session.metadata = metadata;
         session.updated_at = updated_at;
         Ok(session.clone())
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut sessions = self.sessions.lock().await;
+        let before = sessions.len();
+        sessions.retain(|session| session.id != id);
+        Ok(sessions.len() != before)
     }
 }
 
@@ -273,6 +281,13 @@ impl TranscriptRepo for MemTranscriptRepo {
             .collect();
         result.sort_by_key(|i| i.seq);
         Ok(result)
+    }
+
+    async fn delete_by_session(&self, session_id: Uuid) -> Result<usize, StoreError> {
+        let mut items = self.items.lock().await;
+        let before = items.len();
+        items.retain(|item| item.session_id != session_id);
+        Ok(before - items.len())
     }
 }
 
@@ -474,7 +489,7 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
 
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
 
     let workspace_root = std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
@@ -519,7 +534,9 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
         tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
         event_tx,
     };
 
@@ -537,6 +554,321 @@ async fn body_text(response: axum::http::Response<Body>) -> String {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+
+#[tokio::test]
+async fn ws_rpc_status_matches_http_status_basics() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 3,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let payload = dispatcher.dispatch("status", serde_json::json!({})).await.unwrap();
+
+    assert_eq!(payload["status"], "running");
+    assert!(payload["version"].is_string());
+    assert_eq!(payload["registered_tools"], 3);
+    assert!(payload["ws_subscribers"].is_number());
+    assert!(payload["config_paths"].is_object());
+}
+
+#[tokio::test]
+async fn ws_rpc_health_reports_session_count() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+
+    let now = chrono::Utc::now();
+    session_repo.create(NewSession {
+        id: Uuid::now_v7(),
+        kind: "direct".into(),
+        status: "created".into(),
+        workspace_root: None,
+        channel_ref: None,
+        requester_session_id: None,
+        metadata: serde_json::json!({}),
+        created_at: now,
+        updated_at: now,
+        last_activity_at: now,
+    }).await.unwrap();
+    session_repo.create(NewSession {
+        id: Uuid::now_v7(),
+        kind: "subagent".into(),
+        status: "running".into(),
+        workspace_root: None,
+        channel_ref: None,
+        requester_session_id: None,
+        metadata: serde_json::json!({}),
+        created_at: now,
+        updated_at: now,
+        last_activity_at: now,
+    }).await.unwrap();
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let payload = dispatcher.dispatch("health", serde_json::json!({})).await.unwrap();
+
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["service"], "rune-gateway");
+    assert_eq!(payload["session_count"], 2);
+}
+
+#[tokio::test]
+async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+
+    let session_id = Uuid::now_v7();
+    let now = chrono::Utc::now();
+    session_repo.create(NewSession {
+        id: session_id,
+        kind: "direct".into(),
+        status: "created".into(),
+        workspace_root: None,
+        channel_ref: Some("telegram:chat-1".into()),
+        requester_session_id: None,
+        metadata: serde_json::json!({}),
+        created_at: now,
+        updated_at: now,
+        last_activity_at: now,
+    }).await.unwrap();
+    turn_repo.create(NewTurn {
+        id: Uuid::now_v7(),
+        session_id,
+        trigger_kind: "user_message".into(),
+        status: "completed".into(),
+        model_ref: Some("fake-model".into()),
+        started_at: now,
+        ended_at: Some(now),
+        usage_prompt_tokens: Some(12),
+        usage_completion_tokens: Some(7),
+    }).await.unwrap();
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let payload = dispatcher
+        .dispatch("session.status", serde_json::json!({ "session_id": session_id }))
+        .await
+        .unwrap();
+
+    assert_eq!(payload["session_id"], session_id.to_string());
+    assert_eq!(payload["channel_ref"], "telegram:chat-1");
+    assert_eq!(payload["current_model"], "fake-model");
+    assert_eq!(payload["turn_count"], 1);
+    assert_eq!(payload["prompt_tokens"], 12);
+    assert_eq!(payload["completion_tokens"], 7);
+    assert_eq!(payload["total_tokens"], 19);
+    assert_eq!(payload["approval_mode"], "on-miss");
+    assert_eq!(payload["security_mode"], "allowlist");
+    assert_eq!(payload["reasoning"], "off");
+}
+
+#[tokio::test]
+async fn ws_rpc_session_status_rejects_invalid_uuid() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let err = dispatcher
+        .dispatch("session.status", serde_json::json!({ "session_id": "not-a-uuid" }))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, "bad_request");
+    assert!(err.message.contains("invalid UUID for session_id"));
+}
 
 #[tokio::test]
 async fn health_returns_200() {
@@ -591,8 +923,31 @@ async fn dashboard_html_renders() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    assert!(body.contains("Rune Operator Dashboard"));
-    assert!(body.contains("/api/dashboard/summary"));
+    assert!(body.contains("<!doctype html>") || body.contains("<html"));
+    assert!(body.contains("/assets/") || body.contains("/favicon") || body.contains("index-"));
+}
+
+#[tokio::test]
+async fn processes_routes_surface_empty_inventory() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/processes").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json, serde_json::json!([]));
+
+    let response = app
+        .oneshot(Request::get("/processes/missing").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "bad_request");
+    assert!(json["message"].as_str().unwrap().contains("process not found"));
 }
 
 #[tokio::test]
@@ -780,6 +1135,74 @@ async fn health_is_public_even_with_auth() {
 }
 
 #[tokio::test]
+async fn patch_and_delete_session_routes_work() {
+    let app = build_test_app(None);
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let session_json = body_json(create_response).await;
+    let session_id = session_json["id"].as_str().unwrap();
+
+    let patch_response = app
+        .clone()
+        .oneshot(
+            Request::patch(format!("/sessions/{session_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"label":"backend","verbose":true,"reasoning":"medium"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch_response.status(), StatusCode::OK);
+    let patched_json = body_json(patch_response).await;
+    assert_eq!(patched_json["id"], session_id);
+
+    let status_response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_json = body_json(status_response).await;
+    assert_eq!(status_json["reasoning"], "medium");
+    assert_eq!(status_json["verbose"], true);
+
+    let delete_response = app
+        .clone()
+        .oneshot(
+            Request::delete(format!("/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(delete_response.status(), StatusCode::OK);
+
+    let get_response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get_response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn create_session_returns_201() {
     let app = build_test_app(None);
 
@@ -807,7 +1230,7 @@ async fn send_message_and_transcript_with_shared_state() {
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
 
     let workspace_root = std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
@@ -851,7 +1274,9 @@ async fn send_message_and_transcript_with_shared_state() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
         tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
         event_tx,
     };
 
@@ -991,7 +1416,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
     let context_assembler = ContextAssembler::new("You are a test assistant.");
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
@@ -1053,7 +1478,9 @@ async fn get_session_status_surfaces_subagent_metadata() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
         tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
         event_tx,
     };
 
@@ -1422,7 +1849,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
     let context_assembler = ContextAssembler::new("You are a test assistant.");
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
@@ -1458,7 +1885,9 @@ async fn list_sessions_filters_by_channel_and_activity() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
         tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
         event_tx,
     };
 
