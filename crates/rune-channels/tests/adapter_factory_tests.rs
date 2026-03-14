@@ -216,6 +216,26 @@ async fn whatsapp_adapter_defaults_verify_token_without_blocking_send_path() {
     assert_provider_error(err, "whatsapp API");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn channels_config_wiring_supports_optional_listener_and_polling_fields() {
+    let config = ChannelsConfig {
+        discord_token: Some("discord-token".into()),
+        discord_guild_id: Some("guild-1".into()),
+        discord_channel_ids: vec!["chan-1".into(), "chan-2".into()],
+        slack_bot_token: Some("xoxb-test".into()),
+        slack_listen_addr: Some("127.0.0.1:3100".into()),
+        whatsapp_access_token: Some("wa-token".into()),
+        whatsapp_phone_number_id: Some("phone-1".into()),
+        whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
+        signal_number: Some("+15551234567".into()),
+        ..ChannelsConfig::default()
+    };
+
+    assert!(create_adapter("discord", &config).is_ok());
+    assert!(create_adapter("slack", &config).is_ok());
+    assert!(create_adapter("whatsapp", &config).is_ok());
+}
+
 fn assert_provider_error(err: ChannelError, expected: &str) {
     match err {
         ChannelError::Provider { message } => assert!(message.contains(expected), "{message}"),

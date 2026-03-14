@@ -386,12 +386,18 @@ pub struct ChannelsConfig {
     /// Discord guild (server) ID to watch.
     #[serde(default)]
     pub discord_guild_id: Option<String>,
+    /// Discord text channel IDs to poll for inbound messages.
+    #[serde(default)]
+    pub discord_channel_ids: Vec<String>,
     /// Slack bot OAuth token (`xoxb-...`).
     #[serde(default)]
     pub slack_bot_token: Option<String>,
     /// Slack app-level token (`xapp-...`) for Socket Mode.
     #[serde(default)]
     pub slack_app_token: Option<String>,
+    /// Local address for the Slack Events API listener (for example `0.0.0.0:3100`).
+    #[serde(default)]
+    pub slack_listen_addr: Option<String>,
     /// WhatsApp Cloud API permanent access token.
     #[serde(default)]
     pub whatsapp_access_token: Option<String>,
@@ -401,6 +407,9 @@ pub struct ChannelsConfig {
     /// Token used by Meta to verify the WhatsApp webhook endpoint.
     #[serde(default)]
     pub whatsapp_verify_token: Option<String>,
+    /// Local address for the WhatsApp webhook listener (for example `0.0.0.0:3200`).
+    #[serde(default)]
+    pub whatsapp_listen_addr: Option<String>,
     /// Signal phone number (e.g. `"+15551234567"`).
     #[serde(default)]
     pub signal_number: Option<String>,

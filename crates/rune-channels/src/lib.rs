@@ -4,8 +4,8 @@ mod discord;
 mod signal;
 mod slack;
 mod telegram;
-mod whatsapp;
 pub mod types;
+mod whatsapp;
 
 pub use discord::DiscordAdapter;
 pub use signal::SignalAdapter;
@@ -39,51 +39,57 @@ pub fn create_adapter(
 ) -> Result<Box<dyn ChannelAdapter>, ChannelError> {
     match kind {
         "telegram" => {
-            let token = config.telegram_token.as_deref().ok_or_else(|| {
-                ChannelError::Provider {
+            let token = config
+                .telegram_token
+                .as_deref()
+                .ok_or_else(|| ChannelError::Provider {
                     message: "telegram_token is required for the Telegram adapter".into(),
-                }
-            })?;
+                })?;
             Ok(Box::new(TelegramAdapter::new(token)))
         }
         "discord" => {
-            let token = config.discord_token.as_deref().ok_or_else(|| {
-                ChannelError::Provider {
+            let token = config
+                .discord_token
+                .as_deref()
+                .ok_or_else(|| ChannelError::Provider {
                     message: "discord_token is required for the Discord adapter".into(),
-                }
-            })?;
+                })?;
             let guild_id = config.discord_guild_id.as_deref().unwrap_or("");
-            // Discord adapter watches no channels by default; callers may
-            // extend this to read from config.
             Ok(Box::new(DiscordAdapter::new(
                 token,
                 guild_id,
-                Vec::new(),
+                config.discord_channel_ids.clone(),
             )))
         }
         "slack" => {
-            let bot_token = config.slack_bot_token.as_deref().ok_or_else(|| {
-                ChannelError::Provider {
-                    message: "slack_bot_token is required for the Slack adapter".into(),
-                }
-            })?;
-            let app_token = config.slack_app_token.as_deref().unwrap_or("");
-            Ok(Box::new(SlackAdapter::new(bot_token, app_token, None)))
-        }
-        "whatsapp" => {
-            let access_token = config.whatsapp_access_token.as_deref().ok_or_else(|| {
-                ChannelError::Provider {
-                    message: "whatsapp_access_token is required for the WhatsApp adapter".into(),
-                }
-            })?;
-            let phone_number_id =
+            let bot_token =
                 config
-                    .whatsapp_phone_number_id
+                    .slack_bot_token
                     .as_deref()
                     .ok_or_else(|| ChannelError::Provider {
-                        message: "whatsapp_phone_number_id is required for the WhatsApp adapter"
+                        message: "slack_bot_token is required for the Slack adapter".into(),
+                    })?;
+            let app_token = config.slack_app_token.as_deref().unwrap_or("");
+            Ok(Box::new(SlackAdapter::new(
+                bot_token,
+                app_token,
+                config.slack_listen_addr.clone(),
+            )))
+        }
+        "whatsapp" => {
+            let access_token =
+                config
+                    .whatsapp_access_token
+                    .as_deref()
+                    .ok_or_else(|| ChannelError::Provider {
+                        message: "whatsapp_access_token is required for the WhatsApp adapter"
                             .into(),
                     })?;
+            let phone_number_id = config.whatsapp_phone_number_id.as_deref().ok_or_else(|| {
+                ChannelError::Provider {
+                    message: "whatsapp_phone_number_id is required for the WhatsApp adapter".into(),
+                }
+            })?;
             let verify_token = config
                 .whatsapp_verify_token
                 .as_deref()
@@ -92,15 +98,16 @@ pub fn create_adapter(
                 access_token,
                 phone_number_id,
                 verify_token,
-                None,
+                config.whatsapp_listen_addr.clone(),
             )))
         }
         "signal" => {
-            let number = config.signal_number.as_deref().ok_or_else(|| {
-                ChannelError::Provider {
+            let number = config
+                .signal_number
+                .as_deref()
+                .ok_or_else(|| ChannelError::Provider {
                     message: "signal_number is required for the Signal adapter".into(),
-                }
-            })?;
+                })?;
             let api_url = config
                 .signal_api_url
                 .as_deref()
