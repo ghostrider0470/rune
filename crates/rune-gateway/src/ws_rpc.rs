@@ -12,6 +12,7 @@ use rune_core::SessionKind;
 use rune_runtime::SkillScanSummary;
 
 use crate::state::AppState;
+use crate::ws::active_ws_connections;
 
 // ── Error type ───────────────────────────────────────────────────────────────
 
@@ -583,6 +584,7 @@ impl RpcDispatcher {
             "uptime_seconds": self.state.started_at.elapsed().as_secs(),
             "session_count": sessions.len(),
             "ws_subscribers": self.state.event_tx.receiver_count(),
+            "ws_connections": active_ws_connections(),
         }))
     }
 
@@ -617,6 +619,7 @@ impl RpcDispatcher {
             "session_count": sessions.len(),
             "cron_job_count": cron_job_count,
             "ws_subscribers": self.state.event_tx.receiver_count(),
+            "ws_connections": active_ws_connections(),
             "uptime_seconds": self.state.started_at.elapsed().as_secs(),
             "lane_stats": lane_stats,
             "skills": {
