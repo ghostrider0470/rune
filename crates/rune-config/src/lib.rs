@@ -345,6 +345,33 @@ pub struct ChannelsConfig {
     /// Telegram bot token for the Bot API.
     #[serde(default)]
     pub telegram_token: Option<String>,
+    /// Discord bot token.
+    #[serde(default)]
+    pub discord_token: Option<String>,
+    /// Discord guild (server) ID to watch.
+    #[serde(default)]
+    pub discord_guild_id: Option<String>,
+    /// Slack bot OAuth token (`xoxb-...`).
+    #[serde(default)]
+    pub slack_bot_token: Option<String>,
+    /// Slack app-level token (`xapp-...`) for Socket Mode.
+    #[serde(default)]
+    pub slack_app_token: Option<String>,
+    /// WhatsApp Cloud API permanent access token.
+    #[serde(default)]
+    pub whatsapp_access_token: Option<String>,
+    /// WhatsApp phone number ID from the Business dashboard.
+    #[serde(default)]
+    pub whatsapp_phone_number_id: Option<String>,
+    /// Token used by Meta to verify the WhatsApp webhook endpoint.
+    #[serde(default)]
+    pub whatsapp_verify_token: Option<String>,
+    /// Signal phone number (e.g. `"+15551234567"`).
+    #[serde(default)]
+    pub signal_number: Option<String>,
+    /// Base URL of the signal-cli REST API daemon.
+    #[serde(default)]
+    pub signal_api_url: Option<String>,
 }
 
 /// Memory indexing and retrieval settings.
@@ -803,5 +830,284 @@ primary = "oc-01-openai/gpt-5.4"
         );
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn channels_config_loads_new_provider_fields_from_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("channels-provider-fields");
+        fs::write(
+            &path,
+            r#"
+[channels]
+enabled = ["telegram", "discord", "slack", "whatsapp", "signal"]
+telegram_token = "telegram-token"
+discord_token = "discord-token"
+discord_guild_id = "guild-123"
+slack_bot_token = "xoxb-token"
+slack_app_token = "xapp-token"
+whatsapp_access_token = "wa-token"
+whatsapp_phone_number_id = "phone-123"
+whatsapp_verify_token = "verify-token"
+signal_number = "+15551234567"
+signal_api_url = "http://signal.local:8080"
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(
+            config.channels.enabled,
+            vec!["telegram", "discord", "slack", "whatsapp", "signal"]
+        );
+        assert_eq!(config.channels.telegram_token.as_deref(), Some("telegram-token"));
+        assert_eq!(config.channels.discord_token.as_deref(), Some("discord-token"));
+        assert_eq!(config.channels.discord_guild_id.as_deref(), Some("guild-123"));
+        assert_eq!(config.channels.slack_bot_token.as_deref(), Some("xoxb-token"));
+        assert_eq!(config.channels.slack_app_token.as_deref(), Some("xapp-token"));
+        assert_eq!(
+            config.channels.whatsapp_access_token.as_deref(),
+            Some("wa-token")
+        );
+        assert_eq!(
+            config.channels.whatsapp_phone_number_id.as_deref(),
+            Some("phone-123")
+        );
+        assert_eq!(
+            config.channels.whatsapp_verify_token.as_deref(),
+            Some("verify-token")
+        );
+        assert_eq!(config.channels.signal_number.as_deref(), Some("+15551234567"));
+        assert_eq!(
+            config.channels.signal_api_url.as_deref(),
+            Some("http://signal.local:8080")
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn channels_config_env_overrides_file_values() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("channels-env-override");
+        fs::write(
+            &path,
+            r#"
+[channels]
+discord_token = "discord-from-file"
+whatsapp_verify_token = "verify-from-file"
+signal_api_url = "http://file-signal:8080"
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_CHANNELS__DISCORD_TOKEN", "discord-from-env");
+            std::env::set_var(
+                "RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN",
+                "verify-from-env",
+            );
+            std::env::set_var("RUNE_CHANNELS__SIGNAL_API_URL", "http://env-signal:8080");
+        }
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(config.channels.discord_token.as_deref(), Some("discord-from-env"));
+        assert_eq!(
+            config.channels.whatsapp_verify_token.as_deref(),
+            Some("verify-from-env")
+        );
+        assert_eq!(
+            config.channels.signal_api_url.as_deref(),
+            Some("http://env-signal:8080")
+        );
+
+        unsafe {
+            std::env::remove_var("RUNE_CHANNELS__DISCORD_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__SIGNAL_API_URL");
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn channels_config_defaults_optional_provider_fields_to_none() {
+        let config = AppConfig::default();
+
+        assert!(config.channels.enabled.is_empty());
+        assert_eq!(config.channels.telegram_token, None);
+        assert_eq!(config.channels.discord_token, None);
+        assert_eq!(config.channels.discord_guild_id, None);
+        assert_eq!(config.channels.slack_bot_token, None);
+        assert_eq!(config.channels.slack_app_token, None);
+        assert_eq!(config.channels.whatsapp_access_token, None);
+        assert_eq!(config.channels.whatsapp_phone_number_id, None);
+        assert_eq!(config.channels.whatsapp_verify_token, None);
+        assert_eq!(config.channels.signal_number, None);
+        assert_eq!(config.channels.signal_api_url, None);
+    }
+
+    #[test]
+    fn channels_config_supports_enabled_list_from_environment() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var(
+                "RUNE_CHANNELS__ENABLED",
+                "[\"telegram\",\"discord\",\"signal\"]",
+            );
+        }
+
+        let config = AppConfig::load(None::<&std::path::Path>).unwrap();
+        assert_eq!(
+            config.channels.enabled,
+            vec!["telegram", "discord", "signal"]
+        );
+
+        unsafe {
+            std::env::remove_var("RUNE_CHANNELS__ENABLED");
+        }
+    }
+
+    #[test]
+    fn models_config_loads_provider_kinds_and_inventory_from_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("models-provider-kinds");
+        fs::write(
+            &path,
+            r#"
+[models]
+default_model = "google/gemini-2.0-flash"
+
+[[models.providers]]
+name = "google"
+kind = "gemini"
+base_url = ""
+api_key_env = "GOOGLE_API_KEY"
+models = ["gemini-2.0-flash"]
+
+[[models.providers]]
+name = "bedrock"
+kind = "aws-bedrock"
+base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
+deployment_name = "us-east-1"
+api_key_env = "BEDROCK_COMBINED"
+models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(
+            config.models.default_model.as_deref(),
+            Some("google/gemini-2.0-flash")
+        );
+        assert_eq!(config.models.providers.len(), 2);
+        assert_eq!(config.models.providers[0].kind, "gemini");
+        assert_eq!(config.models.providers[1].kind, "aws-bedrock");
+        assert_eq!(
+            config.models.model_ids(),
+            vec![
+                "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0".to_string(),
+                "google/gemini-2.0-flash".to_string(),
+            ]
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_model_accepts_provider_alias_kinds_without_affecting_inventory_matching() {
+        let config = ModelsConfig {
+            default_model: Some("google/gemini-2.0-flash".into()),
+            providers: vec![
+                ModelProviderConfig {
+                    name: "google".into(),
+                    kind: "gemini".into(),
+                    base_url: String::new(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("GOOGLE_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![ConfiguredModel::Id("gemini-2.0-flash".into())],
+                },
+                ModelProviderConfig {
+                    name: "bedrock".into(),
+                    kind: "aws-bedrock".into(),
+                    base_url: String::new(),
+                    api_key: None,
+                    deployment_name: Some("us-east-1".into()),
+                    api_version: None,
+                    api_key_env: Some("BEDROCK_COMBINED".into()),
+                    model_alias: None,
+                    models: vec![ConfiguredModel::Id(
+                        "anthropic.claude-3-5-sonnet-20241022-v2:0".into(),
+                    )],
+                },
+            ],
+        };
+
+        let gemini = config.resolve_model("google/gemini-2.0-flash").unwrap();
+        assert_eq!(gemini.provider.kind, "gemini");
+        assert_eq!(gemini.raw_model, "gemini-2.0-flash");
+
+        let bedrock = config
+            .resolve_model("bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0")
+            .unwrap();
+        assert_eq!(bedrock.provider.kind, "aws-bedrock");
+        assert_eq!(
+            bedrock.canonical_model_id(),
+            "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"
+        );
+    }
+
+    #[test]
+    fn channels_config_supports_new_provider_fields_from_environment() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("RUNE_CHANNELS__TELEGRAM_TOKEN", "telegram-env");
+            std::env::set_var("RUNE_CHANNELS__DISCORD_TOKEN", "discord-env");
+            std::env::set_var("RUNE_CHANNELS__DISCORD_GUILD_ID", "guild-env");
+            std::env::set_var("RUNE_CHANNELS__SLACK_BOT_TOKEN", "xoxb-env");
+            std::env::set_var("RUNE_CHANNELS__SLACK_APP_TOKEN", "xapp-env");
+            std::env::set_var("RUNE_CHANNELS__WHATSAPP_ACCESS_TOKEN", "wa-env");
+            std::env::set_var("RUNE_CHANNELS__WHATSAPP_PHONE_NUMBER_ID", "phone-env");
+            std::env::set_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN", "verify-env");
+            std::env::set_var("RUNE_CHANNELS__SIGNAL_API_URL", "http://signal-env:8080");
+        }
+
+        let config = AppConfig::load(None::<&std::path::Path>).unwrap();
+        assert_eq!(config.channels.telegram_token.as_deref(), Some("telegram-env"));
+        assert_eq!(config.channels.discord_token.as_deref(), Some("discord-env"));
+        assert_eq!(config.channels.discord_guild_id.as_deref(), Some("guild-env"));
+        assert_eq!(config.channels.slack_bot_token.as_deref(), Some("xoxb-env"));
+        assert_eq!(config.channels.slack_app_token.as_deref(), Some("xapp-env"));
+        assert_eq!(
+            config.channels.whatsapp_access_token.as_deref(),
+            Some("wa-env")
+        );
+        assert_eq!(
+            config.channels.whatsapp_phone_number_id.as_deref(),
+            Some("phone-env")
+        );
+        assert_eq!(
+            config.channels.whatsapp_verify_token.as_deref(),
+            Some("verify-env")
+        );
+        assert_eq!(
+            config.channels.signal_api_url.as_deref(),
+            Some("http://signal-env:8080")
+        );
+
+        unsafe {
+            std::env::remove_var("RUNE_CHANNELS__TELEGRAM_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__DISCORD_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__DISCORD_GUILD_ID");
+            std::env::remove_var("RUNE_CHANNELS__SLACK_BOT_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__SLACK_APP_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__WHATSAPP_ACCESS_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__WHATSAPP_PHONE_NUMBER_ID");
+            std::env::remove_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__SIGNAL_API_URL");
+        }
     }
 }

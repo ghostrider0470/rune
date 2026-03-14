@@ -398,6 +398,50 @@ fn selects_bedrock_provider_with_inline_credentials() {
 }
 
 #[test]
+fn selects_bedrock_provider_with_env_credentials_pair() {
+    unsafe {
+        std::env::set_var("TEST_BEDROCK_KEY_SEL", "ENV_AKIA:ENV_SECRET");
+        std::env::remove_var("AWS_ACCESS_KEY_ID");
+        std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+    }
+    let cfg = ModelProviderConfig {
+        name: "bedrock".into(),
+        kind: "bedrock".into(),
+        base_url: String::new(),
+        deployment_name: Some("us-west-2".into()),
+        api_version: None,
+        api_key_env: Some("TEST_BEDROCK_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe {
+        std::env::remove_var("TEST_BEDROCK_KEY_SEL");
+    }
+}
+
+#[test]
+fn falls_back_to_openai_for_unknown_provider_kind() {
+    unsafe { std::env::set_var("TEST_FALLBACK_OAI_KEY", "fallback-key") };
+    let cfg = ModelProviderConfig {
+        name: "custom".into(),
+        kind: "custom-openai-compatible".into(),
+        base_url: "https://api.example.com/v1".into(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_FALLBACK_OAI_KEY".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_FALLBACK_OAI_KEY") };
+}
+
+#[test]
 fn bedrock_requires_credentials() {
     unsafe {
         std::env::remove_var("AWS_ACCESS_KEY_ID");

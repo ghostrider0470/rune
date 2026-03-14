@@ -1,6 +1,12 @@
 pub mod anthropic;
 pub mod azure;
 pub mod azure_foundry;
+pub mod bedrock;
+pub mod deepseek;
+pub mod google;
+pub mod groq;
+pub mod mistral;
+pub mod ollama;
 pub mod openai;
 pub(crate) mod response;
 

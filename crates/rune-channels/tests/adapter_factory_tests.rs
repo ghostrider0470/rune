@@ -117,6 +117,43 @@ async fn configured_adapter_kinds_construct_successfully() {
     assert!(signal.is_ok());
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn whatsapp_adapter_uses_default_verify_token_when_missing() {
+    let adapter = create_adapter(
+        "whatsapp",
+        &ChannelsConfig {
+            whatsapp_access_token: Some("wa-token".into()),
+            whatsapp_phone_number_id: Some("phone-1".into()),
+            whatsapp_verify_token: None,
+            ..ChannelsConfig::default()
+        },
+    );
+    assert!(adapter.is_ok());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn slack_and_signal_allow_optional_secondary_connection_fields() {
+    let slack = create_adapter(
+        "slack",
+        &ChannelsConfig {
+            slack_bot_token: Some("xoxb-test".into()),
+            slack_app_token: None,
+            ..ChannelsConfig::default()
+        },
+    );
+    assert!(slack.is_ok());
+
+    let signal = create_adapter(
+        "signal",
+        &ChannelsConfig {
+            signal_number: Some("+15551234567".into()),
+            signal_api_url: None,
+            ..ChannelsConfig::default()
+        },
+    );
+    assert!(signal.is_ok());
+}
+
 fn assert_provider_error(err: ChannelError, expected: &str) {
     match err {
         ChannelError::Provider { message } => assert!(message.contains(expected), "{message}"),
