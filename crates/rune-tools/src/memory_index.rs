@@ -280,9 +280,7 @@ impl EmbeddingProvider for OpenAiEmbedding {
             .enumerate()
             .map(|(i, opt)| {
                 opt.ok_or_else(|| {
-                    MemoryIndexError::Embedding(format!(
-                        "missing embedding for input at index {i}"
-                    ))
+                    MemoryIndexError::Embedding(format!("missing embedding for input at index {i}"))
                 })
             })
             .collect()
@@ -422,7 +420,8 @@ fn split_at_word_boundary(text: &str, max_tokens: usize) -> Vec<String> {
             current.len() + 1 + word.len()
         };
 
-        if estimate_tokens(&current) > 0 && estimate_tokens(&format!("{current} {word}")) > max_tokens
+        if estimate_tokens(&current) > 0
+            && estimate_tokens(&format!("{current} {word}")) > max_tokens
         {
             pieces.push(std::mem::take(&mut current));
         }
@@ -665,7 +664,12 @@ impl MemoryIndex {
 
     /// Chunk a single file's content using the configured chunk / overlap sizes.
     pub fn chunk_file(&self, path: &Path, content: &str) -> Vec<MemoryChunk> {
-        chunk_file(path, content, self.config.chunk_size, self.config.chunk_overlap)
+        chunk_file(
+            path,
+            content,
+            self.config.chunk_size,
+            self.config.chunk_overlap,
+        )
     }
 
     // -- Indexing ------------------------------------------------------------
@@ -873,7 +877,11 @@ Second paragraph of section two also with extra words for testing length.
         // Use a small chunk size so each heading section exceeds the merge
         // threshold and they stay as separate chunks.
         let chunks = chunk_file(Path::new("notes.md"), content, 15, 0);
-        assert!(chunks.len() >= 2, "expected at least 2 chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 2,
+            "expected at least 2 chunks, got {}",
+            chunks.len()
+        );
         assert!(chunks.iter().any(|c| c.chunk_text.contains("Section One")));
         assert!(chunks.iter().any(|c| c.chunk_text.contains("Section Two")));
     }
@@ -931,7 +939,8 @@ Delta echo foxtrot.
             // The exact words depend on merge decisions, but overlap > 0 means
             // some content from chunk 0 appears in chunk 1.
             assert!(
-                chunks[1].chunk_text.len() > chunks[1].chunk_text.trim_start().find("Delta").unwrap_or(0)
+                chunks[1].chunk_text.len()
+                    > chunks[1].chunk_text.trim_start().find("Delta").unwrap_or(0)
                     || chunks[1].chunk_text.contains("charlie")
                     || chunks[1].chunk_text.contains("bravo"),
                 "expected overlap content in second chunk"
@@ -1127,13 +1136,29 @@ Delta echo foxtrot.
             Err(err) => err,
         };
         assert!(matches!(err, MemoryIndexError::Embedding(_)));
-        assert!(err.to_string().contains("unsupported embedding provider: local"));
+        assert!(
+            err.to_string()
+                .contains("unsupported embedding provider: local")
+        );
     }
 
     struct WrongCountEmbedding;
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for WrongCountEmbedding {
+        async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryIndexError> {
+            Ok(Vec::new())
+        }
+
+        fn dimension(&self) -> usize {
+            4
+        }
+    }
+
+    struct EmptyEmbeddingProvider;
+
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for EmptyEmbeddingProvider {
         async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryIndexError> {
             Ok(Vec::new())
         }
@@ -1200,19 +1225,94 @@ Delta echo foxtrot.
     }
 
     #[tokio::test]
+    async fn memory_index_reindex_directory_skips_unreadable_markdown_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let readable = tmp.path().join("readable.md");
+        let unreadable_dir = tmp.path().join("broken.md");
+
+        tokio::fs::write(&readable, "# Readable\nStill works\n")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(&unreadable_dir).await.unwrap();
+
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                chunk_size: 512,
+                chunk_overlap: 0,
+                ..Default::default()
+            },
+            Box::new(StubEmbedding { dim: 4 }),
+        );
+
+        let all = index.reindex_directory(tmp.path()).await.unwrap();
+        let paths: Vec<_> = all.iter().map(|e| e.chunk.file_path.clone()).collect();
+        assert!(paths.iter().any(|p| p.ends_with("readable.md")));
+        assert!(!paths.iter().any(|p| p.ends_with("broken.md")));
+    }
+
+    #[tokio::test]
+    async fn embed_query_returns_first_embedding_vector() {
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 8,
+                ..Default::default()
+            },
+            Box::new(StubEmbedding { dim: 8 }),
+        );
+
+        let embedding = index.embed_query("find this").await.unwrap();
+        assert_eq!(embedding.len(), 8);
+        assert_eq!(embedding[0], 0.0);
+        assert!(embedding.iter().skip(1).all(|value| *value == 0.0));
+    }
+
+    #[tokio::test]
+    async fn embed_query_rejects_empty_provider_response() {
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                ..Default::default()
+            },
+            Box::new(EmptyEmbeddingProvider),
+        );
+
+        let err = index.embed_query("find this").await.unwrap_err();
+        assert!(matches!(err, MemoryIndexError::Embedding(_)));
+        assert!(
+            err.to_string()
+                .contains("embedding provider returned no vectors")
+        );
+    }
+
+    #[tokio::test]
     async fn search_merges_and_truncates() {
         let config = MemoryIndexConfig::default();
         let provider = Box::new(StubEmbedding { dim: 4 });
         let index = MemoryIndex::new(config, provider);
 
         let kw_hits = vec![
-            KeywordHit { file_path: "a.md".into(), chunk_text: "one".into(), ts_rank: 1.0 },
-            KeywordHit { file_path: "b.md".into(), chunk_text: "two".into(), ts_rank: 0.5 },
-            KeywordHit { file_path: "c.md".into(), chunk_text: "three".into(), ts_rank: 0.3 },
+            KeywordHit {
+                file_path: "a.md".into(),
+                chunk_text: "one".into(),
+                ts_rank: 1.0,
+            },
+            KeywordHit {
+                file_path: "b.md".into(),
+                chunk_text: "two".into(),
+                ts_rank: 0.5,
+            },
+            KeywordHit {
+                file_path: "c.md".into(),
+                chunk_text: "three".into(),
+                ts_rank: 0.3,
+            },
         ];
-        let vec_hits = vec![
-            VectorHit { file_path: "a.md".into(), chunk_text: "one".into(), cosine_similarity: 0.9 },
-        ];
+        let vec_hits = vec![VectorHit {
+            file_path: "a.md".into(),
+            chunk_text: "one".into(),
+            cosine_similarity: 0.9,
+        }];
 
         let results = index.search(&kw_hits, &vec_hits, 2);
         assert_eq!(results.len(), 2);
