@@ -301,11 +301,7 @@ impl TurnExecutor {
             },
         };
 
-        let resume_status = if tool_result.is_error {
-            "completed_error"
-        } else {
-            "completed"
-        };
+        let tool_result_was_error = tool_result.is_error;
         let resume_output = tool_result.output.clone();
         let result_item = TranscriptItem::ToolResult {
             tool_call_id: tool_result.tool_call_id,
@@ -316,8 +312,13 @@ impl TurnExecutor {
         self.append_transcript(session_id, Some(turn_uuid), &result_item)
             .await?;
 
-        self.update_approval_progress(approval.id, resumed_at, resume_status, Some(resume_output))
-            .await?;
+        self.update_approval_progress(
+            approval.id,
+            resumed_at,
+            "resuming",
+            Some(format!("tool execution resumed: {resume_output}")),
+        )
+        .await?;
 
         let session = self.session_repo.find_by_id(session_id).await?;
         let effective_model = selected_model(&session)
@@ -341,11 +342,35 @@ impl TurnExecutor {
             .update_usage(turn_uuid, prompt_tokens, completion_tokens)
             .await?;
 
-        let (final_status, ended_at) = match &result {
-            Ok(TurnLoopOutcome::Completed) => (TurnStatus::Completed, Some(Utc::now())),
-            Ok(TurnLoopOutcome::WaitingForApproval) => (TurnStatus::ToolExecuting, None),
-            Err(_) => (TurnStatus::Failed, Some(Utc::now())),
+        let (final_status, ended_at, approval_status, approval_summary) = match &result {
+            Ok(TurnLoopOutcome::Completed) => {
+                let approval_status = if tool_result_was_error {
+                    "completed_error"
+                } else {
+                    "completed"
+                };
+                (
+                    TurnStatus::Completed,
+                    Some(Utc::now()),
+                    approval_status,
+                    Some(resume_output),
+                )
+            }
+            Ok(TurnLoopOutcome::WaitingForApproval) => (
+                TurnStatus::ToolExecuting,
+                None,
+                "waiting_for_approval",
+                Some("resumed turn encountered another approval gate".to_string()),
+            ),
+            Err(error) => (
+                TurnStatus::Failed,
+                Some(Utc::now()),
+                "failed",
+                Some(format!("post-approval continuation failed: {error}")),
+            ),
         };
+        self.update_approval_progress(approval.id, resumed_at, approval_status, approval_summary)
+            .await?;
         let final_turn = self
             .turn_repo
             .update_status(turn_uuid, status_str(final_status), ended_at)

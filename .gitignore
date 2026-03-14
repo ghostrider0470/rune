@@ -6,3 +6,5 @@ Cargo.lock
 .DS_Store
 *.log
 config.toml
+ui/node_modules
+ui/dist

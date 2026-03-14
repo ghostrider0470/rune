@@ -105,6 +105,40 @@ impl ModelProvider for FailingModelProvider {
     }
 }
 
+#[derive(Debug)]
+struct FailAfterFirstCallModelProvider {
+    calls: Mutex<usize>,
+}
+
+impl FailAfterFirstCallModelProvider {
+    fn new() -> Self {
+        Self {
+            calls: Mutex::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl ModelProvider for FailAfterFirstCallModelProvider {
+    async fn complete(
+        &self,
+        _request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelError> {
+        let mut calls = self.calls.lock().await;
+        *calls += 1;
+        if *calls == 1 {
+            Ok(FakeModelProvider::tool_call_response(
+                "exec",
+                r#"{"command":"echo hi"}"#,
+            ))
+        } else {
+            Err(ModelError::Transient(
+                "fake transient error after approval resume".into(),
+            ))
+        }
+    }
+}
+
 enum FakeToolStep {
     Output(String),
     OutputWithExecutionId { output: String, tool_execution_id: Uuid },
@@ -1158,6 +1192,80 @@ async fn approval_resume_does_not_mark_completed_at_before_completion() {
 
     let completed = h.approval_repo.find_by_id(approvals[0].id).await.unwrap();
     assert!(completed.presented_payload.get("completed_at").is_some());
+}
+
+#[tokio::test]
+async fn approval_resume_marks_failed_when_post_tool_continuation_fails() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FailAfterFirstCallModelProvider::new());
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({"command": "echo hi"}),
+                    command: Some("echo hi".to_string()),
+                })
+                .unwrap(),
+            },
+            FakeToolStep::Output("approved output".to_string()),
+        ])),
+        registry,
+    );
+
+    let (blocked_turn, _) = executor.execute(session.id, "run it", None).await.unwrap();
+    assert_eq!(blocked_turn.status, "tool_executing");
+
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    h.approval_repo
+        .decide(
+            approvals[0].id,
+            "allow_once",
+            "operator",
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+    let err = executor.resume_approval(approvals[0].id).await.unwrap_err();
+    assert!(err.to_string().contains("fake transient error after approval resume"));
+
+    let approval = h.approval_repo.find_by_id(approvals[0].id).await.unwrap();
+    assert_eq!(approval.presented_payload["approval_status"], "failed");
+    assert_eq!(approval.presented_payload["resume_status"], "failed");
+    assert!(approval.presented_payload.get("completed_at").is_some());
+    assert!(approval.presented_payload["resume_result_summary"]
+        .as_str()
+        .unwrap()
+        .contains("post-approval continuation failed"));
+
+    let failed_turn = h.turn_repo.find_by_id(blocked_turn.id).await.unwrap();
+    assert_eq!(failed_turn.status, "failed");
 }
 
 #[tokio::test]

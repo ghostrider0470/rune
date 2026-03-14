@@ -410,3 +410,19 @@ Wire `session_status` tool/runtime/gateway responses to emit the new `SessionSta
 - Validation:
   - `cargo test -q -p rune-tools` ✅
   - `cargo clippy -q -p rune-tools --all-targets -- -D warnings` ✅
+
+## 13:3x approval terminal-state honesty pass
+
+- Closed a concrete approval-lifecycle inspectability bug in `rune-runtime`.
+- Before this pass, `resume_approval(...)` marked the approval payload as `completed` / `completed_error` immediately after the resumed tool call returned, before the blocked turn's post-tool model continuation finished.
+- That meant operator surfaces could lie after a resumed tool succeeded but the rest of the turn failed: the approval looked terminally complete even though the resumed turn still crashed afterward.
+- Updated `crates/rune-runtime/src/executor.rs` so approval progress now follows the full resumed-turn outcome:
+  - after the resumed tool result is appended, approval stays in `resuming`
+  - only a fully successful continuation promotes it to `completed` or `completed_error`
+  - a re-blocked continuation now records `waiting_for_approval`
+  - a failed continuation now records terminal `failed` with an explicit `post-approval continuation failed: ...` summary
+- Added focused regression coverage proving a resumed approval is marked `failed` when the post-tool model continuation errors after approval.
+- Validation:
+  - `cargo test -q -p rune-runtime` ✅
+  - `cargo clippy -q -p rune-runtime -- -D warnings` ✅
+  - full workspace `cargo test -q` ✅
