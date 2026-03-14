@@ -147,6 +147,22 @@ fn outbound_action_variants_roundtrip() {
             },
             "delete",
         ),
+        (
+            OutboundAction::SendTypingIndicator {
+                channel_id: cid,
+                chat_id: "chat-1".into(),
+            },
+            "send_typing_indicator",
+        ),
+        (
+            OutboundAction::SendInlineKeyboard {
+                channel_id: cid,
+                chat_id: "chat-1".into(),
+                content: "choose".into(),
+                buttons: vec![("One".into(), "1".into()), ("Two".into(), "2".into())],
+            },
+            "send_inline_keyboard",
+        ),
     ];
 
     for (action, expected_tag) in cases {

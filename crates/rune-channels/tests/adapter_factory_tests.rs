@@ -154,6 +154,68 @@ async fn slack_and_signal_allow_optional_secondary_connection_fields() {
     assert!(signal.is_ok());
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn discord_adapter_allows_missing_guild_id_for_send_only_mode() {
+    let adapter = create_adapter(
+        "discord",
+        &ChannelsConfig {
+            discord_token: Some("discord-token".into()),
+            discord_guild_id: None,
+            ..ChannelsConfig::default()
+        },
+    );
+    assert!(adapter.is_ok());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn signal_adapter_defaults_api_url_when_missing() {
+    let adapter = create_adapter(
+        "signal",
+        &ChannelsConfig {
+            signal_number: Some("+15551234567".into()),
+            signal_api_url: None,
+            ..ChannelsConfig::default()
+        },
+    )
+    .expect("signal adapter should construct with default api url");
+
+    let err = adapter
+        .send(rune_channels::OutboundAction::Send {
+            channel_id: rune_core::ChannelId::new(),
+            chat_id: "+15559876543".into(),
+            content: "ping".into(),
+        })
+        .await
+        .expect_err("default localhost signal api should not succeed during unit tests");
+
+    assert_provider_error(err, "signal send request error");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn whatsapp_adapter_defaults_verify_token_without_blocking_send_path() {
+    let adapter = create_adapter(
+        "whatsapp",
+        &ChannelsConfig {
+            whatsapp_access_token: Some("wa-token".into()),
+            whatsapp_phone_number_id: Some("phone-1".into()),
+            whatsapp_verify_token: None,
+            ..ChannelsConfig::default()
+        },
+    )
+    .expect("whatsapp adapter should construct with default verify token");
+
+    let err = adapter
+        .send(rune_channels::OutboundAction::Send {
+            channel_id: rune_core::ChannelId::new(),
+            chat_id: "15551234567".into(),
+            content: "ping".into(),
+        })
+        .await
+        .expect_err("cloud api call should fail with dummy credentials");
+
+    assert_provider_error(err, "whatsapp API");
+}
+
 fn assert_provider_error(err: ChannelError, expected: &str) {
     match err {
         ChannelError::Provider { message } => assert!(message.contains(expected), "{message}"),
