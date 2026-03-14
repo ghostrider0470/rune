@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
 use crate::state::{AppState, SessionEvent};
-use crate::ws_rpc::RpcDispatcher;
+use crate::ws_rpc::{RpcDispatch, RpcDispatcher};
 
 /// Global monotonic sequence counter for event frames (gap detection).
 static EVENT_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -107,12 +107,14 @@ impl ConnState {
     }
 }
 
-async fn handle_socket(
+async fn handle_socket<D>(
     mut socket: WebSocket,
     mut rx: broadcast::Receiver<SessionEvent>,
-    dispatcher: RpcDispatcher,
+    dispatcher: D,
     state_version: Arc<AtomicU64>,
-) {
+) where
+    D: RpcDispatch,
+{
     let mut conn = ConnState::new();
 
     loop {
@@ -186,12 +188,15 @@ async fn handle_socket(
 }
 
 /// Process a single inbound text message and optionally produce a reply.
-pub async fn handle_text_message(
+pub async fn handle_text_message<D>(
     text: &str,
     conn: &mut ConnState,
-    dispatcher: &RpcDispatcher,
+    dispatcher: &D,
     state_version: &Arc<AtomicU64>,
-) -> Option<String> {
+) -> Option<String>
+where
+    D: RpcDispatch,
+{
     // Try to parse as an inbound frame.
     let frame: InboundFrame = match serde_json::from_str(text) {
         Ok(f) => f,
@@ -389,6 +394,32 @@ mod tests {
     use super::*;
     use serde_json::Value as JsonValue;
 
+    struct StubDispatcher {
+        result: Result<Value, crate::ws_rpc::RpcError>,
+    }
+
+    #[async_trait::async_trait]
+    impl RpcDispatch for StubDispatcher {
+        async fn dispatch(&self, _method: &str, _params: Value) -> Result<Value, crate::ws_rpc::RpcError> {
+            self.result.clone()
+        }
+    }
+
+    fn ok_dispatcher(payload: Value) -> StubDispatcher {
+        StubDispatcher {
+            result: Ok(payload),
+        }
+    }
+
+    fn err_dispatcher(code: &str, message: &str) -> StubDispatcher {
+        StubDispatcher {
+            result: Err(crate::ws_rpc::RpcError {
+                code: code.to_string(),
+                message: message.to_string(),
+            }),
+        }
+    }
+
     #[test]
     fn encode_res_includes_state_version() {
         let encoded = encode_res("abc", true, Some(json!({"ok": true})), None, 7);
@@ -418,5 +449,72 @@ mod tests {
         conn.subscribed_sessions.clear();
         conn.subscribed_events.insert("turn_completed".to_string());
         assert!(conn.subscribes_to(&event));
+    }
+
+    #[tokio::test]
+    async fn subscribe_req_updates_connection_state_and_returns_ack() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({"ignored": true}));
+        let state_version = Arc::new(AtomicU64::new(41));
+
+        let reply = handle_text_message(
+            r#"{"type":"req","id":"1","method":"subscribe","params":{"session_id":"sess-1","event":"turn_completed"}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["type"], "res");
+        assert_eq!(decoded["id"], "1");
+        assert_eq!(decoded["ok"], true);
+        assert_eq!(decoded["payload"]["subscribed"]["session_id"], "sess-1");
+        assert_eq!(decoded["payload"]["subscribed"]["event"], "turn_completed");
+        assert!(conn.subscribed_sessions.contains("sess-1"));
+        assert!(conn.subscribed_events.contains("turn_completed"));
+    }
+
+    #[tokio::test]
+    async fn rpc_error_is_encoded_as_error_response() {
+        let mut conn = ConnState::new();
+        let dispatcher = err_dispatcher("method_not_found", "unknown method: nope");
+        let state_version = Arc::new(AtomicU64::new(9));
+
+        let reply = handle_text_message(
+            r#"{"type":"req","id":"2","method":"nope","params":{}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["type"], "res");
+        assert_eq!(decoded["id"], "2");
+        assert_eq!(decoded["ok"], false);
+        assert_eq!(decoded["error"]["code"], "method_not_found");
+        assert_eq!(decoded["error"]["message"], "unknown method: nope");
+        assert_eq!(decoded["stateVersion"], 9);
+    }
+
+    #[tokio::test]
+    async fn malformed_frame_returns_parse_error_response() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({}));
+        let state_version = Arc::new(AtomicU64::new(5));
+
+        let reply = handle_text_message("not-json", &mut conn, &dispatcher, &state_version)
+            .await
+            .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["type"], "res");
+        assert_eq!(decoded["id"], "unknown");
+        assert_eq!(decoded["ok"], false);
+        assert_eq!(decoded["error"]["code"], "parse_error");
+        assert_eq!(decoded["stateVersion"], 5);
     }
 }

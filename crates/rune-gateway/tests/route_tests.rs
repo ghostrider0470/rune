@@ -751,6 +751,83 @@ enabled: true
 }
 
 #[tokio::test]
+async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_runtime::LaneQueue;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let lane_queue = Arc::new(LaneQueue::with_capacities(2, 3, 4));
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model")
+        .with_lane_queue(lane_queue),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let payload = dispatcher
+        .dispatch("runtime.lanes", serde_json::json!({}))
+        .await
+        .unwrap();
+
+    assert_eq!(payload["enabled"], true);
+    assert_eq!(payload["lanes"]["main"]["active"], 0);
+    assert_eq!(payload["lanes"]["main"]["capacity"], 2);
+    assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
+    assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+}
+
+#[tokio::test]
 async fn ws_rpc_health_reports_session_count() {
     use rune_gateway::ws_rpc::RpcDispatcher;
 

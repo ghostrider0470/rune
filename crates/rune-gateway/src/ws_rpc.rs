@@ -16,7 +16,7 @@ use crate::state::AppState;
 // ── Error type ───────────────────────────────────────────────────────────────
 
 /// Error returned from an RPC method.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RpcError {
     pub code: String,
     pub message: String,
@@ -59,16 +59,25 @@ pub struct RpcDispatcher {
     state: AppState,
 }
 
+#[async_trait::async_trait]
+pub trait RpcDispatch: Send + Sync {
+    async fn dispatch(&self, method: &str, params: Value) -> Result<Value, RpcError>;
+}
+
 impl RpcDispatcher {
     pub fn new(state: AppState) -> Self {
         Self { state }
+    }
+
+    pub async fn dispatch(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        self.dispatch_impl(method, params).await
     }
 
     /// Dispatch a method call to the appropriate handler.
     ///
     /// `subscribe` and `unsubscribe` are handled at the connection level in
     /// `ws.rs`; they are not routed here.
-    pub async fn dispatch(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+    async fn dispatch_impl(&self, method: &str, params: Value) -> Result<Value, RpcError> {
         match method {
             "session.list" => self.session_list(params).await,
             "session.get" => self.session_get(params).await,
@@ -78,6 +87,7 @@ impl RpcDispatcher {
             "session.status" => self.session_status(params).await,
             "cron.list" => self.cron_list(params).await,
             "cron.status" => self.cron_status(params).await,
+            "runtime.lanes" => self.runtime_lanes().await,
             "skills.list" => self.skills_list().await,
             "skills.reload" => self.skills_reload().await,
             "skills.enable" => self.skills_enable(params).await,
@@ -475,6 +485,29 @@ impl RpcDispatcher {
 
     // ── System methods ───────────────────────────────────────────────────
 
+    /// Current runtime lane utilisation and capacities.
+    async fn runtime_lanes(&self) -> Result<Value, RpcError> {
+        let lane_stats = self.state.turn_executor.lane_stats().map(|stats| json!({
+            "main": {
+                "active": stats.main_active,
+                "capacity": stats.main_capacity,
+            },
+            "subagent": {
+                "active": stats.subagent_active,
+                "capacity": stats.subagent_capacity,
+            },
+            "cron": {
+                "active": stats.cron_active,
+                "capacity": stats.cron_capacity,
+            },
+        }));
+
+        Ok(json!({
+            "enabled": lane_stats.is_some(),
+            "lanes": lane_stats,
+        }))
+    }
+
     /// Health check.
     async fn health(&self) -> Result<Value, RpcError> {
         let sessions = self
@@ -536,6 +569,13 @@ impl RpcDispatcher {
                 "logs_dir": self.state.config.paths.logs_dir.display().to_string(),
             },
         }))
+    }
+}
+
+#[async_trait::async_trait]
+impl RpcDispatch for RpcDispatcher {
+    async fn dispatch(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        self.dispatch_impl(method, params).await
     }
 }
 
