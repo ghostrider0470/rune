@@ -137,7 +137,11 @@ async fn handle_socket(
                 match event {
                     Ok(ev) if conn.subscribes_to(&ev) => {
                         let seq = EVENT_SEQ.fetch_add(1, Ordering::Relaxed);
-                        let current_state_version = state_version.load(Ordering::Relaxed);
+                        let current_state_version = if ev.state_changed {
+                            state_version.fetch_add(1, Ordering::Relaxed) + 1
+                        } else {
+                            state_version.load(Ordering::Relaxed)
+                        };
                         let frame = EventFrame {
                             frame_type: "event",
                             event: ev.kind.clone(),
@@ -394,5 +398,25 @@ mod tests {
         assert_eq!(decoded["ok"], true);
         assert_eq!(decoded["stateVersion"], 7);
         assert_eq!(decoded["payload"]["ok"], true);
+    }
+
+    #[test]
+    fn conn_state_matches_event_filters() {
+        let mut conn = ConnState::new();
+        let event = SessionEvent {
+            session_id: "sess-1".to_string(),
+            kind: "turn_completed".to_string(),
+            payload: json!({"ok": true}),
+            state_changed: true,
+        };
+
+        assert!(!conn.subscribes_to(&event));
+
+        conn.subscribed_sessions.insert("sess-1".to_string());
+        assert!(conn.subscribes_to(&event));
+
+        conn.subscribed_sessions.clear();
+        conn.subscribed_events.insert("turn_completed".to_string());
+        assert!(conn.subscribes_to(&event));
     }
 }

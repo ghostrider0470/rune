@@ -6,7 +6,7 @@ use std::time::Instant;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -18,10 +18,13 @@ use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, Schedule, SessionTarget,
 };
+use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
+use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
 use serde_json::Value;
 
 use crate::error::GatewayError;
+use crate::pairing::{PairedDevice, PairingError, PairingRequest};
 use crate::state::{AppState, SessionEvent};
 use crate::{SupervisorDeps, run_job_lifecycle};
 
@@ -70,6 +73,8 @@ pub struct StatusResponse {
     pub cron_job_count: usize,
     pub ws_subscribers: usize,
     pub uptime_seconds: u64,
+    pub lane_stats: Option<LaneStatsResponse>,
+    pub skills: SkillStatusResponse,
     pub config_paths: StatusPaths,
 }
 
@@ -80,6 +85,23 @@ pub struct StatusPaths {
     pub logs_dir: String,
 }
 
+#[derive(Serialize)]
+pub struct LaneStatsResponse {
+    pub main_active: usize,
+    pub main_capacity: usize,
+    pub subagent_active: usize,
+    pub subagent_capacity: usize,
+    pub cron_active: usize,
+    pub cron_capacity: usize,
+}
+
+#[derive(Serialize)]
+pub struct SkillStatusResponse {
+    pub loaded: usize,
+    pub enabled: usize,
+    pub skills_dir: String,
+}
+
 /// Daemon status with useful runtime metadata.
 pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, GatewayError> {
     let sessions = state
@@ -88,6 +110,9 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
     let cron_job_count = state.scheduler.list_jobs(true).await.len();
+
+    let skills = state.skill_registry.list().await;
+    let lane_stats = state.turn_executor.lane_stats().map(lane_stats_response);
 
     Ok(Json(StatusResponse {
         status: "running",
@@ -108,6 +133,12 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
         cron_job_count,
         ws_subscribers: state.event_tx.receiver_count(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
+        lane_stats,
+        skills: SkillStatusResponse {
+            loaded: skills.len(),
+            enabled: skills.iter().filter(|skill| skill.enabled).count(),
+            skills_dir: state.skill_loader.skills_dir().display().to_string(),
+        },
         config_paths: StatusPaths {
             sessions_dir: state.config.paths.sessions_dir.display().to_string(),
             memory_dir: state.config.paths.memory_dir.display().to_string(),
@@ -166,8 +197,54 @@ pub struct DashboardDiagnosticsResponse {
     pub items: Vec<DashboardDiagnosticItem>,
 }
 
-pub async fn dashboard_page() -> Html<&'static str> {
-    Html(DASHBOARD_HTML)
+// SPA serving — embedded UI dist
+use include_dir::{Dir, include_dir};
+
+static UI_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../ui/dist");
+
+pub async fn spa_index() -> Response {
+    spa_response_for_path("")
+}
+
+pub async fn spa_handler(uri: axum::http::Uri) -> Response {
+    spa_response_for_path(uri.path().trim_start_matches('/'))
+}
+
+fn spa_response_for_path(path: &str) -> Response {
+    // Try to serve the exact file first
+    if !path.is_empty() {
+        if let Some(file) = UI_DIST.get_file(path) {
+            let content_type = match path.rsplit('.').next() {
+                Some("html") => "text/html; charset=utf-8",
+                Some("js") => "application/javascript; charset=utf-8",
+                Some("css") => "text/css; charset=utf-8",
+                Some("svg") => "image/svg+xml",
+                Some("png") => "image/png",
+                Some("ico") => "image/x-icon",
+                Some("json") => "application/json",
+                Some("woff2") => "font/woff2",
+                Some("woff") => "font/woff",
+                _ => "application/octet-stream",
+            };
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, content_type)],
+                file.contents(),
+            )
+                .into_response();
+        }
+    }
+
+    // Fall back to index.html for client-side routing
+    match UI_DIST.get_file("index.html") {
+        Some(index) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            index.contents(),
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "UI not built").into_response(),
+    }
 }
 
 pub async fn branded_asset(Path(path): Path<String>) -> Result<Response, GatewayError> {
@@ -194,7 +271,9 @@ pub async fn branded_asset(Path(path): Path<String>) -> Result<Response, Gateway
             include_bytes!("../../../assets/rune-logo-wordmark.svg"),
         ),
         _ => {
-            return Err(GatewayError::AssetNotFound(path));
+            // Try serving from embedded UI dist (Vite-built assets)
+            let dist_path = format!("assets/{}", path);
+            return Ok(spa_response_for_path(&dist_path));
         }
     };
 
@@ -317,7 +396,7 @@ pub struct ActionResponse {
     pub message: String,
 }
 
-/// `POST /gateway/start` — parity placeholder for CLI/gateway contract alignment.
+/// `POST /gateway/start` — acknowledges the control-plane request in the current single-process gateway model.
 pub async fn gateway_start() -> Json<ActionResponse> {
     Json(ActionResponse {
         success: true,
@@ -325,7 +404,7 @@ pub async fn gateway_start() -> Json<ActionResponse> {
     })
 }
 
-/// `POST /gateway/stop` — parity placeholder for CLI/gateway contract alignment.
+/// `POST /gateway/stop` — acknowledges the control-plane request in the current single-process gateway model.
 pub async fn gateway_stop() -> Json<ActionResponse> {
     Json(ActionResponse {
         success: true,
@@ -333,7 +412,7 @@ pub async fn gateway_stop() -> Json<ActionResponse> {
     })
 }
 
-/// `POST /gateway/restart` — parity placeholder for CLI/gateway contract alignment.
+/// `POST /gateway/restart` — acknowledges the control-plane request in the current single-process gateway model.
 pub async fn gateway_restart() -> Json<ActionResponse> {
     Json(ActionResponse {
         success: true,
@@ -615,6 +694,7 @@ pub async fn cron_run(
             "status": status,
             "output": output,
         }),
+        state_changed: true,
     });
 
     Ok(Json(CronMutationResponse {
@@ -652,6 +732,7 @@ pub async fn cron_wake(
             "mode": mode,
             "contextMessages": body.context_messages,
         }),
+        state_changed: false,
     });
 
     Ok(Json(CronWakeResponse {
@@ -798,6 +879,7 @@ pub async fn create_session(
             "kind": row.kind,
             "status": row.status,
         }),
+        state_changed: true,
     });
 
     info!(session_id = %row.id, "session created");
@@ -984,6 +1066,85 @@ pub async fn get_session_status(
     }))
 }
 
+/// `PATCH /sessions/{id}` — update session metadata fields used by operator surfaces.
+pub async fn patch_session(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PatchSessionRequest>,
+) -> Result<Json<SessionResponse>, GatewayError> {
+    let patch = serde_json::json!({
+        "label": body.label,
+        "thinking_level": body.thinking_level,
+        "verbose": body.verbose,
+        "reasoning": body.reasoning,
+    });
+
+    let row = state
+        .session_engine
+        .patch_metadata(id, patch)
+        .await
+        .map_err(|e| GatewayError::SessionNotFound(e.to_string()))?;
+
+    let turns = state
+        .turn_repo
+        .list_by_session(row.id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let aggregate = aggregate_turns(&turns);
+
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: row.id.to_string(),
+        kind: "session_updated".to_string(),
+        payload: json!({
+            "session_id": row.id,
+            "metadata": row.metadata,
+        }),
+        state_changed: true,
+    });
+
+    Ok(Json(SessionResponse {
+        id: row.id,
+        kind: row.kind,
+        status: row.status,
+        requester_session_id: row.requester_session_id,
+        channel_ref: row.channel_ref,
+        created_at: row.created_at.to_rfc3339(),
+        updated_at: row.updated_at.to_rfc3339(),
+        turn_count: aggregate.turn_count,
+        latest_model: aggregate.latest_model,
+        usage_prompt_tokens: aggregate.usage_prompt_tokens,
+        usage_completion_tokens: aggregate.usage_completion_tokens,
+        last_turn_started_at: aggregate.last_turn_started_at,
+        last_turn_ended_at: aggregate.last_turn_ended_at,
+    }))
+}
+
+/// `DELETE /sessions/{id}` — delete session and transcript history.
+pub async fn delete_session(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    state
+        .session_engine
+        .delete_session(id)
+        .await
+        .map_err(|e| GatewayError::SessionNotFound(e.to_string()))?;
+
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: id.to_string(),
+        kind: "session_deleted".to_string(),
+        payload: json!({
+            "session_id": id,
+        }),
+        state_changed: true,
+    });
+
+    Ok(Json(ActionResponse {
+        success: true,
+        message: format!("session {id} deleted"),
+    }))
+}
+
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /sessions/{id}/messages`.
@@ -991,6 +1152,14 @@ pub async fn get_session_status(
 pub struct SendMessageRequest {
     pub content: String,
     pub model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PatchSessionRequest {
+    pub label: Option<String>,
+    pub thinking_level: Option<String>,
+    pub verbose: Option<bool>,
+    pub reasoning: Option<String>,
 }
 
 /// Response after processing a message.
@@ -1056,6 +1225,7 @@ pub async fn send_message(
             "prompt_tokens": usage.prompt_tokens,
             "completion_tokens": usage.completion_tokens,
         }),
+        state_changed: true,
     });
 
     info!(session_id = %session_id, turn_id = %turn_row.id, "message processed");
@@ -1347,954 +1517,35 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
     }
 }
 
-const DASHBOARD_HTML: &str = r##"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="/assets/rune-logo-favicon.svg" type="image/svg+xml">
-  <title>Rune Operator Dashboard</title>
-  <style>
-    :root {
-      --bg: #f5f7fb;
-      --bg-soft: #eef3fb;
-      --panel: rgba(255, 255, 255, 0.82);
-      --panel-strong: rgba(255, 255, 255, 0.94);
-      --panel-alt: rgba(247, 250, 255, 0.92);
-      --ink: #1b2942;
-      --text-strong: #101c33;
-      --muted: #61718b;
-      --line: rgba(102, 123, 159, 0.18);
-      --line-strong: rgba(88, 108, 145, 0.28);
-      --accent: #ff8c61;
-      --accent-strong: #ff6b79;
-      --accent-soft: rgba(255, 140, 97, 0.16);
-      --violet: #8d7dff;
-      --violet-soft: rgba(141, 125, 255, 0.14);
-      --teal: #2fb6b0;
-      --teal-soft: rgba(47, 182, 176, 0.14);
-      --warn: #d98f1f;
-      --warn-soft: rgba(217, 143, 31, 0.14);
-      --danger: #df5e67;
-      --danger-soft: rgba(223, 94, 103, 0.14);
-      --ok: #249f97;
-      --ok-soft: rgba(36, 159, 151, 0.14);
-      --shadow-lg: 0 30px 80px rgba(24, 43, 77, 0.13);
-      --shadow-md: 0 18px 48px rgba(24, 43, 77, 0.08);
-      --radius-xl: 32px;
-      --radius-lg: 24px;
-      --radius-md: 18px;
-      --space-2: 0.5rem;
-      --space-3: 0.75rem;
-      --space-4: 1rem;
-      --space-5: 1.25rem;
-      --space-6: 1.5rem;
-      --space-8: 2rem;
-      --space-10: 2.5rem;
-      --space-12: 3rem;
-      --space-16: 4rem;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: "Avenir Next", "IBM Plex Sans", "Segoe UI", sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at top left, rgba(47, 182, 176, 0.18), transparent 22%),
-        radial-gradient(circle at 88% 8%, rgba(255, 107, 121, 0.2), transparent 22%),
-        radial-gradient(circle at 80% 28%, rgba(141, 125, 255, 0.16), transparent 20%),
-        linear-gradient(180deg, #fcfdff 0%, var(--bg) 48%, #eef4fb 100%);
-    }
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background-image:
-        linear-gradient(rgba(115, 138, 177, 0.08) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(115, 138, 177, 0.08) 1px, transparent 1px);
-      background-size: 32px 32px;
-      mask-image: radial-gradient(circle at center, black 32%, transparent 82%);
-      opacity: 0.4;
-    }
-    .shell {
-      position: relative;
-      max-width: 1360px;
-      margin: 0 auto;
-      padding: 24px 16px 64px;
-    }
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--space-4);
-      margin-bottom: var(--space-6);
-      padding: 0 var(--space-2);
-    }
-    .topbar-note {
-      color: var(--muted);
-      font-size: 13px;
-      letter-spacing: 0.02em;
-    }
-    .topbar-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(141, 125, 255, 0.22);
-      background: rgba(255, 255, 255, 0.72);
-      color: var(--text-strong);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      box-shadow: var(--shadow-md);
-    }
-    .hero {
-      position: relative;
-      overflow: hidden;
-      display: grid;
-      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.95fr);
-      gap: var(--space-6);
-      align-items: stretch;
-      margin-bottom: var(--space-8);
-      padding: var(--space-8);
-      border: 1px solid rgba(255, 255, 255, 0.72);
-      border-radius: var(--radius-xl);
-      background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(249, 251, 255, 0.92)),
-        linear-gradient(140deg, rgba(255, 140, 97, 0.18), rgba(141, 125, 255, 0.12) 58%, rgba(47, 182, 176, 0.14));
-      box-shadow: var(--shadow-lg);
-      backdrop-filter: blur(22px);
-    }
-    .hero::after {
-      content: "";
-      position: absolute;
-      inset: auto -60px -110px auto;
-      width: 280px;
-      height: 280px;
-      border-radius: 999px;
-      background: radial-gradient(circle, rgba(255, 140, 97, 0.26), transparent 68%);
-      pointer-events: none;
-    }
-    .hero::before {
-      content: "";
-      position: absolute;
-      inset: -35% auto auto -10%;
-      width: 380px;
-      height: 380px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(141, 125, 255, 0.18), transparent 70%);
-      pointer-events: none;
-    }
-    .hero-copy {
-      position: relative;
-      z-index: 1;
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-6);
-      min-width: 0;
-    }
-    .brand-lockup {
-      display: flex;
-      align-items: center;
-      gap: var(--space-4);
-      flex-wrap: wrap;
-    }
-    .brand-mark {
-      width: 62px;
-      height: 62px;
-      border-radius: 20px;
-      padding: 13px;
-      background: linear-gradient(180deg, rgba(255, 140, 97, 0.12), rgba(141, 125, 255, 0.06));
-      border: 1px solid rgba(255, 140, 97, 0.18);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
-    }
-    .brand-wordmark {
-      height: 32px;
-      width: auto;
-      display: block;
-    }
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      width: fit-content;
-      padding: 9px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(47, 182, 176, 0.18);
-      background: rgba(47, 182, 176, 0.1);
-      color: #1d7f7b;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    .hero-heading {
-      display: grid;
-      gap: var(--space-4);
-      max-width: 52rem;
-    }
-    h1 {
-      margin: 0;
-      color: var(--text-strong);
-      font-size: clamp(2.45rem, 4vw, 4.45rem);
-      line-height: 0.96;
-      letter-spacing: -0.065em;
-      max-width: 11ch;
-    }
-    .subhead {
-      margin: 0;
-      font-size: clamp(1rem, 1.25vw, 1.125rem);
-      line-height: 1.75;
-      color: var(--muted);
-      max-width: 62ch;
-    }
-    .hero-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    .pill {
-      border: 1px solid rgba(255, 255, 255, 0.72);
-      background: rgba(255, 255, 255, 0.76);
-      border-radius: 999px;
-      padding: 10px 14px;
-      font-size: 12px;
-      color: var(--muted);
-      box-shadow: 0 10px 25px rgba(32, 54, 92, 0.06);
-    }
-    .pill strong {
-      color: var(--text-strong);
-      font-weight: 700;
-    }
-    .hero-stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
-    }
-    .hero-stat {
-      padding: 16px 18px;
-      border-radius: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.76);
-      background: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(247,250,255,0.96));
-      box-shadow: 0 16px 32px rgba(34, 58, 98, 0.07);
-    }
-    .hero-stat label {
-      display: block;
-      margin-bottom: 8px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.09em;
-      text-transform: uppercase;
-    }
-    .hero-stat strong {
-      color: var(--text-strong);
-      font-size: 1rem;
-      line-height: 1.45;
-      word-break: break-word;
-    }
-    .hero-visual {
-      position: relative;
-      min-height: 100%;
-      border-radius: 28px;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.82);
-      background:
-        linear-gradient(180deg, rgba(17, 28, 50, 0.1), rgba(17, 28, 50, 0.5)),
-        linear-gradient(135deg, rgba(255, 140, 97, 0.16), rgba(141, 125, 255, 0.14));
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
-    }
-    .hero-visual img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: center;
-      filter: saturate(1.05) contrast(1.04);
-      transform: scale(1.01);
-    }
-    .hero-overlay {
-      position: absolute;
-      inset: auto 20px 20px 20px;
-      display: grid;
-      gap: 14px;
-      padding: 20px;
-      border-radius: 22px;
-      background: linear-gradient(180deg, rgba(15, 25, 45, 0.82), rgba(20, 32, 56, 0.92));
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(14px);
-    }
-    .hero-overlay-title {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: #ffc9bb;
-    }
-    .hero-overlay-value {
-      font-size: clamp(1.8rem, 2.2vw, 2.5rem);
-      font-weight: 700;
-      line-height: 1;
-      color: #fff9ff;
-    }
-    .hero-overlay-copy {
-      color: rgba(232, 239, 255, 0.76);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .hero-overlay-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-    .overlay-chip {
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      color: rgba(240, 245, 255, 0.82);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .overlay-chip strong {
-      display: block;
-      color: #fff;
-      font-size: 13px;
-      margin-top: 2px;
-    }
-    .section-heading {
-      display: flex;
-      justify-content: space-between;
-      align-items: end;
-      gap: var(--space-4);
-      margin-bottom: var(--space-5);
-      padding: 0 var(--space-2);
-    }
-    .section-label {
-      margin: 0 0 8px;
-      color: #8c6bff;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-    .section-heading h2 {
-      margin: 0;
-      font-size: clamp(1.7rem, 2vw, 2.25rem);
-      letter-spacing: -0.05em;
-      color: var(--text-strong);
-    }
-    .section-heading p {
-      margin: 10px 0 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.7;
-      max-width: 56ch;
-    }
-    .grid {
-      display: grid;
-      gap: var(--space-5);
-      grid-template-columns: repeat(12, minmax(0, 1fr));
-    }
-    .card {
-      grid-column: span 12;
-      border: 1px solid rgba(255, 255, 255, 0.86);
-      background: var(--panel);
-      border-radius: var(--radius-lg);
-      padding: 24px;
-      box-shadow: var(--shadow-md);
-      backdrop-filter: blur(18px);
-    }
-    .card-head {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-      justify-content: space-between;
-      margin-bottom: 20px;
-    }
-    .card h2 {
-      margin: 0 0 8px;
-      color: var(--text-strong);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }
-    .card-copy {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.7;
-    }
-    .stats {
-      display: grid;
-      gap: 16px;
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    }
-    .stat {
-      border: 1px solid rgba(106, 127, 163, 0.14);
-      border-radius: var(--radius-md);
-      padding: 18px;
-      background:
-        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,255,0.88)),
-        var(--panel-strong);
-      min-height: 136px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
-    }
-    .stat label {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 10px;
-    }
-    .stat strong {
-      font-size: clamp(1.55rem, 2.5vw, 2.05rem);
-      line-height: 1.05;
-      color: var(--text-strong);
-      letter-spacing: -0.04em;
-      word-break: break-word;
-    }
-    .stat small {
-      display: block;
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    .stack {
-      display: grid;
-      gap: 12px;
-    }
-    .surface {
-      border-radius: 20px;
-      border: 1px solid rgba(106, 127, 163, 0.14);
-      background: var(--panel-alt);
-      overflow: hidden;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.76);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 14px;
-    }
-    th, td {
-      text-align: left;
-      padding: 16px 18px;
-      border-top: 1px solid rgba(106, 127, 163, 0.12);
-      vertical-align: top;
-    }
-    th {
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      border-top: none;
-      padding-top: 16px;
-      padding-bottom: 12px;
-    }
-    td {
-      color: var(--ink);
-    }
-    tr:hover td {
-      background: rgba(141, 125, 255, 0.04);
-    }
-    .model-name,
-    .session-id {
-      display: grid;
-      gap: 6px;
-    }
-    .model-name strong,
-    .session-id strong {
-      color: var(--text-strong);
-      font-size: 14px;
-      font-weight: 600;
-    }
-    .table-subtle {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    .chip-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      width: fit-content;
-      border-radius: 999px;
-      padding: 6px 11px;
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      border: 1px solid transparent;
-    }
-    .chip.status-running,
-    .chip.status-ready,
-    .chip.status-completed {
-      background: var(--ok-soft);
-      color: #19766f;
-      border-color: rgba(36, 159, 151, 0.18);
-    }
-    .chip.status-failed,
-    .chip.status-error,
-    .chip.status-cancelled {
-      background: var(--danger-soft);
-      color: #9d3340;
-      border-color: rgba(223, 94, 103, 0.18);
-    }
-    .chip.status-waiting,
-    .chip.status-pending,
-    .chip.status-tool_executing {
-      background: var(--warn-soft);
-      color: #8f5a0a;
-      border-color: rgba(217, 143, 31, 0.18);
-    }
-    .chip.kind {
-      background: rgba(141, 125, 255, 0.08);
-      color: #5340cd;
-      border-color: rgba(141, 125, 255, 0.14);
-      text-transform: capitalize;
-    }
-    code {
-      font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
-      font-size: 12px;
-      color: #824d56;
-      background: rgba(255, 140, 97, 0.08);
-      border: 1px solid rgba(255, 140, 97, 0.12);
-      border-radius: 10px;
-      padding: 2px 7px;
-      word-break: break-all;
-    }
-    .diag {
-      display: grid;
-      gap: 14px;
-    }
-    .diag-item {
-      border-radius: 20px;
-      border: 1px solid rgba(106, 127, 163, 0.14);
-      padding: 18px;
-      background: var(--panel-strong);
-    }
-    .diag-item.info { background: rgba(255,255,255,0.78); }
-    .diag-item.warn { background: rgba(255, 244, 226, 0.92); border-color: rgba(217, 143, 31, 0.26); }
-    .diag-item.error { background: rgba(255, 238, 239, 0.94); border-color: rgba(223, 94, 103, 0.26); }
-    .diag-head {
-      display: flex;
-      gap: 8px;
-      justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 8px;
-      font-family: "IBM Plex Mono", monospace;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .diag-message {
-      color: var(--text-strong);
-      line-height: 1.6;
-    }
-    .empty, .loading {
-      color: var(--muted);
-      padding: 18px 16px;
-    }
-    .status-rail {
-      display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    }
-    .rail-item {
-      border: 1px solid rgba(255, 255, 255, 0.82);
-      border-radius: 20px;
-      padding: 16px 18px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.84), rgba(247,250,255,0.98));
-      box-shadow: 0 18px 34px rgba(31, 50, 86, 0.06);
-    }
-    .rail-item span {
-      display: block;
-      margin-bottom: 8px;
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-    .rail-item strong {
-      color: var(--text-strong);
-      font-size: 15px;
-      line-height: 1.5;
-    }
-    .footer-note {
-      margin-top: 18px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.6;
-    }
-    @media (min-width: 900px) {
-      .summary { grid-column: span 12; }
-      .models { grid-column: span 4; }
-      .sessions { grid-column: span 8; }
-      .diagnostics { grid-column: span 12; }
-    }
-    @media (max-width: 980px) {
-      .topbar,
-      .section-heading {
-        padding: 0;
-      }
-      .hero {
-        grid-template-columns: 1fr;
-      }
-      .hero-visual {
-        order: -1;
-        min-height: 300px;
-      }
-    }
-    @media (max-width: 720px) {
-      .shell {
-        padding: 16px 14px 32px;
-      }
-      .topbar {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      .hero,
-      .card {
-        padding: 18px;
-      }
-      .brand-lockup {
-        align-items: flex-start;
-      }
-      .brand-wordmark {
-        height: 28px;
-      }
-      h1 {
-        max-width: 12ch;
-      }
-      .hero-stats,
-      .status-rail,
-      .hero-overlay-grid {
-        grid-template-columns: 1fr;
-      }
-      .section-heading {
-        align-items: flex-start;
-      }
-      .surface {
-        overflow-x: auto;
-      }
-      table {
-        min-width: 680px;
-      }
-      .hero-overlay {
-        inset: auto 12px 12px 12px;
-      }
-    }
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <div class="topbar">
-      <div class="topbar-note">Horizon-inspired operator surface for Rune's existing dashboard routes.</div>
-      <div class="topbar-badge">Dashboard Theme Refresh</div>
-    </div>
-    <section class="hero">
-      <div class="hero-copy">
-        <div class="eyebrow">Local Operator Surface</div>
-        <div class="brand-lockup">
-          <img class="brand-mark" src="/assets/rune-logo-icon.svg" alt="Rune icon">
-          <img class="brand-wordmark" src="/assets/rune-logo-wordmark-dark.svg" alt="Rune">
-        </div>
-        <div class="hero-heading">
-          <h1>Operate sessions, models, and runtime health with actual signal.</h1>
-          <p class="subhead">Local-first control plane for gateway status, configured models, recent sessions, and diagnostics. Same backend routes, cleaner hierarchy, better scanability, and brand-consistent presentation.</p>
-        </div>
-        <div class="hero-meta">
-          <div class="pill">Route <strong>/dashboard</strong></div>
-          <div class="pill">Mirror <strong>/ui</strong></div>
-          <div class="pill">Data <strong>/api/dashboard/*</strong></div>
-        </div>
-        <div id="status-rail" class="status-rail">
-          <div class="hero-stat"><label>Gateway</label><strong>Loading…</strong></div>
-          <div class="hero-stat"><label>Bind</label><strong>Loading…</strong></div>
-          <div class="hero-stat"><label>Channels</label><strong>Loading…</strong></div>
-          <div class="hero-stat"><label>Auth</label><strong>Loading…</strong></div>
-        </div>
-      </div>
-      <aside class="hero-visual" aria-hidden="true">
-        <img src="/assets/hero.png" alt="">
-        <div class="hero-overlay">
-          <div class="hero-overlay-title">Rune Operator</div>
-          <div id="hero-session-count" class="hero-overlay-value">Loading…</div>
-          <div class="hero-overlay-copy">Snapshot of live operator context across runtime sessions, model routing, channel availability, and diagnostic posture.</div>
-          <div class="hero-overlay-grid">
-            <div class="overlay-chip">Theme<strong>Horizon-style polish</strong></div>
-            <div class="overlay-chip">Surface<strong>Dashboard + /ui mirror</strong></div>
-          </div>
-        </div>
-      </aside>
-    </section>
+fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
+    LaneStatsResponse {
+        main_active: stats.main_active,
+        main_capacity: stats.main_capacity,
+        subagent_active: stats.subagent_active,
+        subagent_capacity: stats.subagent_capacity,
+        cron_active: stats.cron_active,
+        cron_capacity: stats.cron_capacity,
+    }
+}
 
-    <div class="section-heading">
-      <div>
-        <p class="section-label">Overview</p>
-        <h2>Operational clarity without changing the backend surface.</h2>
-        <p>The dashboard keeps the same live JSON sources and runtime functionality, but the hierarchy now reads like a polished admin surface instead of a raw internal panel.</p>
-      </div>
-    </div>
-
-    <section class="grid">
-      <article class="card summary">
-        <div class="card-head">
-          <div>
-            <h2>Overview</h2>
-            <p class="card-copy">High-signal system summary for fast operator triage.</p>
-          </div>
-        </div>
-        <div id="summary" class="stats">
-          <div class="loading">Loading summary…</div>
-        </div>
-      </article>
-
-      <article class="card models">
-        <div class="card-head">
-          <div>
-            <h2>Model Inventory</h2>
-            <p class="card-copy">Configured routes and default selection across providers.</p>
-          </div>
-        </div>
-        <div class="stack">
-          <div class="surface">
-          <table>
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th>Provider</th>
-                <th>Kind</th>
-              </tr>
-            </thead>
-            <tbody id="models-body">
-              <tr><td colspan="3" class="loading">Loading models…</td></tr>
-            </tbody>
-          </table>
-          </div>
-        </div>
-      </article>
-
-      <article class="card sessions">
-        <div class="card-head">
-          <div>
-            <h2>Recent Sessions</h2>
-            <p class="card-copy">Current execution state, routing context, and latest activity.</p>
-          </div>
-        </div>
-        <div class="surface">
-        <table>
-          <thead>
-            <tr>
-              <th>Session</th>
-              <th>Kind / Status</th>
-              <th>Channel / Routing</th>
-              <th>Last Activity</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody id="sessions-body">
-            <tr><td colspan="5" class="loading">Loading sessions…</td></tr>
-          </tbody>
-        </table>
-        </div>
-      </article>
-
-      <article class="card diagnostics">
-        <div class="card-head">
-          <div>
-            <h2>Diagnostics</h2>
-            <p class="card-copy">Configuration warnings and runtime signals surfaced by the gateway.</p>
-          </div>
-        </div>
-        <div id="diagnostics" class="diag">
-          <div class="loading">Loading diagnostics…</div>
-        </div>
-        <div class="footer-note">This dashboard is intentionally lightweight and reads from the existing gateway JSON routes, so it stays operational without introducing a separate SPA runtime.</div>
-      </article>
-    </section>
-  </main>
-  <script>
-    function escapeHtml(value) {
-      return String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;");
+fn skill_to_response(skill: Skill) -> SkillResponse {
+    SkillResponse {
+        name: skill.name,
+        description: skill.description,
+        enabled: skill.enabled,
+        source_dir: skill.source_dir.display().to_string(),
+        binary_path: skill.binary_path.map(|path| path.display().to_string()),
     }
+}
 
-    function fmtDate(value) {
-      if (!value) return "n/a";
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-      });
+fn skill_reload_response(summary: SkillScanSummary) -> SkillReloadResponse {
+    SkillReloadResponse {
+        success: true,
+        discovered: summary.discovered,
+        loaded: summary.loaded,
+        removed: summary.removed,
     }
-
-    function fmtDuration(seconds) {
-      if (typeof seconds !== "number") return "n/a";
-      const parts = [];
-      const days = Math.floor(seconds / 86400);
-      const hours = Math.floor((seconds % 86400) / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      if (days) parts.push(days + "d");
-      if (hours) parts.push(hours + "h");
-      parts.push(minutes + "m");
-      return parts.join(" ");
-    }
-
-    function toStatusClass(value) {
-      return String(value || "unknown").toLowerCase().replaceAll(/[^a-z0-9]+/g, "_");
-    }
-
-    function renderStatusRail(summary) {
-      const channels = Array.isArray(summary.channels) && summary.channels.length
-        ? summary.channels.join(", ")
-        : "No channels";
-      document.getElementById("status-rail").innerHTML = [
-        ["Gateway", summary.gateway_status || "unknown"],
-        ["Bind", summary.bind || "n/a"],
-        ["Channels", channels],
-        ["Auth", summary.auth_enabled ? "Bearer protected" : "Open"]
-      ].map(([label, value]) => `
-        <div class="hero-stat">
-          <label>${escapeHtml(label)}</label>
-          <strong>${escapeHtml(value)}</strong>
-        </div>
-      `).join("");
-      document.getElementById("hero-session-count").textContent =
-        `${summary.session_count || 0} active session${summary.session_count === 1 ? "" : "s"}`;
-    }
-
-    async function loadJson(path) {
-      const response = await fetch(path, { headers: { "accept": "application/json" } });
-      if (!response.ok) throw new Error(path + " returned " + response.status);
-      return response.json();
-    }
-
-    function renderSummary(summary) {
-      const root = document.getElementById("summary");
-      const entries = [
-        ["Gateway status", summary.gateway_status, summary.auth_enabled ? "Protected operator access is enabled." : "Auth is disabled for protected routes."],
-        ["Uptime", fmtDuration(summary.uptime_seconds), `Listening on ${summary.bind || "n/a"}`],
-        ["Default model", summary.default_model || "none", `${summary.provider_count || 0} provider${summary.provider_count === 1 ? "" : "s"} configured`],
-        ["Configured models", String(summary.configured_model_count || 0), "Inventory discovered from current model configuration."],
-        ["Sessions", String(summary.session_count || 0), `${summary.ws_subscribers || 0} WebSocket subscriber${summary.ws_subscribers === 1 ? "" : "s"}`],
-        ["Channels", String((summary.channels || []).length), (summary.channels || []).length ? (summary.channels || []).join(", ") : "No channel adapters configured"],
-      ];
-      root.innerHTML = entries.map(([label, value, note]) =>
-        `<div class="stat"><div><label>${escapeHtml(label)}</label><strong>${escapeHtml(value)}</strong></div><small>${escapeHtml(note)}</small></div>`
-      ).join("");
-      renderStatusRail(summary);
-    }
-
-    function renderModels(models) {
-      const body = document.getElementById("models-body");
-      if (!models.length) {
-        body.innerHTML = `<tr><td colspan="3" class="empty">No configured models.</td></tr>`;
-        return;
-      }
-      body.innerHTML = models.map((model) => `
-        <tr>
-          <td>
-            <div class="model-name">
-              <strong>${escapeHtml(model.model_id)}</strong>
-              <div class="table-subtle">${model.is_default ? "Default route" : escapeHtml(model.raw_model || "Mapped model")}</div>
-            </div>
-          </td>
-          <td>${escapeHtml(model.provider_name)}</td>
-          <td><span class="chip kind">${escapeHtml(model.provider_kind || "n/a")}</span></td>
-        </tr>
-      `).join("");
-    }
-
-    function renderSessions(sessions) {
-      const body = document.getElementById("sessions-body");
-      if (!sessions.length) {
-        body.innerHTML = `<tr><td colspan="5" class="empty">No sessions found.</td></tr>`;
-        return;
-      }
-      body.innerHTML = sessions.map((session) => `
-        <tr>
-          <td>
-            <div class="session-id">
-              <strong>${escapeHtml((session.id || "").slice(0, 8))}</strong>
-              <div><code>${escapeHtml(session.id)}</code></div>
-            </div>
-          </td>
-          <td>
-            <div class="chip-row">
-              <span class="chip kind">${escapeHtml(session.kind || "unknown")}</span>
-              <span class="chip status-${toStatusClass(session.status)}">${escapeHtml(session.status || "unknown")}</span>
-            </div>
-          </td>
-          <td>
-            <div>${escapeHtml(session.channel_ref || "n/a")}</div>
-            <div class="table-subtle">${session.routing_ref ? `<code>${escapeHtml(session.routing_ref)}</code>` : "No routing ref"}</div>
-          </td>
-          <td>${escapeHtml(fmtDate(session.last_activity_at))}</td>
-          <td>${escapeHtml(fmtDate(session.created_at))}</td>
-        </tr>
-      `).join("");
-    }
-
-    function renderDiagnostics(data) {
-      const root = document.getElementById("diagnostics");
-      if (!data.items.length) {
-        root.innerHTML = `<div class="diag-item info"><div class="diag-head"><span>INFO · runtime</span><span>now</span></div><div class="diag-message">No diagnostics were raised by the current dashboard probes.</div></div>`;
-        return;
-      }
-      root.innerHTML = data.items.map((item) => `
-        <div class="diag-item ${item.level}">
-          <div class="diag-head">
-            <span>${escapeHtml(String(item.level || "info").toUpperCase())} · ${escapeHtml(item.source || "runtime")}</span>
-            <span>${escapeHtml(fmtDate(item.observed_at))}</span>
-          </div>
-          <div class="diag-message">${escapeHtml(item.message)}</div>
-        </div>
-      `).join("");
-    }
-
-    async function boot() {
-      try {
-        const [summary, models, sessions, diagnostics] = await Promise.all([
-          loadJson("/api/dashboard/summary"),
-          loadJson("/api/dashboard/models"),
-          loadJson("/api/dashboard/sessions"),
-          loadJson("/api/dashboard/diagnostics"),
-        ]);
-        renderSummary(summary);
-        renderModels(models);
-        renderSessions(sessions);
-        renderDiagnostics(diagnostics);
-      } catch (error) {
-        document.getElementById("summary").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
-        document.getElementById("models-body").innerHTML = `<tr><td colspan="3" class="empty">Failed to load models.</td></tr>`;
-        document.getElementById("sessions-body").innerHTML = `<tr><td colspan="5" class="empty">Failed to load sessions.</td></tr>`;
-        document.getElementById("diagnostics").innerHTML = `<div class="empty">Failed to load diagnostics.</div>`;
-        document.getElementById("status-rail").innerHTML = `<div class="rail-item"><span>Gateway</span><strong>Unavailable</strong></div>`;
-        document.getElementById("hero-session-count").textContent = "Dashboard unavailable";
-      }
-    }
-
-    boot();
-  </script>
-</body>
-</html>
-"##;
+}
 
 // ── Approvals ─────────────────────────────────────────────────────────
 
@@ -2324,6 +1575,29 @@ pub struct ApprovalPolicyResponse {
     pub tool_name: String,
     pub decision: String,
     pub decided_at: String,
+}
+
+/// Operator-facing summary for a background process handle.
+#[derive(Serialize)]
+pub struct ProcessResponse {
+    pub process_id: String,
+    pub running: bool,
+    pub exit_code: Option<i32>,
+    pub live: bool,
+    pub durable_status: Option<String>,
+    pub persisted: Option<PersistedProcessResponse>,
+    pub note: Option<String>,
+}
+
+/// Restart-visible persisted metadata for a background process handle.
+#[derive(Serialize)]
+pub struct PersistedProcessResponse {
+    pub tool_call_id: String,
+    pub tool_execution_id: String,
+    pub command: String,
+    pub workdir: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
 }
 
 /// Request body for `POST /approvals`.
@@ -2542,6 +1816,89 @@ pub async fn clear_approval_policy(
     }
 }
 
+fn persisted_process_to_response(persisted: PersistedProcessInfo) -> PersistedProcessResponse {
+    PersistedProcessResponse {
+        tool_call_id: persisted.tool_call_id,
+        tool_execution_id: persisted.tool_execution_id,
+        command: persisted.command,
+        workdir: persisted.workdir,
+        started_at: persisted.started_at,
+        ended_at: persisted.ended_at,
+    }
+}
+
+fn process_to_response(process: ProcessInfo) -> ProcessResponse {
+    ProcessResponse {
+        process_id: process.process_id,
+        running: process.running,
+        exit_code: process.exit_code,
+        live: process.live,
+        durable_status: process.durable_status,
+        persisted: process.persisted.map(persisted_process_to_response),
+        note: process.note,
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ProcessLogQuery {
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+/// `GET /processes` — list live and restart-visible background process handles.
+pub async fn list_processes(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ProcessResponse>>, GatewayError> {
+    let processes = state.process_manager.list().await;
+    Ok(Json(
+        processes.into_iter().map(process_to_response).collect(),
+    ))
+}
+
+/// `GET /processes/{id}` — inspect a single background process handle.
+pub async fn get_process(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProcessResponse>, GatewayError> {
+    let process = state.process_manager.poll(&id).await.map_err(|e| match e {
+        rune_tools::ToolError::ExecutionFailed(message)
+            if message.contains("process not found") =>
+        {
+            GatewayError::BadRequest(message)
+        }
+        other => GatewayError::Internal(other.to_string()),
+    })?;
+
+    Ok(Json(process_to_response(process)))
+}
+
+/// `GET /processes/{id}/log` — fetch process log output or persisted post-restart metadata.
+pub async fn get_process_log(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ProcessLogQuery>,
+) -> Result<Response, GatewayError> {
+    let output = state
+        .process_manager
+        .log(&id, query.offset, query.limit)
+        .await
+        .map_err(|e| match e {
+            rune_tools::ToolError::ExecutionFailed(message)
+                if message.contains("process not found") =>
+            {
+                GatewayError::BadRequest(message)
+            }
+            other => GatewayError::Internal(other.to_string()),
+        })?;
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        output,
+    )
+        .into_response())
+}
+
 // ── Telegram Webhook ────────────────────────────────────────────────
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────────
@@ -2662,6 +2019,69 @@ fn reminder_to_response(r: Reminder) -> ReminderResponse {
     }
 }
 
+// ── Skills ─────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct SkillResponse {
+    pub name: String,
+    pub description: String,
+    pub enabled: bool,
+    pub source_dir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary_path: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SkillReloadResponse {
+    pub success: bool,
+    pub discovered: usize,
+    pub loaded: usize,
+    pub removed: usize,
+}
+
+pub async fn list_skills(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<SkillResponse>>, GatewayError> {
+    let mut skills = state.skill_registry.list().await;
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(skills.into_iter().map(skill_to_response).collect()))
+}
+
+pub async fn reload_skills(
+    State(state): State<AppState>,
+) -> Result<Json<SkillReloadResponse>, GatewayError> {
+    let summary = state.skill_loader.scan_summary().await;
+    Ok(Json(skill_reload_response(summary)))
+}
+
+pub async fn enable_skill(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    if state.skill_registry.enable(&name).await {
+        Ok(Json(ActionResponse {
+            success: true,
+            message: format!("skill '{name}' enabled"),
+        }))
+    } else {
+        Err(GatewayError::BadRequest(format!("unknown skill: {name}")))
+    }
+}
+
+pub async fn disable_skill(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    if state.skill_registry.disable(&name).await {
+        Ok(Json(ActionResponse {
+            success: true,
+            message: format!("skill '{name}' disabled"),
+        }))
+    } else {
+        Err(GatewayError::BadRequest(format!("unknown skill: {name}")))
+    }
+}
+
 /// `POST /webhook/telegram/{token}` — receive Telegram Bot API updates.
 ///
 /// The token in the URL is validated against the configured bot token
@@ -2688,7 +2108,300 @@ pub async fn telegram_webhook(
         session_id: "telegram".to_string(),
         kind: "telegram_update".to_string(),
         payload: update,
+        state_changed: true,
     });
 
     Ok(StatusCode::OK)
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+
+/// `GET /models` — list all configured models across all providers.
+pub async fn list_models(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DashboardModelItem>>, GatewayError> {
+    // Reuse the same logic as dashboard_models.
+    dashboard_models(State(state)).await
+}
+
+/// Response for the Ollama scan endpoint.
+#[derive(Serialize)]
+pub struct ScanModelsResponse {
+    pub provider: String,
+    pub models: Vec<ScannedModel>,
+}
+
+/// A single discovered model from a local provider.
+#[derive(Serialize)]
+pub struct ScannedModel {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+}
+
+/// `POST /models/scan` — discover models from local providers (e.g. Ollama).
+///
+/// Scans any configured Ollama provider by calling `GET /api/tags` on its
+/// native API endpoint. Returns the list of locally available models.
+pub async fn scan_models(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ScanModelsResponse>>, GatewayError> {
+    let mut results = Vec::new();
+
+    for provider_cfg in &state.config.models.providers {
+        let kind = if provider_cfg.kind.is_empty() {
+            provider_cfg.name.as_str()
+        } else {
+            provider_cfg.kind.as_str()
+        };
+
+        if kind.to_lowercase() != "ollama" {
+            continue;
+        }
+
+        let ollama_base = if provider_cfg.base_url.is_empty() {
+            "http://localhost:11434".to_string()
+        } else {
+            provider_cfg
+                .base_url
+                .trim_end_matches('/')
+                .strip_suffix("/v1")
+                .unwrap_or(&provider_cfg.base_url)
+                .to_string()
+        };
+
+        let url = format!("{ollama_base}/api/tags");
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_default();
+
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                #[derive(serde::Deserialize)]
+                struct OllamaTagsResponse {
+                    models: Vec<OllamaModelEntry>,
+                }
+                #[derive(serde::Deserialize)]
+                struct OllamaModelEntry {
+                    name: String,
+                    #[serde(default)]
+                    size: u64,
+                    #[serde(default)]
+                    modified_at: String,
+                }
+
+                if let Ok(tags) = resp.json::<OllamaTagsResponse>().await {
+                    results.push(ScanModelsResponse {
+                        provider: provider_cfg.name.clone(),
+                        models: tags
+                            .models
+                            .into_iter()
+                            .map(|m| ScannedModel {
+                                name: m.name,
+                                size: if m.size > 0 { Some(m.size) } else { None },
+                                modified_at: if m.modified_at.is_empty() {
+                                    None
+                                } else {
+                                    Some(m.modified_at)
+                                },
+                            })
+                            .collect(),
+                    });
+                }
+            }
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                return Err(GatewayError::Internal(format!(
+                    "Ollama /api/tags returned HTTP {status} for provider '{}'",
+                    provider_cfg.name
+                )));
+            }
+            Err(e) => {
+                return Err(GatewayError::Internal(format!(
+                    "failed to reach Ollama at {url} for provider '{}': {e}",
+                    provider_cfg.name
+                )));
+            }
+        }
+    }
+
+    Ok(Json(results))
+}
+
+// ── Device Pairing ──────────────────────────────────────────────────────────
+
+/// Request body for `POST /devices/pair/request`.
+#[derive(Deserialize)]
+pub struct PairRequestBody {
+    pub device_name: String,
+    pub public_key: String,
+}
+
+/// `POST /devices/pair/request` — initiate a new device pairing.
+///
+/// The device supplies its name and Ed25519 public key (hex-encoded).
+/// Returns a [`PairingRequest`] containing a random challenge nonce that
+/// the device must sign with its private key.
+pub async fn device_pair_request(
+    State(state): State<AppState>,
+    Json(body): Json<PairRequestBody>,
+) -> Result<Json<PairingRequest>, GatewayError> {
+    let req = state
+        .device_registry
+        .request_pairing(body.device_name, body.public_key)
+        .await
+        .map_err(pairing_err)?;
+
+    Ok(Json(req))
+}
+
+/// Request body for `POST /devices/pair/approve`.
+#[derive(Deserialize)]
+pub struct PairApproveBody {
+    pub request_id: Uuid,
+    pub challenge_response: String,
+}
+
+/// `POST /devices/pair/approve` — approve a pending pairing request.
+///
+/// The caller supplies the request ID and the Ed25519 signature of the
+/// challenge nonce (hex-encoded).  On success the response contains the
+/// newly paired device **including the full bearer token**.
+pub async fn device_pair_approve(
+    State(state): State<AppState>,
+    Json(body): Json<PairApproveBody>,
+) -> Result<Json<PairedDevice>, GatewayError> {
+    let device = state
+        .device_registry
+        .approve_pairing(body.request_id, body.challenge_response)
+        .await
+        .map_err(pairing_err)?;
+
+    Ok(Json(device))
+}
+
+/// Request body for `POST /devices/pair/reject`.
+#[derive(Deserialize)]
+pub struct PairRejectBody {
+    pub request_id: Uuid,
+}
+
+/// `POST /devices/pair/reject` — reject and discard a pending pairing request.
+pub async fn device_pair_reject(
+    State(state): State<AppState>,
+    Json(body): Json<PairRejectBody>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    state
+        .device_registry
+        .reject_pairing(body.request_id)
+        .await
+        .map_err(pairing_err)?;
+
+    Ok(Json(ActionResponse {
+        success: true,
+        message: format!("pairing request {} rejected", body.request_id),
+    }))
+}
+
+/// `GET /devices/pair/pending` — list all pending pairing requests.
+pub async fn device_pair_pending(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PairingRequest>>, GatewayError> {
+    let pending = state.device_registry.list_pending().await;
+    Ok(Json(pending))
+}
+
+/// Response type for device listings; masks the token field.
+#[derive(Serialize)]
+pub struct DeviceListEntry {
+    pub id: Uuid,
+    pub name: String,
+    pub public_key: String,
+    pub role: crate::pairing::DeviceRole,
+    pub scopes: Vec<String>,
+    /// Masked token — only the first 8 characters are shown.
+    pub token_prefix: String,
+    pub token_expires_at: chrono::DateTime<chrono::Utc>,
+    pub paired_at: chrono::DateTime<chrono::Utc>,
+    pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl From<PairedDevice> for DeviceListEntry {
+    fn from(d: PairedDevice) -> Self {
+        let token_prefix = if d.token.len() >= 8 {
+            format!("{}...", &d.token[..8])
+        } else {
+            "***".to_string()
+        };
+        Self {
+            id: d.id,
+            name: d.name,
+            public_key: d.public_key,
+            role: d.role,
+            scopes: d.scopes,
+            token_prefix,
+            token_expires_at: d.token_expires_at,
+            paired_at: d.paired_at,
+            last_seen_at: d.last_seen_at,
+        }
+    }
+}
+
+/// `GET /devices` — list all paired devices with masked tokens.
+pub async fn device_list(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DeviceListEntry>>, GatewayError> {
+    let devices = state.device_registry.list_devices().await;
+    let entries: Vec<DeviceListEntry> = devices.into_iter().map(DeviceListEntry::from).collect();
+    Ok(Json(entries))
+}
+
+/// `DELETE /devices/{id}` — revoke a paired device.
+pub async fn device_revoke(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    state
+        .device_registry
+        .revoke_device(id)
+        .await
+        .map_err(pairing_err)?;
+
+    Ok(Json(ActionResponse {
+        success: true,
+        message: format!("device {id} revoked"),
+    }))
+}
+
+/// `POST /devices/{id}/rotate-token` — rotate the bearer token for a device.
+///
+/// Returns the updated device **including the new full token**.
+pub async fn device_rotate_token(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<PairedDevice>, GatewayError> {
+    let device = state
+        .device_registry
+        .rotate_token(id)
+        .await
+        .map_err(pairing_err)?;
+
+    Ok(Json(device))
+}
+
+/// Map [`PairingError`] variants to appropriate [`GatewayError`] variants.
+fn pairing_err(e: PairingError) -> GatewayError {
+    match &e {
+        PairingError::RequestNotFound(_) | PairingError::DeviceNotFound(_) => {
+            GatewayError::BadRequest(e.to_string())
+        }
+        PairingError::RequestExpired(_) => GatewayError::BadRequest(e.to_string()),
+        PairingError::InvalidPublicKey(_) | PairingError::InvalidSignature(_) => {
+            GatewayError::BadRequest(e.to_string())
+        }
+        PairingError::VerificationFailed => GatewayError::Unauthorized,
+    }
 }

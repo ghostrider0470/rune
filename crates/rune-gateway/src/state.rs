@@ -6,14 +6,17 @@ use std::time::Instant;
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
 use rune_runtime::{
-    SessionEngine, TurnExecutor,
+    SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
     ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
 };
+use rune_tools::process_tool::ProcessManager;
 use tokio::sync::broadcast;
+
+use crate::pairing::DeviceRegistry;
 
 /// Events emitted for WebSocket subscribers.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -24,6 +27,8 @@ pub struct SessionEvent {
     pub kind: String,
     /// Arbitrary JSON payload.
     pub payload: serde_json::Value,
+    /// Whether this event should bump the connection-visible state version.
+    pub state_changed: bool,
 }
 
 /// Shared state accessible from all route handlers.
@@ -55,8 +60,16 @@ pub struct AppState {
     pub approval_repo: Arc<dyn ApprovalRepo>,
     /// Tool approval policy repository.
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
+    /// Background process manager for operator inspection/control surfaces.
+    pub process_manager: ProcessManager,
     /// Number of registered tools in the runtime graph.
     pub tool_count: usize,
+    /// Device pairing registry for Ed25519 challenge-response auth.
+    pub device_registry: Arc<DeviceRegistry>,
+    /// Dynamic skill registry populated from scanned `SKILL.md` directories.
+    pub skill_registry: Arc<SkillRegistry>,
+    /// Skill loader used for explicit reloads and background scanning.
+    pub skill_loader: Arc<SkillLoader>,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
 }
