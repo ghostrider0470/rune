@@ -893,8 +893,9 @@ fn render_session_status_card(
     let mut unresolved =
         vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
     if approval_mode == "on-miss" {
-        unresolved
-            .push("approval lifecycle is not yet durable/resumable across restarts".to_string());
+        unresolved.push(
+            "approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet".to_string(),
+        );
     }
     if security_mode == "allowlist" {
         unresolved.push(
