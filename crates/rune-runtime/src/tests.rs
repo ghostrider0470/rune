@@ -107,6 +107,7 @@ impl ModelProvider for FailingModelProvider {
 
 enum FakeToolStep {
     Output(String),
+    OutputWithExecutionId { output: String, tool_execution_id: Uuid },
     ApprovalRequired { tool: String, details: String },
 }
 
@@ -148,6 +149,15 @@ impl ToolExecutor for FakeToolExecutor {
                 output,
                 is_error: false,
                 tool_execution_id: None,
+            }),
+            FakeToolStep::OutputWithExecutionId {
+                output,
+                tool_execution_id,
+            } => Ok(ToolResult {
+                tool_call_id: call.tool_call_id,
+                output,
+                is_error: false,
+                tool_execution_id: Some(tool_execution_id),
             }),
             FakeToolStep::ApprovalRequired { tool, details } => {
                 Err(ToolError::ApprovalRequired { tool, details })
@@ -1017,6 +1027,69 @@ async fn approval_allow_once_resumes_blocked_turn() {
 
     let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
     assert_eq!(session_row.status, "running");
+}
+
+#[tokio::test]
+async fn tool_result_transcript_preserves_tool_execution_id() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("read", r#"{"path":"Cargo.toml"}"#),
+        FakeModelProvider::text_response("done"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "read".to_string(),
+        description: "Read a file".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    });
+
+    let execution_id = Uuid::now_v7();
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::OutputWithExecutionId {
+                output: "file contents".to_string(),
+                tool_execution_id: execution_id,
+            },
+        ])),
+        registry,
+    );
+
+    executor.execute(session.id, "read the file", None).await.unwrap();
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let tool_result_row = transcript
+        .iter()
+        .find(|item| item.kind == "tool_result")
+        .expect("tool_result transcript item present");
+    let tool_result_item: rune_core::TranscriptItem =
+        serde_json::from_value(tool_result_row.payload.clone()).unwrap();
+    match tool_result_item {
+        rune_core::TranscriptItem::ToolResult {
+            output,
+            is_error,
+            tool_execution_id,
+            ..
+        } => {
+            assert_eq!(output, "file contents");
+            assert!(!is_error);
+            assert_eq!(tool_execution_id, Some(execution_id));
+        }
+        other => panic!("unexpected transcript item: {other:?}"),
+    }
 }
 
 #[tokio::test]
