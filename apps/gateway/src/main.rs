@@ -26,7 +26,7 @@ use rune_models::{
     RoutedModelProvider, Usage,
 };
 use rune_runtime::{
-    ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor,
+    ContextAssembler, LaneQueue, NoOpCompaction, SessionEngine, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
@@ -179,7 +179,9 @@ async fn build_services(
         Arc::new(rune_store::pg::PgToolApprovalPolicyRepo::new(pool.clone()));
     let tool_execution_repo: Arc<dyn ToolExecutionRepo> = Arc::new(PgToolExecutionRepo::new(pool));
 
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
 
     let model_provider: Arc<dyn ModelProvider> = build_model_provider(&config);
     let scheduler = Arc::new(Scheduler::new_with_repos(job_repo.clone(), job_run_repo));
@@ -187,6 +189,7 @@ async fn build_services(
     let process_audit_store: Arc<dyn ProcessAuditStore> =
         Arc::new(DbProcessAuditStore::new(tool_execution_repo));
     let process_manager = ProcessManager::new().with_audit_store(process_audit_store.clone());
+    let lane_queue = Arc::new(LaneQueue::new());
     let workspace_root = config
         .paths
         .config_dir
@@ -224,7 +227,7 @@ async fn build_services(
         exec: ExecToolExecutor::new(workspace_root.clone(), Duration::from_secs(30))
             .with_process_manager(process_manager.clone())
             .with_audit_store(process_audit_store),
-        process: ProcessToolExecutor::new(process_manager),
+        process: ProcessToolExecutor::new(process_manager.clone()),
         memory: MemoryToolExecutor::new(workspace_root),
         session: SessionToolExecutor::new(live_session_query),
         spawn: SpawnToolExecutor::new(live_session_spawner),
@@ -266,6 +269,9 @@ async fn build_services(
         info!(model = %model, "default model configured");
     }
 
+    turn_executor = turn_executor.with_lane_queue(lane_queue.clone());
+    info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
+
     let turn_executor = Arc::new(turn_executor);
 
     // Build session loop if Telegram channel is configured.
@@ -302,6 +308,7 @@ async fn build_services(
         reminder_store,
         approval_repo,
         tool_approval_repo,
+        process_manager,
         tool_count,
     };
 
