@@ -1,6 +1,7 @@
 //! Integration tests for rune-gateway HTTP route handlers.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -19,7 +20,8 @@ use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };
 use rune_runtime::{
-    CompactionStrategy, ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor,
+    CompactionStrategy, ContextAssembler, NoOpCompaction, SessionEngine, SkillLoader,
+    SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -489,7 +491,9 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
 
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
 
     let workspace_root = std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
@@ -518,9 +522,15 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
 
     config.gateway.auth_token = auth_token.clone();
+    let config = Arc::new(config);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        config.paths.skills_dir.clone(),
+        skill_registry.clone(),
+    ));
 
     let state = AppState {
-        config: Arc::new(config),
+        config,
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -537,6 +547,8 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
         process_manager: ProcessManager::new(),
         tool_count: 0,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
@@ -554,7 +566,6 @@ async fn body_text(response: axum::http::Response<Body>) -> String {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
-
 
 #[tokio::test]
 async fn ws_rpc_status_matches_http_status_basics() {
@@ -588,6 +599,11 @@ async fn ws_rpc_status_matches_http_status_basics() {
         .with_default_model("fake-model"),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -607,17 +623,131 @@ async fn ws_rpc_status_matches_http_status_basics() {
         process_manager: ProcessManager::new(),
         tool_count: 3,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
     let dispatcher = RpcDispatcher::new(state);
-    let payload = dispatcher.dispatch("status", serde_json::json!({})).await.unwrap();
+    let payload = dispatcher
+        .dispatch("status", serde_json::json!({}))
+        .await
+        .unwrap();
 
     assert_eq!(payload["status"], "running");
     assert!(payload["version"].is_string());
     assert_eq!(payload["registered_tools"], 3);
     assert!(payload["ws_subscribers"].is_number());
     assert!(payload["config_paths"].is_object());
+}
+
+#[tokio::test]
+async fn ws_rpc_skills_reload_and_toggle_round_trip() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skills_dir = std::env::temp_dir().join(format!("rune-ws-skills-{}", Uuid::now_v7()));
+    std::fs::create_dir_all(skills_dir.join("rpc-skill")).unwrap();
+    std::fs::write(
+        skills_dir.join("rpc-skill/SKILL.md"),
+        r#"---
+name: rpc-skill
+description: RPC managed skill
+enabled: true
+---
+
+# RPC Skill
+"#,
+    )
+    .unwrap();
+    let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+
+    let reload = dispatcher
+        .dispatch("skills.reload", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(reload["success"], true);
+    assert_eq!(reload["loaded"], 1);
+
+    let listed = dispatcher
+        .dispatch("skills.list", serde_json::json!({}))
+        .await
+        .unwrap();
+    let items = listed.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "rpc-skill");
+    assert_eq!(items[0]["enabled"], true);
+
+    let disabled = dispatcher
+        .dispatch("skills.disable", serde_json::json!({"name": "rpc-skill"}))
+        .await
+        .unwrap();
+    assert_eq!(disabled["enabled"], false);
+
+    let enabled = dispatcher
+        .dispatch("skills.enable", serde_json::json!({"name": "rpc-skill"}))
+        .await
+        .unwrap();
+    assert_eq!(enabled["enabled"], true);
+
+    let err = dispatcher
+        .dispatch("skills.enable", serde_json::json!({"name": "missing"}))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "not_found");
 }
 
 #[tokio::test]
@@ -652,32 +782,43 @@ async fn ws_rpc_health_reports_session_count() {
         .with_default_model("fake-model"),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
 
     let now = chrono::Utc::now();
-    session_repo.create(NewSession {
-        id: Uuid::now_v7(),
-        kind: "direct".into(),
-        status: "created".into(),
-        workspace_root: None,
-        channel_ref: None,
-        requester_session_id: None,
-        metadata: serde_json::json!({}),
-        created_at: now,
-        updated_at: now,
-        last_activity_at: now,
-    }).await.unwrap();
-    session_repo.create(NewSession {
-        id: Uuid::now_v7(),
-        kind: "subagent".into(),
-        status: "running".into(),
-        workspace_root: None,
-        channel_ref: None,
-        requester_session_id: None,
-        metadata: serde_json::json!({}),
-        created_at: now,
-        updated_at: now,
-        last_activity_at: now,
-    }).await.unwrap();
+    session_repo
+        .create(NewSession {
+            id: Uuid::now_v7(),
+            kind: "direct".into(),
+            status: "created".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+    session_repo
+        .create(NewSession {
+            id: Uuid::now_v7(),
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -697,11 +838,16 @@ async fn ws_rpc_health_reports_session_count() {
         process_manager: ProcessManager::new(),
         tool_count: 0,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
     let dispatcher = RpcDispatcher::new(state);
-    let payload = dispatcher.dispatch("health", serde_json::json!({})).await.unwrap();
+    let payload = dispatcher
+        .dispatch("health", serde_json::json!({}))
+        .await
+        .unwrap();
 
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["service"], "rune-gateway");
@@ -740,32 +886,43 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         .with_default_model("fake-model"),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
 
     let session_id = Uuid::now_v7();
     let now = chrono::Utc::now();
-    session_repo.create(NewSession {
-        id: session_id,
-        kind: "direct".into(),
-        status: "created".into(),
-        workspace_root: None,
-        channel_ref: Some("telegram:chat-1".into()),
-        requester_session_id: None,
-        metadata: serde_json::json!({}),
-        created_at: now,
-        updated_at: now,
-        last_activity_at: now,
-    }).await.unwrap();
-    turn_repo.create(NewTurn {
-        id: Uuid::now_v7(),
-        session_id,
-        trigger_kind: "user_message".into(),
-        status: "completed".into(),
-        model_ref: Some("fake-model".into()),
-        started_at: now,
-        ended_at: Some(now),
-        usage_prompt_tokens: Some(12),
-        usage_completion_tokens: Some(7),
-    }).await.unwrap();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "direct".into(),
+            status: "created".into(),
+            workspace_root: None,
+            channel_ref: Some("telegram:chat-1".into()),
+            requester_session_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id,
+            trigger_kind: "user_message".into(),
+            status: "completed".into(),
+            model_ref: Some("fake-model".into()),
+            started_at: now,
+            ended_at: Some(now),
+            usage_prompt_tokens: Some(12),
+            usage_completion_tokens: Some(7),
+        })
+        .await
+        .unwrap();
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -785,12 +942,17 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         process_manager: ProcessManager::new(),
         tool_count: 0,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
     let dispatcher = RpcDispatcher::new(state);
     let payload = dispatcher
-        .dispatch("session.status", serde_json::json!({ "session_id": session_id }))
+        .dispatch(
+            "session.status",
+            serde_json::json!({ "session_id": session_id }),
+        )
         .await
         .unwrap();
 
@@ -838,6 +1000,11 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         .with_default_model("fake-model"),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -857,17 +1024,473 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         process_manager: ProcessManager::new(),
         tool_count: 0,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
     let dispatcher = RpcDispatcher::new(state);
     let err = dispatcher
-        .dispatch("session.status", serde_json::json!({ "session_id": "not-a-uuid" }))
+        .dispatch(
+            "session.status",
+            serde_json::json!({ "session_id": "not-a-uuid" }),
+        )
         .await
         .unwrap_err();
 
     assert_eq!(err.code, "bad_request");
     assert!(err.message.contains("invalid UUID for session_id"));
+}
+
+#[tokio::test]
+async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
+    use rune_gateway::ws::{ConnState, handle_text_message};
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let mut conn = ConnState::new();
+    let state_version = Arc::new(AtomicU64::new(1));
+    // stateVersion in responses is driven by the process-global counter, not this per-call seed.
+
+    let subscribe: String = handle_text_message(
+        r#"{"type":"req","id":"1","method":"subscribe","params":{"session_id":"sess-1"}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let subscribe_json: Value = serde_json::from_str(&subscribe).unwrap();
+    assert_eq!(subscribe_json["type"], "res");
+    assert_eq!(subscribe_json["id"], "1");
+    assert_eq!(subscribe_json["ok"], true);
+    assert_eq!(subscribe_json["payload"]["subscribed"]["session_id"], "sess-1");
+    assert_eq!(subscribe_json["payload"]["subscribed"]["all"], false);
+    assert!(subscribe_json["stateVersion"].as_u64().unwrap() >= 1);
+
+    let unsubscribe: String = handle_text_message(
+        r#"{"type":"req","id":"2","method":"unsubscribe","params":{"session_id":"sess-1"}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let unsubscribe_json: Value = serde_json::from_str(&unsubscribe).unwrap();
+    assert_eq!(unsubscribe_json["ok"], true);
+    assert_eq!(unsubscribe_json["payload"]["unsubscribed"]["session_id"], "sess-1");
+    assert_eq!(unsubscribe_json["payload"]["unsubscribed"]["all"], false);
+    assert!(unsubscribe_json["stateVersion"].as_u64().unwrap() >= 1);
+
+    let missing_session: String = handle_text_message(
+        r#"{"type":"req","id":"3","method":"subscribe","params":{}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let missing_json: Value = serde_json::from_str(&missing_session).unwrap();
+    assert_eq!(missing_json["ok"], false);
+    assert_eq!(missing_json["error"]["code"], "bad_request");
+    assert!(missing_json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("missing subscription target"));
+
+    let parse_error: String = handle_text_message(
+        "not-json",
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let parse_json: Value = serde_json::from_str(&parse_error).unwrap();
+    assert_eq!(parse_json["ok"], false);
+    assert_eq!(parse_json["id"], "unknown");
+    assert_eq!(parse_json["error"]["code"], "parse_error");
+}
+
+#[tokio::test]
+async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
+    use rune_gateway::ws::{ConnState, handle_text_message};
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let mut conn = ConnState::new();
+    let state_version = Arc::new(AtomicU64::new(25));
+
+    let subscribe_event = handle_text_message(
+        r#"{"type":"req","id":"11","method":"subscribe","params":{"event":"wake_event"}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let subscribe_event_json: Value = serde_json::from_str(&subscribe_event).unwrap();
+    assert_eq!(subscribe_event_json["ok"], true);
+    assert_eq!(subscribe_event_json["payload"]["subscribed"]["event"], "wake_event");
+    assert_eq!(subscribe_event_json["payload"]["subscribed"]["all"], false);
+    assert!(subscribe_event_json["stateVersion"].as_u64().unwrap() >= 1);
+
+    let subscribe_all = handle_text_message(
+        r#"{"type":"req","id":"12","method":"subscribe","params":{"all":true}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let subscribe_all_json: Value = serde_json::from_str(&subscribe_all).unwrap();
+    assert_eq!(subscribe_all_json["ok"], true);
+    assert_eq!(subscribe_all_json["payload"]["subscribed"]["all"], true);
+    assert!(subscribe_all_json["stateVersion"].as_u64().unwrap() >= 1);
+
+    let unsubscribe_event = handle_text_message(
+        r#"{"type":"req","id":"13","method":"unsubscribe","params":{"event":"wake_event"}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let unsubscribe_event_json: Value = serde_json::from_str(&unsubscribe_event).unwrap();
+    assert_eq!(unsubscribe_event_json["ok"], true);
+    assert_eq!(unsubscribe_event_json["payload"]["unsubscribed"]["event"], "wake_event");
+    assert!(unsubscribe_event_json["stateVersion"].as_u64().unwrap() >= 1);
+
+    let unsubscribe_all = handle_text_message(
+        r#"{"type":"req","id":"14","method":"unsubscribe","params":{"all":true}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let unsubscribe_all_json: Value = serde_json::from_str(&unsubscribe_all).unwrap();
+    assert_eq!(unsubscribe_all_json["ok"], true);
+    assert_eq!(unsubscribe_all_json["payload"]["unsubscribed"]["all"], true);
+    assert!(unsubscribe_all_json["stateVersion"].as_u64().unwrap() >= 1);
+}
+
+#[tokio::test]
+async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not() {
+    use rune_gateway::ws::handle_text_message;
+    use rune_gateway::ws::ConnState;
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let mut conn = ConnState::new();
+    let state_version = Arc::new(AtomicU64::new(101));
+
+    let subscribe = handle_text_message(
+        r#"{"type":"req","id":"sub","method":"subscribe","params":{"session_id":"sess-1"}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap();
+    let subscribe_json: Value = serde_json::from_str(&subscribe).unwrap();
+    let subscribed_version = subscribe_json["stateVersion"].as_u64().unwrap();
+    assert!(subscribed_version >= 1);
+    assert_eq!(state_version.load(Ordering::Relaxed), 101);
+
+    let status = handle_text_message(
+        r#"{"type":"req","id":"status","method":"status","params":{}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap();
+    let status_json: Value = serde_json::from_str(&status).unwrap();
+    assert_eq!(status_json["stateVersion"], 101);
+    assert_eq!(state_version.load(Ordering::Relaxed), 101);
+    assert_ne!(status_json["stateVersion"].as_u64().unwrap(), subscribed_version);
+}
+
+#[tokio::test]
+async fn ws_handle_text_message_dispatches_rpc_errors() {
+    use rune_gateway::ws::{ConnState, handle_text_message};
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let state = AppState {
+        config: Arc::new(AppConfig::default()),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        tool_count: 0,
+        device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
+        event_tx,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let mut conn = ConnState::new();
+    let state_version = Arc::new(AtomicU64::new(10));
+
+    let method_not_found: String = handle_text_message(
+        r#"{"type":"req","id":"404","method":"unknown.method","params":{}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let method_json: Value = serde_json::from_str(&method_not_found).unwrap();
+    assert_eq!(method_json["ok"], false);
+    assert_eq!(method_json["error"]["code"], "method_not_found");
+    assert!(method_json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unknown method: unknown.method"));
+    assert_eq!(method_json["stateVersion"], 10);
+
+    let invalid_uuid: String = handle_text_message(
+        r#"{"type":"req","id":"bad","method":"session.status","params":{"session_id":"nope"}}"#,
+        &mut conn,
+        &dispatcher,
+        &state_version,
+    )
+    .await
+    .unwrap()
+    .to_string();
+    let invalid_uuid_json: Value = serde_json::from_str(&invalid_uuid).unwrap();
+    assert_eq!(invalid_uuid_json["ok"], false);
+    assert_eq!(invalid_uuid_json["error"]["code"], "bad_request");
+    assert!(invalid_uuid_json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("invalid UUID for session_id"));
 }
 
 #[tokio::test]
@@ -900,6 +1523,22 @@ async fn status_returns_correct_shape() {
     assert!(json["uptime_seconds"].is_number());
     assert!(json["registered_tools"].is_number());
     assert!(json["session_count"].is_number());
+}
+
+#[tokio::test]
+async fn status_includes_skill_status_shape() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(Request::get("/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert!(json["skills"].is_object());
+    assert!(json["skills"]["loaded"].is_number());
+    assert!(json["skills"]["enabled"].is_number());
+    assert!(json["skills"]["skills_dir"].is_string());
 }
 
 #[tokio::test]
@@ -941,13 +1580,22 @@ async fn processes_routes_surface_empty_inventory() {
     assert_eq!(json, serde_json::json!([]));
 
     let response = app
-        .oneshot(Request::get("/processes/missing").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/processes/missing")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = body_json(response).await;
     assert_eq!(json["code"], "bad_request");
-    assert!(json["message"].as_str().unwrap().contains("process not found"));
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("process not found")
+    );
 }
 
 #[tokio::test]
@@ -1157,7 +1805,9 @@ async fn patch_and_delete_session_routes_work() {
         .oneshot(
             Request::patch(format!("/sessions/{session_id}"))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"label":"backend","verbose":true,"reasoning":"medium"}"#))
+                .body(Body::from(
+                    r#"{"label":"backend","verbose":true,"reasoning":"medium"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -1230,7 +1880,9 @@ async fn send_message_and_transcript_with_shared_state() {
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
 
     let workspace_root = std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
@@ -1258,6 +1910,11 @@ async fn send_message_and_transcript_with_shared_state() {
     );
 
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1277,6 +1934,8 @@ async fn send_message_and_transcript_with_shared_state() {
         process_manager: ProcessManager::new(),
         tool_count: 0,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
@@ -1416,7 +2075,9 @@ async fn get_session_status_surfaces_subagent_metadata() {
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
     let context_assembler = ContextAssembler::new("You are a test assistant.");
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
@@ -1437,6 +2098,11 @@ async fn get_session_status_surfaces_subagent_metadata() {
         .with_default_model("fake-model"),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
 
     let session_id = Uuid::now_v7();
     let now = chrono::Utc::now();
@@ -1481,6 +2147,8 @@ async fn get_session_status_surfaces_subagent_metadata() {
         process_manager: ProcessManager::new(),
         tool_count: 0,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
@@ -1809,6 +2477,137 @@ async fn cron_run_executes_and_records_run_history() {
 }
 
 #[tokio::test]
+async fn skills_routes_list_reload_and_toggle() {
+    let mut config = AppConfig::default();
+    let skills_dir = std::env::temp_dir().join(format!("rune-gw-skills-{}", Uuid::now_v7()));
+    std::fs::create_dir_all(skills_dir.join("alpha")).unwrap();
+    std::fs::write(
+        skills_dir.join("alpha/SKILL.md"),
+        r#"---
+name: alpha
+description: Alpha skill
+binary: ./run-alpha.sh
+enabled: true
+---
+
+# Alpha
+"#,
+    )
+    .unwrap();
+    config.paths.skills_dir = skills_dir.clone();
+
+    let app = build_test_app_with_config(config, None);
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/skills").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json, serde_json::json!([]));
+
+    std::fs::create_dir_all(skills_dir.join("beta")).unwrap();
+    std::fs::write(
+        skills_dir.join("beta/SKILL.md"),
+        r#"---
+name: beta
+description: Beta skill
+enabled: false
+---
+
+# Beta
+"#,
+    )
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(Request::post("/skills/reload").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["success"], true);
+    assert_eq!(json["discovered"], 2);
+    assert_eq!(json["loaded"], 2);
+    assert_eq!(json["removed"], 0);
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/skills").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let alpha = items.iter().find(|item| item["name"] == "alpha").unwrap();
+    assert_eq!(alpha["description"], "Alpha skill");
+    assert_eq!(alpha["enabled"], true);
+    assert!(alpha["binary_path"].as_str().unwrap().contains("run-alpha.sh"));
+
+    let response = app
+        .clone()
+        .oneshot(Request::post("/skills/alpha/disable").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(Request::post("/skills/beta/enable").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/skills").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let alpha = items.iter().find(|item| item["name"] == "alpha").unwrap();
+    let beta = items.iter().find(|item| item["name"] == "beta").unwrap();
+    assert_eq!(alpha["enabled"], false);
+    assert_eq!(beta["enabled"], true);
+
+    std::fs::remove_dir_all(skills_dir.join("beta")).unwrap();
+    let response = app
+        .clone()
+        .oneshot(Request::post("/skills/reload").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["removed"], 1);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/skills/missing/enable")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(
+            Request::post("/skills/missing/disable")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn list_sessions_filters_by_channel_and_activity() {
     let session_repo = Arc::new(MemSessionRepo::new());
     let now = chrono::Utc::now();
@@ -1849,7 +2648,9 @@ async fn list_sessions_filters_by_channel_and_activity() {
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()));
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
     let context_assembler = ContextAssembler::new("You are a test assistant.");
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
@@ -1870,6 +2671,11 @@ async fn list_sessions_filters_by_channel_and_activity() {
         .with_default_model("fake-model"),
     );
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
     let state = AppState {
         config: Arc::new(AppConfig::default()),
         started_at: Arc::new(Instant::now()),
@@ -1888,6 +2694,8 @@ async fn list_sessions_filters_by_channel_and_activity() {
         process_manager: ProcessManager::new(),
         tool_count: 0,
         device_registry: Arc::new(DeviceRegistry::new()),
+        skill_registry,
+        skill_loader,
         event_tx,
     };
 
