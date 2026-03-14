@@ -1356,43 +1356,55 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
   <title>Rune Operator Dashboard</title>
   <style>
     :root {
-      --bg: #0d1317;
-      --bg-soft: #121a1f;
-      --panel: rgba(18, 27, 33, 0.84);
-      --panel-strong: rgba(24, 36, 43, 0.96);
-      --panel-alt: rgba(15, 24, 29, 0.9);
-      --ink: #f2ede2;
-      --text-strong: #fff9ef;
-      --muted: #9eaba8;
-      --line: rgba(250, 238, 218, 0.11);
-      --line-strong: rgba(250, 238, 218, 0.18);
-      --accent: #f3bd6a;
-      --accent-strong: #ffd89c;
-      --accent-soft: rgba(243, 189, 106, 0.14);
-      --teal: #4fc9bf;
-      --teal-soft: rgba(79, 201, 191, 0.12);
-      --warn: #f59e0b;
-      --warn-soft: rgba(245, 158, 11, 0.14);
-      --danger: #f97066;
-      --danger-soft: rgba(249, 112, 102, 0.14);
-      --ok: #4fc9bf;
-      --ok-soft: rgba(79, 201, 191, 0.14);
-      --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
-      --radius-xl: 28px;
-      --radius-lg: 22px;
-      --radius-md: 16px;
+      --bg: #f5f7fb;
+      --bg-soft: #eef3fb;
+      --panel: rgba(255, 255, 255, 0.82);
+      --panel-strong: rgba(255, 255, 255, 0.94);
+      --panel-alt: rgba(247, 250, 255, 0.92);
+      --ink: #1b2942;
+      --text-strong: #101c33;
+      --muted: #61718b;
+      --line: rgba(102, 123, 159, 0.18);
+      --line-strong: rgba(88, 108, 145, 0.28);
+      --accent: #ff8c61;
+      --accent-strong: #ff6b79;
+      --accent-soft: rgba(255, 140, 97, 0.16);
+      --violet: #8d7dff;
+      --violet-soft: rgba(141, 125, 255, 0.14);
+      --teal: #2fb6b0;
+      --teal-soft: rgba(47, 182, 176, 0.14);
+      --warn: #d98f1f;
+      --warn-soft: rgba(217, 143, 31, 0.14);
+      --danger: #df5e67;
+      --danger-soft: rgba(223, 94, 103, 0.14);
+      --ok: #249f97;
+      --ok-soft: rgba(36, 159, 151, 0.14);
+      --shadow-lg: 0 30px 80px rgba(24, 43, 77, 0.13);
+      --shadow-md: 0 18px 48px rgba(24, 43, 77, 0.08);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.25rem;
+      --space-6: 1.5rem;
+      --space-8: 2rem;
+      --space-10: 2.5rem;
+      --space-12: 3rem;
+      --space-16: 4rem;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: Inter, "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-family: "Avenir Next", "IBM Plex Sans", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, rgba(79, 201, 191, 0.22), transparent 26%),
-        radial-gradient(circle at 85% 10%, rgba(243, 189, 106, 0.18), transparent 24%),
-        radial-gradient(circle at 50% 100%, rgba(47, 78, 91, 0.38), transparent 36%),
-        linear-gradient(180deg, #0b1013 0%, var(--bg) 45%, #091015 100%);
+        radial-gradient(circle at top left, rgba(47, 182, 176, 0.18), transparent 22%),
+        radial-gradient(circle at 88% 8%, rgba(255, 107, 121, 0.2), transparent 22%),
+        radial-gradient(circle at 80% 28%, rgba(141, 125, 255, 0.16), transparent 20%),
+        linear-gradient(180deg, #fcfdff 0%, var(--bg) 48%, #eef4fb 100%);
     }
     body::before {
       content: "";
@@ -1400,43 +1412,81 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       inset: 0;
       pointer-events: none;
       background-image:
-        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+        linear-gradient(rgba(115, 138, 177, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(115, 138, 177, 0.08) 1px, transparent 1px);
       background-size: 32px 32px;
       mask-image: radial-gradient(circle at center, black 32%, transparent 82%);
-      opacity: 0.35;
+      opacity: 0.4;
     }
     .shell {
       position: relative;
-      max-width: 1320px;
+      max-width: 1360px;
       margin: 0 auto;
-      padding: 24px 16px 48px;
+      padding: 24px 16px 64px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      margin-bottom: var(--space-6);
+      padding: 0 var(--space-2);
+    }
+    .topbar-note {
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+    .topbar-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(141, 125, 255, 0.22);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--text-strong);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      box-shadow: var(--shadow-md);
     }
     .hero {
       position: relative;
       overflow: hidden;
       display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr);
-      gap: 24px;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.95fr);
+      gap: var(--space-6);
       align-items: stretch;
-      margin-bottom: 20px;
-      padding: 26px;
-      border: 1px solid var(--line);
+      margin-bottom: var(--space-8);
+      padding: var(--space-8);
+      border: 1px solid rgba(255, 255, 255, 0.72);
       border-radius: var(--radius-xl);
       background:
-        linear-gradient(135deg, rgba(14, 22, 27, 0.98), rgba(17, 29, 36, 0.88)),
-        linear-gradient(135deg, rgba(79, 201, 191, 0.12), rgba(243, 189, 106, 0.08));
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
+        linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(249, 251, 255, 0.92)),
+        linear-gradient(140deg, rgba(255, 140, 97, 0.18), rgba(141, 125, 255, 0.12) 58%, rgba(47, 182, 176, 0.14));
+      box-shadow: var(--shadow-lg);
+      backdrop-filter: blur(22px);
     }
     .hero::after {
       content: "";
       position: absolute;
-      inset: auto -80px -120px auto;
-      width: 300px;
-      height: 300px;
+      inset: auto -60px -110px auto;
+      width: 280px;
+      height: 280px;
       border-radius: 999px;
-      background: radial-gradient(circle, rgba(243, 189, 106, 0.28), transparent 68%);
+      background: radial-gradient(circle, rgba(255, 140, 97, 0.26), transparent 68%);
+      pointer-events: none;
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: -35% auto auto -10%;
+      width: 380px;
+      height: 380px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(141, 125, 255, 0.18), transparent 70%);
       pointer-events: none;
     }
     .hero-copy {
@@ -1444,26 +1494,26 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       z-index: 1;
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: var(--space-6);
       min-width: 0;
     }
     .brand-lockup {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: var(--space-4);
       flex-wrap: wrap;
     }
     .brand-mark {
-      width: 56px;
-      height: 56px;
-      border-radius: 18px;
-      padding: 12px;
-      background: linear-gradient(180deg, rgba(243, 189, 106, 0.14), rgba(255, 255, 255, 0.03));
-      border: 1px solid rgba(243, 189, 106, 0.18);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+      width: 62px;
+      height: 62px;
+      border-radius: 20px;
+      padding: 13px;
+      background: linear-gradient(180deg, rgba(255, 140, 97, 0.12), rgba(141, 125, 255, 0.06));
+      border: 1px solid rgba(255, 140, 97, 0.18);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
     }
     .brand-wordmark {
-      height: 34px;
+      height: 32px;
       width: auto;
       display: block;
     }
@@ -1472,28 +1522,33 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       align-items: center;
       gap: 8px;
       width: fit-content;
-      padding: 8px 12px;
+      padding: 9px 14px;
       border-radius: 999px;
-      border: 1px solid rgba(79, 201, 191, 0.24);
-      background: rgba(79, 201, 191, 0.08);
-      color: #d6f6f3;
+      border: 1px solid rgba(47, 182, 176, 0.18);
+      background: rgba(47, 182, 176, 0.1);
+      color: #1d7f7b;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 0.08em;
       text-transform: uppercase;
+    }
+    .hero-heading {
+      display: grid;
+      gap: var(--space-4);
+      max-width: 52rem;
     }
     h1 {
       margin: 0;
       color: var(--text-strong);
-      font-size: clamp(32px, 4.4vw, 58px);
-      line-height: 0.98;
-      letter-spacing: -0.055em;
-      max-width: 12ch;
+      font-size: clamp(2.45rem, 4vw, 4.45rem);
+      line-height: 0.96;
+      letter-spacing: -0.065em;
+      max-width: 11ch;
     }
     .subhead {
       margin: 0;
-      font-size: clamp(15px, 1.5vw, 18px);
-      line-height: 1.7;
+      font-size: clamp(1rem, 1.25vw, 1.125rem);
+      line-height: 1.75;
       color: var(--muted);
       max-width: 62ch;
     }
@@ -1503,75 +1558,153 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       gap: 10px;
     }
     .pill {
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      background: rgba(255, 255, 255, 0.76);
       border-radius: 999px;
-      padding: 9px 13px;
-      font-size: 13px;
+      padding: 10px 14px;
+      font-size: 12px;
       color: var(--muted);
+      box-shadow: 0 10px 25px rgba(32, 54, 92, 0.06);
     }
     .pill strong {
       color: var(--text-strong);
-      font-weight: 600;
+      font-weight: 700;
+    }
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .hero-stat {
+      padding: 16px 18px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.76);
+      background: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(247,250,255,0.96));
+      box-shadow: 0 16px 32px rgba(34, 58, 98, 0.07);
+    }
+    .hero-stat label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+    .hero-stat strong {
+      color: var(--text-strong);
+      font-size: 1rem;
+      line-height: 1.45;
+      word-break: break-word;
     }
     .hero-visual {
       position: relative;
-      min-height: 260px;
-      border-radius: 24px;
+      min-height: 100%;
+      border-radius: 28px;
       overflow: hidden;
-      border: 1px solid var(--line);
+      border: 1px solid rgba(255, 255, 255, 0.82);
       background:
-        linear-gradient(180deg, rgba(8, 12, 16, 0.24), rgba(8, 12, 16, 0.56)),
-        linear-gradient(135deg, rgba(243, 189, 106, 0.16), rgba(79, 201, 191, 0.08));
+        linear-gradient(180deg, rgba(17, 28, 50, 0.1), rgba(17, 28, 50, 0.5)),
+        linear-gradient(135deg, rgba(255, 140, 97, 0.16), rgba(141, 125, 255, 0.14));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
     }
     .hero-visual img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       object-position: center;
-      filter: saturate(0.95) contrast(1.04);
-      transform: scale(1.02);
+      filter: saturate(1.05) contrast(1.04);
+      transform: scale(1.01);
     }
     .hero-overlay {
       position: absolute;
-      inset: auto 18px 18px 18px;
+      inset: auto 20px 20px 20px;
       display: grid;
-      gap: 12px;
-      padding: 18px;
-      border-radius: 18px;
-      background: rgba(9, 15, 19, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(12px);
+      gap: 14px;
+      padding: 20px;
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(15, 25, 45, 0.82), rgba(20, 32, 56, 0.92));
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(14px);
     }
     .hero-overlay-title {
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0.1em;
-      color: var(--accent-strong);
+      color: #ffc9bb;
     }
     .hero-overlay-value {
-      font-size: 26px;
+      font-size: clamp(1.8rem, 2.2vw, 2.5rem);
       font-weight: 700;
       line-height: 1;
-      color: var(--text-strong);
+      color: #fff9ff;
     }
     .hero-overlay-copy {
-      color: var(--muted);
+      color: rgba(232, 239, 255, 0.76);
       font-size: 13px;
       line-height: 1.6;
     }
+    .hero-overlay-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .overlay-chip {
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(240, 245, 255, 0.82);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .overlay-chip strong {
+      display: block;
+      color: #fff;
+      font-size: 13px;
+      margin-top: 2px;
+    }
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: var(--space-4);
+      margin-bottom: var(--space-5);
+      padding: 0 var(--space-2);
+    }
+    .section-label {
+      margin: 0 0 8px;
+      color: #8c6bff;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .section-heading h2 {
+      margin: 0;
+      font-size: clamp(1.7rem, 2vw, 2.25rem);
+      letter-spacing: -0.05em;
+      color: var(--text-strong);
+    }
+    .section-heading p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: 56ch;
+    }
     .grid {
       display: grid;
-      gap: 16px;
+      gap: var(--space-5);
       grid-template-columns: repeat(12, minmax(0, 1fr));
     }
     .card {
       grid-column: span 12;
-      border: 1px solid var(--line);
+      border: 1px solid rgba(255, 255, 255, 0.86);
       background: var(--panel);
       border-radius: var(--radius-lg);
-      padding: 20px;
-      box-shadow: var(--shadow);
+      padding: 24px;
+      box-shadow: var(--shadow-md);
       backdrop-filter: blur(18px);
     }
     .card-head {
@@ -1579,37 +1712,38 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       gap: 12px;
       align-items: flex-start;
       justify-content: space-between;
-      margin-bottom: 18px;
+      margin-bottom: 20px;
     }
     .card h2 {
-      margin: 0 0 6px;
+      margin: 0 0 8px;
       color: var(--text-strong);
-      font-size: 15px;
+      font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.1em;
     }
     .card-copy {
       margin: 0;
       color: var(--muted);
       font-size: 14px;
-      line-height: 1.6;
+      line-height: 1.7;
     }
     .stats {
       display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     }
     .stat {
-      border: 1px solid var(--line);
+      border: 1px solid rgba(106, 127, 163, 0.14);
       border-radius: var(--radius-md);
-      padding: 16px;
+      padding: 18px;
       background:
-        linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,255,0.88)),
         var(--panel-strong);
-      min-height: 124px;
+      min-height: 136px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
     }
     .stat label {
       display: block;
@@ -1620,7 +1754,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       margin-bottom: 10px;
     }
     .stat strong {
-      font-size: clamp(24px, 2.5vw, 32px);
+      font-size: clamp(1.55rem, 2.5vw, 2.05rem);
       line-height: 1.05;
       color: var(--text-strong);
       letter-spacing: -0.04em;
@@ -1638,10 +1772,11 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       gap: 12px;
     }
     .surface {
-      border-radius: 18px;
-      border: 1px solid var(--line);
+      border-radius: 20px;
+      border: 1px solid rgba(106, 127, 163, 0.14);
       background: var(--panel-alt);
       overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.76);
     }
     table {
       width: 100%;
@@ -1650,8 +1785,8 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
     }
     th, td {
       text-align: left;
-      padding: 14px 16px;
-      border-top: 1px solid var(--line);
+      padding: 16px 18px;
+      border-top: 1px solid rgba(106, 127, 163, 0.12);
       vertical-align: top;
     }
     th {
@@ -1667,7 +1802,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       color: var(--ink);
     }
     tr:hover td {
-      background: rgba(255, 255, 255, 0.015);
+      background: rgba(141, 125, 255, 0.04);
     }
     .model-name,
     .session-id {
@@ -1695,7 +1830,7 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       align-items: center;
       width: fit-content;
       border-radius: 999px;
-      padding: 6px 10px;
+      padding: 6px 11px;
       font-size: 12px;
       font-weight: 600;
       letter-spacing: 0.02em;
@@ -1705,52 +1840,52 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
     .chip.status-ready,
     .chip.status-completed {
       background: var(--ok-soft);
-      color: #b7f4ee;
-      border-color: rgba(79, 201, 191, 0.18);
+      color: #19766f;
+      border-color: rgba(36, 159, 151, 0.18);
     }
     .chip.status-failed,
     .chip.status-error,
     .chip.status-cancelled {
       background: var(--danger-soft);
-      color: #ffccc8;
-      border-color: rgba(249, 112, 102, 0.18);
+      color: #9d3340;
+      border-color: rgba(223, 94, 103, 0.18);
     }
     .chip.status-waiting,
     .chip.status-pending,
     .chip.status-tool_executing {
       background: var(--warn-soft);
-      color: #ffd79b;
-      border-color: rgba(245, 158, 11, 0.18);
+      color: #8f5a0a;
+      border-color: rgba(217, 143, 31, 0.18);
     }
     .chip.kind {
-      background: rgba(255,255,255,0.04);
-      color: var(--text-strong);
-      border-color: var(--line);
+      background: rgba(141, 125, 255, 0.08);
+      color: #5340cd;
+      border-color: rgba(141, 125, 255, 0.14);
       text-transform: capitalize;
     }
     code {
       font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
       font-size: 12px;
-      color: #f8e5bb;
-      background: rgba(243, 189, 106, 0.08);
-      border: 1px solid rgba(243, 189, 106, 0.12);
+      color: #824d56;
+      background: rgba(255, 140, 97, 0.08);
+      border: 1px solid rgba(255, 140, 97, 0.12);
       border-radius: 10px;
       padding: 2px 7px;
       word-break: break-all;
     }
     .diag {
       display: grid;
-      gap: 12px;
+      gap: 14px;
     }
     .diag-item {
-      border-radius: 18px;
-      border: 1px solid var(--line);
-      padding: 16px;
+      border-radius: 20px;
+      border: 1px solid rgba(106, 127, 163, 0.14);
+      padding: 18px;
       background: var(--panel-strong);
     }
-    .diag-item.info { background: rgba(255,255,255,0.03); }
-    .diag-item.warn { background: var(--warn-soft); border-color: rgba(245, 158, 11, 0.3); }
-    .diag-item.error { background: var(--danger-soft); border-color: rgba(249, 112, 102, 0.3); }
+    .diag-item.info { background: rgba(255,255,255,0.78); }
+    .diag-item.warn { background: rgba(255, 244, 226, 0.92); border-color: rgba(217, 143, 31, 0.26); }
+    .diag-item.error { background: rgba(255, 238, 239, 0.94); border-color: rgba(223, 94, 103, 0.26); }
     .diag-head {
       display: flex;
       gap: 8px;
@@ -1773,13 +1908,13 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       display: grid;
       gap: 12px;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      margin-top: 6px;
     }
     .rail-item {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 14px 16px;
-      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.82);
+      border-radius: 20px;
+      padding: 16px 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.84), rgba(247,250,255,0.98));
+      box-shadow: 0 18px 34px rgba(31, 50, 86, 0.06);
     }
     .rail-item span {
       display: block;
@@ -1792,9 +1927,10 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
     .rail-item strong {
       color: var(--text-strong);
       font-size: 15px;
+      line-height: 1.5;
     }
     .footer-note {
-      margin-top: 16px;
+      margin-top: 18px;
       color: var(--muted);
       font-size: 12px;
       line-height: 1.6;
@@ -1806,21 +1942,29 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       .diagnostics { grid-column: span 12; }
     }
     @media (max-width: 980px) {
+      .topbar,
+      .section-heading {
+        padding: 0;
+      }
       .hero {
         grid-template-columns: 1fr;
       }
       .hero-visual {
         order: -1;
-        min-height: 220px;
+        min-height: 300px;
       }
     }
     @media (max-width: 720px) {
       .shell {
-        padding: 14px 14px 28px;
+        padding: 16px 14px 32px;
+      }
+      .topbar {
+        flex-direction: column;
+        align-items: flex-start;
       }
       .hero,
       .card {
-        padding: 16px;
+        padding: 18px;
       }
       .brand-lockup {
         align-items: flex-start;
@@ -1828,11 +1972,22 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
       .brand-wordmark {
         height: 28px;
       }
+      h1 {
+        max-width: 12ch;
+      }
+      .hero-stats,
+      .status-rail,
+      .hero-overlay-grid {
+        grid-template-columns: 1fr;
+      }
+      .section-heading {
+        align-items: flex-start;
+      }
       .surface {
         overflow-x: auto;
       }
       table {
-        min-width: 640px;
+        min-width: 680px;
       }
       .hero-overlay {
         inset: auto 12px 12px 12px;
@@ -1842,14 +1997,18 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
 </head>
 <body>
   <main class="shell">
+    <div class="topbar">
+      <div class="topbar-note">Horizon-inspired operator surface for Rune's existing dashboard routes.</div>
+      <div class="topbar-badge">Dashboard Theme Refresh</div>
+    </div>
     <section class="hero">
       <div class="hero-copy">
         <div class="eyebrow">Local Operator Surface</div>
         <div class="brand-lockup">
           <img class="brand-mark" src="/assets/rune-logo-icon.svg" alt="Rune icon">
-          <img class="brand-wordmark" src="/assets/rune-logo-wordmark-light.svg" alt="Rune">
+          <img class="brand-wordmark" src="/assets/rune-logo-wordmark-dark.svg" alt="Rune">
         </div>
-        <div>
+        <div class="hero-heading">
           <h1>Operate sessions, models, and runtime health with actual signal.</h1>
           <p class="subhead">Local-first control plane for gateway status, configured models, recent sessions, and diagnostics. Same backend routes, cleaner hierarchy, better scanability, and brand-consistent presentation.</p>
         </div>
@@ -1859,10 +2018,10 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
           <div class="pill">Data <strong>/api/dashboard/*</strong></div>
         </div>
         <div id="status-rail" class="status-rail">
-          <div class="rail-item"><span>Gateway</span><strong>Loading…</strong></div>
-          <div class="rail-item"><span>Bind</span><strong>Loading…</strong></div>
-          <div class="rail-item"><span>Channels</span><strong>Loading…</strong></div>
-          <div class="rail-item"><span>Auth</span><strong>Loading…</strong></div>
+          <div class="hero-stat"><label>Gateway</label><strong>Loading…</strong></div>
+          <div class="hero-stat"><label>Bind</label><strong>Loading…</strong></div>
+          <div class="hero-stat"><label>Channels</label><strong>Loading…</strong></div>
+          <div class="hero-stat"><label>Auth</label><strong>Loading…</strong></div>
         </div>
       </div>
       <aside class="hero-visual" aria-hidden="true">
@@ -1871,9 +2030,21 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
           <div class="hero-overlay-title">Rune Operator</div>
           <div id="hero-session-count" class="hero-overlay-value">Loading…</div>
           <div class="hero-overlay-copy">Snapshot of live operator context across runtime sessions, model routing, channel availability, and diagnostic posture.</div>
+          <div class="hero-overlay-grid">
+            <div class="overlay-chip">Theme<strong>Horizon-style polish</strong></div>
+            <div class="overlay-chip">Surface<strong>Dashboard + /ui mirror</strong></div>
+          </div>
         </div>
       </aside>
     </section>
+
+    <div class="section-heading">
+      <div>
+        <p class="section-label">Overview</p>
+        <h2>Operational clarity without changing the backend surface.</h2>
+        <p>The dashboard keeps the same live JSON sources and runtime functionality, but the hierarchy now reads like a polished admin surface instead of a raw internal panel.</p>
+      </div>
+    </div>
 
     <section class="grid">
       <article class="card summary">
@@ -1999,8 +2170,8 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
         ["Channels", channels],
         ["Auth", summary.auth_enabled ? "Bearer protected" : "Open"]
       ].map(([label, value]) => `
-        <div class="rail-item">
-          <span>${escapeHtml(label)}</span>
+        <div class="hero-stat">
+          <label>${escapeHtml(label)}</label>
           <strong>${escapeHtml(value)}</strong>
         </div>
       `).join("");
@@ -2024,8 +2195,8 @@ const DASHBOARD_HTML: &str = r##"<!doctype html>
         ["Sessions", String(summary.session_count || 0), `${summary.ws_subscribers || 0} WebSocket subscriber${summary.ws_subscribers === 1 ? "" : "s"}`],
         ["Channels", String((summary.channels || []).length), (summary.channels || []).length ? (summary.channels || []).join(", ") : "No channel adapters configured"],
       ];
-      root.innerHTML = entries.map(([label, value]) =>
-        `<div class="stat"><div><label>${escapeHtml(label)}</label><strong>${escapeHtml(value)}</strong></div><small>${escapeHtml(arguments[0][2])}</small></div>`
+      root.innerHTML = entries.map(([label, value, note]) =>
+        `<div class="stat"><div><label>${escapeHtml(label)}</label><strong>${escapeHtml(value)}</strong></div><small>${escapeHtml(note)}</small></div>`
       ).join("");
       renderStatusRail(summary);
     }
