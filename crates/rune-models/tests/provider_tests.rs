@@ -288,6 +288,137 @@ fn selects_openai_provider() {
 }
 
 #[test]
+fn selects_google_provider() {
+    unsafe { std::env::set_var("TEST_GOOGLE_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "google".into(),
+        kind: "google".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_GOOGLE_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_GOOGLE_KEY_SEL") };
+}
+
+#[test]
+fn selects_ollama_provider_without_api_key() {
+    let cfg = ModelProviderConfig {
+        name: "ollama".into(),
+        kind: "ollama".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+}
+
+#[test]
+fn selects_groq_provider() {
+    unsafe { std::env::set_var("TEST_GROQ_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "groq".into(),
+        kind: "groq".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_GROQ_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_GROQ_KEY_SEL") };
+}
+
+#[test]
+fn selects_deepseek_provider() {
+    unsafe { std::env::set_var("TEST_DEEPSEEK_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "deepseek".into(),
+        kind: "deepseek".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_DEEPSEEK_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_DEEPSEEK_KEY_SEL") };
+}
+
+#[test]
+fn selects_mistral_provider() {
+    unsafe { std::env::set_var("TEST_MISTRAL_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "mistral".into(),
+        kind: "mistral".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_MISTRAL_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_MISTRAL_KEY_SEL") };
+}
+
+#[test]
+fn selects_bedrock_provider_with_inline_credentials() {
+    let cfg = ModelProviderConfig {
+        name: "bedrock".into(),
+        kind: "bedrock".into(),
+        base_url: String::new(),
+        deployment_name: Some("us-east-1".into()),
+        api_version: None,
+        api_key_env: None,
+        api_key: Some("AKIA_TEST:SECRET_TEST".into()),
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+}
+
+#[test]
+fn bedrock_requires_credentials() {
+    unsafe {
+        std::env::remove_var("AWS_ACCESS_KEY_ID");
+        std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+    }
+    let cfg = ModelProviderConfig {
+        name: "bedrock".into(),
+        kind: "bedrock".into(),
+        base_url: String::new(),
+        deployment_name: Some("us-east-1".into()),
+        api_version: None,
+        api_key_env: None,
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let err = provider_from_config(&cfg).unwrap_err();
+    assert!(matches!(err, ModelError::Auth(_)));
+}
+
+#[test]
 fn azure_requires_deployment_name() {
     unsafe { std::env::set_var("TEST_AZURE_KEY_DEP", "fake") };
     let cfg = ModelProviderConfig {
