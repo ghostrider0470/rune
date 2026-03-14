@@ -208,6 +208,7 @@ impl ExecToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output,
                     is_error,
+                    tool_execution_id: None,
                 })
             }
             Ok(Err(e)) => Err(ToolError::ExecutionFailed(format!(
@@ -217,6 +218,7 @@ impl ExecToolExecutor {
                 tool_call_id: call.tool_call_id,
                 output: format!("command timed out after {}s", timeout_secs.as_secs()),
                 is_error: true,
+                tool_execution_id: None,
             }),
         }
     }
@@ -254,22 +256,26 @@ impl ExecToolExecutor {
             .register(process_id.clone(), child, stdin)
             .await;
 
-        if let Some(audit_store) = &self.audit_store {
-            audit_store
-                .record_spawn(NewProcessAudit {
-                    process_id: process_id.clone(),
-                    tool_call_id: call.tool_call_id.into_uuid(),
-                    session_id: extract_uuid_argument(&call.arguments, "__session_id"),
-                    turn_id: extract_uuid_argument(&call.arguments, "__turn_id"),
-                    tool_name: call.tool_name.clone(),
-                    command: command_str.to_string(),
-                    workdir: workdir.display().to_string(),
-                    arguments: call.arguments.clone(),
-                    started_at: Utc::now(),
-                })
-                .await
-                .map_err(ToolError::ExecutionFailed)?;
-        }
+        let audit_record = if let Some(audit_store) = &self.audit_store {
+            Some(
+                audit_store
+                    .record_spawn(NewProcessAudit {
+                        process_id: process_id.clone(),
+                        tool_call_id: call.tool_call_id.into_uuid(),
+                        session_id: extract_uuid_argument(&call.arguments, "__session_id"),
+                        turn_id: extract_uuid_argument(&call.arguments, "__turn_id"),
+                        tool_name: call.tool_name.clone(),
+                        command: command_str.to_string(),
+                        workdir: workdir.display().to_string(),
+                        arguments: call.arguments.clone(),
+                        started_at: Utc::now(),
+                    })
+                    .await
+                    .map_err(ToolError::ExecutionFailed)?,
+            )
+        } else {
+            None
+        };
 
         let output = json!({
             "sessionId": process_id,
@@ -282,7 +288,9 @@ impl ExecToolExecutor {
             "host": host,
             "workdir": workdir,
             "command": command_str,
-            "durable": self.audit_store.is_some(),
+            "durable": audit_record.is_some(),
+            "toolCallId": call.tool_call_id.into_uuid(),
+            "toolExecutionId": audit_record.as_ref().map(|record| record.tool_execution_id),
         })
         .to_string();
 
@@ -290,6 +298,7 @@ impl ExecToolExecutor {
             tool_call_id: call.tool_call_id,
             output,
             is_error: false,
+            tool_execution_id: audit_record.as_ref().map(|record| record.tool_execution_id),
         })
     }
 }
@@ -307,14 +316,83 @@ impl ToolExecutor for ExecToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process_audit::{CompletedProcessAudit, ProcessAuditRecord};
     use rune_core::ToolCallId;
     use tempfile::TempDir;
+    use tokio::sync::Mutex;
 
     fn make_call(name: &str, args: serde_json::Value) -> ToolCall {
         ToolCall {
             tool_call_id: ToolCallId::new(),
             tool_name: name.into(),
             arguments: args,
+        }
+    }
+
+    #[derive(Default)]
+    struct MemProcessAuditStore {
+        records: Mutex<Vec<ProcessAuditRecord>>,
+    }
+
+    #[async_trait]
+    impl ProcessAuditStore for MemProcessAuditStore {
+        async fn record_spawn(&self, spawn: NewProcessAudit) -> Result<ProcessAuditRecord, String> {
+            let record = ProcessAuditRecord {
+                process_id: spawn.process_id,
+                tool_call_id: spawn.tool_call_id,
+                tool_execution_id: Uuid::now_v7(),
+                session_id: spawn.session_id,
+                turn_id: spawn.turn_id,
+                tool_name: spawn.tool_name,
+                command: spawn.command,
+                workdir: spawn.workdir,
+                arguments: spawn.arguments,
+                status: "running".to_string(),
+                result_summary: None,
+                error_summary: None,
+                started_at: spawn.started_at,
+                ended_at: None,
+            };
+            self.records.lock().await.push(record.clone());
+            Ok(record)
+        }
+
+        async fn record_completion(
+            &self,
+            completion: CompletedProcessAudit,
+        ) -> Result<ProcessAuditRecord, String> {
+            let mut records = self.records.lock().await;
+            let record = records
+                .iter_mut()
+                .find(|record| record.process_id == completion.process_id)
+                .ok_or_else(|| format!("missing process {}", completion.process_id))?;
+            record.status = completion.status;
+            record.result_summary = completion.result_summary;
+            record.error_summary = completion.error_summary;
+            record.ended_at = Some(completion.ended_at);
+            Ok(record.clone())
+        }
+
+        async fn find(&self, process_id: &str) -> Result<Option<ProcessAuditRecord>, String> {
+            Ok(self
+                .records
+                .lock()
+                .await
+                .iter()
+                .find(|record| record.process_id == process_id)
+                .cloned())
+        }
+
+        async fn list_recent(&self, limit: usize) -> Result<Vec<ProcessAuditRecord>, String> {
+            Ok(self
+                .records
+                .lock()
+                .await
+                .iter()
+                .rev()
+                .take(limit)
+                .cloned()
+                .collect())
         }
     }
 
@@ -427,6 +505,51 @@ mod tests {
 
         let infos = manager.list().await;
         assert!(infos.iter().any(|info| info.process_id == session_id));
+    }
+
+    #[tokio::test]
+    async fn background_exec_returns_durable_audit_ids_when_configured() {
+        let tmp = TempDir::new().unwrap();
+        let manager = ProcessManager::new();
+        let audit_store = Arc::new(MemProcessAuditStore::default());
+        let exec = ExecToolExecutor::new(tmp.path(), Duration::from_secs(30))
+            .with_process_manager(manager)
+            .with_audit_store(audit_store.clone());
+
+        let call = make_call(
+            "exec",
+            serde_json::json!({
+                "command": "echo hi && sleep 1",
+                "background": true,
+                "__session_id": Uuid::now_v7().to_string(),
+                "__turn_id": Uuid::now_v7().to_string()
+            }),
+        );
+        let result = exec.execute(call.clone()).await.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+
+        assert_eq!(value["durable"], true);
+        assert_eq!(
+            value["toolCallId"],
+            call.tool_call_id.into_uuid().to_string()
+        );
+        assert!(value.get("toolExecutionId").is_some());
+        assert_ne!(value["toolExecutionId"], serde_json::Value::Null);
+        assert_eq!(
+            result.tool_execution_id,
+            Some(value["toolExecutionId"].as_str().unwrap().parse().unwrap())
+        );
+
+        let persisted = audit_store
+            .find(value["sessionId"].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.tool_call_id, call.tool_call_id.into_uuid());
+        assert_eq!(
+            value["toolExecutionId"],
+            serde_json::Value::String(persisted.tool_execution_id.to_string())
+        );
     }
 
     #[tokio::test]

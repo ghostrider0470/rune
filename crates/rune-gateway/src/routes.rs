@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::Html;
+use axum::http::{StatusCode, header};
+use axum::response::{Html, IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -168,6 +168,37 @@ pub struct DashboardDiagnosticsResponse {
 
 pub async fn dashboard_page() -> Html<&'static str> {
     Html(DASHBOARD_HTML)
+}
+
+pub async fn branded_asset(Path(path): Path<String>) -> Result<Response, GatewayError> {
+    let (content_type, bytes): (&'static str, &'static [u8]) = match path.as_str() {
+        "hero.png" => ("image/png", include_bytes!("../../../assets/hero.png")),
+        "rune-logo-favicon.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/rune-logo-favicon.svg"),
+        ),
+        "rune-logo-icon.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/rune-logo-icon.svg"),
+        ),
+        "rune-logo-wordmark-dark.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/rune-logo-wordmark-dark.svg"),
+        ),
+        "rune-logo-wordmark-light.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/rune-logo-wordmark-light.svg"),
+        ),
+        "rune-logo-wordmark.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/rune-logo-wordmark.svg"),
+        ),
+        _ => {
+            return Err(GatewayError::AssetNotFound(path));
+        }
+    };
+
+    Ok(([(header::CONTENT_TYPE, content_type)], bytes).into_response())
 }
 
 pub async fn dashboard_summary(
@@ -1291,104 +1322,269 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
     }
 }
 
-const DASHBOARD_HTML: &str = r#"<!doctype html>
+const DASHBOARD_HTML: &str = r##"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/assets/rune-logo-favicon.svg" type="image/svg+xml">
   <title>Rune Operator Dashboard</title>
   <style>
     :root {
-      --bg: #f4efe7;
-      --panel: rgba(255, 252, 247, 0.9);
-      --panel-strong: #fffaf3;
-      --ink: #1f1c18;
-      --muted: #6e655d;
-      --line: #d5c6b8;
-      --accent: #0f766e;
-      --accent-soft: #d7f3ef;
-      --warn: #b45309;
-      --warn-soft: #fde7c7;
-      --danger: #b42318;
-      --danger-soft: #fee4e2;
+      --bg: #0d1317;
+      --bg-soft: #121a1f;
+      --panel: rgba(18, 27, 33, 0.84);
+      --panel-strong: rgba(24, 36, 43, 0.96);
+      --panel-alt: rgba(15, 24, 29, 0.9);
+      --ink: #f2ede2;
+      --text-strong: #fff9ef;
+      --muted: #9eaba8;
+      --line: rgba(250, 238, 218, 0.11);
+      --line-strong: rgba(250, 238, 218, 0.18);
+      --accent: #f3bd6a;
+      --accent-strong: #ffd89c;
+      --accent-soft: rgba(243, 189, 106, 0.14);
+      --teal: #4fc9bf;
+      --teal-soft: rgba(79, 201, 191, 0.12);
+      --warn: #f59e0b;
+      --warn-soft: rgba(245, 158, 11, 0.14);
+      --danger: #f97066;
+      --danger-soft: rgba(249, 112, 102, 0.14);
+      --ok: #4fc9bf;
+      --ok-soft: rgba(79, 201, 191, 0.14);
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+      --radius-xl: 28px;
+      --radius-lg: 22px;
+      --radius-md: 16px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Iosevka Aile", "IBM Plex Sans", sans-serif;
+      min-height: 100vh;
+      font-family: Inter, "IBM Plex Sans", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 28%),
-        radial-gradient(circle at top right, rgba(180, 83, 9, 0.12), transparent 24%),
-        linear-gradient(180deg, #f8f3eb 0%, var(--bg) 100%);
+        radial-gradient(circle at top left, rgba(79, 201, 191, 0.22), transparent 26%),
+        radial-gradient(circle at 85% 10%, rgba(243, 189, 106, 0.18), transparent 24%),
+        radial-gradient(circle at 50% 100%, rgba(47, 78, 91, 0.38), transparent 36%),
+        linear-gradient(180deg, #0b1013 0%, var(--bg) 45%, #091015 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: radial-gradient(circle at center, black 32%, transparent 82%);
+      opacity: 0.35;
     }
     .shell {
-      max-width: 1180px;
+      position: relative;
+      max-width: 1320px;
       margin: 0 auto;
-      padding: 24px 16px 40px;
+      padding: 24px 16px 48px;
     }
     .hero {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      align-items: flex-end;
-      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr);
+      gap: 24px;
+      align-items: stretch;
       margin-bottom: 20px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(135deg, rgba(14, 22, 27, 0.98), rgba(17, 29, 36, 0.88)),
+        linear-gradient(135deg, rgba(79, 201, 191, 0.12), rgba(243, 189, 106, 0.08));
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -80px -120px auto;
+      width: 300px;
+      height: 300px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(243, 189, 106, 0.28), transparent 68%);
+      pointer-events: none;
+    }
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      min-width: 0;
+    }
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .brand-mark {
+      width: 56px;
+      height: 56px;
+      border-radius: 18px;
+      padding: 12px;
+      background: linear-gradient(180deg, rgba(243, 189, 106, 0.14), rgba(255, 255, 255, 0.03));
+      border: 1px solid rgba(243, 189, 106, 0.18);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .brand-wordmark {
+      height: 34px;
+      width: auto;
+      display: block;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(79, 201, 191, 0.24);
+      background: rgba(79, 201, 191, 0.08);
+      color: #d6f6f3;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
     h1 {
       margin: 0;
-      font-family: "IBM Plex Mono", monospace;
-      font-size: clamp(28px, 4vw, 42px);
-      letter-spacing: -0.04em;
+      color: var(--text-strong);
+      font-size: clamp(32px, 4.4vw, 58px);
+      line-height: 0.98;
+      letter-spacing: -0.055em;
+      max-width: 12ch;
     }
     .subhead {
-      margin-top: 8px;
+      margin: 0;
+      font-size: clamp(15px, 1.5vw, 18px);
+      line-height: 1.7;
       color: var(--muted);
-      max-width: 680px;
+      max-width: 62ch;
     }
-    .meta {
+    .hero-meta {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 10px;
     }
     .pill {
       border: 1px solid var(--line);
-      background: rgba(255, 250, 243, 0.7);
+      background: rgba(255, 255, 255, 0.03);
       border-radius: 999px;
-      padding: 8px 12px;
+      padding: 9px 13px;
       font-size: 13px;
       color: var(--muted);
     }
+    .pill strong {
+      color: var(--text-strong);
+      font-weight: 600;
+    }
+    .hero-visual {
+      position: relative;
+      min-height: 260px;
+      border-radius: 24px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(8, 12, 16, 0.24), rgba(8, 12, 16, 0.56)),
+        linear-gradient(135deg, rgba(243, 189, 106, 0.16), rgba(79, 201, 191, 0.08));
+    }
+    .hero-visual img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      filter: saturate(0.95) contrast(1.04);
+      transform: scale(1.02);
+    }
+    .hero-overlay {
+      position: absolute;
+      inset: auto 18px 18px 18px;
+      display: grid;
+      gap: 12px;
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(9, 15, 19, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
+    }
+    .hero-overlay-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent-strong);
+    }
+    .hero-overlay-value {
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--text-strong);
+    }
+    .hero-overlay-copy {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
     .grid {
       display: grid;
-      gap: 14px;
+      gap: 16px;
       grid-template-columns: repeat(12, minmax(0, 1fr));
     }
     .card {
       grid-column: span 12;
       border: 1px solid var(--line);
       background: var(--panel);
-      border-radius: 18px;
-      padding: 18px;
-      box-shadow: 0 10px 30px rgba(51, 33, 15, 0.05);
-      backdrop-filter: blur(10px);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+    .card-head {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 18px;
     }
     .card h2 {
-      margin: 0 0 14px;
+      margin: 0 0 6px;
+      color: var(--text-strong);
       font-size: 15px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
+    .card-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
     .stats {
       display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     }
     .stat {
       border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px;
-      background: var(--panel-strong);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+        var(--panel-strong);
+      min-height: 124px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
     .stat label {
       display: block;
@@ -1396,15 +1592,31 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     .stat strong {
-      font-size: 28px;
-      line-height: 1;
+      font-size: clamp(24px, 2.5vw, 32px);
+      line-height: 1.05;
+      color: var(--text-strong);
+      letter-spacing: -0.04em;
+      word-break: break-word;
+    }
+    .stat small {
+      display: block;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
     }
     .stack {
       display: grid;
       gap: 12px;
+    }
+    .surface {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: var(--panel-alt);
+      overflow: hidden;
     }
     table {
       width: 100%;
@@ -1413,7 +1625,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     }
     th, td {
       text-align: left;
-      padding: 10px 8px;
+      padding: 14px 16px;
       border-top: 1px solid var(--line);
       vertical-align: top;
     }
@@ -1423,66 +1635,243 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       text-transform: uppercase;
       letter-spacing: 0.08em;
       border-top: none;
-      padding-top: 0;
+      padding-top: 16px;
+      padding-bottom: 12px;
+    }
+    td {
+      color: var(--ink);
+    }
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.015);
+    }
+    .model-name,
+    .session-id {
+      display: grid;
+      gap: 6px;
+    }
+    .model-name strong,
+    .session-id strong {
+      color: var(--text-strong);
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .table-subtle {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      border: 1px solid transparent;
+    }
+    .chip.status-running,
+    .chip.status-ready,
+    .chip.status-completed {
+      background: var(--ok-soft);
+      color: #b7f4ee;
+      border-color: rgba(79, 201, 191, 0.18);
+    }
+    .chip.status-failed,
+    .chip.status-error,
+    .chip.status-cancelled {
+      background: var(--danger-soft);
+      color: #ffccc8;
+      border-color: rgba(249, 112, 102, 0.18);
+    }
+    .chip.status-waiting,
+    .chip.status-pending,
+    .chip.status-tool_executing {
+      background: var(--warn-soft);
+      color: #ffd79b;
+      border-color: rgba(245, 158, 11, 0.18);
+    }
+    .chip.kind {
+      background: rgba(255,255,255,0.04);
+      color: var(--text-strong);
+      border-color: var(--line);
+      text-transform: capitalize;
+    }
+    code {
+      font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
+      font-size: 12px;
+      color: #f8e5bb;
+      background: rgba(243, 189, 106, 0.08);
+      border: 1px solid rgba(243, 189, 106, 0.12);
+      border-radius: 10px;
+      padding: 2px 7px;
+      word-break: break-all;
     }
     .diag {
       display: grid;
-      gap: 10px;
+      gap: 12px;
     }
     .diag-item {
-      border-radius: 14px;
+      border-radius: 18px;
       border: 1px solid var(--line);
-      padding: 12px 14px;
+      padding: 16px;
       background: var(--panel-strong);
     }
-    .diag-item.warn { background: var(--warn-soft); border-color: #eab308; }
-    .diag-item.error { background: var(--danger-soft); border-color: #fda29b; }
+    .diag-item.info { background: rgba(255,255,255,0.03); }
+    .diag-item.warn { background: var(--warn-soft); border-color: rgba(245, 158, 11, 0.3); }
+    .diag-item.error { background: var(--danger-soft); border-color: rgba(249, 112, 102, 0.3); }
     .diag-head {
       display: flex;
       gap: 8px;
       justify-content: space-between;
       align-items: baseline;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       font-family: "IBM Plex Mono", monospace;
       font-size: 12px;
       color: var(--muted);
     }
+    .diag-message {
+      color: var(--text-strong);
+      line-height: 1.6;
+    }
     .empty, .loading {
       color: var(--muted);
-      padding: 10px 0;
+      padding: 18px 16px;
+    }
+    .status-rail {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      margin-top: 6px;
+    }
+    .rail-item {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+    .rail-item span {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .rail-item strong {
+      color: var(--text-strong);
+      font-size: 15px;
+    }
+    .footer-note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
     }
     @media (min-width: 900px) {
       .summary { grid-column: span 12; }
-      .models { grid-column: span 5; }
-      .sessions { grid-column: span 7; }
+      .models { grid-column: span 4; }
+      .sessions { grid-column: span 8; }
       .diagnostics { grid-column: span 12; }
+    }
+    @media (max-width: 980px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+      .hero-visual {
+        order: -1;
+        min-height: 220px;
+      }
+    }
+    @media (max-width: 720px) {
+      .shell {
+        padding: 14px 14px 28px;
+      }
+      .hero,
+      .card {
+        padding: 16px;
+      }
+      .brand-lockup {
+        align-items: flex-start;
+      }
+      .brand-wordmark {
+        height: 28px;
+      }
+      .surface {
+        overflow-x: auto;
+      }
+      table {
+        min-width: 640px;
+      }
+      .hero-overlay {
+        inset: auto 12px 12px 12px;
+      }
     }
   </style>
 </head>
 <body>
   <main class="shell">
     <section class="hero">
-      <div>
-        <h1>Rune Operator Dashboard</h1>
-        <div class="subhead">Local-first operator view for gateway state, configured models, recent sessions, and runtime diagnostics.</div>
+      <div class="hero-copy">
+        <div class="eyebrow">Local Operator Surface</div>
+        <div class="brand-lockup">
+          <img class="brand-mark" src="/assets/rune-logo-icon.svg" alt="Rune icon">
+          <img class="brand-wordmark" src="/assets/rune-logo-wordmark-light.svg" alt="Rune">
+        </div>
+        <div>
+          <h1>Operate sessions, models, and runtime health with actual signal.</h1>
+          <p class="subhead">Local-first control plane for gateway status, configured models, recent sessions, and diagnostics. Same backend routes, cleaner hierarchy, better scanability, and brand-consistent presentation.</p>
+        </div>
+        <div class="hero-meta">
+          <div class="pill">Route <strong>/dashboard</strong></div>
+          <div class="pill">Mirror <strong>/ui</strong></div>
+          <div class="pill">Data <strong>/api/dashboard/*</strong></div>
+        </div>
+        <div id="status-rail" class="status-rail">
+          <div class="rail-item"><span>Gateway</span><strong>Loading…</strong></div>
+          <div class="rail-item"><span>Bind</span><strong>Loading…</strong></div>
+          <div class="rail-item"><span>Channels</span><strong>Loading…</strong></div>
+          <div class="rail-item"><span>Auth</span><strong>Loading…</strong></div>
+        </div>
       </div>
-      <div class="meta">
-        <div class="pill">Route: <strong>/dashboard</strong></div>
-        <div class="pill">API: <strong>/api/dashboard/*</strong></div>
-      </div>
+      <aside class="hero-visual" aria-hidden="true">
+        <img src="/assets/hero.png" alt="">
+        <div class="hero-overlay">
+          <div class="hero-overlay-title">Rune Operator</div>
+          <div id="hero-session-count" class="hero-overlay-value">Loading…</div>
+          <div class="hero-overlay-copy">Snapshot of live operator context across runtime sessions, model routing, channel availability, and diagnostic posture.</div>
+        </div>
+      </aside>
     </section>
 
     <section class="grid">
       <article class="card summary">
-        <h2>Home</h2>
+        <div class="card-head">
+          <div>
+            <h2>Overview</h2>
+            <p class="card-copy">High-signal system summary for fast operator triage.</p>
+          </div>
+        </div>
         <div id="summary" class="stats">
           <div class="loading">Loading summary…</div>
         </div>
       </article>
 
       <article class="card models">
-        <h2>Models</h2>
+        <div class="card-head">
+          <div>
+            <h2>Model Inventory</h2>
+            <p class="card-copy">Configured routes and default selection across providers.</p>
+          </div>
+        </div>
         <div class="stack">
+          <div class="surface">
           <table>
             <thead>
               <tr>
@@ -1495,11 +1884,18 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
               <tr><td colspan="3" class="loading">Loading models…</td></tr>
             </tbody>
           </table>
+          </div>
         </div>
       </article>
 
       <article class="card sessions">
-        <h2>Recent Sessions</h2>
+        <div class="card-head">
+          <div>
+            <h2>Recent Sessions</h2>
+            <p class="card-copy">Current execution state, routing context, and latest activity.</p>
+          </div>
+        </div>
+        <div class="surface">
         <table>
           <thead>
             <tr>
@@ -1514,24 +1910,46 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             <tr><td colspan="5" class="loading">Loading sessions…</td></tr>
           </tbody>
         </table>
+        </div>
       </article>
 
       <article class="card diagnostics">
-        <h2>Errors & Health</h2>
+        <div class="card-head">
+          <div>
+            <h2>Diagnostics</h2>
+            <p class="card-copy">Configuration warnings and runtime signals surfaced by the gateway.</p>
+          </div>
+        </div>
         <div id="diagnostics" class="diag">
           <div class="loading">Loading diagnostics…</div>
         </div>
+        <div class="footer-note">This dashboard is intentionally lightweight and reads from the existing gateway JSON routes, so it stays operational without introducing a separate SPA runtime.</div>
       </article>
     </section>
   </main>
   <script>
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
     function fmtDate(value) {
       if (!value) return "n/a";
       const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
     }
 
     function fmtDuration(seconds) {
+      if (typeof seconds !== "number") return "n/a";
       const parts = [];
       const days = Math.floor(seconds / 86400);
       const hours = Math.floor((seconds % 86400) / 3600);
@@ -1540,6 +1958,29 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       if (hours) parts.push(hours + "h");
       parts.push(minutes + "m");
       return parts.join(" ");
+    }
+
+    function toStatusClass(value) {
+      return String(value || "unknown").toLowerCase().replaceAll(/[^a-z0-9]+/g, "_");
+    }
+
+    function renderStatusRail(summary) {
+      const channels = Array.isArray(summary.channels) && summary.channels.length
+        ? summary.channels.join(", ")
+        : "No channels";
+      document.getElementById("status-rail").innerHTML = [
+        ["Gateway", summary.gateway_status || "unknown"],
+        ["Bind", summary.bind || "n/a"],
+        ["Channels", channels],
+        ["Auth", summary.auth_enabled ? "Bearer protected" : "Open"]
+      ].map(([label, value]) => `
+        <div class="rail-item">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </div>
+      `).join("");
+      document.getElementById("hero-session-count").textContent =
+        `${summary.session_count || 0} active session${summary.session_count === 1 ? "" : "s"}`;
     }
 
     async function loadJson(path) {
@@ -1551,16 +1992,17 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     function renderSummary(summary) {
       const root = document.getElementById("summary");
       const entries = [
-        ["Gateway", summary.gateway_status],
-        ["Uptime", fmtDuration(summary.uptime_seconds)],
-        ["Default model", summary.default_model || "none"],
-        ["Providers", String(summary.provider_count)],
-        ["Configured models", String(summary.configured_model_count)],
-        ["Sessions", String(summary.session_count)],
+        ["Gateway status", summary.gateway_status, summary.auth_enabled ? "Protected operator access is enabled." : "Auth is disabled for protected routes."],
+        ["Uptime", fmtDuration(summary.uptime_seconds), `Listening on ${summary.bind || "n/a"}`],
+        ["Default model", summary.default_model || "none", `${summary.provider_count || 0} provider${summary.provider_count === 1 ? "" : "s"} configured`],
+        ["Configured models", String(summary.configured_model_count || 0), "Inventory discovered from current model configuration."],
+        ["Sessions", String(summary.session_count || 0), `${summary.ws_subscribers || 0} WebSocket subscriber${summary.ws_subscribers === 1 ? "" : "s"}`],
+        ["Channels", String((summary.channels || []).length), (summary.channels || []).length ? (summary.channels || []).join(", ") : "No channel adapters configured"],
       ];
       root.innerHTML = entries.map(([label, value]) =>
-        `<div class="stat"><label>${label}</label><strong>${value}</strong></div>`
+        `<div class="stat"><div><label>${escapeHtml(label)}</label><strong>${escapeHtml(value)}</strong></div><small>${escapeHtml(arguments[0][2])}</small></div>`
       ).join("");
+      renderStatusRail(summary);
     }
 
     function renderModels(models) {
@@ -1571,9 +2013,14 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       }
       body.innerHTML = models.map((model) => `
         <tr>
-          <td>${model.model_id}${model.is_default ? " <strong>(default)</strong>" : ""}</td>
-          <td>${model.provider_name}</td>
-          <td>${model.provider_kind || "n/a"}</td>
+          <td>
+            <div class="model-name">
+              <strong>${escapeHtml(model.model_id)}</strong>
+              <div class="table-subtle">${model.is_default ? "Default route" : escapeHtml(model.raw_model || "Mapped model")}</div>
+            </div>
+          </td>
+          <td>${escapeHtml(model.provider_name)}</td>
+          <td><span class="chip kind">${escapeHtml(model.provider_kind || "n/a")}</span></td>
         </tr>
       `).join("");
     }
@@ -1586,24 +2033,41 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       }
       body.innerHTML = sessions.map((session) => `
         <tr>
-          <td><code>${session.id}</code></td>
-          <td>${session.kind} / ${session.status}</td>
-          <td>${session.channel_ref || "n/a"}${session.routing_ref ? `<br><code>${session.routing_ref}</code>` : ""}</td>
-          <td>${fmtDate(session.last_activity_at)}</td>
-          <td>${fmtDate(session.created_at)}</td>
+          <td>
+            <div class="session-id">
+              <strong>${escapeHtml((session.id || "").slice(0, 8))}</strong>
+              <div><code>${escapeHtml(session.id)}</code></div>
+            </div>
+          </td>
+          <td>
+            <div class="chip-row">
+              <span class="chip kind">${escapeHtml(session.kind || "unknown")}</span>
+              <span class="chip status-${toStatusClass(session.status)}">${escapeHtml(session.status || "unknown")}</span>
+            </div>
+          </td>
+          <td>
+            <div>${escapeHtml(session.channel_ref || "n/a")}</div>
+            <div class="table-subtle">${session.routing_ref ? `<code>${escapeHtml(session.routing_ref)}</code>` : "No routing ref"}</div>
+          </td>
+          <td>${escapeHtml(fmtDate(session.last_activity_at))}</td>
+          <td>${escapeHtml(fmtDate(session.created_at))}</td>
         </tr>
       `).join("");
     }
 
     function renderDiagnostics(data) {
       const root = document.getElementById("diagnostics");
+      if (!data.items.length) {
+        root.innerHTML = `<div class="diag-item info"><div class="diag-head"><span>INFO · runtime</span><span>now</span></div><div class="diag-message">No diagnostics were raised by the current dashboard probes.</div></div>`;
+        return;
+      }
       root.innerHTML = data.items.map((item) => `
         <div class="diag-item ${item.level}">
           <div class="diag-head">
-            <span>${item.level.toUpperCase()} · ${item.source}</span>
-            <span>${fmtDate(item.observed_at)}</span>
+            <span>${escapeHtml(String(item.level || "info").toUpperCase())} · ${escapeHtml(item.source || "runtime")}</span>
+            <span>${escapeHtml(fmtDate(item.observed_at))}</span>
           </div>
-          <div>${item.message}</div>
+          <div class="diag-message">${escapeHtml(item.message)}</div>
         </div>
       `).join("");
     }
@@ -1621,10 +2085,12 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         renderSessions(sessions);
         renderDiagnostics(diagnostics);
       } catch (error) {
-        document.getElementById("summary").innerHTML = `<div class="empty">${error.message}</div>`;
+        document.getElementById("summary").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
         document.getElementById("models-body").innerHTML = `<tr><td colspan="3" class="empty">Failed to load models.</td></tr>`;
         document.getElementById("sessions-body").innerHTML = `<tr><td colspan="5" class="empty">Failed to load sessions.</td></tr>`;
         document.getElementById("diagnostics").innerHTML = `<div class="empty">Failed to load diagnostics.</div>`;
+        document.getElementById("status-rail").innerHTML = `<div class="rail-item"><span>Gateway</span><strong>Unavailable</strong></div>`;
+        document.getElementById("hero-session-count").textContent = "Dashboard unavailable";
       }
     }
 
@@ -1632,7 +2098,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
   </script>
 </body>
 </html>
-"#;
+"##;
 
 // ── Approvals ─────────────────────────────────────────────────────────
 
@@ -1689,10 +2155,7 @@ pub async fn list_pending_approvals(
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
     Ok(Json(
-        approvals
-            .into_iter()
-            .map(approval_to_response)
-            .collect(),
+        approvals.into_iter().map(approval_to_response).collect(),
     ))
 }
 

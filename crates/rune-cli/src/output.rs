@@ -244,7 +244,11 @@ pub struct ApprovalRequestSummary {
 impl fmt::Display for ApprovalRequestSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Approval: {}", self.id)?;
-        writeln!(f, "  Subject:         {} {}", self.subject_type, self.subject_id)?;
+        writeln!(
+            f,
+            "  Subject:         {} {}",
+            self.subject_type, self.subject_id
+        )?;
         writeln!(f, "  Reason:          {}", self.reason)?;
         if let Some(decision) = &self.decision {
             writeln!(f, "  Decision:        {decision}")?;
@@ -289,7 +293,14 @@ impl fmt::Display for ApprovalListResponse {
             return write!(f, "No pending approvals.");
         }
         for approval in &self.approvals {
-            writeln!(f, "{} [{}] status={} created={}", approval.id, approval.reason, approval.approval_status.as_deref().unwrap_or("unknown"), approval.created_at)?;
+            writeln!(
+                f,
+                "{} [{}] status={} created={}",
+                approval.id,
+                approval.reason,
+                approval.approval_status.as_deref().unwrap_or("unknown"),
+                approval.created_at
+            )?;
             if let Some(command) = &approval.command {
                 writeln!(f, "  command: {command}")?;
             }
@@ -308,7 +319,11 @@ pub struct ApprovalPolicySummary {
 
 impl fmt::Display for ApprovalPolicySummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} {}", self.tool_name, self.decision, self.decided_at)
+        write!(
+            f,
+            "{} {} {}",
+            self.tool_name, self.decision, self.decided_at
+        )
     }
 }
 

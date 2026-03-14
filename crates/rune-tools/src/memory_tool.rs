@@ -130,6 +130,7 @@ impl MemoryToolExecutor {
             tool_call_id: call.tool_call_id,
             output,
             is_error: false,
+            tool_execution_id: None,
         })
     }
 
@@ -183,6 +184,7 @@ impl MemoryToolExecutor {
             tool_call_id: call.tool_call_id,
             output,
             is_error: false,
+            tool_execution_id: None,
         })
     }
 }

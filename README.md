@@ -1,4 +1,12 @@
+<p align="center">
+  <img src="assets/hero.png" alt="Rune Hero" width="800" />
+</p>
+
 # Rune
+
+<p align="left">
+  <img src="assets/rune-logo-wordmark-dark.svg" alt="Rune Logo" height="48" />
+</p>
 
 A high-performance personal AI gateway written in Rust. Drop-in replacement for [OpenClaw](https://github.com/openclaw/openclaw) with full Azure compatibility, Docker-first deployment, and PostgreSQL persistence.
 

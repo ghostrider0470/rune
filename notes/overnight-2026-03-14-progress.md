@@ -324,3 +324,54 @@ Wire `session_status` tool/runtime/gateway responses to emit the new `SessionSta
   - `cargo test -q -p rune-cli -p rune-gateway` ✅
 - Remaining honest gap:
   - this improves restart-visible inspectability, not restart-safe continuation/reattachment itself.
+
+## 11:1x durable exec audit-correlation pass
+
+- Tightened the transcript/audit parity story for long-running `exec` without pretending live-handle restart reattachment exists.
+- Updated `crates/rune-tools/src/exec_tool.rs` so background `exec` output now includes explicit durable correlation fields when an audit store is configured:
+  - `toolCallId`
+  - `toolExecutionId`
+- Kept `sessionId` as the process handle surface, but removed the need to infer durable linkage from command text or process IDs alone.
+- Added focused `rune-tools` coverage with an in-memory `ProcessAuditStore` proving the returned `toolExecutionId` matches the persisted durable audit record.
+- Validation:
+  - `cargo test -q -p rune-tools -p rune-runtime` ✅
+  - `cargo clippy -q -p rune-tools -- -D warnings` ✅
+- Honest boundary:
+  - runtime transcripts still do not universally embed audit references for every tool result, so the checklist item remains intentionally unchecked.
+
+## 11:2x transcript audit-correlation follow-up
+
+- Continued the same highest-priority parity seam instead of starting a new feature branch.
+- Narrow protocol fix landed:
+  - `rune-core::TranscriptItem::ToolResult` now carries optional `tool_execution_id`
+  - `rune-tools::ToolResult` now carries the same optional durable audit correlation field
+  - `rune-runtime` now preserves that correlation when appending transcripted tool results
+- Result: background `exec` no longer stops at returning durable audit IDs to the immediate caller; the transcript contract can now preserve the same audit linkage when that tool result flows through the runtime turn loop.
+- Kept the boundary honest:
+  - no claim that every tool family now persists a durable execution row
+  - no claim of restart-safe process reattachment
+  - checklist item stays open until broader end-to-end black-box coverage exists
+- Validation:
+  - `cargo test -q -p rune-core -p rune-tools -p rune-runtime` ✅
+
+## 11:4x durable subagent lifecycle metadata pass
+
+- Tightened the conservative subagent implementation so restart-visible lifecycle state is no longer trapped mostly in transcript notes.
+- Updated the live gateway app subagent surfaces to persist first-class metadata on subagent session rows:
+  - `subagent_lifecycle`
+  - `subagent_runtime_status`
+  - `subagent_runtime_attached`
+  - `subagent_status_updated_at`
+  - `subagent_last_note`
+- Spawned subagents now initialize as durable inspectable state instead of only “running + see transcript note”:
+  - lifecycle = `spawned`
+  - runtime status = `not_attached`
+  - runtime attached = `false`
+- `subagents steer` and `subagents kill` now update those same metadata fields alongside transcript status notes, so operators can tell the latest subagent lifecycle state after restart without reconstructing everything from transcript history.
+- `subagents list` now surfaces the lifecycle/runtime fields directly.
+- Kept the boundary honest:
+  - still no fake remote runtime attachment
+  - still no claim of true subagent execution parity
+  - this is richer durable inspectability only
+- Validation:
+  - `cargo test -q -p rune-gateway-app` ✅

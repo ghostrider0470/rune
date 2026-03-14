@@ -27,6 +27,10 @@ pub enum GatewayError {
     #[error("job not found: {0}")]
     JobNotFound(String),
 
+    /// Asset not found.
+    #[error("asset not found: {0}")]
+    AssetNotFound(String),
+
     /// Invalid request payload.
     #[error("bad request: {0}")]
     BadRequest(String),
@@ -53,6 +57,13 @@ impl IntoResponse for GatewayError {
             Self::JobNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "job_not_found",
+                false,
+                false,
+                self.to_string(),
+            ),
+            Self::AssetNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                "asset_not_found",
                 false,
                 false,
                 self.to_string(),

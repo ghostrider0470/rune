@@ -453,6 +453,7 @@ impl ToolExecutor for FakeToolExecutor {
             tool_call_id: call.tool_call_id,
             output: "fake tool output".to_string(),
             is_error: false,
+            tool_execution_id: None,
         })
     }
 }

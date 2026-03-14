@@ -126,6 +126,7 @@ impl FileToolExecutor {
             tool_call_id: call.tool_call_id,
             output: truncate_read_output(&output),
             is_error: false,
+            tool_execution_id: None,
         })
     }
 
@@ -152,6 +153,7 @@ impl FileToolExecutor {
             tool_call_id: call.tool_call_id,
             output: format!("wrote {} bytes to {}", content.len(), path_str),
             is_error: false,
+            tool_execution_id: None,
         })
     }
 
@@ -171,6 +173,7 @@ impl FileToolExecutor {
                 tool_call_id: call.tool_call_id,
                 output: "old_string not found in file — no changes made".into(),
                 is_error: true,
+                tool_execution_id: None,
             });
         }
 
@@ -182,6 +185,7 @@ impl FileToolExecutor {
                     "old_string matched {match_count} times — must match exactly once for safe edit"
                 ),
                 is_error: true,
+                tool_execution_id: None,
             });
         }
 
@@ -194,6 +198,7 @@ impl FileToolExecutor {
             tool_call_id: call.tool_call_id,
             output: format!("edited {path_str}: replaced 1 occurrence"),
             is_error: false,
+            tool_execution_id: None,
         })
     }
 
@@ -230,6 +235,7 @@ impl FileToolExecutor {
             tool_call_id: call.tool_call_id,
             output: names.join("\n"),
             is_error: false,
+            tool_execution_id: None,
         })
     }
 }

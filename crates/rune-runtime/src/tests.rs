@@ -147,6 +147,7 @@ impl ToolExecutor for FakeToolExecutor {
                 tool_call_id: call.tool_call_id,
                 output,
                 is_error: false,
+                tool_execution_id: None,
             }),
             FakeToolStep::ApprovalRequired { tool, details } => {
                 Err(ToolError::ApprovalRequired { tool, details })
@@ -999,6 +1000,20 @@ async fn approval_allow_once_resumes_blocked_turn() {
             "assistant_message"
         ]
     );
+
+    let tool_result_item: rune_core::TranscriptItem =
+        serde_json::from_value(transcript[4].payload.clone()).unwrap();
+    match tool_result_item {
+        rune_core::TranscriptItem::ToolResult {
+            output,
+            tool_execution_id,
+            ..
+        } => {
+            assert_eq!(output, "approved output");
+            assert!(tool_execution_id.is_none());
+        }
+        other => panic!("unexpected transcript item: {other:?}"),
+    }
 
     let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
     assert_eq!(session_row.status, "running");

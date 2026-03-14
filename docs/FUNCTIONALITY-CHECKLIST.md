@@ -209,6 +209,7 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 - [x] `subagents`
 - [x] `session_status`
   - 2026-03-14 morning: live gateway wiring now exposes `sessions_spawn`, `sessions_send`, and `subagents` as real app-registered tools rather than library-only modules, with focused app-level tests covering persisted subagent creation, requester-linkage preservation when provided, inspectability, steering-note persistence, and cancel semantics.
+  - 2026-03-14 late morning: subagent session rows now also persist first-class lifecycle/runtime inspectability metadata (`subagent_lifecycle`, `subagent_runtime_status`, `subagent_runtime_attached`, `subagent_status_updated_at`, `subagent_last_note`) so restart-visible operator inspection no longer depends primarily on transcript reconstruction.
 
 ### Memory tools
 - [x] `memory_search`
@@ -218,6 +219,8 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 - [x] stable names and schemas
 - [ ] transcript/audit linkage
   - 2026-03-14 watchdog verification: this remains partially open rather than absent. Tool-side durable audit rows now exist for background `exec` (`tool_executions`), and transcript attribution exists for tool/approval/subagent events, but the stricter parity invariant from `docs/PROTOCOLS.md` — transcript tool outputs matching audit records or carrying an explicit reference — still needs end-to-end evidence and black-box tests before this can be checked.
+  - 2026-03-14 late morning: background `exec` results now return explicit durable correlation fields (`toolCallId`, `toolExecutionId`) when a process audit store is configured, so operators and future runtime/gateway transcript surfaces can tie long-running tool handles back to persisted `tool_executions` rows without guessing from raw command text.
+  - 2026-03-14 watchdog follow-up: the shared transcript contract now also has an optional `tool_execution_id` on `tool_result`, and `rune-runtime` preserves that field when a tool executor returns it. This closes the protocol gap for transcripted background `exec` results, but the checklist remains intentionally open until broader end-to-end black-box evidence exists across more than this one tool family.
 - [x] structured errors
 - [x] durable handles for long-running work
   - 2026-03-14 morning: long-running `exec` work now has durable audit visibility through persisted `tool_executions` metadata, even though full post-restart live-handle control is still out of scope.

@@ -1051,6 +1051,30 @@ struct LiveSessionSpawner {
     workspace_root: PathBuf,
 }
 
+fn set_metadata_string(metadata: &mut serde_json::Value, key: &str, value: impl Into<String>) {
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            key.to_string(),
+            serde_json::Value::String(value.into()),
+        );
+    }
+}
+
+fn set_metadata_u64(metadata: &mut serde_json::Value, key: &str, value: u64) {
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            key.to_string(),
+            serde_json::Value::Number(value.into()),
+        );
+    }
+}
+
+fn set_metadata_bool(metadata: &mut serde_json::Value, key: &str, value: bool) {
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(key.to_string(), serde_json::Value::Bool(value));
+    }
+}
+
 impl LiveSessionSpawner {
     fn new(
         session_engine: Arc<SessionEngine>,
@@ -1120,34 +1144,29 @@ impl SessionSpawner for LiveSessionSpawner {
             .map_err(|e| e.to_string())?;
 
         let mut metadata = row.metadata.clone();
-        if let Some(object) = metadata.as_object_mut() {
-            object.insert(
-                "spawn_task".to_string(),
-                serde_json::Value::String(task.to_string()),
+        set_metadata_string(&mut metadata, "spawn_task", task.to_string());
+        if let Some(requester_session_id) = requester_session_id {
+            set_metadata_string(
+                &mut metadata,
+                "requester_session_id",
+                requester_session_id.to_string(),
             );
-            if let Some(requester_session_id) = requester_session_id {
-                object.insert(
-                    "requester_session_id".to_string(),
-                    serde_json::Value::String(requester_session_id.to_string()),
-                );
-            }
-            object.insert(
-                "spawn_mode".to_string(),
-                serde_json::Value::String(mode.unwrap_or("run").to_string()),
-            );
-            if let Some(model) = model {
-                object.insert(
-                    "selected_model".to_string(),
-                    serde_json::Value::String(model.to_string()),
-                );
-            }
-            if let Some(timeout_seconds) = timeout_seconds {
-                object.insert(
-                    "spawn_timeout_seconds".to_string(),
-                    serde_json::Value::Number(timeout_seconds.into()),
-                );
-            }
         }
+        set_metadata_string(&mut metadata, "spawn_mode", mode.unwrap_or("run").to_string());
+        if let Some(model) = model {
+            set_metadata_string(&mut metadata, "selected_model", model.to_string());
+        }
+        if let Some(timeout_seconds) = timeout_seconds {
+            set_metadata_u64(&mut metadata, "spawn_timeout_seconds", timeout_seconds);
+        }
+        set_metadata_string(&mut metadata, "subagent_lifecycle", "spawned");
+        set_metadata_string(&mut metadata, "subagent_runtime_status", "not_attached");
+        set_metadata_bool(&mut metadata, "subagent_runtime_attached", false);
+        set_metadata_string(
+            &mut metadata,
+            "subagent_status_updated_at",
+            chrono::Utc::now().to_rfc3339(),
+        );
 
         self.session_engine
             .mark_ready(row.id)
@@ -1257,6 +1276,41 @@ impl LiveSubagentManager {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    async fn update_subagent_metadata(
+        &self,
+        session_id: Uuid,
+        lifecycle: &str,
+        runtime_status: &str,
+        last_note: Option<&str>,
+    ) -> Result<(), String> {
+        let row = self
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut metadata = row.metadata;
+        set_metadata_string(&mut metadata, "subagent_lifecycle", lifecycle.to_string());
+        set_metadata_string(
+            &mut metadata,
+            "subagent_runtime_status",
+            runtime_status.to_string(),
+        );
+        set_metadata_bool(&mut metadata, "subagent_runtime_attached", false);
+        set_metadata_string(
+            &mut metadata,
+            "subagent_status_updated_at",
+            chrono::Utc::now().to_rfc3339(),
+        );
+        if let Some(note) = last_note {
+            set_metadata_string(&mut metadata, "subagent_last_note", note.to_string());
+        }
+        self.session_repo
+            .update_metadata(session_id, metadata, chrono::Utc::now())
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1283,6 +1337,11 @@ impl SubagentManager for LiveSubagentManager {
                     "task": row.metadata.get("spawn_task").and_then(|v| v.as_str()),
                     "mode": row.metadata.get("spawn_mode").and_then(|v| v.as_str()),
                     "selected_model": row.metadata.get("selected_model").and_then(|v| v.as_str()),
+                    "subagent_lifecycle": row.metadata.get("subagent_lifecycle").and_then(|v| v.as_str()),
+                    "subagent_runtime_status": row.metadata.get("subagent_runtime_status").and_then(|v| v.as_str()),
+                    "subagent_runtime_attached": row.metadata.get("subagent_runtime_attached").and_then(|v| v.as_bool()),
+                    "subagent_status_updated_at": row.metadata.get("subagent_status_updated_at").and_then(|v| v.as_str()),
+                    "subagent_last_note": row.metadata.get("subagent_last_note").and_then(|v| v.as_str()),
                 })
             })
             .collect();
@@ -1296,13 +1355,17 @@ impl SubagentManager for LiveSubagentManager {
             .find_by_id(session_id)
             .await
             .map_err(|e| e.to_string())?;
-        self.append_status_note(session_id, format!("Subagent steering message: {message}"))
+        let note = format!("Subagent steering message: {message}");
+        self.append_status_note(session_id, note.clone()).await?;
+        self.update_subagent_metadata(session_id, "steered", "not_attached", Some(&note))
             .await?;
         serde_json::to_string(&json!({
             "target": session_id,
             "steered": true,
             "message": message,
-            "note": "Steering message persisted as a status note."
+            "note": "Steering message persisted as a status note.",
+            "subagentLifecycle": "steered",
+            "subagentRuntimeStatus": "not_attached"
         }))
         .map_err(|e| e.to_string())
     }
@@ -1314,16 +1377,17 @@ impl SubagentManager for LiveSubagentManager {
             .update_status(session_id, "cancelled", chrono::Utc::now())
             .await
             .map_err(|e| e.to_string())?;
-        self.append_status_note(
-            session_id,
-            "Subagent marked cancelled by operator.".to_string(),
-        )
-        .await?;
+        let note = "Subagent marked cancelled by operator.".to_string();
+        self.append_status_note(session_id, note.clone()).await?;
+        self.update_subagent_metadata(session_id, "cancelled", "not_attached", Some(&note))
+            .await?;
         serde_json::to_string(&json!({
             "target": row.id,
             "killed": true,
             "status": row.status,
-            "note": "Persisted subagent session marked cancelled."
+            "note": "Persisted subagent session marked cancelled.",
+            "subagentLifecycle": "cancelled",
+            "subagentRuntimeStatus": "not_attached"
         }))
         .map_err(|e| e.to_string())
     }
@@ -1562,6 +1626,24 @@ mod tests {
             Some("run")
         );
         assert_eq!(
+            row.metadata
+                .get("subagent_lifecycle")
+                .and_then(Value::as_str),
+            Some("spawned")
+        );
+        assert_eq!(
+            row.metadata
+                .get("subagent_runtime_status")
+                .and_then(Value::as_str),
+            Some("not_attached")
+        );
+        assert_eq!(
+            row.metadata
+                .get("subagent_runtime_attached")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
             row.metadata.get("selected_model").and_then(Value::as_str),
             Some("gpt-5.4")
         );
@@ -1638,6 +1720,18 @@ mod tests {
                 .and_then(Value::as_str),
             Some("22222222-2222-2222-2222-222222222222")
         );
+        assert_eq!(
+            listed[0]
+                .get("subagent_lifecycle")
+                .and_then(Value::as_str),
+            Some("spawned")
+        );
+        assert_eq!(
+            listed[0]
+                .get("subagent_runtime_status")
+                .and_then(Value::as_str),
+            Some("not_attached")
+        );
 
         let steer: Value = serde_json::from_str(
             &manager
@@ -1647,6 +1741,29 @@ mod tests {
         )
         .expect("valid steer JSON");
         assert_eq!(steer.get("steered").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            steer.get("subagentLifecycle").and_then(Value::as_str),
+            Some("steered")
+        );
+
+        let steered_row = session_repo
+            .find_by_id(Uuid::parse_str(&session_id).expect("session uuid"))
+            .await
+            .expect("session row exists after steer");
+        assert_eq!(
+            steered_row
+                .metadata
+                .get("subagent_lifecycle")
+                .and_then(Value::as_str),
+            Some("steered")
+        );
+        assert_eq!(
+            steered_row
+                .metadata
+                .get("subagent_last_note")
+                .and_then(Value::as_str),
+            Some("Subagent steering message: keep going")
+        );
 
         let killed: Value =
             serde_json::from_str(&manager.kill(&session_id).await.expect("kill works"))
@@ -1662,6 +1779,18 @@ mod tests {
             .await
             .expect("session row exists after kill");
         assert_eq!(row.status, "cancelled");
+        assert_eq!(
+            row.metadata
+                .get("subagent_lifecycle")
+                .and_then(Value::as_str),
+            Some("cancelled")
+        );
+        assert_eq!(
+            row.metadata
+                .get("subagent_runtime_status")
+                .and_then(Value::as_str),
+            Some("not_attached")
+        );
 
         let transcript = transcript_repo
             .list_by_session(Uuid::parse_str(&session_id).expect("session uuid"))

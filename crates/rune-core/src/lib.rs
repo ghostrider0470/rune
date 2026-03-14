@@ -195,6 +195,7 @@ pub enum TranscriptItem {
         tool_call_id: ToolCallId,
         output: String,
         is_error: bool,
+        tool_execution_id: Option<Uuid>,
     },
     ApprovalRequest {
         approval_id: ApprovalId,

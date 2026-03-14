@@ -20,6 +20,7 @@ impl ToolExecutor for StubExecutor {
                 call.tool_name, call.arguments
             ),
             is_error: false,
+            tool_execution_id: None,
         })
     }
 }

@@ -30,4 +30,6 @@ pub struct ToolResult {
     pub tool_call_id: ToolCallId,
     pub output: String,
     pub is_error: bool,
+    /// Durable audit correlation when the execution is persisted (for example `tool_executions`).
+    pub tool_execution_id: Option<uuid::Uuid>,
 }

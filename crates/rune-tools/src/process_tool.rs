@@ -479,6 +479,7 @@ impl ProcessToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output: serde_json::to_string_pretty(&json).unwrap_or_default(),
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             "poll" => {
@@ -507,6 +508,7 @@ impl ProcessToolExecutor {
                     })
                     .to_string(),
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             "log" => {
@@ -527,6 +529,7 @@ impl ProcessToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output,
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             "write" => {
@@ -549,6 +552,7 @@ impl ProcessToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output: format!("wrote {written} bytes"),
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             "submit" => {
@@ -566,6 +570,7 @@ impl ProcessToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output: format!("submitted {written} bytes"),
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             "paste" => {
@@ -593,6 +598,7 @@ impl ProcessToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output: format!("pasted {written} bytes"),
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             "send-keys" => {
@@ -647,6 +653,7 @@ impl ProcessToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output: format!("sent {written} bytes"),
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             "kill" => {
@@ -657,6 +664,7 @@ impl ProcessToolExecutor {
                     tool_call_id: call.tool_call_id,
                     output: format!("killed process {pid}"),
                     is_error: false,
+                    tool_execution_id: None,
                 })
             }
             other => Err(ToolError::InvalidArgument(format!(
@@ -840,7 +848,10 @@ mod tests {
         mgr.register("kill-test".into(), child, stdin).await;
         mgr.kill("kill-test").await.unwrap();
 
-        let info = mgr.poll_wait("kill-test", Duration::from_millis(1000)).await.unwrap();
+        let info = mgr
+            .poll_wait("kill-test", Duration::from_millis(1000))
+            .await
+            .unwrap();
         assert!(!info.running);
     }
 

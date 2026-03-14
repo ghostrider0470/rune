@@ -222,6 +222,7 @@ impl TurnExecutor {
                     tool_call_id: ToolCallId::from(tool_call_id),
                     output: format!("Tool error: approval denied for tool {tool_name}"),
                     is_error: true,
+                    tool_execution_id: None,
                 };
                 self.append_transcript(session_id, Some(turn_uuid), &result_item)
                     .await?;
@@ -296,6 +297,7 @@ impl TurnExecutor {
                 tool_call_id: call.tool_call_id,
                 output: format!("Tool error: {e}"),
                 is_error: true,
+                tool_execution_id: None,
             },
         };
 
@@ -309,6 +311,7 @@ impl TurnExecutor {
             tool_call_id: tool_result.tool_call_id,
             output: tool_result.output,
             is_error: tool_result.is_error,
+            tool_execution_id: tool_result.tool_execution_id,
         };
         self.append_transcript(session_id, Some(turn_uuid), &result_item)
             .await?;
@@ -527,6 +530,7 @@ impl TurnExecutor {
                                 tool_call_id,
                                 output: format!("Tool error: {e}"),
                                 is_error: true,
+                                tool_execution_id: None,
                             }
                         }
                     };
@@ -536,6 +540,7 @@ impl TurnExecutor {
                         tool_call_id: tool_result.tool_call_id,
                         output: tool_result.output,
                         is_error: tool_result.is_error,
+                        tool_execution_id: tool_result.tool_execution_id,
                     };
                     self.append_transcript(session_id, Some(turn_id.into_uuid()), &result_item)
                         .await?;
@@ -619,7 +624,10 @@ impl TurnExecutor {
             "approval_status_updated_at".to_string(),
             serde_json::Value::String(Utc::now().to_rfc3339()),
         );
-        if matches!(approval_status, "completed" | "completed_error" | "failed" | "denied") {
+        if matches!(
+            approval_status,
+            "completed" | "completed_error" | "failed" | "denied"
+        ) {
             obj.insert(
                 "completed_at".to_string(),
                 serde_json::Value::String(Utc::now().to_rfc3339()),

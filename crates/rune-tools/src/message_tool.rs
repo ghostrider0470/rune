@@ -49,11 +49,13 @@ impl<D: MessageDelivery> MessageToolExecutor<D> {
                 tool_call_id: call.tool_call_id,
                 output,
                 is_error: false,
+                tool_execution_id: None,
             }),
             Err(e) => Ok(ToolResult {
                 tool_call_id: call.tool_call_id,
                 output: e,
                 is_error: true,
+                tool_execution_id: None,
             }),
         }
     }
