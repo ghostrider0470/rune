@@ -238,7 +238,10 @@ where
                             &id,
                             false,
                             None,
-                            Some(("bad_request", "missing subscription target: session_id, event, or all")),
+                            Some((
+                                "bad_request",
+                                "missing subscription target: session_id, event, or all",
+                            )),
                             state_version.load(Ordering::Relaxed),
                         ));
                     }
@@ -256,7 +259,7 @@ where
                         debug!("ws client subscribed to all events via RPC");
                     }
 
-                    let current_state_version = STATE_VERSION.fetch_add(1, Ordering::Relaxed) + 1;
+                    let current_state_version = state_version.fetch_add(1, Ordering::Relaxed) + 1;
                     Some(encode_res(
                         &id,
                         true,
@@ -287,7 +290,10 @@ where
                             &id,
                             false,
                             None,
-                            Some(("bad_request", "missing subscription target: session_id, event, or all")),
+                            Some((
+                                "bad_request",
+                                "missing subscription target: session_id, event, or all",
+                            )),
                             state_version.load(Ordering::Relaxed),
                         ));
                     }
@@ -305,7 +311,7 @@ where
                         debug!("ws client unsubscribed from all events via RPC");
                     }
 
-                    let current_state_version = STATE_VERSION.fetch_add(1, Ordering::Relaxed) + 1;
+                    let current_state_version = state_version.fetch_add(1, Ordering::Relaxed) + 1;
                     Some(encode_res(
                         &id,
                         true,
@@ -347,7 +353,7 @@ where
             debug!(session_id = %session_id, "ws client subscribed (legacy)");
             // Legacy clients don't expect a response frame, but we send one for
             // consistency. They can ignore it.
-            let current_state_version = STATE_VERSION.fetch_add(1, Ordering::Relaxed) + 1;
+            let current_state_version = state_version.fetch_add(1, Ordering::Relaxed) + 1;
             let res = ResFrame {
                 frame_type: "res",
                 id: "legacy".to_string(),
@@ -400,7 +406,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl RpcDispatch for StubDispatcher {
-        async fn dispatch(&self, _method: &str, _params: Value) -> Result<Value, crate::ws_rpc::RpcError> {
+        async fn dispatch(
+            &self,
+            _method: &str,
+            _params: Value,
+        ) -> Result<Value, crate::ws_rpc::RpcError> {
             self.result.clone()
         }
     }
@@ -472,8 +482,64 @@ mod tests {
         assert_eq!(decoded["ok"], true);
         assert_eq!(decoded["payload"]["subscribed"]["session_id"], "sess-1");
         assert_eq!(decoded["payload"]["subscribed"]["event"], "turn_completed");
+        assert_eq!(decoded["stateVersion"], 42);
+        assert_eq!(state_version.load(Ordering::Relaxed), 42);
         assert!(conn.subscribed_sessions.contains("sess-1"));
         assert!(conn.subscribed_events.contains("turn_completed"));
+    }
+
+    #[tokio::test]
+    async fn legacy_subscribe_frame_returns_ack_and_updates_state() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({"ignored": true}));
+        let state_version = Arc::new(AtomicU64::new(41));
+
+        let reply = handle_text_message(
+            r#"{"type":"subscribe","session_id":"sess-legacy"}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["type"], "res");
+        assert_eq!(decoded["id"], "legacy");
+        assert_eq!(decoded["ok"], true);
+        assert_eq!(decoded["payload"]["subscribed"], "sess-legacy");
+        assert_eq!(decoded["stateVersion"], 42);
+        assert_eq!(state_version.load(Ordering::Relaxed), 42);
+        assert!(conn.subscribed_sessions.contains("sess-legacy"));
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_req_updates_connection_state_and_returns_ack() {
+        let mut conn = ConnState::new();
+        conn.subscribed_sessions.insert("sess-1".to_string());
+        conn.subscribed_events.insert("turn_completed".to_string());
+        let dispatcher = ok_dispatcher(json!({"ignored": true}));
+        let state_version = Arc::new(AtomicU64::new(100));
+
+        let reply = handle_text_message(
+            r#"{"type":"req","id":"2","method":"unsubscribe","params":{"session_id":"sess-1","event":"turn_completed"}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["type"], "res");
+        assert_eq!(decoded["id"], "2");
+        assert_eq!(decoded["ok"], true);
+        assert_eq!(decoded["payload"]["unsubscribed"]["session_id"], "sess-1");
+        assert_eq!(decoded["payload"]["unsubscribed"]["event"], "turn_completed");
+        assert_eq!(decoded["stateVersion"], 101);
+        assert_eq!(state_version.load(Ordering::Relaxed), 101);
+        assert!(!conn.subscribed_sessions.contains("sess-1"));
+        assert!(!conn.subscribed_events.contains("turn_completed"));
     }
 
     #[tokio::test]
@@ -498,6 +564,7 @@ mod tests {
         assert_eq!(decoded["error"]["code"], "method_not_found");
         assert_eq!(decoded["error"]["message"], "unknown method: nope");
         assert_eq!(decoded["stateVersion"], 9);
+        assert_eq!(state_version.load(Ordering::Relaxed), 9);
     }
 
     #[tokio::test]
@@ -516,5 +583,6 @@ mod tests {
         assert_eq!(decoded["ok"], false);
         assert_eq!(decoded["error"]["code"], "parse_error");
         assert_eq!(decoded["stateVersion"], 5);
+        assert_eq!(state_version.load(Ordering::Relaxed), 5);
     }
 }

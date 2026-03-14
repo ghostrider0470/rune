@@ -17,8 +17,10 @@ use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 use crate::compaction::CompactionStrategy;
 use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
+use crate::lane_queue::{Lane, LaneQueue};
 use crate::memory::MemoryLoader;
 use crate::session_metadata::selected_model;
+use crate::skill::SkillRegistry;
 use crate::usage::UsageAccumulator;
 use crate::workspace::WorkspaceLoader;
 
@@ -26,6 +28,11 @@ use crate::workspace::WorkspaceLoader;
 const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 25;
 
 /// Executes a single turn: load context → prompt → model → tool loop → persist.
+///
+/// When a `LaneQueue` is attached, each turn acquires a lane permit before
+/// execution begins, enforcing per-lane concurrency caps. Without a lane
+/// queue the executor behaves as before (sequential, no concurrency limit).
+#[derive(Clone)]
 pub struct TurnExecutor {
     session_repo: Arc<dyn SessionRepo>,
     turn_repo: Arc<dyn TurnRepo>,
@@ -38,6 +45,8 @@ pub struct TurnExecutor {
     compaction: Arc<dyn CompactionStrategy>,
     default_model: Option<String>,
     max_tool_iterations: u32,
+    lane_queue: Option<Arc<LaneQueue>>,
+    skill_registry: Option<Arc<SkillRegistry>>,
 }
 
 impl TurnExecutor {
@@ -65,6 +74,8 @@ impl TurnExecutor {
             compaction,
             default_model: None,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
+            lane_queue: None,
+            skill_registry: None,
         }
     }
 
@@ -85,9 +96,33 @@ impl TurnExecutor {
         self
     }
 
+    /// Attach a lane queue for concurrency-limited execution.
+    ///
+    /// When set, each call to [`execute`] or [`resume_approval`] will
+    /// acquire a permit from the appropriate lane before proceeding.
+    pub fn with_lane_queue(mut self, queue: Arc<LaneQueue>) -> Self {
+        self.lane_queue = Some(queue);
+        self
+    }
+
+    /// Expose lane queue stats for operator surfaces when configured.
+    pub fn lane_stats(&self) -> Option<crate::lane_queue::LaneStats> {
+        self.lane_queue.as_ref().map(|queue| queue.stats())
+    }
+
+    /// Attach a dynamic skill registry whose enabled skills are injected into the system prompt.
+    pub fn with_skill_registry(mut self, registry: Arc<SkillRegistry>) -> Self {
+        self.skill_registry = Some(registry);
+        self
+    }
+
     /// Execute a turn for the given session, triggered by a user message.
     ///
     /// Returns the completed turn row and accumulated usage.
+    ///
+    /// When a [`LaneQueue`] is attached, this method will wait for a
+    /// lane permit before beginning execution. The permit is held for
+    /// the entire turn and released automatically when the turn ends.
     pub async fn execute(
         &self,
         session_id: Uuid,
@@ -101,6 +136,20 @@ impl TurnExecutor {
             .map(str::to_owned)
             .or_else(|| selected_model(&session).map(str::to_owned))
             .or_else(|| self.default_model.clone());
+
+        // Acquire a lane permit if a lane queue is configured.
+        let _lane_permit = if let Some(ref lq) = self.lane_queue {
+            let session_kind = parse_session_kind(&session.kind)?;
+            let lane = Lane::from_session_kind(&session_kind);
+            debug!(
+                turn_id = %turn_id,
+                lane = %lane,
+                "waiting for lane permit"
+            );
+            Some(lq.acquire(lane).await)
+        } else {
+            None
+        };
 
         // 1. Create turn in Started state
         let turn = self
@@ -177,6 +226,22 @@ impl TurnExecutor {
             .and_then(|value| value.as_str())
             .ok_or_else(|| RuntimeError::Aborted("approval payload missing session_id".to_string()))
             .and_then(parse_uuid_runtime)?;
+
+        // Acquire a lane permit if a lane queue is configured.
+        let _lane_permit = if let Some(ref lq) = self.lane_queue {
+            let session = self.session_repo.find_by_id(session_id).await?;
+            let session_kind = parse_session_kind(&session.kind)?;
+            let lane = Lane::from_session_kind(&session_kind);
+            debug!(
+                approval_id = %approval_id,
+                lane = %lane,
+                "waiting for lane permit (approval resume)"
+            );
+            Some(lq.acquire(lane).await)
+        } else {
+            None
+        };
+
         let turn_uuid = payload
             .get("turn_id")
             .and_then(|value| value.as_str())
@@ -420,11 +485,18 @@ impl TurnExecutor {
             // Load transcript and assemble prompt
             let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;
 
+            let skill_prompt_fragment = match &self.skill_registry {
+                Some(registry) => registry.system_prompt_fragment().await,
+                None => None,
+            };
+            let extra_system_sections: Vec<String> = skill_prompt_fragment.into_iter().collect();
+
             let messages = self.context_assembler.assemble(
                 &transcript_rows,
                 self.compaction.as_ref(),
                 Some(&workspace_context),
                 Some(&memory_context),
+                &extra_system_sections,
             );
 
             // Build tool definitions for the request

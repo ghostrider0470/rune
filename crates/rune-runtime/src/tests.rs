@@ -24,6 +24,7 @@ use crate::compaction::NoOpCompaction;
 use crate::context::ContextAssembler;
 use crate::engine::SessionEngine;
 use crate::executor::TurnExecutor;
+use crate::skill::{Skill, SkillRegistry};
 
 #[derive(Debug)]
 struct FakeModelProvider {
@@ -141,8 +142,14 @@ impl ModelProvider for FailAfterFirstCallModelProvider {
 
 enum FakeToolStep {
     Output(String),
-    OutputWithExecutionId { output: String, tool_execution_id: Uuid },
-    ApprovalRequired { tool: String, details: String },
+    OutputWithExecutionId {
+        output: String,
+        tool_execution_id: Uuid,
+    },
+    ApprovalRequired {
+        tool: String,
+        details: String,
+    },
 }
 
 struct FakeToolExecutor {
@@ -316,6 +323,13 @@ impl SessionRepo for MemSessionRepo {
         session.last_activity_at = updated_at;
         Ok(session.clone())
     }
+
+    async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut sessions = self.sessions.lock().await;
+        let before = sessions.len();
+        sessions.retain(|session| session.id != id);
+        Ok(sessions.len() != before)
+    }
 }
 
 struct MemTurnRepo {
@@ -453,6 +467,13 @@ impl TranscriptRepo for MemTranscriptRepo {
             .collect();
         result.sort_by_key(|i| i.seq);
         Ok(result)
+    }
+
+    async fn delete_by_session(&self, session_id: Uuid) -> Result<usize, StoreError> {
+        let mut items = self.items.lock().await;
+        let before = items.len();
+        items.retain(|item| item.session_id != session_id);
+        Ok(before - items.len())
     }
 }
 
@@ -594,7 +615,17 @@ impl TestHarness {
         tool_executor: Arc<dyn ToolExecutor>,
         tool_registry: ToolRegistry,
     ) -> TurnExecutor {
-        TurnExecutor::new(
+        self.turn_executor_with_skill_registry(model, tool_executor, tool_registry, None)
+    }
+
+    fn turn_executor_with_skill_registry(
+        &self,
+        model: Arc<dyn ModelProvider>,
+        tool_executor: Arc<dyn ToolExecutor>,
+        tool_registry: ToolRegistry,
+        skill_registry: Option<Arc<SkillRegistry>>,
+    ) -> TurnExecutor {
+        let executor = TurnExecutor::new(
             self.session_repo.clone(),
             self.turn_repo.clone(),
             self.transcript_repo.clone(),
@@ -604,11 +635,18 @@ impl TestHarness {
             Arc::new(tool_registry),
             ContextAssembler::new("You are a helpful assistant."),
             Arc::new(NoOpCompaction),
-        )
+        );
+
+        if let Some(skill_registry) = skill_registry {
+            executor.with_skill_registry(skill_registry)
+        } else {
+            executor
+        }
     }
 
     fn session_engine(&self) -> SessionEngine {
         SessionEngine::new(self.session_repo.clone())
+            .with_transcript_repo(self.transcript_repo.clone())
     }
 }
 
@@ -776,6 +814,77 @@ async fn session_status_transitions() {
 
     let session = engine.mark_completed(session.id).await.unwrap();
     assert_eq!(session.status, "completed");
+}
+
+#[tokio::test]
+async fn patch_metadata_merges_and_removes_null_fields() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let patched = engine
+        .patch_metadata(
+            session.id,
+            serde_json::json!({
+                "label": "ops",
+                "nested": { "a": 1, "b": 2 }
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patched.metadata["label"], "ops");
+    assert_eq!(patched.metadata["nested"]["a"], 1);
+
+    let patched = engine
+        .patch_metadata(
+            session.id,
+            serde_json::json!({
+                "nested": { "b": null, "c": 3 }
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(patched.metadata["nested"].get("b").is_none());
+    assert_eq!(patched.metadata["nested"]["c"], 3);
+}
+
+#[tokio::test]
+async fn delete_session_removes_session_and_transcript() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    h.transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id: session.id,
+            turn_id: None,
+            seq: 0,
+            kind: "status_note".to_string(),
+            payload: serde_json::json!({"message": "hello"}),
+            created_at: chrono::Utc::now(),
+        })
+        .await
+        .unwrap();
+
+    engine.delete_session(session.id).await.unwrap();
+    assert!(engine.get_session(session.id).await.is_err());
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    assert!(transcript.is_empty());
 }
 
 #[tokio::test]
@@ -1102,7 +1211,10 @@ async fn tool_result_transcript_preserves_tool_execution_id() {
         registry,
     );
 
-    executor.execute(session.id, "read the file", None).await.unwrap();
+    executor
+        .execute(session.id, "read the file", None)
+        .await
+        .unwrap();
 
     let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
     let tool_result_row = transcript
@@ -1253,16 +1365,21 @@ async fn approval_resume_marks_failed_when_post_tool_continuation_fails() {
         .unwrap();
 
     let err = executor.resume_approval(approvals[0].id).await.unwrap_err();
-    assert!(err.to_string().contains("fake transient error after approval resume"));
+    assert!(
+        err.to_string()
+            .contains("fake transient error after approval resume")
+    );
 
     let approval = h.approval_repo.find_by_id(approvals[0].id).await.unwrap();
     assert_eq!(approval.presented_payload["approval_status"], "failed");
     assert_eq!(approval.presented_payload["resume_status"], "failed");
     assert!(approval.presented_payload.get("completed_at").is_some());
-    assert!(approval.presented_payload["resume_result_summary"]
-        .as_str()
-        .unwrap()
-        .contains("post-approval continuation failed"));
+    assert!(
+        approval.presented_payload["resume_result_summary"]
+            .as_str()
+            .unwrap()
+            .contains("post-approval continuation failed")
+    );
 
     let failed_turn = h.turn_repo.find_by_id(blocked_turn.id).await.unwrap();
     assert_eq!(failed_turn.status, "failed");
@@ -1456,6 +1573,64 @@ async fn channel_session_prompt_excludes_long_term_memory() {
     assert!(!system.contains("Long-term Memory"));
     assert!(!system.contains("Long-term fact."));
     assert!(!system.contains("HEARTBEAT.md"));
+}
+
+#[tokio::test]
+async fn enabled_skills_are_injected_into_system_prompt() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let skill_registry = Arc::new(SkillRegistry::new());
+    skill_registry
+        .register(Skill {
+            name: "skill-alpha".into(),
+            description: "Alpha description".into(),
+            parameters: serde_json::json!({}),
+            binary_path: Some(PathBuf::from("/tmp/skill-alpha")),
+            source_dir: PathBuf::from("/tmp/skills/skill-alpha"),
+            enabled: true,
+        })
+        .await;
+    skill_registry
+        .register(Skill {
+            name: "skill-beta".into(),
+            description: "Beta description".into(),
+            parameters: serde_json::json!({}),
+            binary_path: None,
+            source_dir: PathBuf::from("/tmp/skills/skill-beta"),
+            enabled: false,
+        })
+        .await;
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("skills loaded"),
+    ]));
+    let model_handle = model.clone();
+    let executor = h.turn_executor_with_skill_registry(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+        Some(skill_registry),
+    );
+
+    executor.execute(session.id, "hello", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    let system = requests[0].messages[0].content.clone().unwrap();
+    assert!(system.contains("## Available Skills"));
+    assert!(system.contains("skill-alpha"));
+    assert!(system.contains("Alpha description"));
+    assert!(system.contains("/tmp/skill-alpha"));
+    assert!(!system.contains("skill-beta"));
+    assert!(!system.contains("Beta description"));
 }
 
 #[tokio::test]

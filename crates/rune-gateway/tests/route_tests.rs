@@ -820,7 +820,12 @@ async fn status_reports_configured_lane_capacities() {
 
     let app = build_router(state, None);
     let response = app
-        .oneshot(Request::builder().uri("/status").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -1542,8 +1547,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
     .unwrap();
     let subscribe_json: Value = serde_json::from_str(&subscribe).unwrap();
     let subscribed_version = subscribe_json["stateVersion"].as_u64().unwrap();
-    assert!(subscribed_version >= 1);
-    assert_eq!(state_version.load(Ordering::Relaxed), 101);
+    assert_eq!(subscribed_version, 102);
+    assert_eq!(state_version.load(Ordering::Relaxed), 102);
 
     let status = handle_text_message(
         r#"{"type":"req","id":"status","method":"status","params":{}}"#,
@@ -1554,9 +1559,9 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
     .await
     .unwrap();
     let status_json: Value = serde_json::from_str(&status).unwrap();
-    assert_eq!(status_json["stateVersion"], 101);
-    assert_eq!(state_version.load(Ordering::Relaxed), 101);
-    assert_ne!(
+    assert_eq!(status_json["stateVersion"], 102);
+    assert_eq!(state_version.load(Ordering::Relaxed), 102);
+    assert_eq!(
         status_json["stateVersion"].as_u64().unwrap(),
         subscribed_version
     );

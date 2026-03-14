@@ -448,16 +448,18 @@ impl RpcDispatcher {
     async fn skills_list(&self) -> Result<Value, RpcError> {
         let mut skills = self.state.skill_registry.list().await;
         skills.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(json!(skills
-            .into_iter()
-            .map(|skill| json!({
-                "name": skill.name,
-                "description": skill.description,
-                "enabled": skill.enabled,
-                "source_dir": skill.source_dir.display().to_string(),
-                "binary_path": skill.binary_path.map(|path| path.display().to_string()),
-            }))
-            .collect::<Vec<_>>()))
+        Ok(json!(
+            skills
+                .into_iter()
+                .map(|skill| json!({
+                    "name": skill.name,
+                    "description": skill.description,
+                    "enabled": skill.enabled,
+                    "source_dir": skill.source_dir.display().to_string(),
+                    "binary_path": skill.binary_path.map(|path| path.display().to_string()),
+                }))
+                .collect::<Vec<_>>()
+        ))
     }
 
     async fn skills_reload(&self) -> Result<Value, RpcError> {
@@ -487,20 +489,22 @@ impl RpcDispatcher {
 
     /// Current runtime lane utilisation and capacities.
     async fn runtime_lanes(&self) -> Result<Value, RpcError> {
-        let lane_stats = self.state.turn_executor.lane_stats().map(|stats| json!({
-            "main": {
-                "active": stats.main_active,
-                "capacity": stats.main_capacity,
-            },
-            "subagent": {
-                "active": stats.subagent_active,
-                "capacity": stats.subagent_capacity,
-            },
-            "cron": {
-                "active": stats.cron_active,
-                "capacity": stats.cron_capacity,
-            },
-        }));
+        let lane_stats = self.state.turn_executor.lane_stats().map(|stats| {
+            json!({
+                "main": {
+                    "active": stats.main_active,
+                    "capacity": stats.main_capacity,
+                },
+                "subagent": {
+                    "active": stats.subagent_active,
+                    "capacity": stats.subagent_capacity,
+                },
+                "cron": {
+                    "active": stats.cron_active,
+                    "capacity": stats.cron_capacity,
+                },
+            })
+        });
 
         Ok(json!({
             "enabled": lane_stats.is_some(),
@@ -537,14 +541,16 @@ impl RpcDispatcher {
             .map_err(|e| RpcError::internal(e.to_string()))?;
         let cron_job_count = self.state.scheduler.list_jobs(true).await.len();
         let skills = self.state.skill_registry.list().await;
-        let lane_stats = self.state.turn_executor.lane_stats().map(|stats| json!({
-            "main_active": stats.main_active,
-            "main_capacity": stats.main_capacity,
-            "subagent_active": stats.subagent_active,
-            "subagent_capacity": stats.subagent_capacity,
-            "cron_active": stats.cron_active,
-            "cron_capacity": stats.cron_capacity,
-        }));
+        let lane_stats = self.state.turn_executor.lane_stats().map(|stats| {
+            json!({
+                "main_active": stats.main_active,
+                "main_capacity": stats.main_capacity,
+                "subagent_active": stats.subagent_active,
+                "subagent_capacity": stats.subagent_capacity,
+                "cron_active": stats.cron_active,
+                "cron_capacity": stats.cron_capacity,
+            })
+        });
 
         Ok(json!({
             "status": "running",
