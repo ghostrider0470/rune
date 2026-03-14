@@ -202,10 +202,7 @@ pub struct DashboardDiagnosticsResponse {
     pub items: Vec<DashboardDiagnosticItem>,
 }
 
-// SPA serving — embedded UI dist
-use include_dir::{Dir, include_dir};
-
-static UI_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../ui/dist");
+// SPA serving — runtime UI dist lookup so cargo check works even when ui/dist is absent.
 
 pub async fn spa_index() -> Response {
     spa_response_for_path("")
@@ -216,10 +213,26 @@ pub async fn spa_handler(uri: axum::http::Uri) -> Response {
 }
 
 fn spa_response_for_path(path: &str) -> Response {
-    // Try to serve the exact file first
-    if !path.is_empty() {
-        if let Some(file) = UI_DIST.get_file(path) {
-            let content_type = match path.rsplit('.').next() {
+    let dist_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/dist");
+    let requested = if path.is_empty() { "index.html" } else { path };
+    let requested_path = dist_root.join(requested);
+
+    if requested_path.is_file() {
+        return file_response(requested_path, requested);
+    }
+
+    let index_path = dist_root.join("index.html");
+    if index_path.is_file() {
+        return file_response(index_path, "index.html");
+    }
+
+    (StatusCode::NOT_FOUND, "UI not built").into_response()
+}
+
+fn file_response(path: std::path::PathBuf, request_path: &str) -> Response {
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let content_type = match request_path.rsplit('.').next() {
                 Some("html") => "text/html; charset=utf-8",
                 Some("js") => "application/javascript; charset=utf-8",
                 Some("css") => "text/css; charset=utf-8",
@@ -231,24 +244,9 @@ fn spa_response_for_path(path: &str) -> Response {
                 Some("woff") => "font/woff",
                 _ => "application/octet-stream",
             };
-            return (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, content_type)],
-                file.contents(),
-            )
-                .into_response();
+            (StatusCode::OK, [(header::CONTENT_TYPE, content_type)], bytes).into_response()
         }
-    }
-
-    // Fall back to index.html for client-side routing
-    match UI_DIST.get_file("index.html") {
-        Some(index) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            index.contents(),
-        )
-            .into_response(),
-        None => (StatusCode::NOT_FOUND, "UI not built").into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "UI asset missing").into_response(),
     }
 }
 
