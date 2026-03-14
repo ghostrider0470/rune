@@ -56,6 +56,40 @@ fn registry_list_returns_sorted() {
 }
 
 #[test]
+fn registry_contains_unregister_and_register_many_work() {
+    let mut reg = ToolRegistry::new();
+    reg.register_many([
+        ToolDefinition {
+            name: "beta".into(),
+            description: "beta tool".into(),
+            parameters: serde_json::json!({"type": "object"}),
+            category: ToolCategory::FileRead,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "alpha".into(),
+            description: "alpha tool".into(),
+            parameters: serde_json::json!({"type": "object"}),
+            category: ToolCategory::FileWrite,
+            requires_approval: true,
+        },
+    ]);
+
+    assert_eq!(reg.len(), 2);
+    assert!(reg.contains("alpha"));
+    assert!(reg.contains("beta"));
+    assert!(!reg.contains("gamma"));
+
+    let removed = reg.unregister("alpha").expect("alpha should exist");
+    assert_eq!(removed.name, "alpha");
+    assert!(removed.requires_approval);
+    assert!(!reg.contains("alpha"));
+    assert_eq!(reg.len(), 1);
+
+    assert!(reg.unregister("gamma").is_none());
+}
+
+#[test]
 fn register_builtin_stubs_populates_expected_tools() {
     let mut reg = ToolRegistry::new();
     register_builtin_stubs(&mut reg);
