@@ -226,7 +226,16 @@ fn spa_response_for_path(path: &str) -> Response {
         return file_response(index_path, "index.html");
     }
 
-    (StatusCode::NOT_FOUND, "UI not built").into_response()
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        minimal_spa_html(),
+    )
+        .into_response()
+}
+
+fn minimal_spa_html() -> String {
+    r#"<!doctype html><html><head><meta charset="utf-8"><title>Rune Admin</title><link rel="icon" href="/favicon"></head><body><div id="root">Rune UI not built yet.</div></body></html>"#.to_string()
 }
 
 fn file_response(path: std::path::PathBuf, request_path: &str) -> Response {
