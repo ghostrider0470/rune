@@ -144,6 +144,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
     let public_routes = Router::new()
         .route("/health", get(routes::health))
         .route("/ws", get(ws::ws_handler))
+        .route("/assets/{path}", get(routes::branded_asset))
         .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
         .with_state(state.clone());
 

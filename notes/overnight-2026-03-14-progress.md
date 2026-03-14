@@ -375,3 +375,38 @@ Wire `session_status` tool/runtime/gateway responses to emit the new `SessionSta
   - this is richer durable inspectability only
 - Validation:
   - `cargo test -q -p rune-gateway-app` ✅
+
+## 12:2x gateway asset-route green-up pass
+
+- Reconciled live branch state against the overnight notes instead of trusting the earlier green snapshot.
+- Found the current tree had slipped out of gate on `rune-gateway` for a mundane but real reason:
+  - branded dashboard assets were referenced by the HTML shell but the `/assets/{path}` route was not wired into the router
+  - that left `routes::branded_asset` dead under `-D warnings`, breaking workspace clippy/test gates on the gateway crate
+- Fixed the control-plane surface directly by exposing the branded asset handler on the public router:
+  - `GET /assets/{path}` → `routes::branded_asset`
+- Result:
+  - dashboard HTML asset references now have a real served path instead of relying on an unwired helper
+  - `rune-gateway` route tests are green again
+  - `rune-gateway` clippy is clean again
+- Validation:
+  - `cargo test -q -p rune-gateway --test route_tests` ✅
+  - `cargo clippy -q -p rune-gateway --all-targets -- -D warnings` ✅
+  - `cargo check -q -p rune-gateway-app` ✅
+
+## 12:4x detached-process error-honesty pass
+
+- Tightened a concrete restart-inspectability seam in `rune-tools` instead of leaving a misleading operator experience in place.
+- Before this pass:
+  - `process list|poll|log` already degraded honestly after restart by surfacing persisted audit metadata from `tool_executions`
+  - but mutating actions like `write`, `submit`, `paste`, `send-keys`, and `kill` collapsed to a generic `process not found` when only a persisted audit row remained
+- That was semantically wrong: the process was known durably, just not reattached live.
+- Updated `ProcessManager` so stdin/control operations now distinguish between:
+  - truly unknown process IDs
+  - known persisted process IDs with no live handle in the current gateway process
+- New failure mode is explicit and honest:
+  - persisted metadata exists
+  - live stdin/control reattachment after restart is not implemented yet
+- Added focused tests covering detached-persisted `write` and `kill` attempts.
+- Validation:
+  - `cargo test -q -p rune-tools` ✅
+  - `cargo clippy -q -p rune-tools --all-targets -- -D warnings` ✅

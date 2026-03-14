@@ -39,6 +39,23 @@ impl ProcessManager {
         }
     }
 
+    async fn has_persisted_record(&self, process_id: &str) -> Result<bool, ToolError> {
+        let Some(audit_store) = &self.audit_store else {
+            return Ok(false);
+        };
+        Ok(audit_store
+            .find(process_id)
+            .await
+            .map_err(ToolError::ExecutionFailed)?
+            .is_some())
+    }
+
+    fn detached_process_error(process_id: &str) -> ToolError {
+        ToolError::ExecutionFailed(format!(
+            "process {process_id} has persisted metadata but no live handle is attached in this gateway process; restart-safe stdin/control reattachment is not implemented yet"
+        ))
+    }
+
     /// Attach a durable audit store used for restart-visible process metadata.
     #[must_use]
     pub fn with_audit_store(mut self, audit_store: Arc<dyn ProcessAuditStore>) -> Self {
@@ -244,7 +261,15 @@ impl ProcessManager {
         data: &str,
         eof: bool,
     ) -> Result<usize, ToolError> {
-        let entry = self.get(process_id).await?;
+        let entry = match self.get(process_id).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                if self.has_persisted_record(process_id).await? {
+                    return Err(Self::detached_process_error(process_id));
+                }
+                return Err(err);
+            }
+        };
         let mut stdin_guard = entry.stdin.lock().await;
         let stdin = stdin_guard.as_mut().ok_or_else(|| {
             ToolError::ExecutionFailed(format!("stdin not available for process {process_id}"))
@@ -265,7 +290,15 @@ impl ProcessManager {
 
     /// Close stdin for a process without writing more data.
     pub async fn close_stdin(&self, process_id: &str) -> Result<(), ToolError> {
-        let entry = self.get(process_id).await?;
+        let entry = match self.get(process_id).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                if self.has_persisted_record(process_id).await? {
+                    return Err(Self::detached_process_error(process_id));
+                }
+                return Err(err);
+            }
+        };
         let mut stdin_guard = entry.stdin.lock().await;
         if stdin_guard.is_none() {
             return Err(ToolError::ExecutionFailed(format!(
@@ -278,7 +311,15 @@ impl ProcessManager {
 
     /// Kill a process.
     pub async fn kill(&self, process_id: &str) -> Result<(), ToolError> {
-        let entry = self.get(process_id).await?;
+        let entry = match self.get(process_id).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                if self.has_persisted_record(process_id).await? {
+                    return Err(Self::detached_process_error(process_id));
+                }
+                return Err(err);
+            }
+        };
         let mut child = entry.child.lock().await;
         child.kill().await.map_err(|e| {
             ToolError::ExecutionFailed(format!("failed to kill process {process_id}: {e}"))
@@ -687,15 +728,86 @@ impl ToolExecutor for ProcessToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process_audit::{NewProcessAudit, ProcessAuditRecord};
+    use async_trait::async_trait;
     use rune_core::ToolCallId;
     use std::process::Stdio;
     use tokio::process::Command;
+    use tokio::sync::Mutex;
+    use uuid::Uuid;
 
     fn make_call(name: &str, args: serde_json::Value) -> ToolCall {
         ToolCall {
             tool_call_id: ToolCallId::new(),
             tool_name: name.into(),
             arguments: args,
+        }
+    }
+
+    #[derive(Default)]
+    struct MemProcessAuditStore {
+        records: Mutex<Vec<ProcessAuditRecord>>,
+    }
+
+    #[async_trait]
+    impl ProcessAuditStore for MemProcessAuditStore {
+        async fn record_spawn(&self, spawn: NewProcessAudit) -> Result<ProcessAuditRecord, String> {
+            let record = ProcessAuditRecord {
+                process_id: spawn.process_id,
+                tool_call_id: spawn.tool_call_id,
+                tool_execution_id: Uuid::now_v7(),
+                session_id: spawn.session_id,
+                turn_id: spawn.turn_id,
+                tool_name: spawn.tool_name,
+                command: spawn.command,
+                workdir: spawn.workdir,
+                arguments: spawn.arguments,
+                status: "running".to_string(),
+                result_summary: None,
+                error_summary: None,
+                started_at: spawn.started_at,
+                ended_at: None,
+            };
+            self.records.lock().await.push(record.clone());
+            Ok(record)
+        }
+
+        async fn record_completion(
+            &self,
+            completion: CompletedProcessAudit,
+        ) -> Result<ProcessAuditRecord, String> {
+            let mut records = self.records.lock().await;
+            let record = records
+                .iter_mut()
+                .find(|record| record.process_id == completion.process_id)
+                .ok_or_else(|| format!("missing process {}", completion.process_id))?;
+            record.status = completion.status;
+            record.result_summary = completion.result_summary;
+            record.error_summary = completion.error_summary;
+            record.ended_at = Some(completion.ended_at);
+            Ok(record.clone())
+        }
+
+        async fn find(&self, process_id: &str) -> Result<Option<ProcessAuditRecord>, String> {
+            Ok(self
+                .records
+                .lock()
+                .await
+                .iter()
+                .find(|record| record.process_id == process_id)
+                .cloned())
+        }
+
+        async fn list_recent(&self, limit: usize) -> Result<Vec<ProcessAuditRecord>, String> {
+            Ok(self
+                .records
+                .lock()
+                .await
+                .iter()
+                .rev()
+                .take(limit)
+                .cloned()
+                .collect())
         }
     }
 
@@ -962,5 +1074,57 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let log = mgr.log("cat-hex", None, None).await.unwrap();
         assert!(log.contains("ABC\n"));
+    }
+
+    #[tokio::test]
+    async fn write_to_detached_persisted_process_is_explicit() {
+        let audit_store = Arc::new(MemProcessAuditStore::default());
+        let mgr = ProcessManager::new().with_audit_store(audit_store.clone());
+
+        audit_store
+            .record_spawn(NewProcessAudit {
+                process_id: "persisted-only".into(),
+                tool_call_id: Uuid::now_v7(),
+                session_id: None,
+                turn_id: None,
+                tool_name: "execute_command".into(),
+                command: "sleep 5".into(),
+                workdir: "/tmp".into(),
+                arguments: serde_json::json!({"background": true}),
+                started_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let err = mgr.write_stdin("persisted-only", "hello", false).await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("persisted metadata but no live handle is attached"));
+    }
+
+    #[tokio::test]
+    async fn kill_detached_persisted_process_is_explicit() {
+        let audit_store = Arc::new(MemProcessAuditStore::default());
+        let mgr = ProcessManager::new().with_audit_store(audit_store.clone());
+
+        audit_store
+            .record_spawn(NewProcessAudit {
+                process_id: "persisted-kill".into(),
+                tool_call_id: Uuid::now_v7(),
+                session_id: None,
+                turn_id: None,
+                tool_name: "execute_command".into(),
+                command: "sleep 5".into(),
+                workdir: "/tmp".into(),
+                arguments: serde_json::json!({"background": true}),
+                started_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let err = mgr.kill("persisted-kill").await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("persisted metadata but no live handle is attached"));
     }
 }
