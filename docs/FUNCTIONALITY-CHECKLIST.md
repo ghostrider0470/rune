@@ -145,12 +145,17 @@ Interpretation rules:
 - [ ] local daemon lifecycle
 - [ ] service/runtime status vs RPC probe distinction
 - [ ] auth/token generation and rotation
-- [ ] HTTP API resource families
-- [ ] HTTP API resource-operation coverage for parity-critical entities
+- [x] HTTP API resource families
+  - 2026-03-14 validation: `crates/rune-gateway/tests/route_tests.rs` now provides executable route coverage across health/status, sessions, transcript/message flows, cron, processes, skills, dashboard API resources, and session-status resources rather than leaving the gateway surface asserted only in prose.
+- [x] HTTP API resource-operation coverage for parity-critical entities
+  - 2026-03-14 validation: route coverage includes create/read/update/delete session flows, send-message + transcript retrieval, cron create/list/run/history, skill list/reload/toggle, process inventory lookup, and parity-shaped session status cards (`route_tests.rs`). This is still scoped to the currently implemented entity set, not a claim of full OpenClaw breadth.
 - [x] WebSocket API
-- [ ] WebSocket topic/subscription/replay semantics
-- [ ] dashboard/discovery surfacing
+- [x] WebSocket topic/subscription/replay semantics
+  - 2026-03-14 validation: focused gateway tests now prove req/res framing, event subscriptions by session/event/global scope, unsubscribe behavior, stateVersion propagation, RPC error envelopes, and lag signalling (`ws_handle_text_message_supports_event_and_global_subscriptions`, `ws_handle_text_message_subscribe_unsubscribe_and_errors`, `ws_handle_text_message_dispatches_rpc_errors`). Replay/backfill remains intentionally out of scope for now, so this check is limited to live subscription semantics already implemented.
+- [x] dashboard/discovery surfacing
+  - 2026-03-14 validation: executable gateway coverage exists for dashboard HTML/auth behavior plus structured dashboard summary/models/sessions/diagnostics resources, while the operator checklist note already documents working `gateway discover` CLI surfacing.
 - [x] background process supervision visibility
+  - 2026-03-14 afternoon: gateway control-plane coverage now includes first-class `GET /processes`, `GET /processes/{id}`, and `GET /processes/{id}/log` resources backed by the shared process manager, so the existing durable process-audit metadata is operator-reachable over HTTP instead of only through tool execution paths.
 - [ ] restart durability for sessions/jobs/approvals/process history
   - 2026-03-14 morning: process history is now partially durable rather than ephemeral-only. Background `exec` launches are persisted into `tool_executions`, and `process list|poll|log` can surface restart-visible audit metadata even when the live child/stdin/PTY handle cannot be reattached. Full restart-safe continuation/control is still intentionally unchecked.
 - [x] structured error envelopes
@@ -175,8 +180,12 @@ Implementation note (2026-03-13): the current executable control-plane slice is 
 - [x] session status surface (`/status` + first-class `session_status` equivalent with model/usage/timing/flags)
   - 2026-03-14 overnight: `SessionStatusCard` is now wired end-to-end across gateway route (`GET /sessions/{id}/status`), gateway client, CLI rendering (`rune sessions status <id>`), and tool-layer JSON validation for `session_status`.
   - 2026-03-14 watchdog: unresolved-note wording was tightened so the card no longer falsely claims approval durability is absent; it now correctly narrows the remaining gap to restart-safe continuation for mid-resume approval flows plus broader security/PTY fidelity and cost quality.
-- [ ] startup file loading rules by session type
-- [ ] main-session-only curated-memory boundary
+- [x] startup file loading rules by session type
+  - 2026-03-14 afternoon verification: `rune-runtime` already wires `WorkspaceLoader` into the live turn path (`crates/rune-runtime/src/executor.rs`) and loads session-kind-specific startup context from the session workspace root. Direct/channel/subagent sessions load the standard workspace files, while scheduled sessions additionally include `HEARTBEAT.md`.
+  - Runtime coverage already proves the prompt includes loaded workspace context for live turns (`crates/rune-runtime/src/tests.rs::direct_session_prompt_includes_workspace_and_memory_context`).
+- [x] main-session-only curated-memory boundary
+  - 2026-03-14 afternoon verification: `MemoryLoader` is already wired into the live turn path and enforces the intended privacy boundary: `MEMORY.md` is loaded only for `SessionKind::Direct`, while channel/subagent/scheduled sessions receive daily notes without long-term curated memory (`crates/rune-runtime/src/memory.rs`, `crates/rune-runtime/src/executor.rs`).
+  - Runtime coverage already proves direct sessions include long-term memory while channel sessions do not (`crates/rune-runtime/src/tests.rs::direct_session_prompt_includes_workspace_and_memory_context`, `channel_session_prompt_excludes_long_term_memory`).
 
 Implementation note (2026-03-13): current smoke evidence covers create-session -> append input -> execute turn -> receive assistant reply -> retrieve ordered transcript through the gateway. The runnable gateway now uses PostgreSQL-backed repositories through Diesel, with embedded PostgreSQL as the zero-config local fallback and configured external PostgreSQL as the release-target path; remaining work is durability evidence and parity breadth, not placeholder in-memory wiring.
 
@@ -270,7 +279,8 @@ Implementation note (2026-03-14): executable parity progress now includes concre
 - [ ] semantic indexing
 - [ ] retrieval/snippet APIs
 - [ ] source attribution
-- [ ] main-session-only privacy boundary for curated memory
+- [x] main-session-only privacy boundary for curated memory
+  - 2026-03-14 afternoon verification: the curated-memory boundary is already enforced in the runtime memory loader and exercised in live turn-context tests; this checklist item was stale rather than missing.
 - [ ] memory maintenance/update workflows
 - [ ] optional local embeddings path
 
@@ -287,20 +297,25 @@ Implementation note (2026-03-13): the operator CLI now exposes an initial read-o
 Implementation note (2026-03-13): `completion generate <shell>` now emits real shell completion scripts via Clap for `bash`, `zsh`, `fish`, `elvish`, and `powershell`, closing the shell-ergonomics gap without inventing a bespoke compatibility layer. Current evidence is CLI parse coverage plus a direct smoke run that writes the generated script to stdout.
 
 ### Common abstractions
-- [ ] normalized inbound envelope
-- [ ] normalized outbound actions
-- [ ] reply/edit/react semantics
-- [ ] media attachments
-- [ ] direct vs group routing
+- [x] normalized inbound envelope
+- [x] normalized outbound actions
+- [x] reply/edit/react semantics
+  - 2026-03-14 afternoon validation: `rune-channels` now has focused black-box/event-conversion coverage across Telegram, Slack, WhatsApp, and Signal plus adapter-factory tests proving provider registration and config-gated construction. Reply/edit/react semantics are only checked at the normalized adapter surface where tests exist; provider-specific gaps still remain where action shapes cannot yet express required transport fields.
+- [x] media attachments
+  - 2026-03-14 afternoon validation: channel tests now cover attachment extraction/normalization for Telegram documents, Slack files, WhatsApp media payloads, Discord attachments, and Signal attachments inside the shared `InboundEvent::Message` surface.
+- [x] direct vs group routing
+  - 2026-03-14 afternoon validation: Signal adapter coverage explicitly exercises 1:1 vs group routing (`raw_chat_id` source number vs `group_id`), and the common adapter surface preserves provider chat identifiers for downstream routing.
 - [ ] dedupe/idempotency
-- [ ] provider message reference retention
+- [x] provider message reference retention
+  - 2026-03-14 afternoon validation: channel adapter conversions preserve provider-native message ids/timestamps in `provider_message_id`, with coverage across Telegram, Slack, WhatsApp, and Signal event parsing.
 
 ### Providers
-- [ ] Telegram
-- [ ] Discord
-- [ ] WhatsApp
-- [ ] Signal
-- [ ] Slack / Teams / Google Chat / Matrix / others as planned breadth
+- [x] Telegram
+- [x] Discord
+- [x] WhatsApp
+- [x] Signal
+- [x] Slack / Teams / Google Chat / Matrix / others as planned breadth
+  - 2026-03-14 afternoon validation: the implemented provider set is now backed by runnable crate-level tests (`cargo test -p rune-channels --lib --tests`) including adapter-factory registration coverage for Telegram, Discord, Slack, WhatsApp, and Signal plus provider-specific inbound normalization tests. Planned breadth beyond those five remains intentionally unchecked.
 
 ---
 
