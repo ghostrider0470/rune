@@ -9,8 +9,9 @@ use tracing::{debug, error, info};
 
 use rune_core::SessionKind;
 use rune_runtime::heartbeat::HeartbeatRunner;
-use rune_runtime::scheduler::{JobPayload, ReminderStore, Scheduler, SessionTarget};
+use rune_runtime::scheduler::{Job, JobPayload, ReminderStore, Scheduler, SessionTarget};
 use rune_runtime::{SessionEngine, TurnExecutor};
+use rune_store::models::SessionRow;
 
 /// Manages background services (heartbeat, scheduler, reminders).
 pub struct BackgroundSupervisor {
@@ -66,6 +67,50 @@ impl Default for BackgroundSupervisor {
     }
 }
 
+pub(crate) async fn execute_job(
+    deps: &SupervisorDeps,
+    job: &Job,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    match &job.payload {
+        JobPayload::SystemEvent { text } => run_system_event(deps, text).await,
+        JobPayload::AgentTurn { message, model, .. } => {
+            run_agent_turn(deps, message, model.as_deref(), job.session_target).await
+        }
+    }
+}
+
+pub(crate) async fn run_job_lifecycle(
+    deps: &SupervisorDeps,
+    job: &Job,
+    advance_next_run: bool,
+) -> (rune_runtime::scheduler::JobRunStatus, String) {
+    let job_id = job.id;
+    deps.scheduler.start_run(job_id).await;
+
+    let result = execute_job(deps, job).await;
+
+    let (status, output) = match result {
+        Ok(output) => (rune_runtime::scheduler::JobRunStatus::Completed, output),
+        Err(error) => {
+            error!(job_id = %job_id, error = %error, "job execution failed");
+            (
+                rune_runtime::scheduler::JobRunStatus::Failed,
+                error.to_string(),
+            )
+        }
+    };
+
+    deps.scheduler
+        .complete_run(job_id, status.clone(), Some(output.clone()))
+        .await;
+
+    if advance_next_run {
+        deps.scheduler.advance_next_run(&job_id).await;
+    }
+
+    (status, output)
+}
+
 async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<bool>) {
     info!("supervisor loop started");
 
@@ -108,45 +153,7 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
         for job in due_jobs {
             let job_id = job.id;
             debug!(job_id = %job_id, name = ?job.name, "executing due job");
-
-            deps.scheduler.start_run(job_id).await;
-
-            let result = match &job.payload {
-                JobPayload::SystemEvent { text } => {
-                    run_system_event(&deps, text).await
-                }
-                JobPayload::AgentTurn {
-                    message,
-                    model,
-                    ..
-                } => {
-                    run_agent_turn(&deps, message, model.as_deref(), job.session_target).await
-                }
-            };
-
-            match result {
-                Ok(output) => {
-                    deps.scheduler
-                        .complete_run(
-                            job_id,
-                            rune_runtime::scheduler::JobRunStatus::Completed,
-                            Some(output),
-                        )
-                        .await;
-                }
-                Err(e) => {
-                    error!(job_id = %job_id, error = %e, "job execution failed");
-                    deps.scheduler
-                        .complete_run(
-                            job_id,
-                            rune_runtime::scheduler::JobRunStatus::Failed,
-                            Some(e.to_string()),
-                        )
-                        .await;
-                }
-            }
-
-            deps.scheduler.advance_next_run(&job_id).await;
+            let _ = run_job_lifecycle(&deps, &job, true).await;
         }
 
         // --- Reminders ---
@@ -170,7 +177,10 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
 
 /// Create/reuse a heartbeat session and execute the heartbeat prompt.
 /// Returns the assistant's response text.
-async fn run_heartbeat(deps: &SupervisorDeps, prompt: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn run_heartbeat(
+    deps: &SupervisorDeps,
+    prompt: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let session = deps
         .session_engine
         .create_session(SessionKind::Scheduled, deps.workspace_root.clone())
@@ -179,20 +189,24 @@ async fn run_heartbeat(deps: &SupervisorDeps, prompt: &str) -> Result<String, Bo
     deps.session_engine.mark_ready(session.id).await?;
     deps.session_engine.mark_running(session.id).await?;
 
-    let (_turn, _usage) = deps
-        .turn_executor
-        .execute(session.id, prompt, None)
-        .await?;
+    let (_turn, _usage) = deps.turn_executor.execute(session.id, prompt, None).await?;
 
     // Read the last assistant message from transcript
-    let items = deps.turn_executor.transcript_repo().list_by_session(session.id).await?;
+    let items = deps
+        .turn_executor
+        .transcript_repo()
+        .list_by_session(session.id)
+        .await?;
     let response = items
         .iter()
         .rev()
         .find_map(|item| {
             let payload = &item.payload;
             if item.kind == "assistant_message" {
-                payload.get("content").and_then(|c| c.as_str()).map(String::from)
+                payload
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .map(String::from)
             } else {
                 None
             }
@@ -204,33 +218,13 @@ async fn run_heartbeat(deps: &SupervisorDeps, prompt: &str) -> Result<String, Bo
     Ok(response)
 }
 
-/// Execute a system event in a new scheduled session.
-async fn run_system_event(deps: &SupervisorDeps, text: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let session = deps
-        .session_engine
-        .create_session(SessionKind::Scheduled, deps.workspace_root.clone())
-        .await?;
-
-    deps.session_engine.mark_ready(session.id).await?;
-    deps.session_engine.mark_running(session.id).await?;
-
-    let (_turn, _usage) = deps.turn_executor.execute(session.id, text, None).await?;
-
-    let items = deps.turn_executor.transcript_repo().list_by_session(session.id).await?;
-    let response = items
-        .iter()
-        .rev()
-        .find_map(|item| {
-            if item.kind == "assistant_message" {
-                item.payload.get("content").and_then(|c| c.as_str()).map(String::from)
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
-
-    let _ = deps.session_engine.mark_completed(session.id).await;
-    Ok(response)
+/// Execute a system event in the stable main scheduled session.
+async fn run_system_event(
+    deps: &SupervisorDeps,
+    text: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let session = get_or_create_main_scheduled_session(deps).await?;
+    execute_in_session(deps, &session, text, None, false).await
 }
 
 /// Execute an agent turn in an isolated or main session.
@@ -240,41 +234,106 @@ async fn run_agent_turn(
     model: Option<&str>,
     target: SessionTarget,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let kind = match target {
-        SessionTarget::Main => SessionKind::Scheduled,
-        SessionTarget::Isolated => SessionKind::Scheduled,
-    };
+    match target {
+        SessionTarget::Main => {
+            let session = get_or_create_main_scheduled_session(deps).await?;
+            execute_in_session(deps, &session, message, model, false).await
+        }
+        SessionTarget::Isolated => {
+            let parent = get_or_create_main_scheduled_session(deps).await?;
+            let session = deps
+                .session_engine
+                .create_session_full(
+                    SessionKind::Subagent,
+                    deps.workspace_root.clone(),
+                    Some(parent.id),
+                    None,
+                )
+                .await?;
+            execute_in_session(deps, &session, message, model, true).await
+        }
+    }
+}
+
+/// Execute a reminder by running its message in the stable main scheduled session.
+async fn run_reminder(
+    deps: &SupervisorDeps,
+    message: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let session = get_or_create_main_scheduled_session(deps).await?;
+    execute_in_session(deps, &session, message, None, false).await
+}
+
+async fn get_or_create_main_scheduled_session(
+    deps: &SupervisorDeps,
+) -> Result<SessionRow, Box<dyn std::error::Error + Send + Sync>> {
+    const MAIN_SCHEDULED_CHANNEL_REF: &str = "system:scheduled-main";
+
+    if let Some(session) = deps
+        .session_engine
+        .get_session_by_channel_ref(MAIN_SCHEDULED_CHANNEL_REF)
+        .await?
+    {
+        return Ok(session);
+    }
 
     let session = deps
         .session_engine
-        .create_session(kind, deps.workspace_root.clone())
+        .create_session_full(
+            SessionKind::Scheduled,
+            deps.workspace_root.clone(),
+            None,
+            Some(MAIN_SCHEDULED_CHANNEL_REF.to_string()),
+        )
         .await?;
 
-    deps.session_engine.mark_ready(session.id).await?;
-    deps.session_engine.mark_running(session.id).await?;
+    Ok(session)
+}
 
-    let (_turn, _usage) = deps.turn_executor.execute(session.id, message, model).await?;
+async fn execute_in_session(
+    deps: &SupervisorDeps,
+    session: &SessionRow,
+    message: &str,
+    model: Option<&str>,
+    complete_when_done: bool,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if session.status == "created" {
+        deps.session_engine.mark_ready(session.id).await?;
+    }
+    if matches!(session.status.as_str(), "created" | "ready") {
+        deps.session_engine.mark_running(session.id).await?;
+    }
 
-    let items = deps.turn_executor.transcript_repo().list_by_session(session.id).await?;
+    let (_turn, _usage) = deps
+        .turn_executor
+        .execute(session.id, message, model)
+        .await?;
+
+    let items = deps
+        .turn_executor
+        .transcript_repo()
+        .list_by_session(session.id)
+        .await?;
     let response = items
         .iter()
         .rev()
         .find_map(|item| {
             if item.kind == "assistant_message" {
-                item.payload.get("content").and_then(|c| c.as_str()).map(String::from)
+                item.payload
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .map(String::from)
             } else {
                 None
             }
         })
         .unwrap_or_default();
 
-    let _ = deps.session_engine.mark_completed(session.id).await;
-    Ok(response)
-}
+    if complete_when_done {
+        let _ = deps.session_engine.mark_completed(session.id).await;
+    }
 
-/// Execute a reminder by running its message as a turn in a scheduled session.
-async fn run_reminder(deps: &SupervisorDeps, message: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    run_system_event(deps, message).await
+    Ok(response)
 }
 
 #[cfg(test)]

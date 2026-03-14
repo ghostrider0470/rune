@@ -33,9 +33,9 @@ use client::{
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
     ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
-    DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary,
-    HeartbeatPresenceResponse, ModelAliasDetail, ModelAliasesResponse, ModelListResponse,
-    ModelProviderDetail, ModelSetResponse, ModelStatusResponse, OutputFormat, render,
+    DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
+    ModelAliasDetail, ModelAliasesResponse, ModelListResponse, ModelProviderDetail,
+    ModelSetResponse, ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -44,9 +44,52 @@ fn load_config() -> rune_config::AppConfig {
 }
 
 fn discover_local_config_path() -> std::path::PathBuf {
-    std::env::var_os("RUNE_CONFIG")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"))
+    if let Some(config_path) = std::env::var_os("RUNE_CONFIG") {
+        return std::path::PathBuf::from(config_path);
+    }
+
+    let profile = std::env::var("RUNE_PROFILE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    match profile.as_deref() {
+        Some("dev") => std::path::PathBuf::from("config.dev.toml"),
+        Some(profile) => std::path::PathBuf::from(format!("config.{profile}.toml")),
+        None => std::path::PathBuf::from("config.toml"),
+    }
+}
+
+fn apply_global_cli_environment(cli: &Cli) {
+    if cli.dev && cli.profile.is_none() && std::env::var_os("RUNE_PROFILE").is_none() {
+        unsafe {
+            std::env::set_var("RUNE_PROFILE", "dev");
+        }
+    }
+
+    if let Some(profile) = &cli.profile {
+        unsafe {
+            std::env::set_var("RUNE_PROFILE", profile);
+        }
+    }
+
+    if let Some(level) = &cli.log_level {
+        unsafe {
+            std::env::set_var("RUNE_LOG_LEVEL", level);
+        }
+        if std::env::var_os("RUST_LOG").is_none() {
+            unsafe {
+                std::env::set_var("RUST_LOG", level);
+            }
+        }
+    }
+
+    if cli.no_color {
+        unsafe {
+            std::env::set_var("NO_COLOR", "1");
+        }
+        clap::builder::styling::Styles::plain();
+    }
 }
 
 fn run_gateway_foreground() -> Result<()> {
@@ -80,7 +123,12 @@ fn completion_shell(shell: CompletionShell) -> Shell {
 
 fn print_completion(shell: CompletionShell) -> Result<()> {
     let mut command = Cli::command();
-    generate(completion_shell(shell), &mut command, "rune", &mut std::io::stdout());
+    generate(
+        completion_shell(shell),
+        &mut command,
+        "rune",
+        &mut std::io::stdout(),
+    );
     Ok(())
 }
 
@@ -90,9 +138,9 @@ fn parse_reminder_duration(input: &str) -> Result<DateTime<Utc>> {
         anyhow::bail!("reminder duration cannot be empty");
     }
 
-    let split_at = trimmed
-        .find(|c: char| !c.is_ascii_digit())
-        .ok_or_else(|| anyhow::anyhow!("invalid reminder duration `{trimmed}`; expected forms like 30m, 2h, 1d"))?;
+    let split_at = trimmed.find(|c: char| !c.is_ascii_digit()).ok_or_else(|| {
+        anyhow::anyhow!("invalid reminder duration `{trimmed}`; expected forms like 30m, 2h, 1d")
+    })?;
     let (amount_raw, unit_raw) = trimmed.split_at(split_at);
     let amount: i64 = amount_raw
         .parse()
@@ -530,6 +578,7 @@ async fn init_workspace(path: &std::path::Path) -> Result<()> {
 
 /// Execute the parsed CLI command against the configured gateway and print output.
 pub async fn run(cli: Cli) -> Result<()> {
+    apply_global_cli_environment(&cli);
     let format = OutputFormat::from_json_flag(cli.json);
     let client = GatewayClient::new(&cli.gateway_url);
 
@@ -659,6 +708,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.approvals_list().await?;
                 println!("{}", render(&result, format));
             }
+            ApprovalsAction::Decide { id, decision, by } => {
+                let result = client
+                    .approvals_decide(&id, &decision, by.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            ApprovalsAction::Policies => {
+                let result = client.approvals_policies_list().await?;
+                println!("{}", render(&result, format));
+            }
             ApprovalsAction::Get { tool } => {
                 let result = client.approvals_get(&tool).await?;
                 println!("{}", render(&result, format));
@@ -741,6 +800,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             SessionsAction::Show { id } => {
                 let result = client.sessions_show(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            SessionsAction::Status { id } => {
+                let result = client.session_status(&id).await?;
                 println!("{}", render(&result, format));
             }
         },
@@ -908,11 +971,14 @@ pub async fn run(cli: Cli) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
     use tempfile::TempDir;
 
     #[test]
     fn set_default_model_updates_existing_models_section() {
-        let _guard = crate::test_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
@@ -952,7 +1018,9 @@ models = ["gpt-5.4", "gpt-5.4-pro"]
 
     #[test]
     fn set_default_model_accepts_unambiguous_short_name() {
-        let _guard = crate::test_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
@@ -1004,7 +1072,9 @@ models = ["grok-4-fast-reasoning"]
 
     #[test]
     fn set_default_model_rejects_unknown_inventory_entry() {
-        let _guard = crate::test_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
@@ -1032,6 +1102,64 @@ models = ["gpt-5.4"]
 
         unsafe {
             std::env::remove_var("RUNE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn discover_local_config_path_uses_profile_when_present() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+            std::env::remove_var("RUNE_PROFILE");
+            std::env::set_var("RUNE_PROFILE", "azure");
+        }
+        assert_eq!(
+            discover_local_config_path(),
+            std::path::PathBuf::from("config.azure.toml")
+        );
+        unsafe {
+            std::env::remove_var("RUNE_PROFILE");
+        }
+    }
+
+    #[test]
+    fn apply_global_cli_environment_sets_dev_profile_and_log_level() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::remove_var("RUNE_PROFILE");
+            std::env::remove_var("RUNE_LOG_LEVEL");
+            std::env::remove_var("RUST_LOG");
+            std::env::remove_var("NO_COLOR");
+        }
+
+        let cli = Cli::try_parse_from([
+            "rune",
+            "--dev",
+            "--log-level",
+            "trace",
+            "--no-color",
+            "status",
+        ])
+        .unwrap();
+        apply_global_cli_environment(&cli);
+
+        assert_eq!(std::env::var("RUNE_PROFILE").ok().as_deref(), Some("dev"));
+        assert_eq!(
+            std::env::var("RUNE_LOG_LEVEL").ok().as_deref(),
+            Some("trace")
+        );
+        assert_eq!(std::env::var("RUST_LOG").ok().as_deref(), Some("trace"));
+        assert_eq!(std::env::var("NO_COLOR").ok().as_deref(), Some("1"));
+
+        unsafe {
+            std::env::remove_var("RUNE_PROFILE");
+            std::env::remove_var("RUNE_LOG_LEVEL");
+            std::env::remove_var("RUST_LOG");
+            std::env::remove_var("NO_COLOR");
         }
     }
 }

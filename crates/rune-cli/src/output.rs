@@ -106,6 +106,10 @@ pub struct SessionSummary {
     pub status: String,
     pub channel: Option<String>,
     pub created_at: Option<String>,
+    pub turn_count: Option<u32>,
+    pub usage_prompt_tokens: Option<u64>,
+    pub usage_completion_tokens: Option<u64>,
+    pub latest_model: Option<String>,
 }
 
 impl fmt::Display for SessionSummary {
@@ -113,6 +117,17 @@ impl fmt::Display for SessionSummary {
         write!(f, "{} [{}]", self.id, self.status)?;
         if let Some(ref ch) = self.channel {
             write!(f, " ({ch})")?;
+        }
+        if let Some(turns) = self.turn_count {
+            write!(f, " turns={turns}")?;
+        }
+        if let Some(ref model) = self.latest_model {
+            write!(f, " model={model}")?;
+        }
+        if let (Some(prompt), Some(completion)) =
+            (self.usage_prompt_tokens, self.usage_completion_tokens)
+        {
+            write!(f, " tokens={}/{}", prompt, completion)?;
         }
         Ok(())
     }
@@ -144,6 +159,11 @@ pub struct SessionDetailResponse {
     pub channel: Option<String>,
     pub created_at: Option<String>,
     pub turn_count: Option<u32>,
+    pub latest_model: Option<String>,
+    pub usage_prompt_tokens: Option<u64>,
+    pub usage_completion_tokens: Option<u64>,
+    pub last_turn_started_at: Option<String>,
+    pub last_turn_ended_at: Option<String>,
 }
 
 impl fmt::Display for SessionDetailResponse {
@@ -157,7 +177,223 @@ impl fmt::Display for SessionDetailResponse {
             writeln!(f, "  Created: {t}")?;
         }
         if let Some(n) = self.turn_count {
-            write!(f, "  Turns:   {n}")?;
+            writeln!(f, "  Turns:   {n}")?;
+        }
+        if let Some(ref model) = self.latest_model {
+            writeln!(f, "  Model:   {model}")?;
+        }
+        if let (Some(prompt), Some(completion)) =
+            (self.usage_prompt_tokens, self.usage_completion_tokens)
+        {
+            writeln!(f, "  Tokens:  {prompt}/{completion}")?;
+        }
+        if let Some(ref started_at) = self.last_turn_started_at {
+            writeln!(f, "  Last started: {started_at}")?;
+        }
+        if let Some(ref ended_at) = self.last_turn_ended_at {
+            writeln!(f, "  Last ended:   {ended_at}")?;
+        }
+        Ok(())
+    }
+}
+
+/// First-class `/status` / `session_status` parity card for an individual session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionStatusCard {
+    pub session_id: Option<String>,
+    pub runtime: Option<String>,
+    pub status: String,
+    pub current_model: Option<String>,
+    pub model_override: Option<String>,
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub estimated_cost: Option<String>,
+    pub turn_count: Option<u32>,
+    pub uptime_seconds: Option<u64>,
+    pub last_turn_started_at: Option<String>,
+    pub last_turn_ended_at: Option<String>,
+    pub reasoning: Option<String>,
+    pub verbose: Option<bool>,
+    pub elevated: Option<bool>,
+    pub approval_mode: Option<String>,
+    pub security_mode: Option<String>,
+    pub unresolved: Vec<String>,
+}
+
+/// Operator-facing durable approval request detail.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalRequestSummary {
+    pub id: String,
+    pub subject_type: String,
+    pub subject_id: String,
+    pub reason: String,
+    pub decision: Option<String>,
+    pub decided_by: Option<String>,
+    pub decided_at: Option<String>,
+    pub approval_status: Option<String>,
+    pub approval_status_updated_at: Option<String>,
+    pub resumed_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub resume_result_summary: Option<String>,
+    pub command: Option<String>,
+    pub presented_payload: serde_json::Value,
+    pub created_at: String,
+}
+
+impl fmt::Display for ApprovalRequestSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Approval: {}", self.id)?;
+        writeln!(f, "  Subject:         {} {}", self.subject_type, self.subject_id)?;
+        writeln!(f, "  Reason:          {}", self.reason)?;
+        if let Some(decision) = &self.decision {
+            writeln!(f, "  Decision:        {decision}")?;
+        }
+        if let Some(decided_by) = &self.decided_by {
+            writeln!(f, "  Decided by:      {decided_by}")?;
+        }
+        if let Some(decided_at) = &self.decided_at {
+            writeln!(f, "  Decided at:      {decided_at}")?;
+        }
+        if let Some(status) = &self.approval_status {
+            writeln!(f, "  Approval status: {status}")?;
+        }
+        if let Some(updated_at) = &self.approval_status_updated_at {
+            writeln!(f, "  Status updated:  {updated_at}")?;
+        }
+        if let Some(resumed_at) = &self.resumed_at {
+            writeln!(f, "  Resumed at:      {resumed_at}")?;
+        }
+        if let Some(completed_at) = &self.completed_at {
+            writeln!(f, "  Completed at:    {completed_at}")?;
+        }
+        if let Some(summary) = &self.resume_result_summary {
+            writeln!(f, "  Result:          {summary}")?;
+        }
+        if let Some(command) = &self.command {
+            writeln!(f, "  Command:         {command}")?;
+        }
+        write!(f, "  Created at:      {}", self.created_at)
+    }
+}
+
+/// Approval request list response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalListResponse {
+    pub approvals: Vec<ApprovalRequestSummary>,
+}
+
+impl fmt::Display for ApprovalListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.approvals.is_empty() {
+            return write!(f, "No pending approvals.");
+        }
+        for approval in &self.approvals {
+            writeln!(f, "{} [{}] status={} created={}", approval.id, approval.reason, approval.approval_status.as_deref().unwrap_or("unknown"), approval.created_at)?;
+            if let Some(command) = &approval.command {
+                writeln!(f, "  command: {command}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Tool-level approval policy detail.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalPolicySummary {
+    pub tool_name: String,
+    pub decision: String,
+    pub decided_at: String,
+}
+
+impl fmt::Display for ApprovalPolicySummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} {}", self.tool_name, self.decision, self.decided_at)
+    }
+}
+
+/// Approval policy list response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalPoliciesResponse {
+    pub policies: Vec<ApprovalPolicySummary>,
+}
+
+impl fmt::Display for ApprovalPoliciesResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.policies.is_empty() {
+            return write!(f, "No approval policies.");
+        }
+        for policy in &self.policies {
+            writeln!(f, "  {policy}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for SessionStatusCard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Session status")?;
+        writeln!(f, "  Status:          {}", self.status)?;
+        if let Some(session_id) = &self.session_id {
+            writeln!(f, "  Session:         {session_id}")?;
+        }
+        if let Some(runtime) = &self.runtime {
+            writeln!(f, "  Runtime:         {runtime}")?;
+        }
+        if let Some(model) = &self.current_model {
+            writeln!(f, "  Model:           {model}")?;
+        }
+        if let Some(model_override) = &self.model_override {
+            writeln!(f, "  Model override:  {model_override}")?;
+        }
+        if let Some(turn_count) = self.turn_count {
+            writeln!(f, "  Turns:           {turn_count}")?;
+        }
+        if let Some(uptime_seconds) = self.uptime_seconds {
+            writeln!(f, "  Uptime:          {uptime_seconds}s")?;
+        }
+        match (
+            self.prompt_tokens,
+            self.completion_tokens,
+            self.total_tokens,
+        ) {
+            (Some(prompt), Some(completion), Some(total)) => {
+                writeln!(f, "  Tokens:          {prompt}/{completion} total={total}")?;
+            }
+            (Some(prompt), Some(completion), None) => {
+                writeln!(f, "  Tokens:          {prompt}/{completion}")?;
+            }
+            _ => {}
+        }
+        if let Some(estimated_cost) = &self.estimated_cost {
+            writeln!(f, "  Cost:            {estimated_cost}")?;
+        }
+        if let Some(reasoning) = &self.reasoning {
+            writeln!(f, "  Reasoning:       {reasoning}")?;
+        }
+        if let Some(verbose) = self.verbose {
+            writeln!(f, "  Verbose:         {verbose}")?;
+        }
+        if let Some(elevated) = self.elevated {
+            writeln!(f, "  Elevated:        {elevated}")?;
+        }
+        if let Some(approval_mode) = &self.approval_mode {
+            writeln!(f, "  Approval mode:   {approval_mode}")?;
+        }
+        if let Some(security_mode) = &self.security_mode {
+            writeln!(f, "  Security mode:   {security_mode}")?;
+        }
+        if let Some(last_started) = &self.last_turn_started_at {
+            writeln!(f, "  Last started:    {last_started}")?;
+        }
+        if let Some(last_ended) = &self.last_turn_ended_at {
+            writeln!(f, "  Last ended:      {last_ended}")?;
+        }
+        if !self.unresolved.is_empty() {
+            writeln!(f, "  Unresolved:")?;
+            for item in &self.unresolved {
+                writeln!(f, "    - {item}")?;
+            }
         }
         Ok(())
     }
@@ -565,7 +801,15 @@ impl fmt::Display for DashboardResponse {
         if let Some(uptime_seconds) = self.gateway.uptime_seconds {
             writeln!(f, "  Uptime:    {uptime_seconds}s")?;
         }
-        writeln!(f, "  Health:    {}", if self.health.healthy { "healthy" } else { "degraded" })?;
+        writeln!(
+            f,
+            "  Health:    {}",
+            if self.health.healthy {
+                "healthy"
+            } else {
+                "degraded"
+            }
+        )?;
         writeln!(f, "  Sessions:  {} total", self.sessions.total)?;
         if !self.sessions.sample.is_empty() {
             writeln!(f, "  Recent:")?;
@@ -594,7 +838,10 @@ impl fmt::Display for DashboardResponse {
         writeln!(
             f,
             "  Channels:  {} total / {} enabled / {} configured / {} ready",
-            self.channels.total, self.channels.enabled, self.channels.configured, self.channels.ready
+            self.channels.total,
+            self.channels.enabled,
+            self.channels.configured,
+            self.channels.ready
         )?;
         writeln!(
             f,
@@ -606,10 +853,7 @@ impl fmt::Display for DashboardResponse {
         write!(
             f,
             "  Latest:    {}",
-            self.memory
-                .latest_daily_file
-                .as_deref()
-                .unwrap_or("(none)")
+            self.memory.latest_daily_file.as_deref().unwrap_or("(none)")
         )
     }
 }
@@ -865,7 +1109,11 @@ pub struct GatewayCallResponse {
 
 impl fmt::Display for GatewayCallResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{} {} -> HTTP {}", self.method, self.path, self.status_code)?;
+        writeln!(
+            f,
+            "{} {} -> HTTP {}",
+            self.method, self.path, self.status_code
+        )?;
         if let Some(content_type) = &self.content_type {
             writeln!(f, "Content-Type: {content_type}")?;
         }
@@ -1078,7 +1326,11 @@ impl fmt::Display for ReminderSummary {
             f,
             "{} [{}] {} -> {}",
             self.id,
-            if self.delivered { "delivered" } else { "pending" },
+            if self.delivered {
+                "delivered"
+            } else {
+                "pending"
+            },
             self.target,
             self.message
         )?;
@@ -1202,6 +1454,68 @@ mod tests {
     fn render_session_list_empty() {
         let l = SessionListResponse { sessions: vec![] };
         assert_eq!(render(&l, OutputFormat::Human), "No active sessions.");
+    }
+
+    #[test]
+    fn render_session_status_card_human() {
+        let status = SessionStatusCard {
+            session_id: Some("main".into()),
+            runtime: Some("agent=main | model=gpt-5.4".into()),
+            status: "running".into(),
+            current_model: Some("gpt-5.4".into()),
+            model_override: None,
+            prompt_tokens: Some(1200),
+            completion_tokens: Some(340),
+            total_tokens: Some(1540),
+            estimated_cost: Some("not available".into()),
+            turn_count: Some(12),
+            uptime_seconds: Some(98),
+            last_turn_started_at: Some("2026-03-14T01:30:00Z".into()),
+            last_turn_ended_at: Some("2026-03-14T01:30:09Z".into()),
+            reasoning: Some("off".into()),
+            verbose: Some(false),
+            elevated: Some(false),
+            approval_mode: Some("on-miss".into()),
+            security_mode: Some("allowlist".into()),
+            unresolved: vec!["cost posture is estimate-only".into()],
+        };
+        let out = render(&status, OutputFormat::Human);
+        assert!(out.contains("Session status"));
+        assert!(out.contains("Model:           gpt-5.4"));
+        assert!(out.contains("Tokens:          1200/340 total=1540"));
+        assert!(out.contains("Approval mode:   on-miss"));
+        assert!(out.contains("- cost posture is estimate-only"));
+    }
+
+    #[test]
+    fn render_session_status_card_json() {
+        let status = SessionStatusCard {
+            session_id: Some("main".into()),
+            runtime: None,
+            status: "running".into(),
+            current_model: Some("gpt-5.4".into()),
+            model_override: Some("o3-mini".into()),
+            prompt_tokens: Some(10),
+            completion_tokens: Some(5),
+            total_tokens: Some(15),
+            estimated_cost: None,
+            turn_count: Some(2),
+            uptime_seconds: None,
+            last_turn_started_at: None,
+            last_turn_ended_at: None,
+            reasoning: Some("low".into()),
+            verbose: Some(true),
+            elevated: Some(false),
+            approval_mode: Some("always".into()),
+            security_mode: Some("full".into()),
+            unresolved: vec![],
+        };
+        let out = render(&status, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["session_id"], "main");
+        assert_eq!(v["model_override"], "o3-mini");
+        assert_eq!(v["total_tokens"], 15);
+        assert_eq!(v["approval_mode"], "always");
     }
 
     #[test]
@@ -1455,6 +1769,10 @@ mod tests {
                     status: "running".into(),
                     channel: Some("telegram".into()),
                     created_at: None,
+                    turn_count: Some(1),
+                    usage_prompt_tokens: Some(10),
+                    usage_completion_tokens: Some(5),
+                    latest_model: Some("hamza-eastus2/gpt-5.4".into()),
                 }],
             },
             models: DashboardModelsSummary {

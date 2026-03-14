@@ -2,24 +2,32 @@
 //!
 //! Implements the `process` tool: list, poll, log, write, submit, paste, send-keys, kill running
 //! background processes. Works in tandem with `exec_tool` when `background: true` is set.
+//!
+//! PTY-backed sessions are supported through the `exec` tool's `pty: true` mode. On Unix,
+//! Rune currently realizes this by launching the command under `script(1)`, which gives the
+//! child a real pseudo-terminal while preserving the existing process-manager control surface.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::Mutex;
+use tokio::time::{Duration, Instant, sleep};
 use tracing::instrument;
 
 use crate::definition::{ToolCall, ToolResult};
 use crate::error::ToolError;
 use crate::executor::ToolExecutor;
+use crate::process_audit::{CompletedProcessAudit, ProcessAuditStore};
 
 /// Shared process manager that tracks background processes.
 #[derive(Clone)]
 pub struct ProcessManager {
     entries: Arc<Mutex<HashMap<String, Arc<ProcessEntry>>>>,
+    audit_store: Option<Arc<dyn ProcessAuditStore>>,
 }
 
 impl ProcessManager {
@@ -27,7 +35,15 @@ impl ProcessManager {
     pub fn new() -> Self {
         Self {
             entries: Arc::new(Mutex::new(HashMap::new())),
+            audit_store: None,
         }
+    }
+
+    /// Attach a durable audit store used for restart-visible process metadata.
+    #[must_use]
+    pub fn with_audit_store(mut self, audit_store: Arc<dyn ProcessAuditStore>) -> Self {
+        self.audit_store = Some(audit_store);
+        self
     }
 
     /// Register a new background process.
@@ -45,6 +61,7 @@ impl ProcessManager {
                 running: true,
                 exit_code: None,
             })),
+            audit_store: self.audit_store.clone(),
         });
 
         if let Some(reader) = stdout_handle {
@@ -69,21 +86,93 @@ impl ProcessManager {
                 process_id: id.clone(),
                 running: state.running,
                 exit_code: state.exit_code,
+                live: true,
+                durable_status: None,
+                note: None,
             });
         }
+        drop(entries);
+
+        if let Some(audit_store) = &self.audit_store {
+            let recent = audit_store.list_recent(200).await.unwrap_or_default();
+            for record in recent {
+                if infos
+                    .iter()
+                    .any(|info| info.process_id == record.process_id)
+                {
+                    continue;
+                }
+                infos.push(ProcessInfo {
+                    process_id: record.process_id,
+                    running: record.ended_at.is_none() && record.status == "running",
+                    exit_code: None,
+                    live: false,
+                    durable_status: Some(record.status),
+                    note: Some(
+                        "persisted process metadata is available, but the live handle is not attached in this gateway process".to_string(),
+                    ),
+                });
+            }
+        }
+
         infos.sort_by(|a, b| a.process_id.cmp(&b.process_id));
         infos
     }
 
     /// Poll a specific process.
     pub async fn poll(&self, process_id: &str) -> Result<ProcessInfo, ToolError> {
-        let entry = self.get(process_id).await?;
-        let state = entry.state.lock().await;
-        Ok(ProcessInfo {
-            process_id: process_id.to_string(),
-            running: state.running,
-            exit_code: state.exit_code,
-        })
+        match self.get(process_id).await {
+            Ok(entry) => {
+                let state = entry.state.lock().await;
+                Ok(ProcessInfo {
+                    process_id: process_id.to_string(),
+                    running: state.running,
+                    exit_code: state.exit_code,
+                    live: true,
+                    durable_status: None,
+                    note: None,
+                })
+            }
+            Err(_) => {
+                if let Some(audit_store) = &self.audit_store {
+                    if let Some(record) = audit_store
+                        .find(process_id)
+                        .await
+                        .map_err(ToolError::ExecutionFailed)?
+                    {
+                        return Ok(ProcessInfo {
+                            process_id: process_id.to_string(),
+                            running: record.ended_at.is_none() && record.status == "running",
+                            exit_code: None,
+                            live: false,
+                            durable_status: Some(record.status),
+                            note: Some(
+                                "persisted process metadata is available, but the live handle is not attached in this gateway process".to_string(),
+                            ),
+                        });
+                    }
+                }
+                Err(ToolError::ExecutionFailed(format!(
+                    "process not found: {process_id}"
+                )))
+            }
+        }
+    }
+
+    /// Poll a process, waiting up to `timeout` for it to change from running to finished.
+    pub async fn poll_wait(
+        &self,
+        process_id: &str,
+        timeout: Duration,
+    ) -> Result<ProcessInfo, ToolError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let info = self.poll(process_id).await?;
+            if !info.running || Instant::now() >= deadline {
+                return Ok(info);
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
     }
 
     /// Get combined stdout+stderr log with optional offset/limit.
@@ -93,25 +182,59 @@ impl ProcessManager {
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<String, ToolError> {
-        let entry = self.get(process_id).await?;
-        let stdout = entry.stdout.lock().await.clone();
-        let stderr = entry.stderr.lock().await.clone();
+        if let Ok(entry) = self.get(process_id).await {
+            let stdout = entry.stdout.lock().await.clone();
+            let stderr = entry.stderr.lock().await.clone();
 
-        let combined = if stderr.is_empty() {
-            stdout
-        } else if stdout.is_empty() {
-            stderr
-        } else {
-            format!("{stdout}\n{stderr}")
-        };
+            let combined = if stderr.is_empty() {
+                stdout
+            } else if stdout.is_empty() {
+                stderr
+            } else {
+                format!("{stdout}\n{stderr}")
+            };
 
-        let start = offset.unwrap_or(0);
-        let output: String = combined
-            .chars()
-            .skip(start)
-            .take(limit.unwrap_or(usize::MAX))
-            .collect();
-        Ok(output)
+            let start = offset.unwrap_or(0);
+            let output: String = combined
+                .chars()
+                .skip(start)
+                .take(limit.unwrap_or(usize::MAX))
+                .collect();
+            return Ok(output);
+        }
+
+        if let Some(audit_store) = &self.audit_store {
+            if let Some(record) = audit_store
+                .find(process_id)
+                .await
+                .map_err(ToolError::ExecutionFailed)?
+            {
+                let payload = serde_json::json!({
+                    "processId": record.process_id,
+                    "live": false,
+                    "status": record.status,
+                    "startedAt": record.started_at.to_rfc3339(),
+                    "endedAt": record.ended_at.map(|t| t.to_rfc3339()),
+                    "command": record.command,
+                    "workdir": record.workdir,
+                    "resultSummary": record.result_summary,
+                    "errorSummary": record.error_summary,
+                    "note": "Only persisted metadata is available after restart; live stdout/stderr capture is not reattachable yet"
+                })
+                .to_string();
+                let start = offset.unwrap_or(0);
+                let output: String = payload
+                    .chars()
+                    .skip(start)
+                    .take(limit.unwrap_or(usize::MAX))
+                    .collect();
+                return Ok(output);
+            }
+        }
+
+        Err(ToolError::ExecutionFailed(format!(
+            "process not found: {process_id}"
+        )))
     }
 
     /// Write data to a process's stdin.
@@ -190,6 +313,12 @@ pub struct ProcessInfo {
     pub running: bool,
     /// Exit code (None if still running or killed).
     pub exit_code: Option<i32>,
+    /// Whether the current gateway process still has a live handle attached.
+    pub live: bool,
+    /// Durable status recovered from persisted metadata when available.
+    pub durable_status: Option<String>,
+    /// Human-readable note about degraded restart visibility.
+    pub note: Option<String>,
 }
 
 struct ProcessEntry {
@@ -200,6 +329,7 @@ struct ProcessEntry {
     stdout: Arc<Mutex<String>>,
     stderr: Arc<Mutex<String>>,
     state: Arc<Mutex<ProcessState>>,
+    audit_store: Option<Arc<dyn ProcessAuditStore>>,
 }
 
 struct ProcessState {
@@ -226,10 +356,58 @@ fn spawn_waiter(entry: Arc<ProcessEntry>) {
             let mut child = entry.child.lock().await;
             child.wait().await.ok()
         };
-        let mut state = entry.state.lock().await;
-        state.running = false;
-        state.exit_code = status.and_then(|s| s.code());
+        let exit_code = status.and_then(|s| s.code());
+        {
+            let mut state = entry.state.lock().await;
+            state.running = false;
+            state.exit_code = exit_code;
+        }
+
+        if let Some(audit_store) = &entry.audit_store {
+            let stdout = entry.stdout.lock().await.clone();
+            let stderr = entry.stderr.lock().await.clone();
+            let summary = if stderr.is_empty() {
+                stdout
+            } else if stdout.is_empty() {
+                stderr
+            } else {
+                format!("{stdout}\n{stderr}")
+            };
+            let summary = truncate_summary(&summary);
+            let status_text = match exit_code {
+                Some(0) => "completed",
+                Some(_) => "failed",
+                None => "killed",
+            };
+            let _ = audit_store
+                .record_completion(CompletedProcessAudit {
+                    process_id: entry.id.clone(),
+                    status: status_text.to_string(),
+                    result_summary: if status_text == "completed" {
+                        Some(summary.clone())
+                    } else {
+                        None
+                    },
+                    error_summary: if matches!(status_text, "failed" | "killed") {
+                        Some(summary)
+                    } else {
+                        None
+                    },
+                    ended_at: Utc::now(),
+                })
+                .await;
+        }
     });
+}
+
+fn truncate_summary(value: &str) -> String {
+    const MAX: usize = 4_000;
+    if value.len() <= MAX {
+        return value.to_string();
+    }
+    let mut out = value[..MAX].to_string();
+    out.push_str("\n... (truncated)");
+    out
 }
 
 fn key_token_to_bytes(token: &str) -> Option<&'static [u8]> {
@@ -291,6 +469,9 @@ impl ProcessToolExecutor {
                             "processId": i.process_id,
                             "running": i.running,
                             "exitCode": i.exit_code,
+                            "live": i.live,
+                            "durableStatus": i.durable_status,
+                            "note": i.note,
                         })
                     })
                     .collect();
@@ -303,13 +484,26 @@ impl ProcessToolExecutor {
             "poll" => {
                 let pid = process_id
                     .ok_or_else(|| ToolError::InvalidArgument("poll requires sessionId".into()))?;
-                let info = self.manager.poll(pid).await?;
+                let timeout = call
+                    .arguments
+                    .get("timeout")
+                    .and_then(|v| v.as_u64())
+                    .map(Duration::from_millis)
+                    .unwrap_or_else(|| Duration::from_millis(0));
+                let info = if timeout.is_zero() {
+                    self.manager.poll(pid).await?
+                } else {
+                    self.manager.poll_wait(pid, timeout).await?
+                };
                 Ok(ToolResult {
                     tool_call_id: call.tool_call_id,
                     output: serde_json::json!({
                         "processId": info.process_id,
                         "running": info.running,
                         "exitCode": info.exit_code,
+                        "live": info.live,
+                        "durableStatus": info.durable_status,
+                        "note": info.note,
                     })
                     .to_string(),
                     is_error: false,
@@ -521,6 +715,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn poll_wait_returns_after_process_exits() {
+        let mgr = ProcessManager::new();
+
+        let mut child = Command::new("bash")
+            .arg("-c")
+            .arg("sleep 0.2")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let stdin = child.stdin.take();
+        mgr.register("test-poll-wait".into(), child, stdin).await;
+
+        let started = Instant::now();
+        let info = mgr
+            .poll_wait("test-poll-wait", Duration::from_millis(1000))
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+
+        assert!(!info.running);
+        assert!(elapsed >= Duration::from_millis(150));
+    }
+
+    #[tokio::test]
+    async fn process_poll_action_honors_timeout() {
+        let mgr = ProcessManager::new();
+        let executor = ProcessToolExecutor::new(mgr.clone());
+
+        let mut child = Command::new("bash")
+            .arg("-c")
+            .arg("sleep 0.2")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let stdin = child.stdin.take();
+        mgr.register("test-process-poll".into(), child, stdin).await;
+
+        let started = Instant::now();
+        let result = executor
+            .execute(make_call(
+                "process",
+                serde_json::json!({
+                    "action": "poll",
+                    "sessionId": "test-process-poll",
+                    "timeout": 1000
+                }),
+            ))
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        let value: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+
+        assert_eq!(value["processId"], "test-process-poll");
+        assert_eq!(value["running"], false);
+        assert!(elapsed >= Duration::from_millis(150));
+    }
+
+    #[tokio::test]
     async fn spawn_echo_and_read_log() {
         let mgr = ProcessManager::new();
 
@@ -564,6 +822,26 @@ mod tests {
         let call = make_call("process", serde_json::json!({"action": "dance"}));
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn kill_marks_process_non_running() {
+        let mgr = ProcessManager::new();
+
+        let mut child = Command::new("sleep")
+            .arg("10")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let stdin = child.stdin.take();
+        mgr.register("kill-test".into(), child, stdin).await;
+        mgr.kill("kill-test").await.unwrap();
+
+        let info = mgr.poll_wait("kill-test", Duration::from_millis(1000)).await.unwrap();
+        assert!(!info.running);
     }
 
     #[tokio::test]

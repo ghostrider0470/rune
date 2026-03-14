@@ -4,6 +4,7 @@
 //! through the tool interface rather than direct API calls.
 
 use async_trait::async_trait;
+use serde_json::Value;
 use tracing::instrument;
 
 use crate::definition::{ToolCall, ToolResult};
@@ -12,6 +13,32 @@ use crate::executor::ToolExecutor;
 
 /// Trait for querying session state.
 /// Implemented by the runtime/store layer and injected into the tool executor.
+fn validate_session_status_payload(output: &str) -> Result<(), String> {
+    let value: Value = serde_json::from_str(output)
+        .map_err(|e| format!("session_status must return JSON card output: {e}"))?;
+
+    let object = value
+        .as_object()
+        .ok_or_else(|| "session_status must return a JSON object".to_string())?;
+
+    let status = object
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "session_status card missing required string field: status".to_string())?;
+
+    if status.trim().is_empty() {
+        return Err("session_status card field `status` must not be empty".to_string());
+    }
+
+    if let Some(unresolved) = object.get("unresolved") {
+        unresolved.as_array().ok_or_else(|| {
+            "session_status card field `unresolved` must be an array when present".to_string()
+        })?;
+    }
+
+    Ok(())
+}
+
 #[async_trait]
 pub trait SessionQuery: Send + Sync {
     /// List active sessions with optional filters.
@@ -27,8 +54,8 @@ pub trait SessionQuery: Send + Sync {
     /// Get session history/transcript.
     async fn get_history(&self, session_id: &str, limit: Option<usize>) -> Result<String, String>;
 
-    /// Get current session status (usage, time, model).
-    async fn session_status(&self) -> Result<String, String>;
+    /// Get session status (usage, time, model) for the current or targeted session.
+    async fn session_status(&self, session_id: Option<&str>) -> Result<String, String>;
 }
 
 /// Executor for session management tools.
@@ -106,12 +133,26 @@ impl<Q: SessionQuery> SessionToolExecutor<Q> {
 
     #[instrument(skip(self, call), fields(tool = "session_status"))]
     async fn session_status(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        match self.query.session_status().await {
-            Ok(output) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
-                output,
-                is_error: false,
-            }),
+        let session_id = call
+            .arguments
+            .get("sessionKey")
+            .and_then(|v| v.as_str())
+            .or_else(|| call.arguments.get("session_id").and_then(|v| v.as_str()))
+            .or_else(|| call.arguments.get("id").and_then(|v| v.as_str()));
+
+        match self.query.session_status(session_id).await {
+            Ok(output) => match validate_session_status_payload(&output) {
+                Ok(()) => Ok(ToolResult {
+                    tool_call_id: call.tool_call_id,
+                    output,
+                    is_error: false,
+                }),
+                Err(e) => Ok(ToolResult {
+                    tool_call_id: call.tool_call_id,
+                    output: e,
+                    is_error: true,
+                }),
+            },
             Err(e) => Ok(ToolResult {
                 tool_call_id: call.tool_call_id,
                 output: e,
@@ -170,8 +211,25 @@ mod tests {
             ))
         }
 
-        async fn session_status(&self) -> Result<String, String> {
-            Ok("{\"model\": \"gpt-5.4\", \"usage\": {\"tokens\": 1234}}".into())
+        async fn session_status(&self, session_id: Option<&str>) -> Result<String, String> {
+            let target = session_id.unwrap_or("current-session");
+            Ok(format!(
+                concat!(
+                    "{{",
+                    "\"session_id\": \"{}\", ",
+                    "\"runtime\": \"kind=direct | channel=local | status=running\", ",
+                    "\"status\": \"running\", ",
+                    "\"current_model\": \"gpt-5.4\", ",
+                    "\"prompt_tokens\": 1000, ",
+                    "\"completion_tokens\": 234, ",
+                    "\"total_tokens\": 1234, ",
+                    "\"approval_mode\": \"on-miss\", ",
+                    "\"security_mode\": \"allowlist\", ",
+                    "\"unresolved\": []",
+                    "}}"
+                ),
+                target
+            ))
         }
     }
 
@@ -206,6 +264,79 @@ mod tests {
         let exec = SessionToolExecutor::new(MockSessionQuery);
         let call = make_call("session_status", serde_json::json!({}));
         let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error);
         assert!(result.output.contains("gpt-5.4"));
+        assert!(result.output.contains("current-session"));
+        assert!(result.output.contains("\"status\": \"running\""));
+    }
+
+    #[tokio::test]
+    async fn session_status_accepts_session_key_alias() {
+        let exec = SessionToolExecutor::new(MockSessionQuery);
+        let call = make_call(
+            "session_status",
+            serde_json::json!({"sessionKey": "session-42"}),
+        );
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.output.contains("session-42"));
+    }
+
+    #[tokio::test]
+    async fn session_status_accepts_legacy_id_aliases() {
+        let exec = SessionToolExecutor::new(MockSessionQuery);
+
+        let call = make_call(
+            "session_status",
+            serde_json::json!({"session_id": "session-a"}),
+        );
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.output.contains("session-a"));
+
+        let call = make_call("session_status", serde_json::json!({"id": "session-b"}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.output.contains("session-b"));
+    }
+
+    struct InvalidStatusSessionQuery;
+
+    #[async_trait]
+    impl SessionQuery for InvalidStatusSessionQuery {
+        async fn list_sessions(
+            &self,
+            _limit: Option<usize>,
+            _kinds: Option<Vec<String>>,
+        ) -> Result<String, String> {
+            Ok("[]".to_string())
+        }
+
+        async fn get_session(&self, session_id: &str) -> Result<String, String> {
+            Ok(format!("{{\"id\":\"{session_id}\"}}"))
+        }
+
+        async fn get_history(
+            &self,
+            _session_id: &str,
+            _limit: Option<usize>,
+        ) -> Result<String, String> {
+            Ok("[]".to_string())
+        }
+
+        async fn session_status(&self, _session_id: Option<&str>) -> Result<String, String> {
+            Ok("status: running".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn session_status_rejects_non_json_payloads() {
+        let exec = SessionToolExecutor::new(InvalidStatusSessionQuery);
+        let call = make_call("session_status", serde_json::json!({}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.is_error);
+        assert!(
+            result
+                .output
+                .contains("session_status must return JSON card output")
+        );
     }
 }

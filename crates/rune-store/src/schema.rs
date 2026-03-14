@@ -115,9 +115,23 @@ table! {
     }
 }
 
+table! {
+    /// Durable execution history for scheduled jobs.
+    job_runs (id) {
+        id -> Uuid,
+        job_id -> Uuid,
+        started_at -> Timestamptz,
+        finished_at -> Nullable<Timestamptz>,
+        status -> Text,
+        output -> Nullable<Text>,
+        created_at -> Timestamptz,
+    }
+}
+
 diesel::joinable!(turns -> sessions (session_id));
 diesel::joinable!(transcript_items -> sessions (session_id));
 diesel::joinable!(tool_executions -> sessions (session_id));
+diesel::joinable!(job_runs -> jobs (job_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     sessions,
@@ -127,4 +141,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     approvals,
     tool_executions,
     channel_deliveries,
+    job_runs,
 );

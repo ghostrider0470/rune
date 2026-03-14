@@ -2,7 +2,16 @@
 
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
+
+use chrono::Utc;
+use uuid::Uuid;
+
+#[cfg(unix)]
+const SCRIPT_PATH: &str = "/usr/bin/script";
+
+use serde_json::json;
 
 use async_trait::async_trait;
 use tokio::process::Command;
@@ -11,6 +20,7 @@ use tracing::instrument;
 use crate::definition::{ToolCall, ToolResult};
 use crate::error::ToolError;
 use crate::executor::ToolExecutor;
+use crate::process_audit::{NewProcessAudit, ProcessAuditStore};
 use crate::process_tool::ProcessManager;
 
 /// Executor for shell command tools: `execute_command` / `exec`.
@@ -23,6 +33,29 @@ pub struct ExecToolExecutor {
     working_dir: PathBuf,
     default_timeout: Duration,
     process_manager: Option<ProcessManager>,
+    audit_store: Option<Arc<dyn ProcessAuditStore>>,
+}
+
+fn build_shell_command(command_str: &str, pty: bool) -> Command {
+    #[cfg(unix)]
+    {
+        if pty {
+            let mut command = Command::new(SCRIPT_PATH);
+            command.arg("-qec").arg(command_str).arg("/dev/null");
+            return command;
+        }
+    }
+
+    let mut command = Command::new("bash");
+    command.arg("-c").arg(command_str);
+    command
+}
+
+fn extract_uuid_argument(arguments: &serde_json::Value, key: &str) -> Option<Uuid> {
+    arguments
+        .get(key)
+        .and_then(|value| value.as_str())
+        .and_then(|value| Uuid::parse_str(value).ok())
 }
 
 impl ExecToolExecutor {
@@ -32,6 +65,7 @@ impl ExecToolExecutor {
             working_dir: working_dir.into(),
             default_timeout,
             process_manager: None,
+            audit_store: None,
         }
     }
 
@@ -39,6 +73,13 @@ impl ExecToolExecutor {
     #[must_use]
     pub fn with_process_manager(mut self, process_manager: ProcessManager) -> Self {
         self.process_manager = Some(process_manager);
+        self
+    }
+
+    /// Attach a durable process audit store for restart-visible metadata.
+    #[must_use]
+    pub fn with_audit_store(mut self, audit_store: Arc<dyn ProcessAuditStore>) -> Self {
+        self.audit_store = Some(audit_store);
         self
     }
 
@@ -64,9 +105,45 @@ impl ExecToolExecutor {
             .get("background")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let pty = call
+            .arguments
+            .get("pty")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let elevated = call
+            .arguments
+            .get("elevated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let ask_mode = call
+            .arguments
+            .get("ask")
+            .and_then(|v| v.as_str())
+            .unwrap_or("on-miss");
+        let security_mode = call
+            .arguments
+            .get("security")
+            .and_then(|v| v.as_str())
+            .unwrap_or("allowlist");
+        let host = call
+            .arguments
+            .get("host")
+            .and_then(|v| v.as_str())
+            .unwrap_or("sandbox");
 
         if background {
-            return self.spawn_background(call, command_str, workdir).await;
+            return self
+                .spawn_background(
+                    call,
+                    command_str,
+                    workdir,
+                    pty,
+                    elevated,
+                    ask_mode,
+                    security_mode,
+                    host,
+                )
+                .await;
         }
 
         let timeout_secs = call
@@ -76,15 +153,10 @@ impl ExecToolExecutor {
             .map(Duration::from_secs)
             .unwrap_or(self.default_timeout);
 
-        let result = tokio::time::timeout(
-            timeout_secs,
-            Command::new("bash")
-                .arg("-c")
-                .arg(command_str)
-                .current_dir(&workdir)
-                .output(),
-        )
-        .await;
+        let mut command = build_shell_command(command_str, pty);
+        command.current_dir(&workdir);
+
+        let result = tokio::time::timeout(timeout_secs, command.output()).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -116,9 +188,25 @@ impl ExecToolExecutor {
                     );
                 }
 
+                let output = if is_error {
+                    json!({
+                        "stdout_stderr": combined,
+                        "exitCode": output.status.code(),
+                        "pty": pty,
+                        "elevated": elevated,
+                        "ask": ask_mode,
+                        "security": security_mode,
+                        "host": host,
+                        "background": false,
+                    })
+                    .to_string()
+                } else {
+                    combined
+                };
+
                 Ok(ToolResult {
                     tool_call_id: call.tool_call_id,
-                    output: combined,
+                    output,
                     is_error,
                 })
             }
@@ -133,11 +221,17 @@ impl ExecToolExecutor {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn spawn_background(
         &self,
         call: &ToolCall,
         command_str: &str,
         workdir: PathBuf,
+        pty: bool,
+        elevated: bool,
+        ask_mode: &str,
+        security_mode: &str,
+        host: &str,
     ) -> Result<ToolResult, ToolError> {
         let process_manager = self.process_manager.as_ref().ok_or_else(|| {
             ToolError::ExecutionFailed(
@@ -145,9 +239,8 @@ impl ExecToolExecutor {
             )
         })?;
 
-        let mut child = Command::new("bash")
-            .arg("-c")
-            .arg(command_str)
+        let mut command = build_shell_command(command_str, pty);
+        let mut child = command
             .current_dir(&workdir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -161,10 +254,35 @@ impl ExecToolExecutor {
             .register(process_id.clone(), child, stdin)
             .await;
 
-        let output = serde_json::json!({
+        if let Some(audit_store) = &self.audit_store {
+            audit_store
+                .record_spawn(NewProcessAudit {
+                    process_id: process_id.clone(),
+                    tool_call_id: call.tool_call_id.into_uuid(),
+                    session_id: extract_uuid_argument(&call.arguments, "__session_id"),
+                    turn_id: extract_uuid_argument(&call.arguments, "__turn_id"),
+                    tool_name: call.tool_name.clone(),
+                    command: command_str.to_string(),
+                    workdir: workdir.display().to_string(),
+                    arguments: call.arguments.clone(),
+                    started_at: Utc::now(),
+                })
+                .await
+                .map_err(ToolError::ExecutionFailed)?;
+        }
+
+        let output = json!({
             "sessionId": process_id,
             "background": true,
             "running": true,
+            "pty": pty,
+            "elevated": elevated,
+            "ask": ask_mode,
+            "security": security_mode,
+            "host": host,
+            "workdir": workdir,
+            "command": command_str,
+            "durable": self.audit_store.is_some(),
         })
         .to_string();
 
@@ -265,6 +383,27 @@ mod tests {
         let result = exec.execute(call).await.unwrap();
         assert!(!result.is_error);
         assert!(result.output.trim().contains(tmp.path().to_str().unwrap()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pty_true_exposes_a_terminal_to_the_child() {
+        let tmp = TempDir::new().unwrap();
+        let exec = ExecToolExecutor::new(tmp.path(), Duration::from_secs(30));
+
+        let without_pty = make_call(
+            "exec",
+            serde_json::json!({"command": "if [ -t 0 ]; then echo tty; else echo notty; fi"}),
+        );
+        let without_pty_result = exec.execute(without_pty).await.unwrap();
+        assert_eq!(without_pty_result.output.trim(), "notty");
+
+        let with_pty = make_call(
+            "exec",
+            serde_json::json!({"command": "if [ -t 0 ]; then echo tty; else echo notty; fi", "pty": true}),
+        );
+        let with_pty_result = exec.execute(with_pty).await.unwrap();
+        assert!(with_pty_result.output.contains("tty"));
     }
 
     #[tokio::test]

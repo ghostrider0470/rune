@@ -9,9 +9,14 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use cron::Schedule as CronSchedule;
 use rune_core::JobId;
+use rune_store::{
+    JobRepo, JobRunRepo, StoreError,
+    models::{JobRow, JobRunRow, NewJob, NewJobRun},
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 /// Schedule definition for a job.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,8 +98,17 @@ pub enum JobRunStatus {
 }
 
 /// The scheduler manages jobs and their execution lifecycle.
+enum SchedulerBackend {
+    Memory(Arc<Mutex<HashMap<JobId, Job>>>),
+    Repo {
+        jobs: Arc<dyn JobRepo>,
+        runs: Option<Arc<dyn JobRunRepo>>,
+    },
+}
+
+/// The scheduler manages jobs and their execution lifecycle.
 pub struct Scheduler {
-    jobs: Arc<Mutex<HashMap<JobId, Job>>>,
+    backend: SchedulerBackend,
     runs: Arc<Mutex<Vec<JobRun>>>,
 }
 
@@ -102,7 +116,29 @@ impl Scheduler {
     /// Create a new empty scheduler.
     pub fn new() -> Self {
         Self {
-            jobs: Arc::new(Mutex::new(HashMap::new())),
+            backend: SchedulerBackend::Memory(Arc::new(Mutex::new(HashMap::new()))),
+            runs: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Create a scheduler backed by the durable job repository.
+    pub fn new_with_repo(job_repo: Arc<dyn JobRepo>) -> Self {
+        Self {
+            backend: SchedulerBackend::Repo {
+                jobs: job_repo,
+                runs: None,
+            },
+            runs: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Create a scheduler backed by durable job and job-run repositories.
+    pub fn new_with_repos(job_repo: Arc<dyn JobRepo>, job_run_repo: Arc<dyn JobRunRepo>) -> Self {
+        Self {
+            backend: SchedulerBackend::Repo {
+                jobs: job_repo,
+                runs: Some(job_run_repo),
+            },
             runs: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -111,60 +147,159 @@ impl Scheduler {
     pub async fn add_job(&self, job: Job) -> JobId {
         let id = job.id;
         info!(job_id = %id, name = ?job.name, "adding job");
-        self.jobs.lock().await.insert(id, job);
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => {
+                jobs.lock().await.insert(id, job);
+            }
+            SchedulerBackend::Repo { jobs: repo, .. } => {
+                let now = job.created_at;
+                let schedule_json = serde_json::to_string(&job.schedule).ok();
+                let payload = serde_json::to_value(&job).unwrap_or_else(|_| serde_json::json!({}));
+                let new_job = NewJob {
+                    id: Uuid::from(job.id),
+                    job_type: "cron".to_string(),
+                    schedule: schedule_json,
+                    due_at: job.next_run_at,
+                    enabled: job.enabled,
+                    payload,
+                    created_at: now,
+                    updated_at: now,
+                };
+                if let Err(error) = repo.create(new_job).await {
+                    warn!(job_id = %id, error = %error, "failed to persist cron job");
+                }
+            }
+        }
         id
     }
 
     /// List all jobs, optionally including disabled ones.
     pub async fn list_jobs(&self, include_disabled: bool) -> Vec<Job> {
-        let jobs = self.jobs.lock().await;
-        let mut result: Vec<Job> = if include_disabled {
-            jobs.values().cloned().collect()
-        } else {
-            jobs.values().filter(|j| j.enabled).cloned().collect()
-        };
-        result.sort_by_key(|j| j.created_at);
-        result
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => {
+                let jobs = jobs.lock().await;
+                let mut result: Vec<Job> = if include_disabled {
+                    jobs.values().cloned().collect()
+                } else {
+                    jobs.values().filter(|j| j.enabled).cloned().collect()
+                };
+                result.sort_by_key(|j| j.created_at);
+                result
+            }
+            SchedulerBackend::Repo { jobs: repo, .. } => {
+                match repo.list_by_type("cron", include_disabled).await {
+                    Ok(rows) => {
+                        let mut jobs: Vec<Job> = rows
+                            .into_iter()
+                            .filter_map(|row| row_to_job(row).ok())
+                            .collect();
+                        jobs.sort_by_key(|j| j.created_at);
+                        jobs
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "failed to list persisted cron jobs");
+                        Vec::new()
+                    }
+                }
+            }
+        }
     }
 
     /// Get a specific job by ID.
     pub async fn get_job(&self, id: &JobId) -> Option<Job> {
-        self.jobs.lock().await.get(id).cloned()
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => jobs.lock().await.get(id).cloned(),
+            SchedulerBackend::Repo { jobs: repo, .. } => repo
+                .find_by_id(Uuid::from(*id))
+                .await
+                .ok()
+                .and_then(|row| row_to_job(row).ok()),
+        }
     }
 
     /// Update a job.
     pub async fn update_job(&self, id: &JobId, update: JobUpdate) -> Option<Job> {
-        let mut jobs = self.jobs.lock().await;
-        let job = jobs.get_mut(id)?;
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => {
+                let mut jobs = jobs.lock().await;
+                let job = jobs.get_mut(id)?;
 
-        if let Some(name) = update.name {
-            job.name = Some(name);
-        }
-        if let Some(enabled) = update.enabled {
-            job.enabled = enabled;
-        }
-        if let Some(schedule) = update.schedule {
-            job.schedule = schedule;
-        }
-        if let Some(payload) = update.payload {
-            job.payload = payload;
-        }
+                if let Some(name) = update.name {
+                    job.name = Some(name);
+                }
+                if let Some(enabled) = update.enabled {
+                    job.enabled = enabled;
+                }
+                if let Some(schedule) = update.schedule {
+                    job.schedule = schedule;
+                }
+                if let Some(payload) = update.payload {
+                    job.payload = payload;
+                }
 
-        Some(job.clone())
+                Some(job.clone())
+            }
+            SchedulerBackend::Repo { jobs: repo, .. } => {
+                let mut job = self.get_job(id).await?;
+                if let Some(name) = update.name {
+                    job.name = Some(name);
+                }
+                if let Some(enabled) = update.enabled {
+                    job.enabled = enabled;
+                }
+                if let Some(schedule) = update.schedule {
+                    job.schedule = schedule;
+                }
+                if let Some(payload) = update.payload {
+                    job.payload = payload;
+                }
+                let updated_at = Utc::now();
+                let payload = serde_json::to_value(&job).ok()?;
+                repo.update_job(
+                    Uuid::from(*id),
+                    job.enabled,
+                    job.next_run_at,
+                    payload,
+                    updated_at,
+                    job.last_run_at,
+                    job.next_run_at,
+                )
+                .await
+                .ok()
+                .and_then(|row| row_to_job(row).ok())
+            }
+        }
     }
 
     /// Remove a job.
     pub async fn remove_job(&self, id: &JobId) -> Option<Job> {
         info!(job_id = %id, "removing job");
-        self.jobs.lock().await.remove(id)
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => jobs.lock().await.remove(id),
+            SchedulerBackend::Repo { jobs: repo, .. } => {
+                let existing = self.get_job(id).await?;
+                match repo.delete(Uuid::from(*id)).await {
+                    Ok(true) => Some(existing),
+                    Ok(false) => None,
+                    Err(error) => {
+                        warn!(job_id = %id, error = %error, "failed to remove persisted cron job");
+                        None
+                    }
+                }
+            }
+        }
     }
 
     /// Enable or disable a job.
     pub async fn set_enabled(&self, id: &JobId, enabled: bool) -> Option<Job> {
-        let mut jobs = self.jobs.lock().await;
-        let job = jobs.get_mut(id)?;
-        job.enabled = enabled;
-        Some(job.clone())
+        self.update_job(
+            id,
+            JobUpdate {
+                enabled: Some(enabled),
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     /// Record a job run starting.
@@ -179,9 +314,50 @@ impl Scheduler {
         self.runs.lock().await.push(run.clone());
 
         // Update job metadata
-        if let Some(job) = self.jobs.lock().await.get_mut(&job_id) {
-            job.last_run_at = Some(run.started_at);
-            job.run_count += 1;
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => {
+                if let Some(job) = jobs.lock().await.get_mut(&job_id) {
+                    job.last_run_at = Some(run.started_at);
+                    job.run_count += 1;
+                }
+            }
+            SchedulerBackend::Repo { jobs: repo, runs } => {
+                if let Some(mut job) = self.get_job(&job_id).await {
+                    job.last_run_at = Some(run.started_at);
+                    job.run_count += 1;
+                    let payload =
+                        serde_json::to_value(&job).unwrap_or_else(|_| serde_json::json!({}));
+                    if let Err(error) = repo
+                        .update_job(
+                            Uuid::from(job_id),
+                            job.enabled,
+                            job.next_run_at,
+                            payload,
+                            run.started_at,
+                            job.last_run_at,
+                            job.next_run_at,
+                        )
+                        .await
+                    {
+                        warn!(job_id = %job_id, error = %error, "failed to persist cron run start metadata");
+                    }
+                }
+
+                if let Some(run_repo) = runs {
+                    let durable = NewJobRun {
+                        id: Uuid::now_v7(),
+                        job_id: Uuid::from(job_id),
+                        started_at: run.started_at,
+                        finished_at: None,
+                        status: job_run_status_str(&run.status).to_string(),
+                        output: None,
+                        created_at: run.started_at,
+                    };
+                    if let Err(error) = run_repo.create(durable).await {
+                        warn!(job_id = %job_id, error = %error, "failed to persist durable cron run start");
+                    }
+                }
+            }
         }
 
         run
@@ -189,20 +365,65 @@ impl Scheduler {
 
     /// Complete a job run.
     pub async fn complete_run(&self, job_id: JobId, status: JobRunStatus, output: Option<String>) {
+        let finished_at = Utc::now();
         let mut runs = self.runs.lock().await;
         // Find the most recent running entry for this job
         for run in runs.iter_mut().rev() {
             if run.job_id == job_id && run.status == JobRunStatus::Running {
-                run.finished_at = Some(Utc::now());
-                run.status = status;
-                run.output = output;
+                run.finished_at = Some(finished_at);
+                run.status = status.clone();
+                run.output = output.clone();
                 break;
+            }
+        }
+        drop(runs);
+
+        if let SchedulerBackend::Repo {
+            runs: Some(run_repo),
+            ..
+        } = &self.backend
+        {
+            match run_repo.list_by_job(Uuid::from(job_id), Some(1)).await {
+                Ok(rows) => {
+                    if let Some(latest) = rows.into_iter().find(|row| row.finished_at.is_none())
+                        && let Err(error) = run_repo
+                            .complete(
+                                latest.id,
+                                job_run_status_str(&status),
+                                output.as_deref(),
+                                finished_at,
+                            )
+                            .await
+                    {
+                        warn!(job_id = %job_id, error = %error, "failed to persist durable cron run completion");
+                    }
+                }
+                Err(error) => {
+                    warn!(job_id = %job_id, error = %error, "failed to load durable cron run history for completion");
+                }
             }
         }
     }
 
     /// Get run history for a job.
     pub async fn get_runs(&self, job_id: &JobId, limit: Option<usize>) -> Vec<JobRun> {
+        if let SchedulerBackend::Repo {
+            runs: Some(run_repo),
+            ..
+        } = &self.backend
+        {
+            return match run_repo
+                .list_by_job(Uuid::from(*job_id), limit.map(|value| value as i64))
+                .await
+            {
+                Ok(rows) => rows.into_iter().map(row_to_job_run).collect(),
+                Err(error) => {
+                    warn!(job_id = %job_id, error = %error, "failed to list durable cron run history");
+                    Vec::new()
+                }
+            };
+        }
+
         let runs = self.runs.lock().await;
         let mut job_runs: Vec<JobRun> = runs
             .iter()
@@ -219,37 +440,100 @@ impl Scheduler {
     /// Get all due jobs (jobs whose next_run_at is in the past or now).
     pub async fn get_due_jobs(&self) -> Vec<Job> {
         let now = Utc::now();
-        let jobs = self.jobs.lock().await;
-        jobs.values()
-            .filter(|j| j.enabled && j.next_run_at.is_some_and(|next| next <= now))
-            .cloned()
-            .collect()
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => {
+                let jobs = jobs.lock().await;
+                jobs.values()
+                    .filter(|j| j.enabled && j.next_run_at.is_some_and(|next| next <= now))
+                    .cloned()
+                    .collect()
+            }
+            SchedulerBackend::Repo { jobs: repo, .. } => {
+                match repo.list_by_type("cron", false).await {
+                    Ok(rows) => rows
+                        .into_iter()
+                        .filter_map(|row| row_to_job(row).ok())
+                        .filter(|j| j.enabled && j.next_run_at.is_some_and(|next| next <= now))
+                        .collect(),
+                    Err(error) => {
+                        warn!(error = %error, "failed to list due persisted cron jobs");
+                        Vec::new()
+                    }
+                }
+            }
+        }
     }
 
     /// Compute and set the next run time for a job after a firing attempt.
     pub async fn advance_next_run(&self, id: &JobId) {
-        let mut jobs = self.jobs.lock().await;
-        if let Some(job) = jobs.get_mut(id) {
-            let now = Utc::now();
-            let base = job.last_run_at.or(job.next_run_at).unwrap_or(now);
-            match &job.schedule {
-                Schedule::At { .. } => {
-                    // One-shot: disable after firing
-                    job.enabled = false;
-                    job.next_run_at = None;
+        match &self.backend {
+            SchedulerBackend::Memory(jobs) => {
+                let mut jobs = jobs.lock().await;
+                if let Some(job) = jobs.get_mut(id) {
+                    let now = Utc::now();
+                    let base = job.last_run_at.or(job.next_run_at).unwrap_or(now);
+                    match &job.schedule {
+                        Schedule::At { .. } => {
+                            // One-shot: disable after firing
+                            job.enabled = false;
+                            job.next_run_at = None;
+                        }
+                        Schedule::Every {
+                            every_ms,
+                            anchor_ms,
+                        } => {
+                            job.next_run_at =
+                                Some(compute_next_interval_run(*every_ms, *anchor_ms, base, now));
+                        }
+                        Schedule::Cron { expr, tz } => {
+                            job.next_run_at = compute_next_cron_run(expr, tz.as_deref(), base, now);
+                            if job.next_run_at.is_none() {
+                                warn!(job_id = %job.id, expr = %expr, tz = ?tz, "failed to compute next cron run; disabling job");
+                                job.enabled = false;
+                            }
+                        }
+                    }
                 }
-                Schedule::Every {
-                    every_ms,
-                    anchor_ms,
-                } => {
-                    job.next_run_at =
-                        Some(compute_next_interval_run(*every_ms, *anchor_ms, base, now));
-                }
-                Schedule::Cron { expr, tz } => {
-                    job.next_run_at = compute_next_cron_run(expr, tz.as_deref(), base, now);
-                    if job.next_run_at.is_none() {
-                        warn!(job_id = %job.id, expr = %expr, tz = ?tz, "failed to compute next cron run; disabling job");
-                        job.enabled = false;
+            }
+            SchedulerBackend::Repo { jobs: repo, .. } => {
+                if let Some(mut job) = self.get_job(id).await {
+                    let now = Utc::now();
+                    let base = job.last_run_at.or(job.next_run_at).unwrap_or(now);
+                    match &job.schedule {
+                        Schedule::At { .. } => {
+                            job.enabled = false;
+                            job.next_run_at = None;
+                        }
+                        Schedule::Every {
+                            every_ms,
+                            anchor_ms,
+                        } => {
+                            job.next_run_at =
+                                Some(compute_next_interval_run(*every_ms, *anchor_ms, base, now));
+                        }
+                        Schedule::Cron { expr, tz } => {
+                            job.next_run_at = compute_next_cron_run(expr, tz.as_deref(), base, now);
+                            if job.next_run_at.is_none() {
+                                warn!(job_id = %job.id, expr = %expr, tz = ?tz, "failed to compute next cron run; disabling job");
+                                job.enabled = false;
+                            }
+                        }
+                    }
+                    let payload =
+                        serde_json::to_value(&job).unwrap_or_else(|_| serde_json::json!({}));
+                    if let Err(error) = repo
+                        .update_job(
+                            Uuid::from(*id),
+                            job.enabled,
+                            job.next_run_at,
+                            payload,
+                            now,
+                            job.last_run_at,
+                            job.next_run_at,
+                        )
+                        .await
+                    {
+                        warn!(job_id = %id, error = %error, "failed to persist cron next-run advancement");
                     }
                 }
             }
@@ -350,7 +634,11 @@ pub struct Reminder {
 
 impl Reminder {
     /// Create a new reminder.
-    pub fn new(message: impl Into<String>, target: impl Into<String>, fire_at: DateTime<Utc>) -> Self {
+    pub fn new(
+        message: impl Into<String>,
+        target: impl Into<String>,
+        fire_at: DateTime<Utc>,
+    ) -> Self {
         Self {
             id: JobId::new(),
             message: message.into(),
@@ -368,16 +656,31 @@ impl Reminder {
     }
 }
 
-/// In-memory reminder store managed by the scheduler.
+enum ReminderStoreBackend {
+    Memory(Arc<Mutex<Vec<Reminder>>>),
+    Repo(Arc<dyn JobRepo>),
+}
+
+/// Reminder store managed by the scheduler.
+///
+/// Uses PostgreSQL-backed `jobs` rows when a `JobRepo` is provided and falls
+/// back to an in-memory store for lightweight tests.
 pub struct ReminderStore {
-    reminders: Arc<Mutex<Vec<Reminder>>>,
+    backend: ReminderStoreBackend,
 }
 
 impl ReminderStore {
-    /// Create a new empty reminder store.
+    /// Create a new empty in-memory reminder store.
     pub fn new() -> Self {
         Self {
-            reminders: Arc::new(Mutex::new(Vec::new())),
+            backend: ReminderStoreBackend::Memory(Arc::new(Mutex::new(Vec::new()))),
+        }
+    }
+
+    /// Create a reminder store backed by the durable job repository.
+    pub fn new_with_repo(job_repo: Arc<dyn JobRepo>) -> Self {
+        Self {
+            backend: ReminderStoreBackend::Repo(job_repo),
         }
     }
 
@@ -385,53 +688,158 @@ impl ReminderStore {
     pub async fn add(&self, reminder: Reminder) -> JobId {
         let id = reminder.id;
         info!(reminder_id = %id, fire_at = %reminder.fire_at, "adding reminder");
-        self.reminders.lock().await.push(reminder);
+        match &self.backend {
+            ReminderStoreBackend::Memory(reminders) => {
+                reminders.lock().await.push(reminder);
+            }
+            ReminderStoreBackend::Repo(repo) => {
+                let now = reminder.created_at;
+                let payload = serde_json::to_value(&reminder)
+                    .expect("Reminder serialization should not fail");
+                let new_job = NewJob {
+                    id: Uuid::from(reminder.id),
+                    job_type: "reminder".to_string(),
+                    schedule: None,
+                    due_at: Some(reminder.fire_at),
+                    enabled: !reminder.delivered,
+                    payload,
+                    created_at: now,
+                    updated_at: now,
+                };
+                if let Err(error) = repo.create(new_job).await {
+                    warn!(reminder_id = %id, error = %error, "failed to persist reminder");
+                }
+            }
+        }
         id
     }
 
     /// List all reminders, optionally including delivered ones.
     pub async fn list(&self, include_delivered: bool) -> Vec<Reminder> {
-        let reminders = self.reminders.lock().await;
-        let mut result: Vec<Reminder> = if include_delivered {
-            reminders.clone()
-        } else {
-            reminders.iter().filter(|r| !r.delivered).cloned().collect()
-        };
-        result.sort_by_key(|r| r.fire_at);
-        result
+        match &self.backend {
+            ReminderStoreBackend::Memory(reminders) => {
+                let reminders = reminders.lock().await;
+                let mut result: Vec<Reminder> = if include_delivered {
+                    reminders.clone()
+                } else {
+                    reminders.iter().filter(|r| !r.delivered).cloned().collect()
+                };
+                result.sort_by_key(|r| r.fire_at);
+                result
+            }
+            ReminderStoreBackend::Repo(repo) => match repo.list_by_type("reminder", true).await {
+                Ok(rows) => {
+                    let mut reminders: Vec<Reminder> = rows
+                        .into_iter()
+                        .filter_map(|row| row_to_reminder(row).ok())
+                        .filter(|reminder| include_delivered || !reminder.delivered)
+                        .collect();
+                    reminders.sort_by_key(|r| r.fire_at);
+                    reminders
+                }
+                Err(error) => {
+                    warn!(error = %error, "failed to list persisted reminders");
+                    Vec::new()
+                }
+            },
+        }
     }
 
     /// Get a specific reminder.
     pub async fn get(&self, id: &JobId) -> Option<Reminder> {
-        self.reminders.lock().await.iter().find(|r| r.id == *id).cloned()
+        match &self.backend {
+            ReminderStoreBackend::Memory(reminders) => {
+                reminders.lock().await.iter().find(|r| r.id == *id).cloned()
+            }
+            ReminderStoreBackend::Repo(repo) => repo
+                .find_by_id(Uuid::from(*id))
+                .await
+                .ok()
+                .and_then(|row| row_to_reminder(row).ok()),
+        }
     }
 
     /// Cancel (remove) a reminder. Returns the removed reminder if found.
     pub async fn cancel(&self, id: &JobId) -> Option<Reminder> {
-        let mut reminders = self.reminders.lock().await;
-        if let Some(pos) = reminders.iter().position(|r| r.id == *id) {
-            info!(reminder_id = %id, "cancelling reminder");
-            Some(reminders.remove(pos))
-        } else {
-            None
+        match &self.backend {
+            ReminderStoreBackend::Memory(reminders) => {
+                let mut reminders = reminders.lock().await;
+                if let Some(pos) = reminders.iter().position(|r| r.id == *id) {
+                    info!(reminder_id = %id, "cancelling reminder");
+                    Some(reminders.remove(pos))
+                } else {
+                    None
+                }
+            }
+            ReminderStoreBackend::Repo(repo) => {
+                let existing = self.get(id).await?;
+                match repo.delete(Uuid::from(*id)).await {
+                    Ok(true) => Some(existing),
+                    Ok(false) => None,
+                    Err(error) => {
+                        warn!(reminder_id = %id, error = %error, "failed to cancel persisted reminder");
+                        None
+                    }
+                }
+            }
         }
     }
 
     /// Get all due (unfired) reminders.
     pub async fn get_due(&self) -> Vec<Reminder> {
-        let reminders = self.reminders.lock().await;
-        reminders.iter().filter(|r| r.is_due()).cloned().collect()
+        match &self.backend {
+            ReminderStoreBackend::Memory(reminders) => {
+                let reminders = reminders.lock().await;
+                reminders.iter().filter(|r| r.is_due()).cloned().collect()
+            }
+            ReminderStoreBackend::Repo(_) => self
+                .list(false)
+                .await
+                .into_iter()
+                .filter(Reminder::is_due)
+                .collect(),
+        }
     }
 
     /// Mark a reminder as delivered.
     pub async fn mark_delivered(&self, id: &JobId) -> Option<Reminder> {
-        let mut reminders = self.reminders.lock().await;
-        if let Some(reminder) = reminders.iter_mut().find(|r| r.id == *id) {
-            reminder.delivered = true;
-            reminder.delivered_at = Some(Utc::now());
-            Some(reminder.clone())
-        } else {
-            None
+        match &self.backend {
+            ReminderStoreBackend::Memory(reminders) => {
+                let mut reminders = reminders.lock().await;
+                if let Some(reminder) = reminders.iter_mut().find(|r| r.id == *id) {
+                    reminder.delivered = true;
+                    reminder.delivered_at = Some(Utc::now());
+                    Some(reminder.clone())
+                } else {
+                    None
+                }
+            }
+            ReminderStoreBackend::Repo(repo) => {
+                let mut reminder = self.get(id).await?;
+                reminder.delivered = true;
+                reminder.delivered_at = Some(Utc::now());
+                let updated_at = reminder.delivered_at.unwrap_or_else(Utc::now);
+                let payload = serde_json::to_value(&reminder)
+                    .expect("Reminder serialization should not fail");
+                match repo
+                    .update_job(
+                        Uuid::from(*id),
+                        false,
+                        Some(reminder.fire_at),
+                        payload,
+                        updated_at,
+                        reminder.delivered_at,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(row) => row_to_reminder(row).ok(),
+                    Err(error) => {
+                        warn!(reminder_id = %id, error = %error, "failed to mark persisted reminder delivered");
+                        None
+                    }
+                }
+            }
         }
     }
 }
@@ -439,6 +847,54 @@ impl ReminderStore {
 impl Default for ReminderStore {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn row_to_job(row: JobRow) -> Result<Job, StoreError> {
+    let mut job: Job = serde_json::from_value(row.payload.clone())
+        .map_err(|error| StoreError::Serialization(error.to_string()))?;
+    job.id = JobId::from(row.id);
+    job.enabled = row.enabled;
+    job.created_at = row.created_at;
+    job.last_run_at = row.last_run_at;
+    job.next_run_at = row.next_run_at.or(row.due_at).or(job.next_run_at);
+    Ok(job)
+}
+
+fn row_to_reminder(row: rune_store::models::JobRow) -> Result<Reminder, StoreError> {
+    let mut reminder: Reminder = serde_json::from_value(row.payload.clone())
+        .map_err(|error| StoreError::Serialization(error.to_string()))?;
+    reminder.id = JobId::from(row.id);
+    reminder.fire_at = row.due_at.unwrap_or(reminder.fire_at);
+    reminder.delivered = !row.enabled || reminder.delivered;
+    Ok(reminder)
+}
+
+fn row_to_job_run(row: JobRunRow) -> JobRun {
+    JobRun {
+        job_id: JobId::from(row.job_id),
+        started_at: row.started_at,
+        finished_at: row.finished_at,
+        status: parse_job_run_status(&row.status),
+        output: row.output,
+    }
+}
+
+fn job_run_status_str(status: &JobRunStatus) -> &'static str {
+    match status {
+        JobRunStatus::Running => "running",
+        JobRunStatus::Completed => "completed",
+        JobRunStatus::Failed => "failed",
+        JobRunStatus::Skipped => "skipped",
+    }
+}
+
+fn parse_job_run_status(value: &str) -> JobRunStatus {
+    match value {
+        "completed" => JobRunStatus::Completed,
+        "failed" => JobRunStatus::Failed,
+        "skipped" => JobRunStatus::Skipped,
+        _ => JobRunStatus::Running,
     }
 }
 
@@ -712,7 +1168,11 @@ mod tests {
     async fn reminder_get_due() {
         let store = ReminderStore::new();
         // Due (fire_at in the past)
-        let due = Reminder::new("Due now", "main", Utc::now() - chrono::Duration::seconds(10));
+        let due = Reminder::new(
+            "Due now",
+            "main",
+            Utc::now() - chrono::Duration::seconds(10),
+        );
         store.add(due).await;
 
         // Not due (fire_at in the future)
@@ -727,7 +1187,11 @@ mod tests {
     #[tokio::test]
     async fn reminder_mark_delivered() {
         let store = ReminderStore::new();
-        let reminder = Reminder::new("Deliver me", "main", Utc::now() - chrono::Duration::seconds(10));
+        let reminder = Reminder::new(
+            "Deliver me",
+            "main",
+            Utc::now() - chrono::Duration::seconds(10),
+        );
         let id = store.add(reminder).await;
 
         let delivered = store.mark_delivered(&id).await.unwrap();
@@ -742,7 +1206,8 @@ mod tests {
 
     #[tokio::test]
     async fn reminder_is_due_checks_delivered() {
-        let mut reminder = Reminder::new("Done", "main", Utc::now() - chrono::Duration::seconds(10));
+        let mut reminder =
+            Reminder::new("Done", "main", Utc::now() - chrono::Duration::seconds(10));
         assert!(reminder.is_due());
         reminder.delivered = true;
         assert!(!reminder.is_due());

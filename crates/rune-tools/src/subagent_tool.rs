@@ -35,9 +35,7 @@ impl<M: SubagentManager> SubagentToolExecutor<M> {
             .arguments
             .get("action")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::InvalidArgument("missing required parameter: action".into())
-            })?;
+            .unwrap_or("list");
 
         let result = match action {
             "list" => {
@@ -159,5 +157,14 @@ mod tests {
         let call = make_call(serde_json::json!({"action": "kill", "target": "sub-1"}));
         let result = exec.execute(call).await.unwrap();
         assert!(result.output.contains("killed"));
+    }
+
+    #[tokio::test]
+    async fn missing_action_defaults_to_list() {
+        let exec = SubagentToolExecutor::new(MockManager);
+        let call = make_call(serde_json::json!({}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.output.contains("sub-1"));
     }
 }

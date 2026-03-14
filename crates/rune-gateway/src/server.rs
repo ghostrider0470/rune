@@ -18,7 +18,9 @@ use rune_runtime::{
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
-use rune_store::repos::{SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo};
+use rune_store::repos::{
+    ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
+};
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
@@ -58,10 +60,12 @@ pub struct Services {
     pub turn_executor: Arc<TurnExecutor>,
     pub session_repo: Arc<dyn SessionRepo>,
     pub transcript_repo: Arc<dyn TranscriptRepo>,
+    pub turn_repo: Arc<dyn TurnRepo>,
     pub model_provider: Arc<dyn ModelProvider>,
     pub scheduler: Arc<Scheduler>,
     pub heartbeat: Arc<HeartbeatRunner>,
     pub reminder_store: Arc<ReminderStore>,
+    pub approval_repo: Arc<dyn ApprovalRepo>,
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
     pub tool_count: usize,
 }
@@ -87,10 +91,12 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         turn_executor: services.turn_executor,
         session_repo: services.session_repo,
         transcript_repo: services.transcript_repo,
+        turn_repo: services.turn_repo,
         model_provider: services.model_provider,
         scheduler: services.scheduler,
         heartbeat: services.heartbeat,
         reminder_store: services.reminder_store,
+        approval_repo: services.approval_repo,
         tool_approval_repo: services.tool_approval_repo,
         tool_count: services.tool_count,
         event_tx,
@@ -170,11 +176,16 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             get(routes::list_sessions).post(routes::create_session),
         )
         .route("/sessions/{id}", get(routes::get_session))
+        .route("/sessions/{id}/status", get(routes::get_session_status))
         .route("/sessions/{id}/messages", post(routes::send_message))
         .route("/sessions/{id}/transcript", get(routes::get_transcript))
-        .route("/approvals", get(routes::list_approval_policies))
         .route(
-            "/approvals/{tool}",
+            "/approvals",
+            get(routes::list_pending_approvals).post(routes::submit_approval_decision),
+        )
+        .route("/approvals/policies", get(routes::list_approval_policies))
+        .route(
+            "/approvals/policies/{tool}",
             get(routes::get_approval_policy)
                 .put(routes::set_approval_policy)
                 .delete(routes::clear_approval_policy),

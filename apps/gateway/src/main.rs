@@ -7,7 +7,10 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use serde_json::json;
+use uuid::Uuid;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -24,16 +27,28 @@ use rune_models::{
 };
 use rune_runtime::{
     ContextAssembler, NoOpCompaction, SessionEngine, TurnExecutor,
-    heartbeat::HeartbeatRunner, scheduler::{ReminderStore, Scheduler},
+    heartbeat::HeartbeatRunner,
+    scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
 use rune_store::EmbeddedPg;
-use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
-use rune_tools::approval::ApprovalRequest;
+use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
+use rune_store::repos::{
+    ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo, TranscriptRepo, TurnRepo,
+};
+use rune_store::{JobRepo, PgApprovalRepo, PgJobRepo, PgToolExecutionRepo};
+use rune_tools::ApprovalCheck;
+use rune_tools::approval::{ApprovalRequest, PolicyBasedApproval};
 use rune_tools::exec_tool::ExecToolExecutor;
 use rune_tools::file_tools::FileToolExecutor;
 use rune_tools::memory_tool::MemoryToolExecutor;
+use rune_tools::process_audit::{
+    CompletedProcessAudit, NewProcessAudit, ProcessAuditRecord, ProcessAuditStore,
+};
 use rune_tools::process_tool::{ProcessManager, ProcessToolExecutor};
+use rune_tools::session_tool::{SessionQuery, SessionToolExecutor};
+use rune_tools::spawn_tool::{SessionSpawner, SpawnToolExecutor};
+use rune_tools::subagent_tool::{SubagentManager, SubagentToolExecutor};
 use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolRegistry};
 
 #[tokio::main]
@@ -156,15 +171,22 @@ async fn build_services(
     let turn_repo: Arc<dyn TurnRepo> = Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone()));
     let transcript_repo: Arc<dyn TranscriptRepo> =
         Arc::new(rune_store::pg::PgTranscriptRepo::new(pool.clone()));
+    let job_repo: Arc<dyn JobRepo> = Arc::new(PgJobRepo::new(pool.clone()));
+    let job_run_repo: Arc<dyn rune_store::repos::JobRunRepo> =
+        Arc::new(rune_store::pg::PgJobRunRepo::new(pool.clone()));
+    let approval_repo: Arc<dyn ApprovalRepo> = Arc::new(PgApprovalRepo::new(pool.clone()));
     let tool_approval_repo: Arc<dyn rune_store::repos::ToolApprovalPolicyRepo> =
-        Arc::new(rune_store::pg::PgToolApprovalPolicyRepo::new(pool));
+        Arc::new(rune_store::pg::PgToolApprovalPolicyRepo::new(pool.clone()));
+    let tool_execution_repo: Arc<dyn ToolExecutionRepo> = Arc::new(PgToolExecutionRepo::new(pool));
 
     let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
 
     let model_provider: Arc<dyn ModelProvider> = build_model_provider(&config);
-    let scheduler = Arc::new(Scheduler::new());
+    let scheduler = Arc::new(Scheduler::new_with_repos(job_repo.clone(), job_run_repo));
 
-    let process_manager = ProcessManager::new();
+    let process_audit_store: Arc<dyn ProcessAuditStore> =
+        Arc::new(DbProcessAuditStore::new(tool_execution_repo));
+    let process_manager = ProcessManager::new().with_audit_store(process_audit_store.clone());
     let workspace_root = config
         .paths
         .config_dir
@@ -172,18 +194,43 @@ async fn build_services(
         .unwrap_or(Path::new("."))
         .to_path_buf();
 
-    let heartbeat = Arc::new(HeartbeatRunner::new(workspace_root.clone()));
-    let reminder_store = Arc::new(ReminderStore::new());
+    let heartbeat_state_file = config.paths.logs_dir.join("heartbeat-state.json");
+    let heartbeat = Arc::new(HeartbeatRunner::with_state_file(
+        workspace_root.clone(),
+        heartbeat_state_file,
+    ));
+    let reminder_store = Arc::new(ReminderStore::new_with_repo(job_repo));
     let mut registry = ToolRegistry::new();
     register_real_tool_definitions(&mut registry);
     let tool_count = registry.len();
     let tool_registry = Arc::new(registry);
+    let approval = Arc::new(PolicyBasedApproval::new(std::collections::HashSet::new()));
+    let live_session_query = LiveSessionQuery::new(
+        session_repo.clone(),
+        transcript_repo.clone(),
+        turn_repo.clone(),
+        Instant::now(),
+    );
+    let live_session_spawner = LiveSessionSpawner::new(
+        session_engine.clone(),
+        session_repo.clone(),
+        transcript_repo.clone(),
+        workspace_root.clone(),
+    );
+    let live_subagent_manager =
+        LiveSubagentManager::new(session_repo.clone(), transcript_repo.clone());
     let tool_executor = Arc::new(AppToolExecutor {
         file: FileToolExecutor::new(workspace_root.clone()),
         exec: ExecToolExecutor::new(workspace_root.clone(), Duration::from_secs(30))
-            .with_process_manager(process_manager.clone()),
+            .with_process_manager(process_manager.clone())
+            .with_audit_store(process_audit_store),
         process: ProcessToolExecutor::new(process_manager),
         memory: MemoryToolExecutor::new(workspace_root),
+        session: SessionToolExecutor::new(live_session_query),
+        spawn: SpawnToolExecutor::new(live_session_spawner),
+        subagents: SubagentToolExecutor::new(live_subagent_manager),
+        approval,
+        tool_approval_repo: tool_approval_repo.clone(),
     });
 
     // Resolve system prompt: agent config → hardcoded default
@@ -196,8 +243,9 @@ async fn build_services(
 
     let mut turn_executor = TurnExecutor::new(
         session_repo.clone(),
-        turn_repo,
+        turn_repo.clone(),
         transcript_repo.clone(),
+        approval_repo.clone(),
         model_provider.clone(),
         tool_executor,
         tool_registry,
@@ -247,10 +295,12 @@ async fn build_services(
         turn_executor,
         session_repo,
         transcript_repo,
+        turn_repo,
         model_provider,
         scheduler,
         heartbeat,
         reminder_store,
+        approval_repo,
         tool_approval_repo,
         tool_count,
     };
@@ -287,6 +337,145 @@ struct AppToolExecutor {
     exec: ExecToolExecutor,
     process: ProcessToolExecutor,
     memory: MemoryToolExecutor,
+    session: SessionToolExecutor<LiveSessionQuery>,
+    spawn: SpawnToolExecutor<LiveSessionSpawner>,
+    subagents: SubagentToolExecutor<LiveSubagentManager>,
+    approval: Arc<PolicyBasedApproval>,
+    tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
+}
+
+#[derive(Clone)]
+struct DbProcessAuditStore {
+    repo: Arc<dyn ToolExecutionRepo>,
+}
+
+impl DbProcessAuditStore {
+    fn new(repo: Arc<dyn ToolExecutionRepo>) -> Self {
+        Self { repo }
+    }
+}
+
+fn row_to_process_audit(row: rune_store::models::ToolExecutionRow) -> ProcessAuditRecord {
+    let command = row
+        .arguments
+        .get("command")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let workdir = row
+        .arguments
+        .get("workdir")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let session_id = row
+        .arguments
+        .get("__session_id")
+        .and_then(|value| value.as_str())
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .or(Some(row.session_id));
+    let turn_id = row
+        .arguments
+        .get("__turn_id")
+        .and_then(|value| value.as_str())
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .or(Some(row.turn_id));
+
+    ProcessAuditRecord {
+        process_id: row.tool_call_id.to_string(),
+        tool_call_id: row.tool_call_id,
+        tool_execution_id: row.id,
+        session_id,
+        turn_id,
+        tool_name: row.tool_name,
+        command,
+        workdir,
+        arguments: row.arguments,
+        status: row.status,
+        result_summary: row.result_summary,
+        error_summary: row.error_summary,
+        started_at: row.started_at,
+        ended_at: row.ended_at,
+    }
+}
+
+#[async_trait]
+impl ProcessAuditStore for DbProcessAuditStore {
+    async fn record_spawn(&self, spawn: NewProcessAudit) -> Result<ProcessAuditRecord, String> {
+        let row = self
+            .repo
+            .create(NewToolExecution {
+                id: Uuid::now_v7(),
+                tool_call_id: spawn.tool_call_id,
+                session_id: spawn.session_id.unwrap_or_else(Uuid::nil),
+                turn_id: spawn.turn_id.unwrap_or_else(Uuid::nil),
+                tool_name: spawn.tool_name,
+                arguments: spawn.arguments,
+                status: "running".to_string(),
+                started_at: spawn.started_at,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(row_to_process_audit(row))
+    }
+
+    async fn record_completion(
+        &self,
+        completion: CompletedProcessAudit,
+    ) -> Result<ProcessAuditRecord, String> {
+        let tool_call_id = Uuid::parse_str(&completion.process_id).map_err(|e| e.to_string())?;
+        let recent = self
+            .repo
+            .list_recent(500)
+            .await
+            .map_err(|e| e.to_string())?;
+        let row = recent
+            .into_iter()
+            .find(|row| row.tool_call_id == tool_call_id)
+            .ok_or_else(|| {
+                format!(
+                    "tool execution not found for process {}",
+                    completion.process_id
+                )
+            })?;
+        let updated = self
+            .repo
+            .complete(
+                row.id,
+                &completion.status,
+                completion.result_summary.as_deref(),
+                completion.error_summary.as_deref(),
+                completion.ended_at,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(row_to_process_audit(updated))
+    }
+
+    async fn find(&self, process_id: &str) -> Result<Option<ProcessAuditRecord>, String> {
+        let tool_call_id = match Uuid::parse_str(process_id) {
+            Ok(id) => id,
+            Err(_) => return Ok(None),
+        };
+        let recent = self
+            .repo
+            .list_recent(500)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(recent
+            .into_iter()
+            .find(|row| row.tool_call_id == tool_call_id)
+            .map(row_to_process_audit))
+    }
+
+    async fn list_recent(&self, limit: usize) -> Result<Vec<ProcessAuditRecord>, String> {
+        let rows = self
+            .repo
+            .list_recent(limit as i64)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(rows.into_iter().map(row_to_process_audit).collect())
+    }
 }
 
 #[async_trait]
@@ -298,11 +487,76 @@ impl ToolExecutor for AppToolExecutor {
             }
             "exec" | "execute_command" => {
                 let approval_request = ApprovalRequest::from_call(&call);
-                let approval_bypassed = matches!(
-                    call.arguments.get("ask").and_then(|v| v.as_str()),
-                    Some("off")
-                );
-                if !approval_bypassed {
+                let ask_mode = call
+                    .arguments
+                    .get("ask")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("on-miss");
+                let security_mode = call
+                    .arguments
+                    .get("security")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("allowlist");
+                let elevated = call
+                    .arguments
+                    .get("elevated")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let approval_token = call
+                    .arguments
+                    .get("__approval_resume")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                if elevated && security_mode != "full" {
+                    return Err(ToolError::ApprovalDenied {
+                        tool: call.tool_name.clone(),
+                    });
+                }
+
+                if security_mode == "deny" {
+                    return Err(ToolError::ApprovalDenied {
+                        tool: call.tool_name.clone(),
+                    });
+                }
+
+                let persisted_policy = self
+                    .tool_approval_repo
+                    .get_policy(&call.tool_name)
+                    .await
+                    .map_err(|e| {
+                        ToolError::ExecutionFailed(format!("failed to load approval policy: {e}"))
+                    })?;
+
+                if let Some(policy) = persisted_policy {
+                    match policy.decision.as_str() {
+                        "deny" => {
+                            return Err(ToolError::ApprovalDenied {
+                                tool: call.tool_name.clone(),
+                            });
+                        }
+                        "allow_always" if ask_mode != "always" => {
+                            return self.exec.execute(call).await;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if approval_token {
+                    return self.exec.execute(call).await;
+                }
+
+                let approval_required = match ask_mode {
+                    "always" => true,
+                    "off" => false,
+                    _ => match self.approval.check(&call, true).await {
+                        Ok(()) => false,
+                        Err(ToolError::ApprovalRequired { .. }) => true,
+                        Err(other) => return Err(other),
+                    },
+                };
+
+                if approval_required {
                     let details = serde_json::to_string_pretty(&approval_request)
                         .unwrap_or_else(|_| call.arguments.to_string());
                     return Err(ToolError::ApprovalRequired {
@@ -310,10 +564,16 @@ impl ToolExecutor for AppToolExecutor {
                         details,
                     });
                 }
+
                 self.exec.execute(call).await
             }
             "process" => self.process.execute(call).await,
             "memory_search" | "memory_get" => self.memory.execute(call).await,
+            "sessions_list" | "sessions_history" | "session_status" => {
+                self.session.execute(call).await
+            }
+            "sessions_spawn" | "sessions_send" => self.spawn.execute(call).await,
+            "subagents" => self.subagents.execute(call).await,
             other => Err(ToolError::UnknownTool {
                 name: other.to_string(),
             }),
@@ -431,6 +691,99 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry) {
             category: ToolCategory::MemoryAccess,
             requires_approval: false,
         },
+        ToolDefinition {
+            name: "sessions_list".into(),
+            description: "List sessions with optional limit and kind filters.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer" },
+                    "kinds": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    }
+                }
+            }),
+            category: ToolCategory::SessionControl,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "sessions_history".into(),
+            description: "Fetch transcript history for a target session.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "sessionKey": { "type": "string" },
+                    "limit": { "type": "integer" }
+                },
+                "required": ["sessionKey"]
+            }),
+            category: ToolCategory::SessionControl,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "session_status".into(),
+            description: "Show the parity status card for the current or targeted session.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "sessionKey": { "type": "string" },
+                    "session_id": { "type": "string" },
+                    "id": { "type": "string" }
+                }
+            }),
+            category: ToolCategory::SessionControl,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "sessions_spawn".into(),
+            description: "Spawn a persisted subagent session linked to the requester session.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string" },
+                    "model": { "type": "string" },
+                    "mode": { "type": "string" },
+                    "timeoutSeconds": { "type": "integer" },
+                    "sessionKey": { "type": "string" },
+                    "requesterSessionId": { "type": "string" }
+                },
+                "required": ["task"]
+            }),
+            category: ToolCategory::SessionControl,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "sessions_send".into(),
+            description: "Append a steering message into another persisted session transcript.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "sessionKey": { "type": "string" },
+                    "label": { "type": "string" },
+                    "message": { "type": "string" }
+                },
+                "required": ["message"]
+            }),
+            category: ToolCategory::SessionControl,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "subagents".into(),
+            description: "List, steer, or mark persisted subagent sessions as cancelled.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string" },
+                    "target": { "type": "string" },
+                    "message": { "type": "string" },
+                    "recentMinutes": { "type": "integer" }
+                },
+                "required": ["action"]
+            }),
+            category: ToolCategory::SessionControl,
+            requires_approval: false,
+        },
     ];
 
     for tool in builtins {
@@ -439,6 +792,543 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry) {
 }
 
 /// Build the model provider from config, falling back to echo if none configured.
+#[derive(Clone)]
+struct LiveSessionQuery {
+    session_repo: Arc<dyn SessionRepo>,
+    transcript_repo: Arc<dyn TranscriptRepo>,
+    turn_repo: Arc<dyn TurnRepo>,
+    started_at: Instant,
+}
+
+impl LiveSessionQuery {
+    fn new(
+        session_repo: Arc<dyn SessionRepo>,
+        transcript_repo: Arc<dyn TranscriptRepo>,
+        turn_repo: Arc<dyn TurnRepo>,
+        started_at: Instant,
+    ) -> Self {
+        Self {
+            session_repo,
+            transcript_repo,
+            turn_repo,
+            started_at,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct TurnAggregate {
+    turn_count: u32,
+    latest_model: Option<String>,
+    usage_prompt_tokens: u64,
+    usage_completion_tokens: u64,
+    last_turn_started_at: Option<String>,
+    last_turn_ended_at: Option<String>,
+}
+
+fn aggregate_turns(turns: &[TurnRow]) -> TurnAggregate {
+    let mut aggregate = TurnAggregate::default();
+    for turn in turns {
+        aggregate.turn_count += 1;
+        if let Some(model) = &turn.model_ref {
+            aggregate.latest_model = Some(model.clone());
+        }
+        aggregate.usage_prompt_tokens += turn.usage_prompt_tokens.unwrap_or_default().max(0) as u64;
+        aggregate.usage_completion_tokens +=
+            turn.usage_completion_tokens.unwrap_or_default().max(0) as u64;
+        aggregate.last_turn_started_at = Some(turn.started_at.to_rfc3339());
+        aggregate.last_turn_ended_at = turn.ended_at.map(|ended| ended.to_rfc3339());
+    }
+    aggregate
+}
+
+fn metadata_string(metadata: &serde_json::Value, key: &str) -> Option<String> {
+    metadata
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+fn metadata_bool(metadata: &serde_json::Value, key: &str) -> Option<bool> {
+    metadata.get(key).and_then(|value| value.as_bool())
+}
+
+fn serialize_session_summary(row: &SessionRow, aggregate: &TurnAggregate) -> serde_json::Value {
+    json!({
+        "id": row.id,
+        "kind": row.kind,
+        "status": row.status,
+        "requester_session_id": row.requester_session_id,
+        "channel_ref": row.channel_ref,
+        "created_at": row.created_at.to_rfc3339(),
+        "updated_at": row.updated_at.to_rfc3339(),
+        "turn_count": aggregate.turn_count,
+        "latest_model": aggregate.latest_model,
+        "usage_prompt_tokens": aggregate.usage_prompt_tokens,
+        "usage_completion_tokens": aggregate.usage_completion_tokens,
+        "last_turn_started_at": aggregate.last_turn_started_at,
+        "last_turn_ended_at": aggregate.last_turn_ended_at,
+    })
+}
+
+fn render_session_status_card(
+    row: &SessionRow,
+    aggregate: &TurnAggregate,
+    started_at: Instant,
+) -> serde_json::Value {
+    let metadata = &row.metadata;
+    let model_override = metadata_string(metadata, "selected_model");
+    let current_model = aggregate
+        .latest_model
+        .clone()
+        .or_else(|| model_override.clone());
+    let approval_mode =
+        metadata_string(metadata, "approval_mode").unwrap_or_else(|| "on-miss".to_string());
+    let security_mode =
+        metadata_string(metadata, "security_mode").unwrap_or_else(|| "allowlist".to_string());
+    let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
+    let verbose = metadata_bool(metadata, "verbose").unwrap_or(false);
+    let elevated = metadata_bool(metadata, "elevated").unwrap_or(false);
+
+    let mut unresolved =
+        vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
+    if approval_mode == "on-miss" {
+        unresolved
+            .push("approval lifecycle is not yet durable/resumable across restarts".to_string());
+    }
+    if security_mode == "allowlist" {
+        unresolved.push(
+            "host/node/sandbox parity and PTY fidelity are not yet parity-complete".to_string(),
+        );
+    }
+
+    json!({
+        "session_id": row.id,
+        "runtime": format!(
+            "kind={} | channel={} | status={}",
+            row.kind,
+            row.channel_ref.as_deref().unwrap_or("local"),
+            row.status,
+        ),
+        "status": row.status,
+        "current_model": current_model,
+        "model_override": model_override,
+        "prompt_tokens": aggregate.usage_prompt_tokens,
+        "completion_tokens": aggregate.usage_completion_tokens,
+        "total_tokens": aggregate.usage_prompt_tokens + aggregate.usage_completion_tokens,
+        "estimated_cost": "not available",
+        "turn_count": aggregate.turn_count,
+        "uptime_seconds": started_at.elapsed().as_secs(),
+        "last_turn_started_at": aggregate.last_turn_started_at,
+        "last_turn_ended_at": aggregate.last_turn_ended_at,
+        "reasoning": reasoning,
+        "verbose": verbose,
+        "elevated": elevated,
+        "approval_mode": approval_mode,
+        "security_mode": security_mode,
+        "unresolved": unresolved,
+    })
+}
+
+async fn list_sessions_payload(
+    session_repo: &Arc<dyn SessionRepo>,
+    turn_repo: &Arc<dyn TurnRepo>,
+    limit: usize,
+    kinds: Option<&[String]>,
+) -> Result<String, String> {
+    let rows = session_repo
+        .list(limit as i64, 0)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let filtered = rows.into_iter().filter(|row| {
+        kinds.is_none_or(|allowed| {
+            allowed
+                .iter()
+                .any(|kind| kind.eq_ignore_ascii_case(&row.kind))
+        })
+    });
+
+    let mut items = Vec::new();
+    for row in filtered.take(limit) {
+        let turns = turn_repo
+            .list_by_session(row.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let aggregate = aggregate_turns(&turns);
+        items.push(serialize_session_summary(&row, &aggregate));
+    }
+
+    serde_json::to_string(&items).map_err(|e| e.to_string())
+}
+
+async fn session_history_payload(
+    transcript_repo: &Arc<dyn TranscriptRepo>,
+    session_id: Uuid,
+    limit: Option<usize>,
+) -> Result<String, String> {
+    let mut items = transcript_repo
+        .list_by_session(session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(limit) = limit {
+        if items.len() > limit {
+            let start = items.len() - limit;
+            items = items.split_off(start);
+        }
+    }
+    serde_json::to_string(&items).map_err(|e| e.to_string())
+}
+
+#[async_trait]
+impl SessionQuery for LiveSessionQuery {
+    async fn list_sessions(
+        &self,
+        limit: Option<usize>,
+        kinds: Option<Vec<String>>,
+    ) -> Result<String, String> {
+        let limit = limit.unwrap_or(20).clamp(1, 200);
+        list_sessions_payload(&self.session_repo, &self.turn_repo, limit, kinds.as_deref()).await
+    }
+
+    async fn get_session(&self, session_id: &str) -> Result<String, String> {
+        let session_id = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
+        let row = self
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let turns = self
+            .turn_repo
+            .list_by_session(row.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let aggregate = aggregate_turns(&turns);
+        serde_json::to_string(&serialize_session_summary(&row, &aggregate))
+            .map_err(|e| e.to_string())
+    }
+
+    async fn get_history(&self, session_id: &str, limit: Option<usize>) -> Result<String, String> {
+        let session_id = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
+        let _ = self
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        session_history_payload(&self.transcript_repo, session_id, limit).await
+    }
+
+    async fn session_status(&self, session_id: Option<&str>) -> Result<String, String> {
+        let session_id = session_id.ok_or_else(|| {
+            "session_status requires sessionKey/session_id/id until current-session resolution is wired".to_string()
+        })?;
+        let session_id = Uuid::parse_str(session_id).map_err(|e| e.to_string())?;
+        let row = self
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let turns = self
+            .turn_repo
+            .list_by_session(row.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let aggregate = aggregate_turns(&turns);
+        serde_json::to_string(&render_session_status_card(
+            &row,
+            &aggregate,
+            self.started_at,
+        ))
+        .map_err(|e| e.to_string())
+    }
+}
+
+#[derive(Clone)]
+struct LiveSessionSpawner {
+    session_engine: Arc<SessionEngine>,
+    session_repo: Arc<dyn SessionRepo>,
+    transcript_repo: Arc<dyn TranscriptRepo>,
+    workspace_root: PathBuf,
+}
+
+impl LiveSessionSpawner {
+    fn new(
+        session_engine: Arc<SessionEngine>,
+        session_repo: Arc<dyn SessionRepo>,
+        transcript_repo: Arc<dyn TranscriptRepo>,
+        workspace_root: PathBuf,
+    ) -> Self {
+        Self {
+            session_engine,
+            session_repo,
+            transcript_repo,
+            workspace_root,
+        }
+    }
+
+    async fn append_status_note(
+        &self,
+        session_id: Uuid,
+        status: rune_core::SessionStatus,
+        note: String,
+    ) -> Result<(), String> {
+        let existing = self
+            .transcript_repo
+            .list_by_session(session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let item = rune_core::TranscriptItem::StatusNote { status, note };
+        self.transcript_repo
+            .append(rune_store::models::NewTranscriptItem {
+                id: Uuid::now_v7(),
+                session_id,
+                turn_id: None,
+                seq: existing.len() as i32,
+                kind: "status_note".to_string(),
+                payload: serde_json::to_value(item).map_err(|e| e.to_string())?,
+                created_at: chrono::Utc::now(),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl SessionSpawner for LiveSessionSpawner {
+    async fn spawn_session(
+        &self,
+        requester_session_id: Option<&str>,
+        task: &str,
+        model: Option<&str>,
+        mode: Option<&str>,
+        timeout_seconds: Option<u64>,
+    ) -> Result<String, String> {
+        let requester_session_id = requester_session_id
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|e| format!("invalid requester session id: {e}"))?;
+        let row = self
+            .session_engine
+            .create_session_full(
+                rune_core::SessionKind::Subagent,
+                Some(self.workspace_root.display().to_string()),
+                requester_session_id,
+                None,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut metadata = row.metadata.clone();
+        if let Some(object) = metadata.as_object_mut() {
+            object.insert(
+                "spawn_task".to_string(),
+                serde_json::Value::String(task.to_string()),
+            );
+            if let Some(requester_session_id) = requester_session_id {
+                object.insert(
+                    "requester_session_id".to_string(),
+                    serde_json::Value::String(requester_session_id.to_string()),
+                );
+            }
+            object.insert(
+                "spawn_mode".to_string(),
+                serde_json::Value::String(mode.unwrap_or("run").to_string()),
+            );
+            if let Some(model) = model {
+                object.insert(
+                    "selected_model".to_string(),
+                    serde_json::Value::String(model.to_string()),
+                );
+            }
+            if let Some(timeout_seconds) = timeout_seconds {
+                object.insert(
+                    "spawn_timeout_seconds".to_string(),
+                    serde_json::Value::Number(timeout_seconds.into()),
+                );
+            }
+        }
+
+        self.session_engine
+            .mark_ready(row.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let row = self
+            .session_repo
+            .update_metadata(row.id, metadata, chrono::Utc::now())
+            .await
+            .map_err(|e| e.to_string())?;
+        self.session_engine
+            .mark_running(row.id)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        self.append_status_note(
+            row.id,
+            rune_core::SessionStatus::WaitingForSubagent,
+            match requester_session_id {
+                Some(requester) => format!(
+                    "Subagent session spawned for task: {task}. Requester session: {requester}. Execution runtime is not yet attached; session is persisted for inspectability."
+                ),
+                None => format!(
+                    "Subagent session spawned for task: {task}. Execution runtime is not yet attached; session is persisted for inspectability."
+                ),
+            },
+        )
+        .await?;
+
+        serde_json::to_string(&json!({
+            "sessionId": row.id,
+            "status": "running",
+            "kind": "subagent",
+            "requester_session_id": requester_session_id,
+            "task": task,
+            "mode": mode.unwrap_or("run"),
+            "model": model,
+            "timeoutSeconds": timeout_seconds,
+            "note": "Persisted subagent session created; transcript/status inspection is live, runtime execution remains conservative."
+        }))
+        .map_err(|e| e.to_string())
+    }
+
+    async fn send_message(
+        &self,
+        session_key: Option<&str>,
+        label: Option<&str>,
+        message: &str,
+    ) -> Result<String, String> {
+        let target = session_key
+            .or(label)
+            .ok_or_else(|| "missing target session".to_string())?;
+        let session_id = Uuid::parse_str(target).map_err(|e| e.to_string())?;
+
+        self.append_status_note(
+            session_id,
+            rune_core::SessionStatus::WaitingForSubagent,
+            format!("Steering message queued for subagent/session: {message}"),
+        )
+        .await?;
+
+        serde_json::to_string(&json!({
+            "delivered": true,
+            "sessionId": session_id,
+            "message": message,
+            "note": "Message persisted into transcript as a steering/status note."
+        }))
+        .map_err(|e| e.to_string())
+    }
+}
+
+#[derive(Clone)]
+struct LiveSubagentManager {
+    session_repo: Arc<dyn SessionRepo>,
+    transcript_repo: Arc<dyn TranscriptRepo>,
+}
+
+impl LiveSubagentManager {
+    fn new(session_repo: Arc<dyn SessionRepo>, transcript_repo: Arc<dyn TranscriptRepo>) -> Self {
+        Self {
+            session_repo,
+            transcript_repo,
+        }
+    }
+
+    async fn append_status_note(&self, session_id: Uuid, note: String) -> Result<(), String> {
+        let existing = self
+            .transcript_repo
+            .list_by_session(session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.transcript_repo
+            .append(rune_store::models::NewTranscriptItem {
+                id: Uuid::now_v7(),
+                session_id,
+                turn_id: None,
+                seq: existing.len() as i32,
+                kind: "status_note".to_string(),
+                payload: serde_json::to_value(rune_core::TranscriptItem::StatusNote {
+                    status: rune_core::SessionStatus::WaitingForSubagent,
+                    note,
+                })
+                .map_err(|e| e.to_string())?,
+                created_at: chrono::Utc::now(),
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl SubagentManager for LiveSubagentManager {
+    async fn list(&self, recent_minutes: Option<u64>) -> Result<String, String> {
+        let rows = self
+            .session_repo
+            .list(200, 0)
+            .await
+            .map_err(|e| e.to_string())?;
+        let cutoff = recent_minutes
+            .map(|minutes| chrono::Utc::now() - chrono::Duration::minutes(minutes as i64));
+        let items: Vec<_> = rows
+            .into_iter()
+            .filter(|row| row.kind == "subagent")
+            .filter(|row| cutoff.is_none_or(|cutoff| row.updated_at >= cutoff))
+            .map(|row| {
+                json!({
+                    "id": row.id,
+                    "status": row.status,
+                    "requester_session_id": row.requester_session_id,
+                    "created_at": row.created_at.to_rfc3339(),
+                    "updated_at": row.updated_at.to_rfc3339(),
+                    "task": row.metadata.get("spawn_task").and_then(|v| v.as_str()),
+                    "mode": row.metadata.get("spawn_mode").and_then(|v| v.as_str()),
+                    "selected_model": row.metadata.get("selected_model").and_then(|v| v.as_str()),
+                })
+            })
+            .collect();
+        serde_json::to_string(&items).map_err(|e| e.to_string())
+    }
+
+    async fn steer(&self, target: &str, message: &str) -> Result<String, String> {
+        let session_id = Uuid::parse_str(target).map_err(|e| e.to_string())?;
+        let _ = self
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.append_status_note(session_id, format!("Subagent steering message: {message}"))
+            .await?;
+        serde_json::to_string(&json!({
+            "target": session_id,
+            "steered": true,
+            "message": message,
+            "note": "Steering message persisted as a status note."
+        }))
+        .map_err(|e| e.to_string())
+    }
+
+    async fn kill(&self, target: &str) -> Result<String, String> {
+        let session_id = Uuid::parse_str(target).map_err(|e| e.to_string())?;
+        let row = self
+            .session_repo
+            .update_status(session_id, "cancelled", chrono::Utc::now())
+            .await
+            .map_err(|e| e.to_string())?;
+        self.append_status_note(
+            session_id,
+            "Subagent marked cancelled by operator.".to_string(),
+        )
+        .await?;
+        serde_json::to_string(&json!({
+            "target": row.id,
+            "killed": true,
+            "status": row.status,
+            "note": "Persisted subagent session marked cancelled."
+        }))
+        .map_err(|e| e.to_string())
+    }
+}
+
 fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
     if !config.models.providers.is_empty() {
         match RoutedModelProvider::from_models_config(&config.models) {
@@ -451,6 +1341,333 @@ fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
     } else {
         info!("no model providers configured — using echo fallback");
         Arc::new(EchoModelProvider)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use tokio::sync::Mutex;
+
+    use rune_store::StoreError;
+
+    struct MemSessionRepo {
+        sessions: Mutex<Vec<SessionRow>>,
+    }
+
+    impl MemSessionRepo {
+        fn new() -> Self {
+            Self {
+                sessions: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SessionRepo for MemSessionRepo {
+        async fn create(
+            &self,
+            session: rune_store::models::NewSession,
+        ) -> Result<SessionRow, StoreError> {
+            let row = SessionRow {
+                id: session.id,
+                kind: session.kind,
+                status: session.status,
+                workspace_root: session.workspace_root,
+                channel_ref: session.channel_ref,
+                requester_session_id: session.requester_session_id,
+                metadata: session.metadata,
+                created_at: session.created_at,
+                updated_at: session.updated_at,
+                last_activity_at: session.last_activity_at,
+            };
+            self.sessions.lock().await.push(row.clone());
+            Ok(row)
+        }
+
+        async fn find_by_id(&self, id: Uuid) -> Result<SessionRow, StoreError> {
+            self.sessions
+                .lock()
+                .await
+                .iter()
+                .find(|row| row.id == id)
+                .cloned()
+                .ok_or(StoreError::NotFound {
+                    entity: "session",
+                    id: id.to_string(),
+                })
+        }
+
+        async fn list(&self, limit: i64, offset: i64) -> Result<Vec<SessionRow>, StoreError> {
+            let rows = self.sessions.lock().await;
+            Ok(rows
+                .iter()
+                .skip(offset as usize)
+                .take(limit as usize)
+                .cloned()
+                .collect())
+        }
+
+        async fn find_by_channel_ref(
+            &self,
+            channel_ref: &str,
+        ) -> Result<Option<SessionRow>, StoreError> {
+            let rows = self.sessions.lock().await;
+            Ok(rows
+                .iter()
+                .rev()
+                .find(|row| row.channel_ref.as_deref() == Some(channel_ref))
+                .cloned())
+        }
+
+        async fn update_status(
+            &self,
+            id: Uuid,
+            status: &str,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<SessionRow, StoreError> {
+            let mut rows = self.sessions.lock().await;
+            let row = rows
+                .iter_mut()
+                .find(|row| row.id == id)
+                .ok_or(StoreError::NotFound {
+                    entity: "session",
+                    id: id.to_string(),
+                })?;
+            row.status = status.to_string();
+            row.updated_at = updated_at;
+            Ok(row.clone())
+        }
+
+        async fn update_metadata(
+            &self,
+            id: Uuid,
+            metadata: Value,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<SessionRow, StoreError> {
+            let mut rows = self.sessions.lock().await;
+            let row = rows
+                .iter_mut()
+                .find(|row| row.id == id)
+                .ok_or(StoreError::NotFound {
+                    entity: "session",
+                    id: id.to_string(),
+                })?;
+            row.metadata = metadata;
+            row.updated_at = updated_at;
+            Ok(row.clone())
+        }
+    }
+
+    struct MemTranscriptRepo {
+        items: Mutex<Vec<rune_store::models::TranscriptItemRow>>,
+    }
+
+    impl MemTranscriptRepo {
+        fn new() -> Self {
+            Self {
+                items: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl TranscriptRepo for MemTranscriptRepo {
+        async fn append(
+            &self,
+            item: rune_store::models::NewTranscriptItem,
+        ) -> Result<rune_store::models::TranscriptItemRow, StoreError> {
+            let row = rune_store::models::TranscriptItemRow {
+                id: item.id,
+                session_id: item.session_id,
+                turn_id: item.turn_id,
+                seq: item.seq,
+                kind: item.kind,
+                payload: item.payload,
+                created_at: item.created_at,
+            };
+            self.items.lock().await.push(row.clone());
+            Ok(row)
+        }
+
+        async fn list_by_session(
+            &self,
+            session_id: Uuid,
+        ) -> Result<Vec<rune_store::models::TranscriptItemRow>, StoreError> {
+            let mut rows: Vec<_> = self
+                .items
+                .lock()
+                .await
+                .iter()
+                .filter(|row| row.session_id == session_id)
+                .cloned()
+                .collect();
+            rows.sort_by_key(|row| row.seq);
+            Ok(rows)
+        }
+    }
+
+    #[tokio::test]
+    async fn live_session_spawner_persists_metadata_and_status_note() {
+        let session_repo: Arc<dyn SessionRepo> = Arc::new(MemSessionRepo::new());
+        let transcript_repo: Arc<dyn TranscriptRepo> = Arc::new(MemTranscriptRepo::new());
+        let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+        let spawner = LiveSessionSpawner::new(
+            session_engine,
+            session_repo.clone(),
+            transcript_repo.clone(),
+            PathBuf::from("/tmp/rune-tests"),
+        );
+
+        let response = spawner
+            .spawn_session(
+                Some("11111111-1111-1111-1111-111111111111"),
+                "close parity gap",
+                Some("gpt-5.4"),
+                Some("run"),
+                Some(120),
+            )
+            .await
+            .expect("spawn session should succeed");
+        let payload: Value = serde_json::from_str(&response).expect("valid JSON response");
+        let session_id = payload
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .expect("sessionId present");
+        let session_id = Uuid::parse_str(session_id).expect("sessionId is UUID");
+
+        let row = session_repo
+            .find_by_id(session_id)
+            .await
+            .expect("session row exists");
+        assert_eq!(row.kind, "subagent");
+        assert_eq!(row.status, "running");
+        assert_eq!(
+            row.requester_session_id,
+            Some(Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap())
+        );
+        assert_eq!(
+            row.metadata.get("spawn_task").and_then(Value::as_str),
+            Some("close parity gap")
+        );
+        assert_eq!(
+            row.metadata
+                .get("requester_session_id")
+                .and_then(Value::as_str),
+            Some("11111111-1111-1111-1111-111111111111")
+        );
+        assert_eq!(
+            row.metadata.get("spawn_mode").and_then(Value::as_str),
+            Some("run")
+        );
+        assert_eq!(
+            row.metadata.get("selected_model").and_then(Value::as_str),
+            Some("gpt-5.4")
+        );
+        assert_eq!(
+            row.metadata
+                .get("spawn_timeout_seconds")
+                .and_then(Value::as_u64),
+            Some(120)
+        );
+
+        let transcript = transcript_repo
+            .list_by_session(session_id)
+            .await
+            .expect("transcript exists");
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(transcript[0].kind, "status_note");
+        let note = transcript[0]
+            .payload
+            .get("note")
+            .and_then(Value::as_str)
+            .expect("status note payload");
+        assert!(note.contains("Requester session: 11111111-1111-1111-1111-111111111111"));
+        assert!(note.contains("Execution runtime is not yet attached"));
+    }
+
+    #[tokio::test]
+    async fn live_subagent_manager_lists_steers_and_kills_persisted_subagents() {
+        let session_repo: Arc<dyn SessionRepo> = Arc::new(MemSessionRepo::new());
+        let transcript_repo: Arc<dyn TranscriptRepo> = Arc::new(MemTranscriptRepo::new());
+        let session_engine = Arc::new(SessionEngine::new(session_repo.clone()));
+        let spawner = LiveSessionSpawner::new(
+            session_engine,
+            session_repo.clone(),
+            transcript_repo.clone(),
+            PathBuf::from("/tmp/rune-tests"),
+        );
+        let manager = LiveSubagentManager::new(session_repo.clone(), transcript_repo.clone());
+
+        let spawned: Value = serde_json::from_str(
+            &spawner
+                .spawn_session(
+                    Some("22222222-2222-2222-2222-222222222222"),
+                    "verify inspectability",
+                    None,
+                    Some("session"),
+                    None,
+                )
+                .await
+                .expect("spawn should succeed"),
+        )
+        .expect("valid JSON response");
+        let session_id = spawned
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .expect("sessionId present")
+            .to_string();
+
+        let listed: Value =
+            serde_json::from_str(&manager.list(Some(60)).await.expect("list works"))
+                .expect("valid list JSON");
+        let listed = listed.as_array().expect("list should be an array");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].get("id").and_then(Value::as_str),
+            Some(session_id.as_str())
+        );
+        assert_eq!(
+            listed[0].get("task").and_then(Value::as_str),
+            Some("verify inspectability")
+        );
+        assert_eq!(
+            listed[0]
+                .get("requester_session_id")
+                .and_then(Value::as_str),
+            Some("22222222-2222-2222-2222-222222222222")
+        );
+
+        let steer: Value = serde_json::from_str(
+            &manager
+                .steer(&session_id, "keep going")
+                .await
+                .expect("steer works"),
+        )
+        .expect("valid steer JSON");
+        assert_eq!(steer.get("steered").and_then(Value::as_bool), Some(true));
+
+        let killed: Value =
+            serde_json::from_str(&manager.kill(&session_id).await.expect("kill works"))
+                .expect("valid kill JSON");
+        assert_eq!(killed.get("killed").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            killed.get("status").and_then(Value::as_str),
+            Some("cancelled")
+        );
+
+        let row = session_repo
+            .find_by_id(Uuid::parse_str(&session_id).expect("session uuid"))
+            .await
+            .expect("session row exists after kill");
+        assert_eq!(row.status, "cancelled");
+
+        let transcript = transcript_repo
+            .list_by_session(Uuid::parse_str(&session_id).expect("session uuid"))
+            .await
+            .expect("transcript exists");
+        assert_eq!(transcript.len(), 3);
     }
 }
 

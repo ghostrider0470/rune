@@ -10,6 +10,7 @@ pub mod file_tools;
 pub mod gateway_tool;
 pub mod memory_tool;
 pub mod message_tool;
+pub mod process_audit;
 pub mod process_tool;
 mod registry;
 pub mod session_tool;

@@ -5,8 +5,14 @@ use std::time::Instant;
 
 use rune_config::AppConfig;
 use rune_models::ModelProvider;
-use rune_runtime::{SessionEngine, TurnExecutor, heartbeat::HeartbeatRunner, scheduler::{ReminderStore, Scheduler}};
-use rune_store::repos::{SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo};
+use rune_runtime::{
+    SessionEngine, TurnExecutor,
+    heartbeat::HeartbeatRunner,
+    scheduler::{ReminderStore, Scheduler},
+};
+use rune_store::repos::{
+    ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
+};
 use tokio::sync::broadcast;
 
 /// Events emitted for WebSocket subscribers.
@@ -35,6 +41,8 @@ pub struct AppState {
     pub session_repo: Arc<dyn SessionRepo>,
     /// Transcript repository for transcript queries.
     pub transcript_repo: Arc<dyn TranscriptRepo>,
+    /// Turn repository for session-level aggregates.
+    pub turn_repo: Arc<dyn TurnRepo>,
     /// Model provider for status reporting.
     pub model_provider: Arc<dyn ModelProvider>,
     /// In-memory scheduler backing the current cron operator surface.
@@ -43,6 +51,8 @@ pub struct AppState {
     pub heartbeat: Arc<HeartbeatRunner>,
     /// In-memory reminder store.
     pub reminder_store: Arc<ReminderStore>,
+    /// Durable approval request repository.
+    pub approval_repo: Arc<dyn ApprovalRepo>,
     /// Tool approval policy repository.
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
     /// Number of registered tools in the runtime graph.

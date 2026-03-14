@@ -3,18 +3,19 @@
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Method;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::json;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
 use crate::output::{
-    ActionResult, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
+    ActionResult, ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
+    ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DoctorCheck, DoctorReport, GatewayCallResponse,
-    GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
-    HeartbeatStatusResponse, ReminderSummary, RemindersListResponse, SessionDetailResponse,
-    SessionListResponse, SessionSummary, StatusResponse,
+    CronStatusResponse, DoctorCheck, DoctorReport, GatewayCallResponse, GatewayDiscoverResponse,
+    GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
+    ReminderSummary, RemindersListResponse, SessionDetailResponse, SessionListResponse,
+    SessionStatusCard, SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -186,8 +187,14 @@ impl GatewayClient {
         let health_resp = self.http.get(self.url("/health")).send().await;
         let status_resp = self.http.get(self.url("/status")).send().await;
 
-        let health_http_ok = matches!(health_resp.as_ref().map(|r| r.status().is_success()), Ok(true));
-        let status_http_ok = matches!(status_resp.as_ref().map(|r| r.status().is_success()), Ok(true));
+        let health_http_ok = matches!(
+            health_resp.as_ref().map(|r| r.status().is_success()),
+            Ok(true)
+        );
+        let status_http_ok = matches!(
+            status_resp.as_ref().map(|r| r.status().is_success()),
+            Ok(true)
+        );
         let auth_required = matches!(status_resp.as_ref().map(|r| r.status().as_u16()), Ok(401));
         let auth_valid = if status_http_ok {
             Some(true)
@@ -200,9 +207,11 @@ impl GatewayClient {
         let note = if status_http_ok && health_http_ok {
             "RPC reachable and operator status endpoint responded successfully.".to_string()
         } else if health_http_ok && auth_required {
-            "Process is up (`/health` OK) but protected RPC requires a valid bearer token.".to_string()
+            "Process is up (`/health` OK) but protected RPC requires a valid bearer token."
+                .to_string()
         } else if health_http_ok {
-            "Process is up via `/health`, but protected RPC/status did not respond cleanly.".to_string()
+            "Process is up via `/health`, but protected RPC/status did not respond cleanly."
+                .to_string()
         } else {
             "Gateway health probe failed; process may be down or bound to a different address/profile.".to_string()
         };
@@ -255,12 +264,16 @@ impl GatewayClient {
             format!("/{path}")
         };
 
-        let mut request = self.http.request(method.clone(), self.url(&normalized_path));
+        let mut request = self
+            .http
+            .request(method.clone(), self.url(&normalized_path));
         if let Some(token) = token {
             request = request.header(AUTHORIZATION, format!("Bearer {token}"));
         }
         if let Some(body) = body {
-            request = request.header(CONTENT_TYPE, "application/json").body(body.to_string());
+            request = request
+                .header(CONTENT_TYPE, "application/json")
+                .body(body.to_string());
         }
 
         let response = request.send().await.context("failed to reach gateway")?;
@@ -270,7 +283,10 @@ impl GatewayClient {
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
-        let body = response.text().await.context("failed to read gateway response body")?;
+        let body = response
+            .text()
+            .await
+            .context("failed to read gateway response body")?;
 
         Ok(GatewayCallResponse {
             method: method.as_str().to_string(),
@@ -294,7 +310,9 @@ impl GatewayClient {
                 .get(self.url(&format!("/sessions/{}/transcript", session.id)))
                 .send()
                 .await
-                .with_context(|| format!("failed to fetch transcript for session {}", session.id))?;
+                .with_context(|| {
+                    format!("failed to fetch transcript for session {}", session.id)
+                })?;
             if !response.status().is_success() {
                 continue;
             }
@@ -321,7 +339,11 @@ impl GatewayClient {
             let _ = resp.bytes().await;
         }
 
-        let transcript_sessions = sessions.sessions.iter().map(|session| session.id.clone()).collect::<Vec<_>>();
+        let transcript_sessions = sessions
+            .sessions
+            .iter()
+            .map(|session| session.id.clone())
+            .collect::<Vec<_>>();
         for session_id in transcript_sessions {
             let response = self
                 .http
@@ -337,7 +359,8 @@ impl GatewayClient {
                 .await
                 .with_context(|| format!("invalid transcript JSON for session {session_id}"))?;
             if let Some(items) = transcript.as_array() {
-                let mut per_turn: std::collections::BTreeMap<String, (u64, u64)> = std::collections::BTreeMap::new();
+                let mut per_turn: std::collections::BTreeMap<String, (u64, u64)> =
+                    std::collections::BTreeMap::new();
                 for item in items {
                     let turn_id = item["turn_id"].as_str().unwrap_or_default();
                     let payload = &item["payload"];
@@ -668,10 +691,8 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            let items: serde_json::Value = resp
-                .json()
-                .await
-                .context("invalid JSON from /reminders")?;
+            let items: serde_json::Value =
+                resp.json().await.context("invalid JSON from /reminders")?;
             let reminders = items
                 .as_array()
                 .unwrap_or(&vec![])
@@ -780,6 +801,10 @@ impl GatewayClient {
                     status: v["status"].as_str().unwrap_or("unknown").to_string(),
                     channel: v["channel"].as_str().map(String::from),
                     created_at: v["created_at"].as_str().map(String::from),
+                    turn_count: v["turn_count"].as_u64().map(|n| n as u32),
+                    usage_prompt_tokens: v["usage_prompt_tokens"].as_u64(),
+                    usage_completion_tokens: v["usage_completion_tokens"].as_u64(),
+                    latest_model: v["latest_model"].as_str().map(String::from),
                 })
                 .collect();
             Ok(SessionListResponse { sessions })
@@ -805,10 +830,38 @@ impl GatewayClient {
             Ok(SessionDetailResponse {
                 id: v["id"].as_str().unwrap_or("?").to_string(),
                 status: v["status"].as_str().unwrap_or("unknown").to_string(),
-                channel: v["channel"].as_str().map(String::from),
+                channel: v["channel"]
+                    .as_str()
+                    .map(String::from)
+                    .or_else(|| v["channel_ref"].as_str().map(String::from)),
                 created_at: v["created_at"].as_str().map(String::from),
                 turn_count: v["turn_count"].as_u64().map(|n| n as u32),
+                latest_model: v["latest_model"].as_str().map(String::from),
+                usage_prompt_tokens: v["usage_prompt_tokens"].as_u64(),
+                usage_completion_tokens: v["usage_completion_tokens"].as_u64(),
+                last_turn_started_at: v["last_turn_started_at"].as_str().map(String::from),
+                last_turn_ended_at: v["last_turn_ended_at"].as_str().map(String::from),
             })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Session '{id}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /sessions/:id/status`
+    pub async fn session_status(&self, id: &str) -> Result<SessionStatusCard> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/sessions/{id}/status")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            resp.json()
+                .await
+                .context("invalid JSON from /sessions/:id/status")
         } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
             bail!("Session '{id}' not found.");
         } else {
@@ -858,8 +911,8 @@ impl GatewayClient {
 
     // ── Approvals ─────────────────────────────────────────────────────
 
-    /// `GET /approvals` — list all tool approval policies.
-    pub async fn approvals_list(&self) -> Result<serde_json::Value> {
+    /// `GET /approvals` — list pending durable approval requests.
+    pub async fn approvals_list(&self) -> Result<ApprovalListResponse> {
         let resp = self
             .http
             .get(self.url("/approvals"))
@@ -867,22 +920,71 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await?)
+            let approvals = resp
+                .json::<Vec<ApprovalRequestSummary>>()
+                .await
+                .context("invalid JSON from /approvals")?;
+            Ok(ApprovalListResponse { approvals })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
     }
 
-    /// `GET /approvals/{tool}` — get policy for a specific tool.
-    pub async fn approvals_get(&self, tool: &str) -> Result<serde_json::Value> {
+    /// `POST /approvals` — submit a decision for a pending approval request.
+    pub async fn approvals_decide(
+        &self,
+        id: &str,
+        decision: &str,
+        by: Option<&str>,
+    ) -> Result<ApprovalRequestSummary> {
         let resp = self
             .http
-            .get(self.url(&format!("/approvals/{tool}")))
+            .post(self.url("/approvals"))
+            .json(&serde_json::json!({ "id": id, "decision": decision, "decided_by": by }))
             .send()
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await?)
+            resp.json::<ApprovalRequestSummary>()
+                .await
+                .context("invalid JSON from POST /approvals")
+        } else {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Gateway error: {body}");
+        }
+    }
+
+    /// `GET /approvals/policies` — list all tool approval policies.
+    pub async fn approvals_policies_list(&self) -> Result<ApprovalPoliciesResponse> {
+        let resp = self
+            .http
+            .get(self.url("/approvals/policies"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let policies = resp
+                .json::<Vec<ApprovalPolicySummary>>()
+                .await
+                .context("invalid JSON from /approvals/policies")?;
+            Ok(ApprovalPoliciesResponse { policies })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /approvals/policies/{tool}` — get policy for a specific tool.
+    pub async fn approvals_get(&self, tool: &str) -> Result<ApprovalPolicySummary> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/approvals/policies/{tool}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            resp.json::<ApprovalPolicySummary>()
+                .await
+                .context("invalid JSON from GET /approvals/policies/{tool}")
         } else if resp.status() == reqwest::StatusCode::BAD_REQUEST {
             bail!("No approval policy found for tool '{tool}'.");
         } else {
@@ -890,11 +992,11 @@ impl GatewayClient {
         }
     }
 
-    /// `PUT /approvals/{tool}` — set policy for a tool.
+    /// `PUT /approvals/policies/{tool}` — set policy for a tool.
     pub async fn approvals_set(&self, tool: &str, decision: &str) -> Result<serde_json::Value> {
         let resp = self
             .http
-            .put(self.url(&format!("/approvals/{tool}")))
+            .put(self.url(&format!("/approvals/policies/{tool}")))
             .json(&serde_json::json!({ "decision": decision }))
             .send()
             .await
@@ -907,11 +1009,11 @@ impl GatewayClient {
         }
     }
 
-    /// `DELETE /approvals/{tool}` — clear policy for a tool.
+    /// `DELETE /approvals/policies/{tool}` — clear policy for a tool.
     pub async fn approvals_clear(&self, tool: &str) -> Result<serde_json::Value> {
         let resp = self
             .http
-            .delete(self.url(&format!("/approvals/{tool}")))
+            .delete(self.url(&format!("/approvals/policies/{tool}")))
             .send()
             .await
             .context("failed to reach gateway")?;
@@ -926,9 +1028,20 @@ impl GatewayClient {
 }
 
 fn local_config_path() -> std::path::PathBuf {
-    std::env::var_os("RUNE_CONFIG")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"))
+    if let Some(config_path) = std::env::var_os("RUNE_CONFIG") {
+        return std::path::PathBuf::from(config_path);
+    }
+
+    let profile = std::env::var("RUNE_PROFILE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    match profile.as_deref() {
+        Some("dev") => std::path::PathBuf::from("config.dev.toml"),
+        Some(profile) => std::path::PathBuf::from(format!("config.{profile}.toml")),
+        None => std::path::PathBuf::from("config.toml"),
+    }
 }
 
 fn load_local_config_document() -> Result<(std::path::PathBuf, DocumentMut)> {
@@ -1337,6 +1450,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_status_parses_card() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions/session-1/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "session_id": "session-1",
+                "runtime": "kind=direct | channel=local | status=running",
+                "status": "running",
+                "current_model": "gpt-5.4",
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "estimated_cost": "not available",
+                "turn_count": 3,
+                "uptime_seconds": 42,
+                "reasoning": "off",
+                "verbose": false,
+                "elevated": false,
+                "approval_mode": "on-miss",
+                "security_mode": "allowlist",
+                "unresolved": ["cost posture is estimate-only"]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.session_status("session-1").await.unwrap();
+        assert_eq!(resp.session_id.as_deref(), Some("session-1"));
+        assert_eq!(resp.current_model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(resp.total_tokens, Some(150));
+        assert_eq!(resp.approval_mode.as_deref(), Some("on-miss"));
+    }
+
+    #[tokio::test]
     async fn sessions_show_not_found() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1348,6 +1495,31 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let err = client.sessions_show("nonexistent").await.unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn sessions_show_reads_channel_ref_field() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions/session-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "session-1",
+                "status": "running",
+                "channel_ref": "telegram:ops",
+                "created_at": "2026-03-14T00:00:00Z",
+                "turn_count": 1,
+                "latest_model": "fake-model",
+                "usage_prompt_tokens": 10,
+                "usage_completion_tokens": 5,
+                "last_turn_started_at": "2026-03-14T00:00:01Z",
+                "last_turn_ended_at": "2026-03-14T00:00:02Z"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let response = client.sessions_show("session-1").await.unwrap();
+        assert_eq!(response.channel.as_deref(), Some("telegram:ops"));
     }
 
     #[test]

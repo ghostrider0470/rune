@@ -137,6 +137,35 @@ pub struct NewJob {
     pub updated_at: DateTime<Utc>,
 }
 
+// ── Job runs ────────────────────────────────────────────────────────────────
+
+/// A durable job-run row.
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = job_runs)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct JobRunRow {
+    pub id: Uuid,
+    pub job_id: Uuid,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub status: String,
+    pub output: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Insert payload for a durable job-run record.
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = job_runs)]
+pub struct NewJobRun {
+    pub id: Uuid,
+    pub job_id: Uuid,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub status: String,
+    pub output: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
 // ── Approvals ─────────────────────────────────────────────────────────
 
 /// An approval row.

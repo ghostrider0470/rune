@@ -105,14 +105,30 @@ impl ModelProvider for FailingModelProvider {
     }
 }
 
+enum FakeToolStep {
+    Output(String),
+    ApprovalRequired { tool: String, details: String },
+}
+
 struct FakeToolExecutor {
-    responses: Mutex<Vec<String>>,
+    responses: Mutex<Vec<FakeToolStep>>,
 }
 
 impl FakeToolExecutor {
     fn new(responses: Vec<String>) -> Self {
         Self {
-            responses: Mutex::new(responses),
+            responses: Mutex::new(
+                responses
+                    .into_iter()
+                    .map(FakeToolStep::Output)
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+
+    fn with_steps(steps: Vec<FakeToolStep>) -> Self {
+        Self {
+            responses: Mutex::new(steps),
         }
     }
 }
@@ -121,16 +137,21 @@ impl FakeToolExecutor {
 impl ToolExecutor for FakeToolExecutor {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         let mut responses = self.responses.lock().await;
-        let output = if responses.is_empty() {
-            "default tool output".to_string()
+        let step = if responses.is_empty() {
+            FakeToolStep::Output("default tool output".to_string())
         } else {
             responses.remove(0)
         };
-        Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
-            output,
-            is_error: false,
-        })
+        match step {
+            FakeToolStep::Output(output) => Ok(ToolResult {
+                tool_call_id: call.tool_call_id,
+                output,
+                is_error: false,
+            }),
+            FakeToolStep::ApprovalRequired { tool, details } => {
+                Err(ToolError::ApprovalRequired { tool, details })
+            }
+        }
     }
 }
 
@@ -326,6 +347,25 @@ impl TurnRepo for MemTurnRepo {
         }
         Ok(turn.clone())
     }
+
+    async fn update_usage(
+        &self,
+        id: Uuid,
+        prompt_tokens: i32,
+        completion_tokens: i32,
+    ) -> Result<TurnRow, StoreError> {
+        let mut turns = self.turns.lock().await;
+        let turn = turns
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "turn",
+                id: id.to_string(),
+            })?;
+        turn.usage_prompt_tokens = Some(prompt_tokens);
+        turn.usage_completion_tokens = Some(completion_tokens);
+        Ok(turn.clone())
+    }
 }
 
 struct MemTranscriptRepo {
@@ -371,10 +411,102 @@ impl TranscriptRepo for MemTranscriptRepo {
     }
 }
 
+struct MemApprovalRepo {
+    approvals: Mutex<Vec<ApprovalRow>>,
+}
+
+impl MemApprovalRepo {
+    fn new() -> Self {
+        Self {
+            approvals: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl ApprovalRepo for MemApprovalRepo {
+    async fn create(&self, approval: NewApproval) -> Result<ApprovalRow, StoreError> {
+        let row = ApprovalRow {
+            id: approval.id,
+            subject_type: approval.subject_type,
+            subject_id: approval.subject_id,
+            reason: approval.reason,
+            decision: None,
+            decided_by: None,
+            decided_at: None,
+            presented_payload: approval.presented_payload,
+            created_at: approval.created_at,
+        };
+        self.approvals.lock().await.push(row.clone());
+        Ok(row)
+    }
+
+    async fn find_by_id(&self, id: Uuid) -> Result<ApprovalRow, StoreError> {
+        self.approvals
+            .lock()
+            .await
+            .iter()
+            .find(|approval| approval.id == id)
+            .cloned()
+            .ok_or(StoreError::NotFound {
+                entity: "approval",
+                id: id.to_string(),
+            })
+    }
+
+    async fn list(&self, pending_only: bool) -> Result<Vec<ApprovalRow>, StoreError> {
+        let approvals = self.approvals.lock().await;
+        Ok(approvals
+            .iter()
+            .filter(|approval| !pending_only || approval.decision.is_none())
+            .cloned()
+            .collect())
+    }
+
+    async fn decide(
+        &self,
+        id: Uuid,
+        decision: &str,
+        decided_by: &str,
+        decided_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<ApprovalRow, StoreError> {
+        let mut approvals = self.approvals.lock().await;
+        let approval = approvals
+            .iter_mut()
+            .find(|approval| approval.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "approval",
+                id: id.to_string(),
+            })?;
+        approval.decision = Some(decision.to_string());
+        approval.decided_by = Some(decided_by.to_string());
+        approval.decided_at = Some(decided_at);
+        Ok(approval.clone())
+    }
+
+    async fn update_presented_payload(
+        &self,
+        id: Uuid,
+        presented_payload: serde_json::Value,
+    ) -> Result<ApprovalRow, StoreError> {
+        let mut approvals = self.approvals.lock().await;
+        let approval = approvals
+            .iter_mut()
+            .find(|approval| approval.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "approval",
+                id: id.to_string(),
+            })?;
+        approval.presented_payload = presented_payload;
+        Ok(approval.clone())
+    }
+}
+
 struct TestHarness {
     session_repo: Arc<MemSessionRepo>,
     turn_repo: Arc<MemTurnRepo>,
     transcript_repo: Arc<MemTranscriptRepo>,
+    approval_repo: Arc<MemApprovalRepo>,
     workspace_root: PathBuf,
 }
 
@@ -406,6 +538,7 @@ impl TestHarness {
             session_repo: Arc::new(MemSessionRepo::new()),
             turn_repo: Arc::new(MemTurnRepo::new()),
             transcript_repo: Arc::new(MemTranscriptRepo::new()),
+            approval_repo: Arc::new(MemApprovalRepo::new()),
             workspace_root,
         }
     }
@@ -420,6 +553,7 @@ impl TestHarness {
             self.session_repo.clone(),
             self.turn_repo.clone(),
             self.transcript_repo.clone(),
+            self.approval_repo.clone(),
             model,
             tool_executor,
             Arc::new(tool_registry),
@@ -469,6 +603,10 @@ async fn full_turn_cycle_no_tools() {
     assert_eq!(usage.model_calls, 1);
     assert_eq!(usage.prompt_tokens, 10);
     assert_eq!(usage.completion_tokens, 5);
+
+    let persisted_turn = h.turn_repo.find_by_id(turn.id).await.unwrap();
+    assert_eq!(persisted_turn.usage_prompt_tokens, Some(10));
+    assert_eq!(persisted_turn.usage_completion_tokens, Some(5));
 
     let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
     assert_eq!(transcript.len(), 2);
@@ -688,13 +826,11 @@ async fn approval_required_is_attributed_in_transcript() {
         requires_approval: true,
     });
 
-    struct ApprovalRequiringTool;
-
-    #[async_trait]
-    impl ToolExecutor for ApprovalRequiringTool {
-        async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
-            Err(ToolError::ApprovalRequired {
-                tool: call.tool_name,
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
                 details: serde_json::to_string(&ApprovalRequest {
                     tool_name: "exec".to_string(),
                     risk_level: RiskLevel::Medium,
@@ -712,13 +848,143 @@ async fn approval_required_is_attributed_in_transcript() {
                     command: Some("rm -rf /tmp/demo".to_string()),
                 })
                 .unwrap(),
-            })
+            },
+        ])),
+        registry,
+    );
+    let (turn, _) = executor.execute(session.id, "Run it", None).await.unwrap();
+    assert_eq!(turn.status, "tool_executing");
+    assert!(turn.ended_at.is_none());
+
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_eq!(session_row.status, "waiting_for_approval");
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let kinds: Vec<&str> = transcript.iter().map(|t| t.kind.as_str()).collect();
+    assert_eq!(kinds, ["user_message", "tool_request", "approval_request"]);
+
+    let approval_request_item: rune_core::TranscriptItem =
+        serde_json::from_value(transcript[2].payload.clone()).unwrap();
+    match approval_request_item {
+        rune_core::TranscriptItem::ApprovalRequest { command, .. } => {
+            assert_eq!(command.as_deref(), Some("rm -rf /tmp/demo"));
         }
+        other => panic!("unexpected transcript item: {other:?}"),
     }
 
-    let executor = h.turn_executor(model, Arc::new(ApprovalRequiringTool), registry);
-    let (turn, _) = executor.execute(session.id, "Run it", None).await.unwrap();
-    assert_eq!(turn.status, "completed");
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(approvals[0].subject_type, "tool_call");
+    assert_eq!(approvals[0].reason, "exec");
+    assert!(approvals[0].decision.is_none());
+    assert_eq!(approvals[0].presented_payload["tool_name"], "exec");
+    assert_eq!(
+        approvals[0].presented_payload["command"],
+        "rm -rf /tmp/demo"
+    );
+}
+
+#[tokio::test]
+async fn approval_allow_once_resumes_blocked_turn() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"echo hi"}"#),
+        FakeModelProvider::text_response("done after approval"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({"command": "echo hi"}),
+                    command: Some("echo hi".to_string()),
+                })
+                .unwrap(),
+            },
+            FakeToolStep::Output("approved output".to_string()),
+        ])),
+        registry,
+    );
+
+    let (turn, _) = executor.execute(session.id, "run it", None).await.unwrap();
+    assert_eq!(turn.status, "tool_executing");
+    assert!(turn.ended_at.is_none());
+
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    assert_eq!(approvals.len(), 1);
+    let decided = h
+        .approval_repo
+        .decide(
+            approvals[0].id,
+            "allow_once",
+            "operator",
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(decided.decision.as_deref(), Some("allow_once"));
+
+    let (resumed_turn, usage) = executor.resume_approval(approvals[0].id).await.unwrap();
+    assert_eq!(resumed_turn.id, turn.id);
+    assert_eq!(resumed_turn.status, "completed");
+    assert_eq!(usage.model_calls, 1);
+
+    let approval_after_resume = h.approval_repo.find_by_id(approvals[0].id).await.unwrap();
+    assert_eq!(
+        approval_after_resume.presented_payload["resume_status"],
+        "completed"
+    );
+    assert_eq!(
+        approval_after_resume.presented_payload["approval_status"],
+        "completed"
+    );
+    assert!(
+        approval_after_resume
+            .presented_payload
+            .get("resumed_at")
+            .is_some()
+    );
+    assert!(
+        approval_after_resume
+            .presented_payload
+            .get("approval_status_updated_at")
+            .is_some()
+    );
+    assert!(
+        approval_after_resume
+            .presented_payload
+            .get("completed_at")
+            .is_some()
+    );
+    assert_eq!(
+        approval_after_resume.presented_payload["resume_result_summary"],
+        "approved output"
+    );
 
     let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
     let kinds: Vec<&str> = transcript.iter().map(|t| t.kind.as_str()).collect();
@@ -734,35 +1000,76 @@ async fn approval_required_is_attributed_in_transcript() {
         ]
     );
 
-    let approval_request_item: rune_core::TranscriptItem =
-        serde_json::from_value(transcript[2].payload.clone()).unwrap();
-    match approval_request_item {
-        rune_core::TranscriptItem::ApprovalRequest { command, .. } => {
-            assert_eq!(command.as_deref(), Some("rm -rf /tmp/demo"));
-        }
-        other => panic!("unexpected transcript item: {other:?}"),
-    }
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_eq!(session_row.status, "running");
+}
 
-    let approval_response_item: rune_core::TranscriptItem =
-        serde_json::from_value(transcript[3].payload.clone()).unwrap();
-    match approval_response_item {
-        rune_core::TranscriptItem::ApprovalResponse { decision, .. } => {
-            assert_eq!(decision, rune_core::ApprovalDecision::Deny);
-        }
-        other => panic!("unexpected transcript item: {other:?}"),
-    }
+#[tokio::test]
+async fn approval_resume_does_not_mark_completed_at_before_completion() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
 
-    let tool_result_item: rune_core::TranscriptItem =
-        serde_json::from_value(transcript[4].payload.clone()).unwrap();
-    match tool_result_item {
-        rune_core::TranscriptItem::ToolResult {
-            is_error, output, ..
-        } => {
-            assert!(is_error);
-            assert!(output.contains("Approval required for tool exec"));
-        }
-        other => panic!("unexpected transcript item: {other:?}"),
-    }
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"echo hi"}"#),
+        FakeModelProvider::text_response("done after approval"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({"command": "echo hi"}),
+                    command: Some("echo hi".to_string()),
+                })
+                .unwrap(),
+            },
+            FakeToolStep::Output("approved output".to_string()),
+        ])),
+        registry,
+    );
+
+    executor.execute(session.id, "run it", None).await.unwrap();
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    h.approval_repo
+        .decide(
+            approvals[0].id,
+            "allow_once",
+            "operator",
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+    let decided = h.approval_repo.find_by_id(approvals[0].id).await.unwrap();
+    assert!(decided.presented_payload.get("completed_at").is_none());
+
+    executor.resume_approval(approvals[0].id).await.unwrap();
+
+    let completed = h.approval_repo.find_by_id(approvals[0].id).await.unwrap();
+    assert!(completed.presented_payload.get("completed_at").is_some());
 }
 
 #[tokio::test]
@@ -848,6 +1155,37 @@ async fn session_parent_linkage() {
     assert_eq!(channel_session.kind, "channel");
     assert_eq!(channel_session.channel_ref, Some("telegram".to_string()));
     assert!(channel_session.requester_session_id.is_none());
+
+    let scheduled_main = engine
+        .create_session_full(
+            SessionKind::Scheduled,
+            Some("/workspace".to_string()),
+            None,
+            Some("system:scheduled-main".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let isolated_run = engine
+        .create_session_full(
+            SessionKind::Subagent,
+            Some("/workspace".to_string()),
+            Some(scheduled_main.id),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let resumed_main = engine
+        .get_session_by_channel_ref("system:scheduled-main")
+        .await
+        .unwrap()
+        .expect("scheduled main session should resolve by channel ref");
+
+    assert_eq!(resumed_main.id, scheduled_main.id);
+    assert_eq!(resumed_main.kind, "scheduled");
+    assert_eq!(isolated_run.kind, "subagent");
+    assert_eq!(isolated_run.requester_session_id, Some(scheduled_main.id));
 
     assert!(parent.requester_session_id.is_none());
     assert!(parent.channel_ref.is_none());

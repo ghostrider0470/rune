@@ -16,6 +16,7 @@ pub trait SessionSpawner: Send + Sync {
     /// Spawn a new isolated session. Returns JSON with session details.
     async fn spawn_session(
         &self,
+        requester_session_id: Option<&str>,
         task: &str,
         model: Option<&str>,
         mode: Option<&str>,
@@ -50,14 +51,32 @@ impl<S: SessionSpawner> SpawnToolExecutor<S> {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgument("missing required parameter: task".into()))?;
 
+        let requester_session_id = call
+            .arguments
+            .get("sessionKey")
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                call.arguments
+                    .get("requesterSessionId")
+                    .and_then(|v| v.as_str())
+            });
         let model = call.arguments.get("model").and_then(|v| v.as_str());
         let mode = call.arguments.get("mode").and_then(|v| v.as_str());
         let timeout = call
             .arguments
             .get("timeoutSeconds")
-            .and_then(|v| v.as_u64());
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                call.arguments
+                    .get("runTimeoutSeconds")
+                    .and_then(|v| v.as_u64())
+            });
 
-        match self.spawner.spawn_session(task, model, mode, timeout).await {
+        match self
+            .spawner
+            .spawn_session(requester_session_id, task, model, mode, timeout)
+            .await
+        {
             Ok(output) => Ok(ToolResult {
                 tool_call_id: call.tool_call_id,
                 output,
@@ -81,7 +100,11 @@ impl<S: SessionSpawner> SpawnToolExecutor<S> {
                 ToolError::InvalidArgument("missing required parameter: message".into())
             })?;
 
-        let session_key = call.arguments.get("sessionKey").and_then(|v| v.as_str());
+        let session_key = call
+            .arguments
+            .get("sessionKey")
+            .and_then(|v| v.as_str())
+            .or_else(|| call.arguments.get("agentId").and_then(|v| v.as_str()));
         let label = call.arguments.get("label").and_then(|v| v.as_str());
 
         if session_key.is_none() && label.is_none() {
@@ -127,6 +150,7 @@ mod tests {
     impl SessionSpawner for MockSpawner {
         async fn spawn_session(
             &self,
+            _requester_session_id: Option<&str>,
             task: &str,
             _model: Option<&str>,
             _mode: Option<&str>,
@@ -188,5 +212,45 @@ mod tests {
         let result = exec.execute(call).await.unwrap();
         assert!(!result.is_error);
         assert!(result.output.contains("delivered"));
+    }
+
+    #[tokio::test]
+    async fn send_accepts_agent_id_alias() {
+        let exec = SpawnToolExecutor::new(MockSpawner);
+        let call = make_call(
+            "sessions_send",
+            serde_json::json!({"agentId": "coder", "message": "hello"}),
+        );
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.output.contains("coder"));
+    }
+
+    #[tokio::test]
+    async fn spawn_accepts_run_timeout_alias() {
+        let exec = SpawnToolExecutor::new(MockSpawner);
+        let call = make_call(
+            "sessions_spawn",
+            serde_json::json!({"task": "build a feature", "runTimeoutSeconds": 30}),
+        );
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.output.contains("sub-1"));
+    }
+
+    #[tokio::test]
+    async fn spawn_accepts_requester_session_aliases() {
+        let exec = SpawnToolExecutor::new(MockSpawner);
+        let call = make_call(
+            "sessions_spawn",
+            serde_json::json!({
+                "task": "build a feature",
+                "sessionKey": "agent:main:123",
+                "requesterSessionId": "agent:main:456"
+            }),
+        );
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.output.contains("sub-1"));
     }
 }

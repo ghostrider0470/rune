@@ -69,6 +69,14 @@ pub trait TurnRepo: Send + Sync {
         status: &str,
         ended_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<TurnRow, StoreError>;
+
+    /// Persist token usage counters for a turn.
+    async fn update_usage(
+        &self,
+        id: Uuid,
+        prompt_tokens: i32,
+        completion_tokens: i32,
+    ) -> Result<TurnRow, StoreError>;
 }
 
 // ── Transcript repository ─────────────────────────────────────────────
@@ -88,6 +96,7 @@ pub trait TranscriptRepo: Send + Sync {
 
 /// Persistence contract for scheduled jobs.
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait JobRepo: Send + Sync {
     /// Insert a new job.
     async fn create(&self, job: NewJob) -> Result<JobRow, StoreError>;
@@ -98,6 +107,28 @@ pub trait JobRepo: Send + Sync {
     /// List all enabled jobs.
     async fn list_enabled(&self) -> Result<Vec<JobRow>, StoreError>;
 
+    /// List jobs of a specific type, optionally including disabled rows.
+    async fn list_by_type(
+        &self,
+        job_type: &str,
+        include_disabled: bool,
+    ) -> Result<Vec<JobRow>, StoreError>;
+
+    /// Update the durable state of a job row.
+    async fn update_job(
+        &self,
+        id: Uuid,
+        enabled: bool,
+        due_at: Option<chrono::DateTime<chrono::Utc>>,
+        payload: serde_json::Value,
+        updated_at: chrono::DateTime<chrono::Utc>,
+        last_run_at: Option<chrono::DateTime<chrono::Utc>>,
+        next_run_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<JobRow, StoreError>;
+
+    /// Delete a job row. Returns true when a row was removed.
+    async fn delete(&self, id: Uuid) -> Result<bool, StoreError>;
+
     /// Update last_run_at and next_run_at after a run.
     async fn record_run(
         &self,
@@ -105,6 +136,31 @@ pub trait JobRepo: Send + Sync {
         last_run_at: chrono::DateTime<chrono::Utc>,
         next_run_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<JobRow, StoreError>;
+}
+
+// ── Job run repository ──────────────────────────────────────────────────────
+
+/// Persistence contract for durable scheduled-job run history.
+#[async_trait]
+pub trait JobRunRepo: Send + Sync {
+    /// Insert a new job-run row when execution starts.
+    async fn create(&self, run: NewJobRun) -> Result<JobRunRow, StoreError>;
+
+    /// Mark a job run complete and persist final status/output.
+    async fn complete(
+        &self,
+        id: Uuid,
+        status: &str,
+        output: Option<&str>,
+        finished_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<JobRunRow, StoreError>;
+
+    /// List runs for a job, newest first.
+    async fn list_by_job(
+        &self,
+        job_id: Uuid,
+        limit: Option<i64>,
+    ) -> Result<Vec<JobRunRow>, StoreError>;
 }
 
 // ── Approval repository ───────────────────────────────────────────────
@@ -118,6 +174,9 @@ pub trait ApprovalRepo: Send + Sync {
     /// Find an approval by ID.
     async fn find_by_id(&self, id: Uuid) -> Result<ApprovalRow, StoreError>;
 
+    /// List approvals, optionally filtering to unresolved-only rows.
+    async fn list(&self, pending_only: bool) -> Result<Vec<ApprovalRow>, StoreError>;
+
     /// Record a decision on a pending approval.
     async fn decide(
         &self,
@@ -125,6 +184,13 @@ pub trait ApprovalRepo: Send + Sync {
         decision: &str,
         decided_by: &str,
         decided_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<ApprovalRow, StoreError>;
+
+    /// Replace the presented payload for an approval row.
+    async fn update_presented_payload(
+        &self,
+        id: Uuid,
+        presented_payload: serde_json::Value,
     ) -> Result<ApprovalRow, StoreError>;
 }
 
@@ -151,7 +217,11 @@ pub trait ToolApprovalPolicyRepo: Send + Sync {
     async fn get_policy(&self, tool_name: &str) -> Result<Option<ToolApprovalPolicy>, StoreError>;
 
     /// Upsert a policy for the given tool. Replaces any existing row.
-    async fn set_policy(&self, tool_name: &str, decision: &str) -> Result<ToolApprovalPolicy, StoreError>;
+    async fn set_policy(
+        &self,
+        tool_name: &str,
+        decision: &str,
+    ) -> Result<ToolApprovalPolicy, StoreError>;
 
     /// Remove the policy for a tool. Returns `true` if a row was deleted.
     async fn clear_policy(&self, tool_name: &str) -> Result<bool, StoreError>;
@@ -167,6 +237,9 @@ pub trait ToolExecutionRepo: Send + Sync {
 
     /// Find a tool execution by ID.
     async fn find_by_id(&self, id: Uuid) -> Result<ToolExecutionRow, StoreError>;
+
+    /// List the most recent tool execution rows, newest first.
+    async fn list_recent(&self, limit: i64) -> Result<Vec<ToolExecutionRow>, StoreError>;
 
     /// Update status and result after execution completes.
     async fn complete(

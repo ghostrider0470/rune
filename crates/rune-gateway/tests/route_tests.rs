@@ -12,6 +12,8 @@ use tokio::sync::{Mutex, broadcast};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use chrono::Timelike;
+
 use rune_config::{AppConfig, ConfiguredModel, ModelProviderConfig};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
@@ -25,6 +27,7 @@ use rune_store::StoreError;
 use rune_store::models::*;
 use rune_store::repos::*;
 use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
+use std::collections::HashMap;
 
 use rune_gateway::{AppState, SessionEvent, build_router};
 
@@ -209,6 +212,25 @@ impl TurnRepo for MemTurnRepo {
         }
         Ok(turn.clone())
     }
+
+    async fn update_usage(
+        &self,
+        id: Uuid,
+        prompt_tokens: i32,
+        completion_tokens: i32,
+    ) -> Result<TurnRow, StoreError> {
+        let mut turns = self.turns.lock().await;
+        let turn = turns
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "turn",
+                id: id.to_string(),
+            })?;
+        turn.usage_prompt_tokens = Some(prompt_tokens);
+        turn.usage_completion_tokens = Some(completion_tokens);
+        Ok(turn.clone())
+    }
 }
 
 struct MemTranscriptRepo {
@@ -280,34 +302,142 @@ impl ModelProvider for FakeModelProvider {
 
 // ── Fake tool approval policy repo ─────────────────────────────────────────────
 
-struct MemToolApprovalPolicyRepo;
+struct MemApprovalRepo {
+    approvals: Mutex<Vec<ApprovalRow>>,
+}
+
+impl MemApprovalRepo {
+    fn new() -> Self {
+        Self {
+            approvals: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl ApprovalRepo for MemApprovalRepo {
+    async fn create(&self, approval: NewApproval) -> Result<ApprovalRow, StoreError> {
+        let row = ApprovalRow {
+            id: approval.id,
+            subject_type: approval.subject_type,
+            subject_id: approval.subject_id,
+            reason: approval.reason,
+            decision: None,
+            decided_by: None,
+            decided_at: None,
+            presented_payload: approval.presented_payload,
+            created_at: approval.created_at,
+        };
+        self.approvals.lock().await.push(row.clone());
+        Ok(row)
+    }
+
+    async fn find_by_id(&self, id: Uuid) -> Result<ApprovalRow, StoreError> {
+        self.approvals
+            .lock()
+            .await
+            .iter()
+            .find(|approval| approval.id == id)
+            .cloned()
+            .ok_or(StoreError::NotFound {
+                entity: "approval",
+                id: id.to_string(),
+            })
+    }
+
+    async fn list(&self, pending_only: bool) -> Result<Vec<ApprovalRow>, StoreError> {
+        let approvals = self.approvals.lock().await;
+        Ok(approvals
+            .iter()
+            .filter(|approval| !pending_only || approval.decision.is_none())
+            .cloned()
+            .collect())
+    }
+
+    async fn decide(
+        &self,
+        id: Uuid,
+        decision: &str,
+        decided_by: &str,
+        decided_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<ApprovalRow, StoreError> {
+        let mut approvals = self.approvals.lock().await;
+        let approval = approvals
+            .iter_mut()
+            .find(|approval| approval.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "approval",
+                id: id.to_string(),
+            })?;
+        approval.decision = Some(decision.to_string());
+        approval.decided_by = Some(decided_by.to_string());
+        approval.decided_at = Some(decided_at);
+        Ok(approval.clone())
+    }
+
+    async fn update_presented_payload(
+        &self,
+        id: Uuid,
+        presented_payload: serde_json::Value,
+    ) -> Result<ApprovalRow, StoreError> {
+        let mut approvals = self.approvals.lock().await;
+        let approval = approvals
+            .iter_mut()
+            .find(|approval| approval.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "approval",
+                id: id.to_string(),
+            })?;
+        approval.presented_payload = presented_payload;
+        Ok(approval.clone())
+    }
+}
+
+struct MemToolApprovalPolicyRepo {
+    policies: Mutex<HashMap<String, rune_store::repos::ToolApprovalPolicy>>,
+}
+
+impl MemToolApprovalPolicyRepo {
+    fn new() -> Self {
+        Self {
+            policies: Mutex::new(HashMap::new()),
+        }
+    }
+}
 
 #[async_trait]
 impl ToolApprovalPolicyRepo for MemToolApprovalPolicyRepo {
     async fn list_policies(
         &self,
     ) -> Result<Vec<rune_store::repos::ToolApprovalPolicy>, StoreError> {
-        Ok(vec![])
+        let mut values: Vec<_> = self.policies.lock().await.values().cloned().collect();
+        values.sort_by(|a, b| a.tool_name.cmp(&b.tool_name));
+        Ok(values)
     }
     async fn get_policy(
         &self,
-        _tool_name: &str,
+        tool_name: &str,
     ) -> Result<Option<rune_store::repos::ToolApprovalPolicy>, StoreError> {
-        Ok(None)
+        Ok(self.policies.lock().await.get(tool_name).cloned())
     }
     async fn set_policy(
         &self,
         tool_name: &str,
         decision: &str,
     ) -> Result<rune_store::repos::ToolApprovalPolicy, StoreError> {
-        Ok(rune_store::repos::ToolApprovalPolicy {
+        let policy = rune_store::repos::ToolApprovalPolicy {
             tool_name: tool_name.to_string(),
             decision: decision.to_string(),
             decided_at: chrono::Utc::now(),
-        })
+        };
+        self.policies
+            .lock()
+            .await
+            .insert(tool_name.to_string(), policy.clone());
+        Ok(policy)
     }
-    async fn clear_policy(&self, _tool_name: &str) -> Result<bool, StoreError> {
-        Ok(false)
+    async fn clear_policy(&self, tool_name: &str) -> Result<bool, StoreError> {
+        Ok(self.policies.lock().await.remove(tool_name).is_some())
     }
 }
 
@@ -339,6 +469,7 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
     let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
     let scheduler = Arc::new(Scheduler::new());
 
@@ -356,8 +487,9 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo as Arc<dyn TurnRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
             transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
             model_provider.clone(),
             tool_executor,
             tool_registry,
@@ -378,11 +510,14 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
         turn_executor,
         session_repo: session_repo as Arc<dyn SessionRepo>,
         transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
         model_provider,
         scheduler,
         heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
         reminder_store: Arc::new(ReminderStore::new()),
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo) as Arc<dyn ToolApprovalPolicyRepo>,
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
         tool_count: 0,
         event_tx,
     };
@@ -681,12 +816,14 @@ async fn send_message_and_transcript_with_shared_state() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
 
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo as Arc<dyn TurnRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
             transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
             model_provider.clone(),
             tool_executor,
             tool_registry,
@@ -705,11 +842,14 @@ async fn send_message_and_transcript_with_shared_state() {
         turn_executor,
         session_repo: session_repo as Arc<dyn SessionRepo>,
         transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
         model_provider,
         scheduler,
         heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
         reminder_store: Arc::new(ReminderStore::new()),
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo) as Arc<dyn ToolApprovalPolicyRepo>,
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
         tool_count: 0,
         event_tx,
     };
@@ -788,6 +928,155 @@ async fn send_message_and_transcript_with_shared_state() {
 }
 
 #[tokio::test]
+async fn get_session_status_returns_parity_card_fields() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let session_json = body_json(response).await;
+    let session_id = session_json["id"].as_str().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/sessions/{session_id}/messages"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"content":"Hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["session_id"], session_id);
+    assert_eq!(json["status"], "created");
+    assert_eq!(json["current_model"], "fake-model");
+    assert_eq!(json["prompt_tokens"], 10);
+    assert_eq!(json["completion_tokens"], 5);
+    assert_eq!(json["total_tokens"], 15);
+    assert_eq!(json["turn_count"], 1);
+    assert_eq!(json["reasoning"], "off");
+    assert_eq!(json["approval_mode"], "on-miss");
+    assert_eq!(json["security_mode"], "allowlist");
+    assert!(json["unresolved"].is_array());
+    let unresolved = json["unresolved"].as_array().unwrap();
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
+}
+
+#[tokio::test]
+async fn get_session_returns_aggregate_usage_and_turn_metadata() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let session_json = body_json(response).await;
+    let session_id = session_json["id"].as_str().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/sessions/{session_id}/messages"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"content":"Hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["turn_count"], 1);
+    assert_eq!(json["latest_model"], "fake-model");
+    assert_eq!(json["usage_prompt_tokens"], 10);
+    assert_eq!(json["usage_completion_tokens"], 5);
+    assert!(json["last_turn_started_at"].is_string());
+    assert!(json["last_turn_ended_at"].is_string());
+}
+
+#[tokio::test]
+async fn list_sessions_includes_turn_aggregates() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let session_json = body_json(response).await;
+    let session_id = session_json["id"].as_str().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/sessions/{session_id}/messages"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"content":"Hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(Request::get("/sessions").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let sessions = json.as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["turn_count"], 1);
+    assert_eq!(sessions[0]["latest_model"], "fake-model");
+    assert_eq!(sessions[0]["usage_prompt_tokens"], 10);
+    assert_eq!(sessions[0]["usage_completion_tokens"], 5);
+}
+
+#[tokio::test]
 async fn get_session_not_found() {
     let app = build_test_app(None);
     let fake_id = Uuid::now_v7();
@@ -846,6 +1135,154 @@ async fn list_sessions_empty() {
 }
 
 #[tokio::test]
+async fn cron_add_computes_real_next_run_for_cron_schedule() {
+    let app = build_test_app(None);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/cron")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "name":"daily-check",
+                        "schedule":{"kind":"cron","expr":"0 0 9 * * *","tz":"Europe/Sarajevo"},
+                        "payload":{"kind":"system_event","text":"run daily check"},
+                        "sessionTarget":"main",
+                        "enabled":true
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let response = app
+        .oneshot(Request::get("/cron").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let next_run_at = items[0]["next_run_at"].as_str().unwrap();
+    let parsed = chrono::DateTime::parse_from_rfc3339(next_run_at).unwrap();
+    let local = parsed.with_timezone(&"Europe/Sarajevo".parse::<chrono_tz::Tz>().unwrap());
+    assert_eq!(local.hour(), 9);
+    assert_eq!(local.minute(), 0);
+    assert_eq!(local.second(), 0);
+}
+
+#[tokio::test]
+async fn cron_add_respects_interval_anchor_for_first_run() {
+    let app = build_test_app(None);
+    let anchor = (chrono::Utc::now() + chrono::Duration::minutes(7)).timestamp_millis();
+    let body = serde_json::json!({
+        "name": "anchored-interval",
+        "schedule": {"kind": "every", "every_ms": 300000_u64, "anchor_ms": anchor},
+        "payload": {"kind": "system_event", "text": "anchored interval"},
+        "sessionTarget": "main",
+        "enabled": true
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/cron")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let response = app
+        .oneshot(Request::get("/cron").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    let next_run_at = items[0]["next_run_at"].as_str().unwrap();
+    let parsed = chrono::DateTime::parse_from_rfc3339(next_run_at).unwrap();
+    assert_eq!(parsed.timestamp_millis(), anchor);
+}
+
+#[tokio::test]
+async fn cron_run_executes_and_records_run_history() {
+    let app = build_test_app(None);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/cron")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "name":"run-now",
+                        "schedule":{"kind":"every","every_ms":60000},
+                        "payload":{"kind":"system_event","text":"manual trigger"},
+                        "sessionTarget":"main",
+                        "enabled":true
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let job_id = created["job_id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/cron/{job_id}/run"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/cron/{job_id}/runs"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let runs = body_json(response).await;
+    let items = runs.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["status"], "completed");
+    assert_eq!(items[0]["job_id"], job_id);
+    assert_eq!(items[0]["output"], "Hello from fake model!");
+
+    let response = app
+        .oneshot(Request::get("/cron").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let jobs = body_json(response).await;
+    let job = jobs
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == job_id)
+        .unwrap();
+    assert_eq!(job["run_count"], 1);
+    assert!(job["last_run_at"].is_string());
+    assert!(job["next_run_at"].is_string());
+}
+
+#[tokio::test]
 async fn list_sessions_filters_by_channel_and_activity() {
     let session_repo = Arc::new(MemSessionRepo::new());
     let now = chrono::Utc::now();
@@ -891,11 +1328,13 @@ async fn list_sessions_filters_by_channel_and_activity() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo as Arc<dyn TurnRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
             transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
             model_provider.clone(),
             tool_executor,
             tool_registry,
@@ -912,11 +1351,14 @@ async fn list_sessions_filters_by_channel_and_activity() {
         turn_executor,
         session_repo: session_repo as Arc<dyn SessionRepo>,
         transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
         model_provider,
         scheduler,
         heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
         reminder_store: Arc::new(ReminderStore::new()),
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo) as Arc<dyn ToolApprovalPolicyRepo>,
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
         tool_count: 0,
         event_tx,
     };

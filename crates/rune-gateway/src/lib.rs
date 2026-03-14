@@ -14,3 +14,4 @@ pub use logging::init_logging;
 pub use server::{GatewayHandle, Services, build_router, start};
 pub use state::{AppState, SessionEvent};
 pub use supervisor::BackgroundSupervisor;
+pub(crate) use supervisor::{SupervisorDeps, run_job_lifecycle};

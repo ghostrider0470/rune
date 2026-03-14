@@ -18,10 +18,12 @@ use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, Schedule, SessionTarget,
 };
-use rune_store::models::SessionRow;
+use rune_store::models::{SessionRow, TurnRow};
+use serde_json::Value;
 
 use crate::error::GatewayError;
 use crate::state::{AppState, SessionEvent};
+use crate::{SupervisorDeps, run_job_lifecycle};
 
 // ── Health & Status ───────────────────────────────────────────────────────────
 
@@ -561,21 +563,25 @@ pub async fn cron_run(
         .await
         .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
 
-    let run = state.scheduler.start_run(job_id).await;
-    let output = simulated_job_output(&job);
-    state
-        .scheduler
-        .complete_run(job_id, JobRunStatus::Completed, Some(output.clone()))
-        .await;
-    state.scheduler.advance_next_run(&job_id).await;
+    let deps = SupervisorDeps {
+        heartbeat: state.heartbeat.clone(),
+        scheduler: state.scheduler.clone(),
+        reminder_store: state.reminder_store.clone(),
+        session_engine: state.session_engine.clone(),
+        turn_executor: state.turn_executor.clone(),
+        workspace_root: state.config.agents.defaults.workspace.clone(),
+    };
+
+    let started_at = Utc::now();
+    let (status, output) = run_job_lifecycle(&deps, &job, true).await;
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: job_id.to_string(),
         kind: "cron_run_completed".to_string(),
         payload: json!({
             "job_id": job_id.to_string(),
-            "started_at": run.started_at,
-            "status": "completed",
+            "started_at": started_at,
+            "status": status,
             "output": output,
         }),
     });
@@ -658,6 +664,15 @@ pub struct SessionResponse {
     pub channel_ref: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub turn_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_model: Option<String>,
+    pub usage_prompt_tokens: u64,
+    pub usage_completion_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_turn_started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_turn_ended_at: Option<String>,
 }
 
 /// Lightweight session summary for list output.
@@ -667,6 +682,11 @@ pub struct SessionListItem {
     pub status: String,
     pub channel: Option<String>,
     pub created_at: String,
+    pub turn_count: u32,
+    pub usage_prompt_tokens: u64,
+    pub usage_completion_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_model: Option<String>,
 }
 
 /// `GET /sessions` — list sessions.
@@ -686,7 +706,8 @@ pub async fn list_sessions(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
-    let items = rows
+    let mut items = Vec::new();
+    for row in rows
         .into_iter()
         .filter(|row| {
             channel_filter
@@ -698,13 +719,24 @@ pub async fn list_sessions(
                 .map(|cutoff| row.last_activity_at >= cutoff)
                 .unwrap_or(true)
         })
-        .map(|row| SessionListItem {
+    {
+        let turns = state
+            .turn_repo
+            .list_by_session(row.id)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+        let aggregate = aggregate_turns(&turns);
+        items.push(SessionListItem {
             id: row.id.to_string(),
             status: row.status,
             channel: row.channel_ref,
             created_at: row.created_at.to_rfc3339(),
-        })
-        .collect();
+            turn_count: aggregate.turn_count,
+            usage_prompt_tokens: aggregate.usage_prompt_tokens,
+            usage_completion_tokens: aggregate.usage_completion_tokens,
+            latest_model: aggregate.latest_model,
+        });
+    }
 
     Ok(Json(items))
 }
@@ -749,8 +781,43 @@ pub async fn create_session(
             channel_ref: row.channel_ref,
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
+            turn_count: 0,
+            latest_model: None,
+            usage_prompt_tokens: 0,
+            usage_completion_tokens: 0,
+            last_turn_started_at: None,
+            last_turn_ended_at: None,
         }),
     ))
+}
+
+/// First-class session status parity card for `/sessions/{id}/status`.
+#[derive(Serialize)]
+pub struct SessionStatusResponse {
+    pub session_id: String,
+    pub runtime: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_cost: Option<String>,
+    pub turn_count: u32,
+    pub uptime_seconds: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_turn_started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_turn_ended_at: Option<String>,
+    pub reasoning: String,
+    pub verbose: bool,
+    pub elevated: bool,
+    pub approval_mode: String,
+    pub security_mode: String,
+    pub unresolved: Vec<String>,
 }
 
 /// `GET /sessions/{id}` — get session by ID.
@@ -764,6 +831,13 @@ pub async fn get_session(
         .await
         .map_err(|e| GatewayError::SessionNotFound(e.to_string()))?;
 
+    let turns = state
+        .turn_repo
+        .list_by_session(row.id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let aggregate = aggregate_turns(&turns);
+
     Ok(Json(SessionResponse {
         id: row.id,
         kind: row.kind,
@@ -772,6 +846,85 @@ pub async fn get_session(
         channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),
         updated_at: row.updated_at.to_rfc3339(),
+        turn_count: aggregate.turn_count,
+        latest_model: aggregate.latest_model,
+        usage_prompt_tokens: aggregate.usage_prompt_tokens,
+        usage_completion_tokens: aggregate.usage_completion_tokens,
+        last_turn_started_at: aggregate.last_turn_started_at,
+        last_turn_ended_at: aggregate.last_turn_ended_at,
+    }))
+}
+
+/// `GET /sessions/{id}/status` — first-class session status parity card.
+pub async fn get_session_status(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SessionStatusResponse>, GatewayError> {
+    let row = state
+        .session_engine
+        .get_session(id)
+        .await
+        .map_err(|e| GatewayError::SessionNotFound(e.to_string()))?;
+
+    let turns = state
+        .turn_repo
+        .list_by_session(row.id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let aggregate = aggregate_turns(&turns);
+
+    let metadata = &row.metadata;
+    let model_override = metadata_string(metadata, "selected_model");
+    let current_model = aggregate
+        .latest_model
+        .clone()
+        .or_else(|| model_override.clone());
+    let approval_mode =
+        metadata_string(metadata, "approval_mode").unwrap_or_else(|| "on-miss".to_string());
+    let security_mode =
+        metadata_string(metadata, "security_mode").unwrap_or_else(|| "allowlist".to_string());
+    let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
+    let verbose = metadata_bool(metadata, "verbose").unwrap_or(false);
+    let elevated = metadata_bool(metadata, "elevated").unwrap_or(false);
+
+    let mut unresolved = Vec::new();
+    unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
+    if approval_mode == "on-miss" {
+        unresolved.push(
+            "approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet".to_string(),
+        );
+    }
+    if security_mode == "allowlist" {
+        unresolved.push(
+            "host/node/sandbox parity and PTY fidelity are not yet parity-complete".to_string(),
+        );
+    }
+
+    Ok(Json(SessionStatusResponse {
+        session_id: row.id.to_string(),
+        runtime: format!(
+            "kind={} | channel={} | status={}",
+            row.kind,
+            row.channel_ref.as_deref().unwrap_or("local"),
+            row.status
+        ),
+        status: row.status,
+        current_model,
+        model_override,
+        prompt_tokens: aggregate.usage_prompt_tokens,
+        completion_tokens: aggregate.usage_completion_tokens,
+        total_tokens: aggregate.usage_prompt_tokens + aggregate.usage_completion_tokens,
+        estimated_cost: Some("not available".to_string()),
+        turn_count: aggregate.turn_count,
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        last_turn_started_at: aggregate.last_turn_started_at,
+        last_turn_ended_at: aggregate.last_turn_ended_at,
+        reasoning,
+        verbose,
+        elevated,
+        approval_mode,
+        security_mode,
+        unresolved,
     }))
 }
 
@@ -982,20 +1135,60 @@ fn validate_job_contract(
 }
 
 fn initial_next_run(schedule: &Schedule) -> Option<DateTime<Utc>> {
+    let now = Utc::now();
     match schedule {
         Schedule::At { at } => Some(*at),
-        Schedule::Every { every_ms, .. } => {
-            Some(Utc::now() + chrono::Duration::milliseconds(*every_ms as i64))
-        }
-        Schedule::Cron { .. } => Some(Utc::now() + chrono::Duration::hours(1)),
+        Schedule::Every {
+            every_ms,
+            anchor_ms,
+        } => Some(compute_next_interval_run(*every_ms, *anchor_ms, now)),
+        Schedule::Cron { expr, tz } => compute_next_cron_run(expr, tz.as_deref(), now),
     }
 }
 
-fn simulated_job_output(job: &Job) -> String {
-    match &job.payload {
-        JobPayload::SystemEvent { text } => format!("system event delivered: {text}"),
-        JobPayload::AgentTurn { message, .. } => format!("isolated agent turn queued: {message}"),
+fn compute_next_interval_run(
+    every_ms: u64,
+    anchor_ms: Option<u64>,
+    now: DateTime<Utc>,
+) -> DateTime<Utc> {
+    let duration = chrono::Duration::milliseconds(every_ms as i64);
+
+    if let Some(anchor_ms) = anchor_ms {
+        let Some(anchor) = DateTime::<Utc>::from_timestamp_millis(anchor_ms as i64) else {
+            return now + duration;
+        };
+
+        if anchor > now {
+            return anchor;
+        }
+
+        let elapsed_ms = (now - anchor).num_milliseconds();
+        if elapsed_ms < 0 {
+            return anchor;
+        }
+
+        let steps = (elapsed_ms / every_ms as i64) + 1;
+        return anchor + chrono::Duration::milliseconds(steps * every_ms as i64);
     }
+
+    now + duration
+}
+
+fn compute_next_cron_run(
+    expr: &str,
+    tz: Option<&str>,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let schedule = expr.parse::<cron::Schedule>().ok()?;
+    let timezone = match tz {
+        None => chrono_tz::UTC,
+        Some(value) => value.parse::<chrono_tz::Tz>().ok()?,
+    };
+    let after_local = now.with_timezone(&timezone);
+    schedule
+        .after(&after_local)
+        .next()
+        .map(|next| next.with_timezone(&Utc))
 }
 
 fn job_to_response(job: Job) -> CronJobResponse {
@@ -1023,6 +1216,37 @@ fn run_to_response(run: JobRun) -> CronRunResponse {
     }
 }
 
+struct SessionTurnAggregate {
+    turn_count: u32,
+    latest_model: Option<String>,
+    usage_prompt_tokens: u64,
+    usage_completion_tokens: u64,
+    last_turn_started_at: Option<String>,
+    last_turn_ended_at: Option<String>,
+}
+
+fn aggregate_turns(turns: &[TurnRow]) -> SessionTurnAggregate {
+    let turn_count = turns.len() as u32;
+    let usage_prompt_tokens = turns
+        .iter()
+        .map(|turn| turn.usage_prompt_tokens.unwrap_or(0).max(0) as u64)
+        .sum();
+    let usage_completion_tokens = turns
+        .iter()
+        .map(|turn| turn.usage_completion_tokens.unwrap_or(0).max(0) as u64)
+        .sum();
+    let latest_turn = turns.iter().max_by_key(|turn| turn.started_at);
+
+    SessionTurnAggregate {
+        turn_count,
+        latest_model: latest_turn.and_then(|turn| turn.model_ref.clone()),
+        usage_prompt_tokens,
+        usage_completion_tokens,
+        last_turn_started_at: latest_turn.map(|turn| turn.started_at.to_rfc3339()),
+        last_turn_ended_at: latest_turn.and_then(|turn| turn.ended_at.map(|dt| dt.to_rfc3339())),
+    }
+}
+
 fn resolved_default_model(state: &AppState) -> Option<String> {
     state
         .config
@@ -1041,6 +1265,18 @@ fn configured_channels(state: &AppState) -> Vec<String> {
     channels.sort();
     channels.dedup();
     channels
+}
+
+fn metadata_string(metadata: &Value, key: &str) -> Option<String> {
+    metadata
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+}
+
+fn metadata_bool(metadata: &Value, key: &str) -> Option<bool> {
+    metadata.get(key).and_then(Value::as_bool)
 }
 
 fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
@@ -1400,6 +1636,26 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 
 // ── Approvals ─────────────────────────────────────────────────────────
 
+/// Response for a pending or resolved approval request.
+#[derive(Serialize)]
+pub struct ApprovalRequestResponse {
+    pub id: String,
+    pub subject_type: String,
+    pub subject_id: String,
+    pub reason: String,
+    pub decision: Option<String>,
+    pub decided_by: Option<String>,
+    pub decided_at: Option<String>,
+    pub approval_status: Option<String>,
+    pub approval_status_updated_at: Option<String>,
+    pub resumed_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub resume_result_summary: Option<String>,
+    pub command: Option<String>,
+    pub presented_payload: Value,
+    pub created_at: String,
+}
+
 /// Response for a single tool approval policy.
 #[derive(Serialize)]
 pub struct ApprovalPolicyResponse {
@@ -1408,13 +1664,134 @@ pub struct ApprovalPolicyResponse {
     pub decided_at: String,
 }
 
-/// Request body for `PUT /approvals/{tool}`.
+/// Request body for `POST /approvals`.
+#[derive(Deserialize)]
+pub struct SubmitApprovalDecisionRequest {
+    pub id: String,
+    pub decision: String,
+    pub decided_by: Option<String>,
+}
+
+/// Request body for `PUT /approvals/policies/{tool}`.
 #[derive(Deserialize)]
 pub struct SetApprovalPolicyRequest {
     pub decision: String,
 }
 
-/// `GET /approvals` — list all tool approval policies.
+/// `GET /approvals` — list durable approval requests.
+pub async fn list_pending_approvals(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ApprovalRequestResponse>>, GatewayError> {
+    let approvals = state
+        .approval_repo
+        .list(true)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(
+        approvals
+            .into_iter()
+            .map(approval_to_response)
+            .collect(),
+    ))
+}
+
+/// `POST /approvals` — submit a decision for a durable approval request.
+pub async fn submit_approval_decision(
+    State(state): State<AppState>,
+    Json(body): Json<SubmitApprovalDecisionRequest>,
+) -> Result<Json<ApprovalRequestResponse>, GatewayError> {
+    let approval_id = Uuid::parse_str(&body.id)
+        .map_err(|_| GatewayError::BadRequest(format!("invalid approval id: {}", body.id)))?;
+
+    let normalised = body.decision.replace('-', "_");
+    let valid_decisions = ["allow_once", "allow_always", "deny"];
+    if !valid_decisions.contains(&normalised.as_str()) {
+        return Err(GatewayError::BadRequest(format!(
+            "invalid decision '{}'; expected one of: allow-once, allow-always, deny",
+            body.decision
+        )));
+    }
+
+    let decided = state
+        .approval_repo
+        .decide(
+            approval_id,
+            &normalised,
+            body.decided_by.as_deref().unwrap_or("operator"),
+            Utc::now(),
+        )
+        .await
+        .map_err(|e| match e {
+            rune_store::StoreError::NotFound { .. } => {
+                GatewayError::BadRequest(format!("no pending approval found for id: {}", body.id))
+            }
+            other => GatewayError::Internal(other.to_string()),
+        })?;
+
+    if normalised == "allow_always" && decided.subject_type == "tool_call" {
+        state
+            .tool_approval_repo
+            .set_policy(&decided.reason, "allow_always")
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    }
+
+    if decided.subject_type == "tool_call" {
+        state
+            .turn_executor
+            .resume_approval(decided.id)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    }
+
+    let decided = state
+        .approval_repo
+        .find_by_id(approval_id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(approval_to_response(decided)))
+}
+
+fn approval_payload_field(payload: &Value, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+fn approval_to_response(approval: rune_store::models::ApprovalRow) -> ApprovalRequestResponse {
+    let approval_status = approval_payload_field(&approval.presented_payload, "approval_status")
+        .or_else(|| approval_payload_field(&approval.presented_payload, "resume_status"));
+    let approval_status_updated_at =
+        approval_payload_field(&approval.presented_payload, "approval_status_updated_at");
+    let resumed_at = approval_payload_field(&approval.presented_payload, "resumed_at");
+    let completed_at = approval_payload_field(&approval.presented_payload, "completed_at");
+    let resume_result_summary =
+        approval_payload_field(&approval.presented_payload, "resume_result_summary");
+    let command = approval_payload_field(&approval.presented_payload, "command");
+
+    ApprovalRequestResponse {
+        id: approval.id.to_string(),
+        subject_type: approval.subject_type,
+        subject_id: approval.subject_id.to_string(),
+        reason: approval.reason,
+        decision: approval.decision,
+        decided_by: approval.decided_by,
+        decided_at: approval.decided_at.map(|value| value.to_rfc3339()),
+        approval_status,
+        approval_status_updated_at,
+        resumed_at,
+        completed_at,
+        resume_result_summary,
+        command,
+        presented_payload: approval.presented_payload,
+        created_at: approval.created_at.to_rfc3339(),
+    }
+}
+
+/// `GET /approvals/policies` — list all tool approval policies.
 pub async fn list_approval_policies(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ApprovalPolicyResponse>>, GatewayError> {
@@ -1436,7 +1813,7 @@ pub async fn list_approval_policies(
     ))
 }
 
-/// `GET /approvals/{tool}` — get approval policy for a specific tool.
+/// `GET /approvals/policies/{tool}` — get approval policy for a specific tool.
 pub async fn get_approval_policy(
     State(state): State<AppState>,
     Path(tool): Path<String>,
@@ -1455,7 +1832,7 @@ pub async fn get_approval_policy(
     }))
 }
 
-/// `PUT /approvals/{tool}` — set approval policy for a tool.
+/// `PUT /approvals/policies/{tool}` — set approval policy for a tool.
 pub async fn set_approval_policy(
     State(state): State<AppState>,
     Path(tool): Path<String>,
@@ -1483,7 +1860,7 @@ pub async fn set_approval_policy(
     }))
 }
 
-/// `DELETE /approvals/{tool}` — clear approval policy for a tool.
+/// `DELETE /approvals/policies/{tool}` — clear approval policy for a tool.
 pub async fn clear_approval_policy(
     State(state): State<AppState>,
     Path(tool): Path<String>,

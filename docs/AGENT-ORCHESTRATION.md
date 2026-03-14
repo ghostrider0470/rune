@@ -21,6 +21,27 @@ This document is the master instruction set for AI agents building this project 
 - **Treat this document as sequencing and acceptance authority** — not as a literal snapshot of an empty repository or planning-only state
 - **Crate prefix is `rune-`** — all crate names use `rune-*` (e.g., `rune-core`, `rune-runtime`)
 
+### Current implementation reality (keep this in sync with code)
+
+As of 2026-03-14 early-morning execution:
+- workspace `cargo test` is green
+- gateway and CLI are runnable, not stubs
+- embedded PostgreSQL fallback is wired for zero-config local development
+- cron definitions and `cron runs` history are durably persisted
+- scheduled `main` vs `isolated` execution semantics are no longer collapsed together
+- per-session turn aggregates (usage/model/timing) already exist on the gateway session surfaces
+- durable approval requests and decision-time resume are wired end-to-end for approval-gated tool calls
+- local conservative `ask` / `security` / `elevated` exec semantics are enforced in the live gateway tool path
+- background `exec` launches now persist restart-visible metadata into durable tool-execution audit rows, with honest degraded `process` inspection after restart
+
+Highest-leverage remaining parity gaps:
+1. restart-safe continuation guarantees for approval-resumed turns and live process handles across gateway restarts
+2. broader persistence/inspectability for subagent lifecycle beyond scheduled descendants
+   - Note: baseline durable parent/requester linkage for direct/channel/scheduled/subagent sessions already exists in runtime tests, and live `sessions_spawn` now also preserves requester linkage when the caller provides `sessionKey`/`requesterSessionId`; remaining gap is richer lifecycle/runtime inspectability rather than the linkage primitive itself.
+3. deeper session-status parity quality (cost fidelity, unresolved-note reduction, broader runtime linkage)
+4. richer host/node/sandbox parity beyond the current local conservative execution baseline
+5. cross-platform PTY fidelity beyond the current Unix `script(1)`-backed implementation
+
 ---
 
 ## Architecture summary

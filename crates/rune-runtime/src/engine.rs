@@ -127,6 +127,17 @@ impl SessionEngine {
             })
     }
 
+    /// Find the most recent active session by channel reference.
+    pub async fn get_session_by_channel_ref(
+        &self,
+        channel_ref: &str,
+    ) -> Result<Option<SessionRow>, RuntimeError> {
+        self.session_repo
+            .find_by_channel_ref(channel_ref)
+            .await
+            .map_err(RuntimeError::Store)
+    }
+
     async fn transition_session(
         &self,
         session_id: Uuid,

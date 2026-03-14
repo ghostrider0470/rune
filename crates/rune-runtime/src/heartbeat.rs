@@ -53,6 +53,7 @@ pub struct HeartbeatTickResult {
 pub struct HeartbeatRunner {
     state: Arc<Mutex<HeartbeatState>>,
     workspace_root: PathBuf,
+    state_file: Option<PathBuf>,
 }
 
 impl HeartbeatRunner {
@@ -61,6 +62,7 @@ impl HeartbeatRunner {
         Self {
             state: Arc::new(Mutex::new(HeartbeatState::default())),
             workspace_root: workspace_root.into(),
+            state_file: None,
         }
     }
 
@@ -69,6 +71,21 @@ impl HeartbeatRunner {
         Self {
             state: Arc::new(Mutex::new(state)),
             workspace_root: workspace_root.into(),
+            state_file: None,
+        }
+    }
+
+    /// Create a heartbeat runner backed by a state file on disk.
+    pub fn with_state_file(
+        workspace_root: impl Into<PathBuf>,
+        state_file: impl Into<PathBuf>,
+    ) -> Self {
+        let state_file = state_file.into();
+        let state = load_state_file(&state_file).unwrap_or_default();
+        Self {
+            state: Arc::new(Mutex::new(state)),
+            workspace_root: workspace_root.into(),
+            state_file: Some(state_file),
         }
     }
 
@@ -76,6 +93,7 @@ impl HeartbeatRunner {
     pub async fn enable(&self) {
         let mut state = self.state.lock().await;
         state.enabled = true;
+        self.persist_state(&state);
         info!("heartbeat enabled");
     }
 
@@ -83,6 +101,7 @@ impl HeartbeatRunner {
     pub async fn disable(&self) {
         let mut state = self.state.lock().await;
         state.enabled = false;
+        self.persist_state(&state);
         info!("heartbeat disabled");
     }
 
@@ -90,6 +109,7 @@ impl HeartbeatRunner {
     pub async fn set_interval(&self, interval_secs: u64) {
         let mut state = self.state.lock().await;
         state.interval_secs = interval_secs;
+        self.persist_state(&state);
         info!(interval_secs, "heartbeat interval updated");
     }
 
@@ -145,6 +165,7 @@ impl HeartbeatRunner {
         let mut state = self.state.lock().await;
         state.last_run_at = Some(now);
         state.run_count += 1;
+        self.persist_state(&state);
 
         HeartbeatTickResult {
             fired: prompt.is_some(),
@@ -159,15 +180,44 @@ impl HeartbeatRunner {
         let trimmed = response.trim();
         trimmed == "HEARTBEAT_OK"
             || trimmed.eq_ignore_ascii_case("heartbeat_ok")
-            || trimmed.starts_with("HEARTBEAT_OK")
-                && trimmed.len() < 20
+            || trimmed.starts_with("HEARTBEAT_OK") && trimmed.len() < 20
     }
 
     /// Record that a response was suppressed.
     pub async fn record_suppression(&self) {
         let mut state = self.state.lock().await;
         state.suppressed_count += 1;
+        self.persist_state(&state);
     }
+
+    fn persist_state(&self, state: &HeartbeatState) {
+        let Some(path) = &self.state_file else {
+            return;
+        };
+
+        if let Some(parent) = path.parent()
+            && let Err(error) = std::fs::create_dir_all(parent)
+        {
+            warn!(path = %parent.display(), error = %error, "failed to create heartbeat state directory");
+            return;
+        }
+
+        match serde_json::to_vec_pretty(state) {
+            Ok(bytes) => {
+                if let Err(error) = std::fs::write(path, bytes) {
+                    warn!(path = %path.display(), error = %error, "failed to persist heartbeat state");
+                }
+            }
+            Err(error) => {
+                warn!(path = %path.display(), error = %error, "failed to serialize heartbeat state");
+            }
+        }
+    }
+}
+
+fn load_state_file(path: &PathBuf) -> Option<HeartbeatState> {
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice::<HeartbeatState>(&bytes).ok()
 }
 
 #[cfg(test)]
@@ -306,7 +356,9 @@ mod tests {
         assert!(HeartbeatRunner::should_suppress("HEARTBEAT_OK"));
         assert!(HeartbeatRunner::should_suppress("  HEARTBEAT_OK  "));
         assert!(HeartbeatRunner::should_suppress("heartbeat_ok"));
-        assert!(!HeartbeatRunner::should_suppress("HEARTBEAT_OK and then some longer text here"));
+        assert!(!HeartbeatRunner::should_suppress(
+            "HEARTBEAT_OK and then some longer text here"
+        ));
         assert!(!HeartbeatRunner::should_suppress("Something else entirely"));
     }
 
@@ -336,5 +388,26 @@ mod tests {
         assert_eq!(restored.interval_secs, state.interval_secs);
         assert_eq!(restored.run_count, state.run_count);
         assert_eq!(restored.suppressed_count, state.suppressed_count);
+    }
+
+    #[tokio::test]
+    async fn state_file_persists_across_runner_reloads() {
+        let tmp = TempDir::new().unwrap();
+        let state_file = tmp.path().join("state").join("heartbeat-state.json");
+
+        let runner = HeartbeatRunner::with_state_file(tmp.path(), &state_file);
+        runner.enable().await;
+        runner.set_interval(900).await;
+        runner.record_suppression().await;
+        let tick = runner.tick().await;
+        assert!(!tick.fired);
+
+        let reloaded = HeartbeatRunner::with_state_file(tmp.path(), &state_file);
+        let restored = reloaded.status().await;
+        assert!(restored.enabled);
+        assert_eq!(restored.interval_secs, 900);
+        assert_eq!(restored.run_count, 1);
+        assert_eq!(restored.suppressed_count, 1);
+        assert!(restored.last_run_at.is_some());
     }
 }

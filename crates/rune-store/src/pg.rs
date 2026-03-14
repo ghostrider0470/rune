@@ -205,6 +205,24 @@ impl TurnRepo for PgTurnRepo {
                 .map_err(|e| not_found_or(e, "turn", id))
         }
     }
+
+    async fn update_usage(
+        &self,
+        id: Uuid,
+        prompt_tokens: i32,
+        completion_tokens: i32,
+    ) -> Result<TurnRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(turns::table.find(id))
+            .set((
+                turns::usage_prompt_tokens.eq(Some(prompt_tokens)),
+                turns::usage_completion_tokens.eq(Some(completion_tokens)),
+            ))
+            .returning(TurnRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "turn", id))
+    }
 }
 
 // ── PgTranscriptRepo ────────────────────────────────────────────────
@@ -297,6 +315,61 @@ impl JobRepo for PgJobRepo {
             .map_err(StoreError::from)
     }
 
+    async fn list_by_type(
+        &self,
+        job_type: &str,
+        include_disabled: bool,
+    ) -> Result<Vec<JobRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let mut query = jobs::table.filter(jobs::job_type.eq(job_type)).into_boxed();
+
+        if !include_disabled {
+            query = query.filter(jobs::enabled.eq(true));
+        }
+
+        query
+            .select(JobRow::as_select())
+            .order((jobs::due_at.asc().nulls_last(), jobs::created_at.asc()))
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn update_job(
+        &self,
+        id: Uuid,
+        enabled: bool,
+        due_at: Option<DateTime<Utc>>,
+        payload: serde_json::Value,
+        updated_at: DateTime<Utc>,
+        last_run_at: Option<DateTime<Utc>>,
+        next_run_at: Option<DateTime<Utc>>,
+    ) -> Result<JobRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(jobs::table.find(id))
+            .set((
+                jobs::enabled.eq(enabled),
+                jobs::due_at.eq(due_at),
+                jobs::payload.eq(payload),
+                jobs::updated_at.eq(updated_at),
+                jobs::last_run_at.eq(last_run_at),
+                jobs::next_run_at.eq(next_run_at),
+            ))
+            .returning(JobRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "job", id))
+    }
+
+    async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let deleted = diesel::delete(jobs::table.find(id))
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(deleted > 0)
+    }
+
     async fn record_run(
         &self,
         id: Uuid,
@@ -314,6 +387,76 @@ impl JobRepo for PgJobRepo {
             .get_result(&mut conn)
             .await
             .map_err(|e| not_found_or(e, "job", id))
+    }
+}
+
+// ── PgJobRunRepo ────────────────────────────────────────────────────
+
+/// PostgreSQL-backed durable job-run repository.
+#[derive(Clone)]
+pub struct PgJobRunRepo {
+    pool: PgPool,
+}
+
+impl PgJobRunRepo {
+    /// Create a new repository backed by the given connection pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl JobRunRepo for PgJobRunRepo {
+    async fn create(&self, run: NewJobRun) -> Result<JobRunRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::insert_into(job_runs::table)
+            .values(&run)
+            .returning(JobRunRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn complete(
+        &self,
+        id: Uuid,
+        status: &str,
+        output: Option<&str>,
+        finished_at: DateTime<Utc>,
+    ) -> Result<JobRunRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(job_runs::table.find(id))
+            .set((
+                job_runs::status.eq(status),
+                job_runs::output.eq(output),
+                job_runs::finished_at.eq(Some(finished_at)),
+            ))
+            .returning(JobRunRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "job_run", id))
+    }
+
+    async fn list_by_job(
+        &self,
+        job_id: Uuid,
+        limit: Option<i64>,
+    ) -> Result<Vec<JobRunRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let mut query = job_runs::table
+            .filter(job_runs::job_id.eq(job_id))
+            .into_boxed();
+
+        if let Some(limit) = limit {
+            query = query.limit(limit);
+        }
+
+        query
+            .select(JobRunRow::as_select())
+            .order(job_runs::started_at.desc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
     }
 }
 
@@ -354,6 +497,20 @@ impl ApprovalRepo for PgApprovalRepo {
             .map_err(|e| not_found_or(e, "approval", id))
     }
 
+    async fn list(&self, pending_only: bool) -> Result<Vec<ApprovalRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let mut query = approvals::table.into_boxed();
+        if pending_only {
+            query = query.filter(approvals::decision.is_null());
+        }
+        query
+            .select(ApprovalRow::as_select())
+            .order((approvals::created_at.desc(), approvals::id.desc()))
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
     async fn decide(
         &self,
         id: Uuid,
@@ -368,6 +525,20 @@ impl ApprovalRepo for PgApprovalRepo {
                 approvals::decided_by.eq(Some(decided_by)),
                 approvals::decided_at.eq(Some(decided_at)),
             ))
+            .returning(ApprovalRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "approval", id))
+    }
+
+    async fn update_presented_payload(
+        &self,
+        id: Uuid,
+        presented_payload: serde_json::Value,
+    ) -> Result<ApprovalRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(approvals::table.find(id))
+            .set(approvals::presented_payload.eq(presented_payload))
             .returning(ApprovalRow::as_returning())
             .get_result(&mut conn)
             .await
@@ -412,11 +583,14 @@ impl ToolApprovalPolicyRepo for PgToolApprovalPolicyRepo {
             .await
             .map_err(StoreError::from)?;
 
-        Ok(rows.into_iter().map(|r| ToolApprovalPolicy {
-            tool_name: r.reason,
-            decision: r.decision.unwrap_or_default(),
-            decided_at: r.decided_at.unwrap_or(r.created_at),
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(|r| ToolApprovalPolicy {
+                tool_name: r.reason,
+                decision: r.decision.unwrap_or_default(),
+                decided_at: r.decided_at.unwrap_or(r.created_at),
+            })
+            .collect())
     }
 
     async fn get_policy(&self, tool_name: &str) -> Result<Option<ToolApprovalPolicy>, StoreError> {
@@ -437,7 +611,11 @@ impl ToolApprovalPolicyRepo for PgToolApprovalPolicyRepo {
         }))
     }
 
-    async fn set_policy(&self, tool_name: &str, decision: &str) -> Result<ToolApprovalPolicy, StoreError> {
+    async fn set_policy(
+        &self,
+        tool_name: &str,
+        decision: &str,
+    ) -> Result<ToolApprovalPolicy, StoreError> {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
         let now = Utc::now();
 
@@ -536,6 +714,17 @@ impl ToolExecutionRepo for PgToolExecutionRepo {
             .first(&mut conn)
             .await
             .map_err(|e| not_found_or(e, "tool_execution", id))
+    }
+
+    async fn list_recent(&self, limit: i64) -> Result<Vec<ToolExecutionRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        tool_executions::table
+            .select(ToolExecutionRow::as_select())
+            .order(tool_executions::started_at.desc())
+            .limit(limit)
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
     }
 
     async fn complete(

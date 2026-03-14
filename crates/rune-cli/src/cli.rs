@@ -10,6 +10,22 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Use the local development profile defaults.
+    #[arg(long, global = true)]
+    pub dev: bool,
+
+    /// Named config/profile selector used for local config resolution.
+    #[arg(long, global = true, env = "RUNE_PROFILE")]
+    pub profile: Option<String>,
+
+    /// Override the CLI log level for this invocation.
+    #[arg(long, global = true, env = "RUNE_LOG_LEVEL")]
+    pub log_level: Option<String>,
+
+    /// Disable ANSI color/styling in CLI output.
+    #[arg(long, global = true)]
+    pub no_color: bool,
+
     /// Gateway base URL (default: http://127.0.0.1:8787).
     #[arg(
         long,
@@ -228,6 +244,11 @@ pub enum SessionsAction {
         /// Session ID to inspect.
         id: String,
     },
+    /// Show the first-class status card for a specific session.
+    Status {
+        /// Session ID to inspect.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -376,8 +397,20 @@ pub enum CompletionShell {
 
 #[derive(Debug, Subcommand)]
 pub enum ApprovalsAction {
-    /// List all tool approval policies.
+    /// List pending durable approval requests.
     List,
+    /// Submit a decision for a pending approval request.
+    Decide {
+        /// Approval request ID.
+        id: String,
+        /// Decision: allow-once, allow-always, or deny.
+        decision: String,
+        /// Actor identity recorded as the approver.
+        #[arg(long)]
+        by: Option<String>,
+    },
+    /// List all tool approval policies.
+    Policies,
     /// Get the approval policy for a specific tool.
     Get {
         /// Tool name to query.
@@ -467,6 +500,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_global_operator_flags() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "--dev",
+            "--profile",
+            "azure",
+            "--log-level",
+            "debug",
+            "--no-color",
+            "status",
+        ])
+        .unwrap();
+        assert!(cli.dev);
+        assert_eq!(cli.profile.as_deref(), Some("azure"));
+        assert_eq!(cli.log_level.as_deref(), Some("debug"));
+        assert!(cli.no_color);
+        assert!(matches!(cli.command, Command::Status));
+    }
+
+    #[test]
     fn parse_gateway_status() {
         let cli = Cli::try_parse_from(["rune", "gateway", "status"]).unwrap();
         assert!(matches!(
@@ -527,12 +580,13 @@ mod tests {
         .unwrap();
         match cli.command {
             Command::Gateway {
-                action: GatewayAction::Call {
-                    method,
-                    path,
-                    body,
-                    token,
-                },
+                action:
+                    GatewayAction::Call {
+                        method,
+                        path,
+                        body,
+                        token,
+                    },
             } => {
                 assert_eq!(method, "POST");
                 assert_eq!(path, "/cron/wake");
@@ -1059,6 +1113,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_sessions_status() {
+        let cli = Cli::try_parse_from(["rune", "sessions", "status", "abc-123"]).unwrap();
+        match &cli.command {
+            Command::Sessions {
+                action: SessionsAction::Status { id },
+            } => assert_eq!(id, "abc-123"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_config_show() {
         let cli = Cli::try_parse_from(["rune", "config", "show"]).unwrap();
         assert!(matches!(
@@ -1163,6 +1228,41 @@ mod tests {
     }
 
     #[test]
+    fn parse_approvals_decide() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "approvals",
+            "decide",
+            "123e4567-e89b-12d3-a456-426614174000",
+            "allow-once",
+            "--by",
+            "hamza",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Approvals {
+                action: ApprovalsAction::Decide { id, decision, by },
+            } => {
+                assert_eq!(id, "123e4567-e89b-12d3-a456-426614174000");
+                assert_eq!(decision, "allow-once");
+                assert_eq!(by.as_deref(), Some("hamza"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_approvals_policies() {
+        let cli = Cli::try_parse_from(["rune", "approvals", "policies"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Approvals {
+                action: ApprovalsAction::Policies
+            }
+        ));
+    }
+
+    #[test]
     fn parse_approvals_get() {
         let cli = Cli::try_parse_from(["rune", "approvals", "get", "exec"]).unwrap();
         match cli.command {
@@ -1240,13 +1340,16 @@ mod tests {
 
     #[test]
     fn parse_reminders_add() {
-        let cli = Cli::try_parse_from([
-            "rune", "reminders", "add", "Buy milk", "--in", "30m",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "reminders", "add", "Buy milk", "--in", "30m"]).unwrap();
         match cli.command {
             Command::Reminders {
-                action: RemindersAction::Add { message, duration, target },
+                action:
+                    RemindersAction::Add {
+                        message,
+                        duration,
+                        target,
+                    },
             } => {
                 assert_eq!(message, "Buy milk");
                 assert_eq!(duration, "30m");
@@ -1259,12 +1362,24 @@ mod tests {
     #[test]
     fn parse_reminders_add_with_target() {
         let cli = Cli::try_parse_from([
-            "rune", "reminders", "add", "Check PR", "--in", "2h", "--target", "discord",
+            "rune",
+            "reminders",
+            "add",
+            "Check PR",
+            "--in",
+            "2h",
+            "--target",
+            "discord",
         ])
         .unwrap();
         match cli.command {
             Command::Reminders {
-                action: RemindersAction::Add { message, duration, target },
+                action:
+                    RemindersAction::Add {
+                        message,
+                        duration,
+                        target,
+                    },
             } => {
                 assert_eq!(message, "Check PR");
                 assert_eq!(duration, "2h");
@@ -1280,14 +1395,17 @@ mod tests {
         assert!(matches!(
             cli.command,
             Command::Reminders {
-                action: RemindersAction::List { include_delivered: false }
+                action: RemindersAction::List {
+                    include_delivered: false
+                }
             }
         ));
     }
 
     #[test]
     fn parse_reminders_list_include_delivered() {
-        let cli = Cli::try_parse_from(["rune", "reminders", "list", "--include-delivered"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "reminders", "list", "--include-delivered"]).unwrap();
         match cli.command {
             Command::Reminders {
                 action: RemindersAction::List { include_delivered },

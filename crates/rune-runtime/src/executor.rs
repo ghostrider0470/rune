@@ -10,8 +10,8 @@ use rune_core::{
     TurnId, TurnStatus,
 };
 use rune_models::{CompletionRequest, ModelProvider};
-use rune_store::models::{NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
-use rune_store::repos::{SessionRepo, TranscriptRepo, TurnRepo};
+use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
+use rune_store::repos::{ApprovalRepo, SessionRepo, TranscriptRepo, TurnRepo};
 use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
 use crate::compaction::CompactionStrategy;
@@ -30,6 +30,7 @@ pub struct TurnExecutor {
     session_repo: Arc<dyn SessionRepo>,
     turn_repo: Arc<dyn TurnRepo>,
     transcript_repo: Arc<dyn TranscriptRepo>,
+    approval_repo: Arc<dyn ApprovalRepo>,
     model_provider: Arc<dyn ModelProvider>,
     tool_executor: Arc<dyn ToolExecutor>,
     tool_registry: Arc<ToolRegistry>,
@@ -45,6 +46,7 @@ impl TurnExecutor {
         session_repo: Arc<dyn SessionRepo>,
         turn_repo: Arc<dyn TurnRepo>,
         transcript_repo: Arc<dyn TranscriptRepo>,
+        approval_repo: Arc<dyn ApprovalRepo>,
         model_provider: Arc<dyn ModelProvider>,
         tool_executor: Arc<dyn ToolExecutor>,
         tool_registry: Arc<ToolRegistry>,
@@ -55,6 +57,7 @@ impl TurnExecutor {
             session_repo,
             turn_repo,
             transcript_repo,
+            approval_repo,
             model_provider,
             tool_executor,
             tool_registry,
@@ -130,9 +133,18 @@ impl TurnExecutor {
             .run_turn_loop(session_id, turn_id, effective_model.as_deref(), &mut usage)
             .await;
 
+        // Persist usage totals even on failed turns so operator surfaces remain durable.
+        let prompt_tokens = i32::try_from(usage.prompt_tokens).unwrap_or(i32::MAX);
+        let completion_tokens = i32::try_from(usage.completion_tokens).unwrap_or(i32::MAX);
+        let _ = self
+            .turn_repo
+            .update_usage(turn.id, prompt_tokens, completion_tokens)
+            .await?;
+
         // 4. Finalize turn status
         let (final_status, ended_at) = match &result {
-            Ok(_) => (TurnStatus::Completed, Some(Utc::now())),
+            Ok(TurnLoopOutcome::Completed) => (TurnStatus::Completed, Some(Utc::now())),
+            Ok(TurnLoopOutcome::WaitingForApproval) => (TurnStatus::ToolExecuting, None),
             Err(_) => (TurnStatus::Failed, Some(Utc::now())),
         };
 
@@ -147,6 +159,199 @@ impl TurnExecutor {
         Ok((final_turn, usage))
     }
 
+    /// Resume a pending approval-backed tool execution and continue the blocked turn.
+    pub async fn resume_approval(
+        &self,
+        approval_id: Uuid,
+    ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        let approval = self.approval_repo.find_by_id(approval_id).await?;
+        let decision_raw = approval.decision.clone().ok_or_else(|| {
+            RuntimeError::Aborted("approval has not been decided yet".to_string())
+        })?;
+        let resumed_at = Utc::now();
+        let decision = parse_approval_decision(&decision_raw)?;
+        let payload = approval.presented_payload.clone();
+
+        let session_id = payload
+            .get("session_id")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| RuntimeError::Aborted("approval payload missing session_id".to_string()))
+            .and_then(parse_uuid_runtime)?;
+        let turn_uuid = payload
+            .get("turn_id")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| RuntimeError::Aborted("approval payload missing turn_id".to_string()))
+            .and_then(parse_uuid_runtime)?;
+        let tool_call_id = payload
+            .get("tool_call_id")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| {
+                RuntimeError::Aborted("approval payload missing tool_call_id".to_string())
+            })
+            .and_then(parse_uuid_runtime)?;
+        let tool_name = payload
+            .get("tool_name")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| RuntimeError::Aborted("approval payload missing tool_name".to_string()))?
+            .to_string();
+        let arguments = payload.get("arguments").cloned().ok_or_else(|| {
+            RuntimeError::Aborted("approval payload missing arguments".to_string())
+        })?;
+
+        let mut usage = UsageAccumulator::new();
+        let turn = self.turn_repo.find_by_id(turn_uuid).await?;
+
+        match decision {
+            ApprovalDecision::Deny => {
+                self.update_approval_progress(
+                    approval.id,
+                    resumed_at,
+                    "denied",
+                    Some(format!("operator denied execution for tool {tool_name}")),
+                )
+                .await?;
+                let response = TranscriptItem::ApprovalResponse {
+                    approval_id: ApprovalId::from(approval.id),
+                    decision: ApprovalDecision::Deny,
+                    note: Some("operator denied execution".to_string()),
+                };
+                self.append_transcript(session_id, Some(turn_uuid), &response)
+                    .await?;
+
+                let result_item = TranscriptItem::ToolResult {
+                    tool_call_id: ToolCallId::from(tool_call_id),
+                    output: format!("Tool error: approval denied for tool {tool_name}"),
+                    is_error: true,
+                };
+                self.append_transcript(session_id, Some(turn_uuid), &result_item)
+                    .await?;
+
+                self.turn_repo
+                    .update_status(
+                        turn_uuid,
+                        status_str(TurnStatus::Completed),
+                        Some(Utc::now()),
+                    )
+                    .await?;
+                let final_turn = self.turn_repo.find_by_id(turn_uuid).await?;
+                self.session_repo
+                    .update_status(session_id, "running", Utc::now())
+                    .await?;
+                return Ok((final_turn, usage));
+            }
+            ApprovalDecision::AllowAlways | ApprovalDecision::AllowOnce => {
+                self.update_approval_progress(
+                    approval.id,
+                    resumed_at,
+                    "resuming",
+                    Some(format!("resuming approved tool call for {tool_name}")),
+                )
+                .await?;
+                let response = TranscriptItem::ApprovalResponse {
+                    approval_id: ApprovalId::from(approval.id),
+                    decision,
+                    note: Some("operator approved execution".to_string()),
+                };
+                self.append_transcript(session_id, Some(turn_uuid), &response)
+                    .await?;
+            }
+        }
+
+        self.session_repo
+            .update_status(session_id, "running", Utc::now())
+            .await?;
+        self.turn_repo
+            .update_status(turn_uuid, status_str(TurnStatus::ToolExecuting), None)
+            .await?;
+
+        let mut arguments = arguments;
+        if let Some(obj) = arguments.as_object_mut() {
+            obj.insert(
+                "__approval_resume".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+
+        let call = ToolCall {
+            tool_call_id: ToolCallId::from(tool_call_id),
+            tool_name: tool_name.clone(),
+            arguments,
+        };
+
+        let tool_result = match self.tool_executor.execute(call.clone()).await {
+            Ok(result) => result,
+            Err(rune_tools::ToolError::ApprovalRequired { .. }) => {
+                self.update_approval_progress(
+                    approval.id,
+                    resumed_at,
+                    "failed",
+                    Some("approved tool call still requested approval during resume".to_string()),
+                )
+                .await?;
+                return Err(RuntimeError::Aborted(
+                    "approved tool call still requested approval during resume".to_string(),
+                ));
+            }
+            Err(e) => ToolResult {
+                tool_call_id: call.tool_call_id,
+                output: format!("Tool error: {e}"),
+                is_error: true,
+            },
+        };
+
+        let resume_status = if tool_result.is_error {
+            "completed_error"
+        } else {
+            "completed"
+        };
+        let resume_output = tool_result.output.clone();
+        let result_item = TranscriptItem::ToolResult {
+            tool_call_id: tool_result.tool_call_id,
+            output: tool_result.output,
+            is_error: tool_result.is_error,
+        };
+        self.append_transcript(session_id, Some(turn_uuid), &result_item)
+            .await?;
+
+        self.update_approval_progress(approval.id, resumed_at, resume_status, Some(resume_output))
+            .await?;
+
+        let session = self.session_repo.find_by_id(session_id).await?;
+        let effective_model = selected_model(&session)
+            .map(str::to_owned)
+            .or_else(|| turn.model_ref.clone())
+            .or_else(|| self.default_model.clone());
+
+        let result = self
+            .run_turn_loop(
+                session_id,
+                TurnId::from(turn_uuid),
+                effective_model.as_deref(),
+                &mut usage,
+            )
+            .await;
+
+        let prompt_tokens = i32::try_from(usage.prompt_tokens).unwrap_or(i32::MAX);
+        let completion_tokens = i32::try_from(usage.completion_tokens).unwrap_or(i32::MAX);
+        let _ = self
+            .turn_repo
+            .update_usage(turn_uuid, prompt_tokens, completion_tokens)
+            .await?;
+
+        let (final_status, ended_at) = match &result {
+            Ok(TurnLoopOutcome::Completed) => (TurnStatus::Completed, Some(Utc::now())),
+            Ok(TurnLoopOutcome::WaitingForApproval) => (TurnStatus::ToolExecuting, None),
+            Err(_) => (TurnStatus::Failed, Some(Utc::now())),
+        };
+        let final_turn = self
+            .turn_repo
+            .update_status(turn_uuid, status_str(final_status), ended_at)
+            .await?;
+
+        result?;
+        Ok((final_turn, usage))
+    }
+
     /// The core model → tool → model loop.
     async fn run_turn_loop(
         &self,
@@ -154,7 +359,7 @@ impl TurnExecutor {
         turn_id: TurnId,
         model_ref: Option<&str>,
         usage: &mut UsageAccumulator,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<TurnLoopOutcome, RuntimeError> {
         let session = self.session_repo.find_by_id(session_id).await?;
         let session_kind = parse_session_kind(&session.kind)?;
         let workspace_root = session
@@ -257,13 +462,24 @@ impl TurnExecutor {
                         .await?;
 
                     // Execute tool
+                    let mut args = args;
+                    if let Some(obj) = args.as_object_mut() {
+                        obj.insert(
+                            "__session_id".to_string(),
+                            serde_json::Value::String(session_id.to_string()),
+                        );
+                        obj.insert(
+                            "__turn_id".to_string(),
+                            serde_json::Value::String(turn_id.into_uuid().to_string()),
+                        );
+                    }
                     let call = ToolCall {
                         tool_call_id,
                         tool_name: tc.function.name.clone(),
                         arguments: args,
                     };
 
-                    let tool_result = match self.tool_executor.execute(call).await {
+                    let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,
                         Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
                             warn!(tool = %tool, "tool execution requires approval");
@@ -281,23 +497,29 @@ impl TurnExecutor {
                             )
                             .await?;
 
-                            let approval_response = TranscriptItem::ApprovalResponse {
-                                approval_id,
-                                decision: ApprovalDecision::Deny,
-                                note: Some("approval required before execution".to_string()),
-                            };
-                            self.append_transcript(
-                                session_id,
-                                Some(turn_id.into_uuid()),
-                                &approval_response,
-                            )
-                            .await?;
+                            self.approval_repo
+                                .create(NewApproval {
+                                    id: approval_id.into_uuid(),
+                                    subject_type: "tool_call".to_string(),
+                                    subject_id: tool_call_id.into_uuid(),
+                                    reason: tool.clone(),
+                                    presented_payload: approval_payload(
+                                        session_id,
+                                        turn_id,
+                                        tool_call_id,
+                                        &tc.function.name,
+                                        &details,
+                                        &call.arguments,
+                                    ),
+                                    created_at: Utc::now(),
+                                })
+                                .await?;
 
-                            ToolResult {
-                                tool_call_id,
-                                output: format!("Approval required for tool {tool}: {details}"),
-                                is_error: true,
-                            }
+                            self.session_repo
+                                .update_status(session_id, "waiting_for_approval", Utc::now())
+                                .await?;
+
+                            return Ok(TurnLoopOutcome::WaitingForApproval);
                         }
                         Err(e) => {
                             warn!(error = %e, tool = %tc.function.name, "tool execution failed");
@@ -332,7 +554,7 @@ impl TurnExecutor {
                     .await?;
             }
 
-            return Ok(());
+            return Ok(TurnLoopOutcome::Completed);
         }
     }
 
@@ -366,6 +588,54 @@ impl TurnExecutor {
             .await?;
 
         Ok(row)
+    }
+
+    async fn update_approval_progress(
+        &self,
+        approval_id: Uuid,
+        resumed_at: chrono::DateTime<Utc>,
+        approval_status: &str,
+        result_summary: Option<String>,
+    ) -> Result<(), RuntimeError> {
+        let approval = self.approval_repo.find_by_id(approval_id).await?;
+        let mut payload = approval.presented_payload;
+        let Some(obj) = payload.as_object_mut() else {
+            return Ok(());
+        };
+
+        obj.insert(
+            "resumed_at".to_string(),
+            serde_json::Value::String(resumed_at.to_rfc3339()),
+        );
+        obj.insert(
+            "resume_status".to_string(),
+            serde_json::Value::String(approval_status.to_string()),
+        );
+        obj.insert(
+            "approval_status".to_string(),
+            serde_json::Value::String(approval_status.to_string()),
+        );
+        obj.insert(
+            "approval_status_updated_at".to_string(),
+            serde_json::Value::String(Utc::now().to_rfc3339()),
+        );
+        if matches!(approval_status, "completed" | "completed_error" | "failed" | "denied") {
+            obj.insert(
+                "completed_at".to_string(),
+                serde_json::Value::String(Utc::now().to_rfc3339()),
+            );
+        }
+        if let Some(summary) = result_summary {
+            obj.insert(
+                "resume_result_summary".to_string(),
+                serde_json::Value::String(summary),
+            );
+        }
+
+        self.approval_repo
+            .update_presented_payload(approval_id, payload)
+            .await?;
+        Ok(())
     }
 }
 
@@ -405,6 +675,40 @@ fn transcript_item_kind(item: &TranscriptItem) -> &'static str {
     }
 }
 
+enum TurnLoopOutcome {
+    Completed,
+    WaitingForApproval,
+}
+
+fn approval_payload(
+    session_id: Uuid,
+    turn_id: TurnId,
+    tool_call_id: ToolCallId,
+    tool_name: &str,
+    details: &str,
+    arguments: &serde_json::Value,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "session_id": session_id,
+        "turn_id": turn_id.into_uuid(),
+        "tool_call_id": tool_call_id.into_uuid(),
+        "tool_name": tool_name,
+        "arguments": arguments,
+        "command": extract_approval_command(details),
+        "details": details,
+        "resume_status": "pending",
+        "approval_status": "pending",
+    });
+
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(details) {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("approval_request".to_string(), parsed);
+        }
+    }
+
+    payload
+}
+
 fn extract_approval_command(details: &str) -> Option<String> {
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(details) {
         if let Some(command) = value.get("command").and_then(|v| v.as_str()) {
@@ -425,4 +729,20 @@ fn extract_approval_command(details: &str) -> Option<String> {
             .strip_prefix("command:")
             .map(|s| s.trim().to_string())
     })
+}
+
+fn parse_uuid_runtime(raw: &str) -> Result<Uuid, RuntimeError> {
+    Uuid::parse_str(raw)
+        .map_err(|e| RuntimeError::Aborted(format!("invalid UUID in approval payload: {e}")))
+}
+
+fn parse_approval_decision(raw: &str) -> Result<ApprovalDecision, RuntimeError> {
+    match raw {
+        "allow_once" => Ok(ApprovalDecision::AllowOnce),
+        "allow_always" => Ok(ApprovalDecision::AllowAlways),
+        "deny" => Ok(ApprovalDecision::Deny),
+        other => Err(RuntimeError::Aborted(format!(
+            "unsupported approval decision: {other}"
+        ))),
+    }
 }
