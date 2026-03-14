@@ -5,7 +5,11 @@ import { ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "./ChatMessage";
 import { ToolCard } from "./ToolCard";
-import { isLiveEntry, normalizeTranscriptKind } from "./chat-utils";
+import {
+  getPayloadText,
+  isLiveEntry,
+  normalizeTranscriptKind,
+} from "./chat-utils";
 import type { TranscriptEntry } from "@/lib/api-types";
 
 interface ChatThreadProps {
@@ -14,18 +18,28 @@ interface ChatThreadProps {
   className?: string;
 }
 
-const TOOL_KINDS = new Set([
-  "tool_request",
-  "tool_use",
-  "tool_result",
-]);
-
+const TOOL_KINDS = new Set(["tool_request", "tool_use", "tool_result"]);
 const MESSAGE_KINDS = new Set(["user", "assistant"]);
+const INTERMEDIATE_ASSISTANT_KINDS = new Set(["assistant_thought", "assistant_reasoning"]);
 
-/** Group consecutive tool_request + tool_result pairs by turn_id or adjacency */
 interface EntryGroup {
   type: "message" | "tool_pair" | "other";
   entries: TranscriptEntry[];
+}
+
+function isEmptyAssistantMessage(entry: TranscriptEntry): boolean {
+  return (
+    normalizeTranscriptKind(entry.kind) === "assistant" &&
+    getPayloadText(entry.payload).trim().length === 0
+  );
+}
+
+function areLikelySameTurn(left: TranscriptEntry, right: TranscriptEntry): boolean {
+  if (left.turn_id && right.turn_id) {
+    return left.turn_id === right.turn_id;
+  }
+
+  return Math.abs(left.seq - right.seq) <= 2;
 }
 
 function groupEntries(entries: TranscriptEntry[]): EntryGroup[] {
@@ -34,24 +48,44 @@ function groupEntries(entries: TranscriptEntry[]): EntryGroup[] {
 
   while (i < entries.length) {
     const entry = entries[i];
-
     const normalizedKind = normalizeTranscriptKind(entry.kind);
 
     if (MESSAGE_KINDS.has(normalizedKind)) {
+      if (isEmptyAssistantMessage(entry)) {
+        i += 1;
+        continue;
+      }
+
       groups.push({ type: "message", entries: [entry] });
-      i++;
+      i += 1;
       continue;
     }
 
-    // Group tool_request followed by tool_result(s)
     if (entry.kind === "tool_request" || entry.kind === "tool_use") {
       const toolGroup: TranscriptEntry[] = [entry];
       let j = i + 1;
-      // Collect adjacent tool_result entries
-      while (j < entries.length && entries[j].kind === "tool_result") {
-        toolGroup.push(entries[j]);
-        j++;
+
+      while (j < entries.length) {
+        const candidate = entries[j];
+        const candidateKind = normalizeTranscriptKind(candidate.kind);
+
+        if (
+          INTERMEDIATE_ASSISTANT_KINDS.has(candidate.kind) ||
+          (candidateKind === "assistant" && isEmptyAssistantMessage(candidate))
+        ) {
+          j += 1;
+          continue;
+        }
+
+        if (candidate.kind === "tool_result" && areLikelySameTurn(entry, candidate)) {
+          toolGroup.push(candidate);
+          j += 1;
+          continue;
+        }
+
+        break;
       }
+
       groups.push({ type: "tool_pair", entries: toolGroup });
       i = j;
       continue;
@@ -59,19 +93,22 @@ function groupEntries(entries: TranscriptEntry[]): EntryGroup[] {
 
     if (TOOL_KINDS.has(entry.kind)) {
       groups.push({ type: "tool_pair", entries: [entry] });
-      i++;
+      i += 1;
       continue;
     }
 
-    // Any other kind (system, error, etc.)
+    if (INTERMEDIATE_ASSISTANT_KINDS.has(entry.kind)) {
+      i += 1;
+      continue;
+    }
+
     groups.push({ type: "other", entries: [entry] });
-    i++;
+    i += 1;
   }
 
   return groups;
 }
 
-// Threshold in pixels for considering "scrolled to bottom"
 const SCROLL_THRESHOLD = 80;
 
 export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
@@ -90,7 +127,6 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
     if (atBottom) setHasNewMessages(false);
   }, []);
 
-  // Auto-scroll when new messages arrive and user is at bottom
   useEffect(() => {
     if (entries.length > prevLengthRef.current) {
       if (isAtBottom) {
@@ -117,10 +153,7 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className={cn(
-              "flex",
-              i % 2 === 0 ? "justify-start" : "justify-end",
-            )}
+            className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}
           >
             <Skeleton
               className={cn(
@@ -136,12 +169,7 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
 
   if (entries.length === 0) {
     return (
-      <div
-        className={cn(
-          "flex flex-1 items-center justify-center p-8",
-          className,
-        )}
-      >
+      <div className={cn("flex flex-1 items-center justify-center p-8", className)}>
         <p className="text-sm text-muted-foreground">
           No messages yet. Send a message to start the conversation.
         </p>
@@ -159,15 +187,18 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
         {groups.map((group, gi) => {
           if (group.type === "message") {
             const entry = group.entries[0];
-            return <ChatMessage key={entry.id} entry={entry} isLive={isLiveEntry(entry)} />;
+            return (
+              <ChatMessage
+                key={entry.id}
+                entry={entry}
+                isLive={isLiveEntry(entry)}
+              />
+            );
           }
 
           if (group.type === "tool_pair") {
             return (
-              <div
-                key={`tool-group-${gi}`}
-                className="mx-4 flex flex-col gap-1"
-              >
+              <div key={`tool-group-${gi}`} className="mx-4 flex flex-col gap-1">
                 {group.entries.map((entry, ei) => (
                   <ToolCard
                     key={entry.id}
@@ -185,7 +216,6 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
             );
           }
 
-          // "other" type: render as a generic ChatMessage
           return group.entries.map((entry) => (
             <ChatMessage key={entry.id} entry={entry} isLive={isLiveEntry(entry)} />
           ));
@@ -193,7 +223,6 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
         <div ref={endRef} />
       </div>
 
-      {/* New messages indicator */}
       {hasNewMessages && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
           <Button
