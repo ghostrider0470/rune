@@ -7,26 +7,43 @@ import {
   getEntrySignature,
   getPayloadText,
   normalizeTranscriptKind,
+  truncatePreview,
 } from "@/components/chat/chat-utils";
 import type {
   TranscriptEntry,
   MessageResponse,
   SendMessageRequest,
   SessionEvent,
+  SessionListItem,
 } from "@/lib/api-types";
 
-// ---------------------------------------------------------------------------
-// useChatSessions – thin wrapper around useSessions for the sidebar
-// ---------------------------------------------------------------------------
+export interface ChatSessionListItem extends SessionListItem {
+  preview: string;
+}
+
 export function useChatSessions() {
   const query = useSessions({ limit: 100 });
   const createSession = useCreateSession();
-  return { ...query, createSession };
+  const queryClient = useQueryClient();
+
+  const sessionsWithPreview = useMemo<ChatSessionListItem[]>(() => {
+    const sessions = query.data ?? [];
+
+    return sessions.map((session) => {
+      const transcript = queryClient.getQueryData<TranscriptEntry[]>([
+        "sessions",
+        session.id,
+        "transcript",
+      ]);
+
+      const preview = buildSessionPreview(transcript, session.status);
+      return { ...session, preview };
+    });
+  }, [query.data, queryClient]);
+
+  return { ...query, data: sessionsWithPreview, createSession };
 }
 
-// ---------------------------------------------------------------------------
-// useChatTranscript – polls the transcript at 3 s when a session is active
-// ---------------------------------------------------------------------------
 export function useChatTranscript(sessionId: string | undefined) {
   return useQuery({
     queryKey: ["sessions", sessionId, "transcript"],
@@ -37,9 +54,6 @@ export function useChatTranscript(sessionId: string | undefined) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// useChatSend – send a message with optimistic update
-// ---------------------------------------------------------------------------
 export function useChatSend(sessionId: string | undefined) {
   const queryClient = useQueryClient();
 
@@ -76,10 +90,14 @@ export function useChatSend(sessionId: string | undefined) {
         created_at: new Date().toISOString(),
       };
 
+      const optimisticTranscript = [...(previousTranscript ?? []), optimisticEntry];
+
       queryClient.setQueryData<TranscriptEntry[]>(
         ["sessions", sessionId, "transcript"],
-        (old) => [...(old ?? []), optimisticEntry],
+        optimisticTranscript,
       );
+
+      syncSessionPreview(queryClient, sessionId, optimisticTranscript);
 
       return { previousTranscript };
     },
@@ -89,6 +107,7 @@ export function useChatSend(sessionId: string | undefined) {
           ["sessions", sessionId, "transcript"],
           context.previousTranscript,
         );
+        syncSessionPreview(queryClient, sessionId, context.previousTranscript);
       }
     },
     onSettled: () => {
@@ -258,15 +277,80 @@ export function useChatMergedTranscript(sessionId: string | undefined) {
       if (a.seq !== b.seq) return a.seq - b.seq;
       return normalizeTranscriptKind(a.kind).localeCompare(normalizeTranscriptKind(b.kind));
     });
-  }, [transcript.data, liveEntries]);
+  }, [liveEntries, transcript.data]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    syncSessionPreview(queryClient, sessionId, mergedEntries);
+  }, [mergedEntries, queryClient, sessionId]);
+
+  useEffect(() => clearEvents, [clearEvents]);
 
   return {
     entries: mergedEntries,
     isLoading: transcript.isLoading,
     isFetching: transcript.isFetching,
     isError: transcript.isError,
+    error: transcript.error,
     connected,
-    clearEvents,
     refetch: transcript.refetch,
   };
+}
+
+function buildSessionPreview(
+  transcript: TranscriptEntry[] | undefined,
+  status: string,
+): string {
+  if (!transcript || transcript.length === 0) {
+    return status === "active" ? "Live session waiting for transcript…" : "No transcript yet";
+  }
+
+  const sorted = transcript.slice().sort((a, b) => b.seq - a.seq);
+  const candidate = sorted.find((entry) => {
+    const kind = normalizeTranscriptKind(entry.kind);
+    if (kind !== "user" && kind !== "assistant") {
+      return false;
+    }
+
+    const cleaned = getPayloadText(entry.payload)
+      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return cleaned.length > 0;
+  });
+
+  if (!candidate) {
+    return status === "active" ? "Tooling activity in progress…" : "Transcript has no readable messages yet";
+  }
+
+  return truncatePreview(
+    getPayloadText(candidate.payload)
+      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+    140,
+  );
+}
+
+function syncSessionPreview(
+  queryClient: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  transcript: TranscriptEntry[],
+) {
+  queryClient.setQueriesData<SessionListItem[]>(
+    { queryKey: ["sessions"] },
+    (current) => {
+      if (!current) return current;
+
+      return current.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              preview: buildSessionPreview(transcript, session.status),
+            }
+          : session,
+      );
+    },
+  );
 }

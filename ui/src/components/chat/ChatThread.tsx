@@ -1,7 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowDown } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { ArrowDown, Bot, Hammer, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "./ChatMessage";
 import { ToolCard } from "./ToolCard";
@@ -23,18 +25,34 @@ const MESSAGE_KINDS = new Set(["user", "assistant"]);
 const INTERMEDIATE_ASSISTANT_KINDS = new Set(["assistant_thought", "assistant_reasoning"]);
 
 interface EntryGroup {
-  type: "message" | "tool_pair" | "other";
+  type: "message" | "tool_pair" | "other" | "date_divider";
   entries: TranscriptEntry[];
+  dateLabel?: string;
 }
 
 function isEmptyAssistantMessage(entry: TranscriptEntry): boolean {
-  return (
-    normalizeTranscriptKind(entry.kind) === "assistant" &&
-    getPayloadText(entry.payload).trim().length === 0
-  );
+  if (normalizeTranscriptKind(entry.kind) !== "assistant") {
+    return false;
+  }
+
+  const text = getPayloadText(entry.payload).trim();
+  return text.length === 0 || /^<thinking>[\s\S]*<\/thinking>$/i.test(text);
+}
+
+function getToolCallId(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const value = (payload as Record<string, unknown>).tool_call_id;
+  return typeof value === "string" ? value : null;
 }
 
 function areLikelySameTurn(left: TranscriptEntry, right: TranscriptEntry): boolean {
+  const leftToolCallId = getToolCallId(left.payload);
+  const rightToolCallId = getToolCallId(right.payload);
+
+  if (leftToolCallId && rightToolCallId) {
+    return leftToolCallId === rightToolCallId;
+  }
+
   if (left.turn_id && right.turn_id) {
     return left.turn_id === right.turn_id;
   }
@@ -42,12 +60,47 @@ function areLikelySameTurn(left: TranscriptEntry, right: TranscriptEntry): boole
   return Math.abs(left.seq - right.seq) <= 2;
 }
 
+function formatDayLabel(value: string): string {
+  const date = new Date(value);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  if (target.getTime() === today.getTime()) return "Today";
+  if (target.getTime() === yesterday.getTime()) return "Yesterday";
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function entryDayKey(entry: TranscriptEntry): string {
+  const date = new Date(entry.created_at);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
 function groupEntries(entries: TranscriptEntry[]): EntryGroup[] {
   const groups: EntryGroup[] = [];
   let i = 0;
+  let lastDayKey: string | null = null;
 
   while (i < entries.length) {
     const entry = entries[i];
+    const dayKey = entryDayKey(entry);
+
+    if (dayKey !== lastDayKey) {
+      groups.push({
+        type: "date_divider",
+        entries: [entry],
+        dateLabel: formatDayLabel(entry.created_at),
+      });
+      lastDayKey = dayKey;
+    }
+
     const normalizedKind = normalizeTranscriptKind(entry.kind);
 
     if (MESSAGE_KINDS.has(normalizedKind)) {
@@ -98,6 +151,7 @@ function groupEntries(entries: TranscriptEntry[]): EntryGroup[] {
     }
 
     if (INTERMEDIATE_ASSISTANT_KINDS.has(entry.kind)) {
+      groups.push({ type: "other", entries: [entry] });
       i += 1;
       continue;
     }
@@ -107,6 +161,32 @@ function groupEntries(entries: TranscriptEntry[]): EntryGroup[] {
   }
 
   return groups;
+}
+
+function getLaneMeta(entry: TranscriptEntry) {
+  const kind = normalizeTranscriptKind(entry.kind);
+
+  if (kind === "user") {
+    return {
+      label: "Operator",
+      icon: <User className="h-3.5 w-3.5" />,
+      badgeClass: "border-border/70 bg-background/80 text-foreground",
+    };
+  }
+
+  if (kind === "assistant") {
+    return {
+      label: "Rune",
+      icon: <Bot className="h-3.5 w-3.5" />,
+      badgeClass: "border-primary/25 bg-primary/10 text-primary",
+    };
+  }
+
+  return {
+    label: "Tooling",
+    icon: <Hammer className="h-3.5 w-3.5" />,
+    badgeClass: "border-border/70 bg-muted/50 text-muted-foreground",
+  };
 }
 
 const SCROLL_THRESHOLD = 80;
@@ -134,7 +214,9 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
           endRef.current?.scrollIntoView({ behavior: "smooth" });
         });
       } else {
-        setHasNewMessages(true);
+        requestAnimationFrame(() => {
+          setHasNewMessages(true);
+        });
       }
     }
     prevLengthRef.current = entries.length;
@@ -157,8 +239,8 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
           >
             <Skeleton
               className={cn(
-                "rounded-2xl",
-                i % 2 === 0 ? "h-20 w-3/4" : "h-12 w-1/2",
+                "rounded-3xl",
+                i % 2 === 0 ? "h-24 w-3/4" : "h-14 w-1/2",
               )}
             />
           </div>
@@ -170,55 +252,108 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
   if (entries.length === 0) {
     return (
       <div className={cn("flex flex-1 items-center justify-center p-8", className)}>
-        <p className="text-sm text-muted-foreground">
-          No messages yet. Send a message to start the conversation.
-        </p>
+        <div className="max-w-sm text-center">
+          <Bot className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
+          <p className="text-sm font-medium">No messages yet</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Send a message to start the session and the transcript will build here in real time.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className={cn("relative flex-1", className)}>
+    <div className={cn("relative flex-1 bg-gradient-to-b from-background/40 to-background", className)}>
       <div
         ref={containerRef}
         onScroll={checkScrollPosition}
-        className="flex h-full flex-col gap-3 overflow-y-auto p-4"
+        className="flex h-full flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-4"
       >
         {groups.map((group, gi) => {
+          if (group.type === "date_divider") {
+            return (
+              <div key={`date-${gi}`} className="flex items-center gap-3 px-1 py-1">
+                <Separator className="flex-1 bg-border/60" />
+                <span className="rounded-full border border-border/70 bg-background/85 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  {group.dateLabel}
+                </span>
+                <Separator className="flex-1 bg-border/60" />
+              </div>
+            );
+          }
+
+          const leadEntry = group.entries[0];
+          const lane = getLaneMeta(leadEntry);
+
           if (group.type === "message") {
             const entry = group.entries[0];
             return (
-              <ChatMessage
-                key={entry.id}
-                entry={entry}
-                isLive={isLiveEntry(entry)}
-              />
+              <div key={entry.id} className="space-y-2">
+                <div
+                  className={cn(
+                    "flex px-1",
+                    normalizeTranscriptKind(entry.kind) === "user"
+                      ? "justify-end"
+                      : "justify-start",
+                  )}
+                >
+                  <Badge
+                    variant="outline"
+                    className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
+                  >
+                    {lane.icon}
+                    {lane.label}
+                  </Badge>
+                </div>
+                <ChatMessage entry={entry} isLive={isLiveEntry(entry)} />
+              </div>
             );
           }
 
           if (group.type === "tool_pair") {
             return (
-              <div key={`tool-group-${gi}`} className="mx-4 flex flex-col gap-1">
-                {group.entries.map((entry, ei) => (
-                  <ToolCard
-                    key={entry.id}
-                    entry={entry}
-                    pairedEntry={
-                      ei === 0 && group.entries.length > 1
-                        ? group.entries[1]
-                        : ei > 0
-                          ? group.entries[0]
-                          : undefined
-                    }
-                  />
-                ))}
+              <div key={`tool-group-${gi}`} className="space-y-2 px-1 sm:px-2">
+                <Badge
+                  variant="outline"
+                  className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
+                >
+                  {lane.icon}
+                  {lane.label}
+                </Badge>
+                <div className="flex flex-col gap-1">
+                  {group.entries.map((entry, ei) => (
+                    <ToolCard
+                      key={entry.id}
+                      entry={entry}
+                      pairedEntry={
+                        ei === 0 && group.entries.length > 1
+                          ? group.entries[1]
+                          : ei > 0
+                            ? group.entries[0]
+                            : undefined
+                      }
+                    />
+                  ))}
+                </div>
               </div>
             );
           }
 
-          return group.entries.map((entry) => (
-            <ChatMessage key={entry.id} entry={entry} isLive={isLiveEntry(entry)} />
-          ));
+          return (
+            <div key={`other-${gi}`} className="space-y-2">
+              <Badge
+                variant="outline"
+                className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
+              >
+                {lane.icon}
+                {lane.label}
+              </Badge>
+              {group.entries.map((entry) => (
+                <ChatMessage key={entry.id} entry={entry} isLive={isLiveEntry(entry)} />
+              ))}
+            </div>
+          );
         })}
         <div ref={endRef} />
       </div>
@@ -229,7 +364,7 @@ export function ChatThread({ entries, isLoading, className }: ChatThreadProps) {
             variant="secondary"
             size="sm"
             onClick={scrollToBottom}
-            className="gap-1.5 rounded-full shadow-lg"
+            className="gap-1.5 rounded-full border border-primary/20 bg-background/90 shadow-lg backdrop-blur"
           >
             <ArrowDown className="h-3 w-3" />
             New messages
