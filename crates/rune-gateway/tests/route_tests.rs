@@ -1034,6 +1034,7 @@ async fn ws_rpc_health_reports_session_count() {
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["service"], "rune-gateway");
     assert_eq!(payload["session_count"], 2);
+    assert_eq!(payload["ws_connections"], 0);
 }
 
 #[tokio::test]
@@ -1822,6 +1823,7 @@ async fn health_returns_200() {
     let json = body_json(response).await;
     assert_eq!(json["status"], "ok");
     assert_eq!(json["service"], "rune-gateway");
+    assert_eq!(json["ws_connections"], 0);
 }
 
 #[tokio::test]

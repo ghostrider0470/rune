@@ -75,6 +75,7 @@ pub struct StatusResponse {
     pub session_count: usize,
     pub cron_job_count: usize,
     pub ws_subscribers: usize,
+    pub ws_connections: usize,
     pub uptime_seconds: u64,
     pub lane_stats: Option<LaneStatsResponse>,
     pub skills: SkillStatusResponse,
@@ -135,6 +136,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
         session_count: sessions.len(),
         cron_job_count,
         ws_subscribers: state.event_tx.receiver_count(),
+        ws_connections: active_ws_connections(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         lane_stats,
         skills: SkillStatusResponse {
