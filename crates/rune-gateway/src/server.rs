@@ -132,6 +132,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         session_engine: state.session_engine.clone(),
         turn_executor: state.turn_executor.clone(),
         workspace_root: state.config.agents.defaults.workspace.clone(),
+        device_registry: state.device_registry.clone(),
     };
 
     let app = build_router(state, auth_token);

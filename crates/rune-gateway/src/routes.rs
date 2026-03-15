@@ -692,6 +692,7 @@ pub async fn cron_run(
         session_engine: state.session_engine.clone(),
         turn_executor: state.turn_executor.clone(),
         workspace_root: state.config.agents.defaults.workspace.clone(),
+        device_registry: state.device_registry.clone(),
     };
 
     let started_at = Utc::now();
@@ -2503,7 +2504,7 @@ fn pairing_err(e: PairingError) -> GatewayError {
         | PairingError::InvalidSignature(_)
         | PairingError::EmptyDeviceName
         | PairingError::DuplicatePublicKey => GatewayError::BadRequest(e.to_string()),
-        PairingError::VerificationFailed => GatewayError::Unauthorized,
+        PairingError::VerificationFailed => GatewayError::BadRequest(e.to_string()),
         PairingError::Store(_) => GatewayError::Internal(e.to_string()),
     }
 }

@@ -671,10 +671,17 @@ impl ToolExecutor for FakeToolExecutor {
 const TEST_AUTH_TOKEN: &str = "test-secret-token";
 
 fn build_test_app(auth_token: Option<String>) -> axum::Router {
-    build_test_app_with_config(AppConfig::default(), auth_token)
+    build_test_app_parts(AppConfig::default(), auth_token).0
 }
 
-fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>) -> axum::Router {
+fn build_test_app_with_config(config: AppConfig, auth_token: Option<String>) -> axum::Router {
+    build_test_app_parts(config, auth_token).0
+}
+
+fn build_test_app_parts(
+    mut config: AppConfig,
+    auth_token: Option<String>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
@@ -746,7 +753,7 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
         event_tx,
     };
 
-    build_router(state, auth_token)
+    (build_router(state, auth_token), device_repo)
 }
 
 async fn body_json(response: axum::http::Response<Body>) -> Value {
@@ -2542,7 +2549,70 @@ async fn device_pair_approve_rejects_wrong_signature() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert_eq!(payload["code"], "bad_request");
+    assert_eq!(payload["message"], "bad request: challenge response verification failed");
+}
+
+#[tokio::test]
+async fn device_pair_approve_rejects_expired_request() {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let (app, device_repo) = build_test_app_parts(AppConfig::default(), Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[21u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "expired-device",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
+
+    {
+        let mut requests = device_repo.requests.lock().await;
+        let request = requests
+            .iter_mut()
+            .find(|request| request.id.to_string() == request_id)
+            .expect("pending request entry");
+        request.expires_at = chrono::Utc::now() - chrono::Duration::minutes(1);
+    }
+
+    let response = app
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert_eq!(payload["code"], "bad_request");
+    assert!(payload["message"].as_str().unwrap().contains("pairing request expired"));
 }
 
 #[tokio::test]
@@ -2789,6 +2859,29 @@ async fn device_reject_rotate_and_delete_routes_work() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn device_pair_pending_route_requires_gateway_token() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/devices/pair/pending").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::get("/devices/pair/pending")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
