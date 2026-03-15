@@ -2252,22 +2252,32 @@ pub struct PairRequestBody {
     pub public_key: String,
 }
 
+#[derive(Serialize)]
+pub struct PairRequestResponse {
+    pub request_id: Uuid,
+    pub challenge: String,
+    pub expires_at: DateTime<Utc>,
+}
+
 /// `POST /devices/pair/request` — initiate a new device pairing.
 ///
 /// The device supplies its name and Ed25519 public key (hex-encoded).
-/// Returns a [`PairingRequest`] containing a random challenge nonce that
-/// the device must sign with its private key.
+/// Returns a random challenge nonce that the device must sign with its private key.
 pub async fn device_pair_request(
     State(state): State<AppState>,
     Json(body): Json<PairRequestBody>,
-) -> Result<Json<PairingRequest>, GatewayError> {
+) -> Result<Json<PairRequestResponse>, GatewayError> {
     let req = state
         .device_registry
         .request_pairing(body.device_name, body.public_key)
         .await
         .map_err(pairing_err)?;
 
-    Ok(Json(req))
+    Ok(Json(PairRequestResponse {
+        request_id: req.id,
+        challenge: req.challenge,
+        expires_at: req.expires_at,
+    }))
 }
 
 /// Request body for `POST /devices/pair/approve`.
@@ -2337,20 +2347,22 @@ pub struct PairRejectBody {
 }
 
 /// `POST /devices/pair/reject` — reject and discard a pending pairing request.
+#[derive(Serialize)]
+pub struct PairRejectResponse {
+    pub rejected: bool,
+}
+
 pub async fn device_pair_reject(
     State(state): State<AppState>,
     Json(body): Json<PairRejectBody>,
-) -> Result<Json<ActionResponse>, GatewayError> {
+) -> Result<Json<PairRejectResponse>, GatewayError> {
     state
         .device_registry
         .reject_pairing(body.request_id)
         .await
         .map_err(pairing_err)?;
 
-    Ok(Json(ActionResponse {
-        success: true,
-        message: format!("pairing request {} rejected", body.request_id),
-    }))
+    Ok(Json(PairRejectResponse { rejected: true }))
 }
 
 /// `GET /devices/pair/pending` — list all pending pairing requests.
@@ -2431,12 +2443,17 @@ pub async fn device_list(
     }))
 }
 
+#[derive(Serialize)]
+pub struct DeviceDeleteResponse {
+    pub deleted: bool,
+}
+
 /// `DELETE /devices/{id}` — revoke a paired device.
 pub async fn device_revoke(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     headers: HeaderMap,
-) -> Result<Json<ActionResponse>, GatewayError> {
+) -> Result<Json<DeviceDeleteResponse>, GatewayError> {
     require_gateway_operator_token(&headers, &state)?;
     state
         .device_registry
@@ -2444,10 +2461,7 @@ pub async fn device_revoke(
         .await
         .map_err(pairing_err)?;
 
-    Ok(Json(ActionResponse {
-        success: true,
-        message: format!("device {id} revoked"),
-    }))
+    Ok(Json(DeviceDeleteResponse { deleted: true }))
 }
 
 /// `POST /devices/{id}/rotate-token` — rotate the bearer token for a device.
@@ -2513,8 +2527,6 @@ fn require_gateway_operator_token(headers: &HeaderMap, state: &AppState) -> Resu
     if token == expected {
         Ok(())
     } else {
-        Err(GatewayError::Forbidden(
-            "device management requires the gateway operator token".to_string(),
-        ))
+        Err(GatewayError::Unauthorized)
     }
 }

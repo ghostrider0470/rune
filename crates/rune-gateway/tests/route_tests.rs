@@ -2380,9 +2380,9 @@ async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let pairing_request = body_json(response).await;
-    assert_eq!(pairing_request["device_name"], "paired-phone");
-    let request_id = pairing_request["id"].as_str().unwrap().to_string();
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
     let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    assert!(pairing_request["expires_at"].as_str().is_some());
 
     let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
 
@@ -2404,7 +2404,9 @@ async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
     assert_eq!(response.status(), StatusCode::OK);
     let approved = body_json(response).await;
     assert_eq!(approved["name"], "paired-phone");
+    assert_eq!(approved["role"], "operator");
     assert!(approved["token"].as_str().unwrap().len() >= 32);
+    assert!(approved["token_expires_at"].as_str().is_some());
 }
 
 #[tokio::test]
@@ -2433,7 +2435,7 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let pairing_request = body_json(response).await;
-    let request_id = pairing_request["id"].as_str().unwrap().to_string();
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
     let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
     let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
 
@@ -2481,9 +2483,9 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let payload = body_json(response).await;
-    assert_eq!(payload["code"], "forbidden");
+    assert_eq!(payload["code"], "unauthorized");
 
     let response = app
         .oneshot(
