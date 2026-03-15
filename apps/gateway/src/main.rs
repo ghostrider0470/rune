@@ -177,6 +177,8 @@ async fn build_services(
     let approval_repo: Arc<dyn ApprovalRepo> = Arc::new(PgApprovalRepo::new(pool.clone()));
     let tool_approval_repo: Arc<dyn rune_store::repos::ToolApprovalPolicyRepo> =
         Arc::new(rune_store::pg::PgToolApprovalPolicyRepo::new(pool.clone()));
+    let device_repo: Arc<dyn rune_store::repos::DeviceRepo> =
+        Arc::new(rune_store::pg::PgDeviceRepo::new(pool.clone()));
     let tool_execution_repo: Arc<dyn ToolExecutionRepo> = Arc::new(PgToolExecutionRepo::new(pool));
 
     let session_engine = Arc::new(
@@ -314,6 +316,7 @@ async fn build_services(
         tool_approval_repo,
         process_manager,
         tool_count,
+        device_repo,
     };
 
     Ok((services, embedded_pg, session_loop))

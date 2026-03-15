@@ -13,6 +13,8 @@ use rune_runtime::scheduler::{Job, JobPayload, ReminderStore, Scheduler, Session
 use rune_runtime::{SessionEngine, TurnExecutor};
 use rune_store::models::SessionRow;
 
+use crate::pairing::DeviceRegistry;
+
 /// Manages background services (heartbeat, scheduler, reminders).
 pub struct BackgroundSupervisor {
     handle: Option<tokio::task::JoinHandle<()>>,
@@ -28,6 +30,7 @@ pub struct SupervisorDeps {
     pub session_engine: Arc<SessionEngine>,
     pub turn_executor: Arc<TurnExecutor>,
     pub workspace_root: Option<String>,
+    pub device_registry: Arc<DeviceRegistry>,
 }
 
 impl BackgroundSupervisor {
@@ -146,6 +149,11 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                     }
                 }
             }
+        }
+
+        // --- Pairing request pruning ---
+        if let Err(error) = deps.device_registry.prune_expired_requests().await {
+            error!(error = %error, "failed to prune expired pairing requests");
         }
 
         // --- Scheduled jobs ---

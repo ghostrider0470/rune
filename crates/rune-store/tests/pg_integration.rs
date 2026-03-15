@@ -88,7 +88,7 @@ async fn setup() -> Option<PgPool> {
 
     if let Err(err) = diesel::sql_query(
         "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
-         tool_executions, channel_deliveries CASCADE",
+         tool_executions, channel_deliveries, paired_devices, pairing_requests CASCADE",
     )
     .execute(&mut conn)
     .await

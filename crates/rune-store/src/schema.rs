@@ -128,6 +128,34 @@ table! {
     }
 }
 
+table! {
+    /// Paired devices with Ed25519 authentication.
+    paired_devices (id) {
+        id -> Uuid,
+        name -> Text,
+        public_key -> Text,
+        role -> Text,
+        scopes -> Jsonb,
+        token_hash -> Text,
+        token_expires_at -> Timestamptz,
+        paired_at -> Timestamptz,
+        last_seen_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+table! {
+    /// Pending pairing requests.
+    pairing_requests (id) {
+        id -> Uuid,
+        device_name -> Text,
+        public_key -> Text,
+        challenge -> Text,
+        created_at -> Timestamptz,
+        expires_at -> Timestamptz,
+    }
+}
+
 diesel::joinable!(turns -> sessions (session_id));
 diesel::joinable!(transcript_items -> sessions (session_id));
 diesel::joinable!(tool_executions -> sessions (session_id));
@@ -142,4 +170,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     tool_executions,
     channel_deliveries,
     job_runs,
+    paired_devices,
+    pairing_requests,
 );

@@ -769,3 +769,190 @@ impl ToolExecutionRepo for PgToolExecutionRepo {
             .map_err(|e| not_found_or(e, "tool_execution", id))
     }
 }
+
+// ── PgDeviceRepo ────────────────────────────────────────────────────────────
+
+/// PostgreSQL-backed device pairing repository.
+#[derive(Clone)]
+pub struct PgDeviceRepo {
+    pool: PgPool,
+}
+
+impl PgDeviceRepo {
+    /// Create a new repository backed by the given connection pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl DeviceRepo for PgDeviceRepo {
+    async fn create_device(&self, device: NewPairedDevice) -> Result<PairedDeviceRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::insert_into(paired_devices::table)
+            .values(&device)
+            .returning(PairedDeviceRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_device_by_id(&self, id: Uuid) -> Result<PairedDeviceRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        paired_devices::table
+            .find(id)
+            .select(PairedDeviceRow::as_select())
+            .first(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "paired_device", id))
+    }
+
+    async fn find_device_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        paired_devices::table
+            .filter(paired_devices::token_hash.eq(token_hash))
+            .select(PairedDeviceRow::as_select())
+            .first(&mut conn)
+            .await
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    async fn find_device_by_public_key(
+        &self,
+        public_key: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        paired_devices::table
+            .filter(paired_devices::public_key.eq(public_key))
+            .select(PairedDeviceRow::as_select())
+            .first(&mut conn)
+            .await
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    async fn list_devices(&self) -> Result<Vec<PairedDeviceRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        paired_devices::table
+            .select(PairedDeviceRow::as_select())
+            .order(paired_devices::paired_at.asc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn update_token(
+        &self,
+        id: Uuid,
+        token_hash: &str,
+        token_expires_at: DateTime<Utc>,
+    ) -> Result<PairedDeviceRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(paired_devices::table.find(id))
+            .set((
+                paired_devices::token_hash.eq(token_hash),
+                paired_devices::token_expires_at.eq(token_expires_at),
+            ))
+            .returning(PairedDeviceRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "paired_device", id))
+    }
+
+    async fn update_role(
+        &self,
+        id: Uuid,
+        role: &str,
+        scopes: serde_json::Value,
+    ) -> Result<PairedDeviceRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(paired_devices::table.find(id))
+            .set((paired_devices::role.eq(role), paired_devices::scopes.eq(scopes)))
+            .returning(PairedDeviceRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "paired_device", id))
+    }
+
+    async fn touch_last_seen(
+        &self,
+        id: Uuid,
+        last_seen_at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(paired_devices::table.find(id))
+            .set(paired_devices::last_seen_at.eq(Some(last_seen_at)))
+            .execute(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "paired_device", id))?;
+        Ok(())
+    }
+
+    async fn delete_device(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let deleted = diesel::delete(paired_devices::table.find(id))
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(deleted > 0)
+    }
+
+    async fn create_pairing_request(
+        &self,
+        request: NewPairingRequest,
+    ) -> Result<PairingRequestRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::insert_into(pairing_requests::table)
+            .values(&request)
+            .returning(PairingRequestRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn take_pairing_request(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<PairingRequestRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::delete(pairing_requests::table.find(id))
+            .returning(PairingRequestRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    async fn delete_pairing_request(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let deleted = diesel::delete(pairing_requests::table.find(id))
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(deleted > 0)
+    }
+
+    async fn list_pending_requests(&self) -> Result<Vec<PairingRequestRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        pairing_requests::table
+            .filter(pairing_requests::expires_at.gt(Utc::now()))
+            .select(PairingRequestRow::as_select())
+            .order(pairing_requests::created_at.asc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn prune_expired_requests(&self) -> Result<usize, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let deleted = diesel::delete(pairing_requests::table.filter(pairing_requests::expires_at.le(Utc::now())))
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(deleted)
+    }
+}

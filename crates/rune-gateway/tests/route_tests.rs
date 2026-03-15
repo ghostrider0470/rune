@@ -458,6 +458,197 @@ impl ToolApprovalPolicyRepo for MemToolApprovalPolicyRepo {
     }
 }
 
+struct MemDeviceRepo {
+    devices: Mutex<Vec<PairedDeviceRow>>,
+    requests: Mutex<Vec<PairingRequestRow>>,
+}
+
+impl MemDeviceRepo {
+    fn new() -> Self {
+        Self {
+            devices: Mutex::new(Vec::new()),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl DeviceRepo for MemDeviceRepo {
+    async fn create_device(&self, device: NewPairedDevice) -> Result<PairedDeviceRow, StoreError> {
+        let row = PairedDeviceRow {
+            id: device.id,
+            name: device.name,
+            public_key: device.public_key,
+            role: device.role,
+            scopes: device.scopes,
+            token_hash: device.token_hash,
+            token_expires_at: device.token_expires_at,
+            paired_at: device.paired_at,
+            last_seen_at: None,
+            created_at: device.created_at,
+        };
+        self.devices.lock().await.push(row.clone());
+        Ok(row)
+    }
+
+    async fn find_device_by_id(&self, id: Uuid) -> Result<PairedDeviceRow, StoreError> {
+        self.devices
+            .lock()
+            .await
+            .iter()
+            .find(|device| device.id == id)
+            .cloned()
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })
+    }
+
+    async fn find_device_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError> {
+        Ok(self
+            .devices
+            .lock()
+            .await
+            .iter()
+            .find(|device| device.token_hash == token_hash)
+            .cloned())
+    }
+
+    async fn find_device_by_public_key(
+        &self,
+        public_key: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError> {
+        Ok(self
+            .devices
+            .lock()
+            .await
+            .iter()
+            .find(|device| device.public_key == public_key)
+            .cloned())
+    }
+
+    async fn list_devices(&self) -> Result<Vec<PairedDeviceRow>, StoreError> {
+        Ok(self.devices.lock().await.clone())
+    }
+
+    async fn update_token(
+        &self,
+        id: Uuid,
+        token_hash: &str,
+        token_expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<PairedDeviceRow, StoreError> {
+        let mut devices = self.devices.lock().await;
+        let device = devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })?;
+        device.token_hash = token_hash.to_string();
+        device.token_expires_at = token_expires_at;
+        Ok(device.clone())
+    }
+
+    async fn update_role(
+        &self,
+        id: Uuid,
+        role: &str,
+        scopes: serde_json::Value,
+    ) -> Result<PairedDeviceRow, StoreError> {
+        let mut devices = self.devices.lock().await;
+        let device = devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })?;
+        device.role = role.to_string();
+        device.scopes = scopes;
+        Ok(device.clone())
+    }
+
+    async fn touch_last_seen(
+        &self,
+        id: Uuid,
+        last_seen_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError> {
+        let mut devices = self.devices.lock().await;
+        let device = devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })?;
+        device.last_seen_at = Some(last_seen_at);
+        Ok(())
+    }
+
+    async fn delete_device(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut devices = self.devices.lock().await;
+        let before = devices.len();
+        devices.retain(|device| device.id != id);
+        Ok(devices.len() != before)
+    }
+
+    async fn create_pairing_request(
+        &self,
+        request: NewPairingRequest,
+    ) -> Result<PairingRequestRow, StoreError> {
+        let row = PairingRequestRow {
+            id: request.id,
+            device_name: request.device_name,
+            public_key: request.public_key,
+            challenge: request.challenge,
+            created_at: request.created_at,
+            expires_at: request.expires_at,
+        };
+        self.requests.lock().await.push(row.clone());
+        Ok(row)
+    }
+
+    async fn take_pairing_request(&self, id: Uuid) -> Result<Option<PairingRequestRow>, StoreError> {
+        let mut requests = self.requests.lock().await;
+        if let Some(index) = requests.iter().position(|request| request.id == id) {
+            Ok(Some(requests.remove(index)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn delete_pairing_request(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut requests = self.requests.lock().await;
+        let before = requests.len();
+        requests.retain(|request| request.id != id);
+        Ok(requests.len() != before)
+    }
+
+    async fn list_pending_requests(&self) -> Result<Vec<PairingRequestRow>, StoreError> {
+        let now = chrono::Utc::now();
+        Ok(self
+            .requests
+            .lock()
+            .await
+            .iter()
+            .filter(|request| request.expires_at > now)
+            .cloned()
+            .collect())
+    }
+
+    async fn prune_expired_requests(&self) -> Result<usize, StoreError> {
+        let now = chrono::Utc::now();
+        let mut requests = self.requests.lock().await;
+        let before = requests.len();
+        requests.retain(|request| request.expires_at > now);
+        Ok(before - requests.len())
+    }
+}
+
 // ── Fake tool executor ────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -480,10 +671,17 @@ impl ToolExecutor for FakeToolExecutor {
 const TEST_AUTH_TOKEN: &str = "test-secret-token";
 
 fn build_test_app(auth_token: Option<String>) -> axum::Router {
-    build_test_app_with_config(AppConfig::default(), auth_token)
+    build_test_app_parts(AppConfig::default(), auth_token).0
 }
 
-fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>) -> axum::Router {
+fn build_test_app_with_config(config: AppConfig, auth_token: Option<String>) -> axum::Router {
+    build_test_app_parts(config, auth_token).0
+}
+
+fn build_test_app_parts(
+    mut config: AppConfig,
+    auth_token: Option<String>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
@@ -528,6 +726,8 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
         config.paths.skills_dir.clone(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config,
@@ -546,13 +746,14 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
     };
 
-    build_router(state, auth_token)
+    (build_router(state, auth_token), device_repo)
 }
 
 async fn body_json(response: axum::http::Response<Body>) -> Value {
@@ -607,6 +808,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -625,7 +828,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 3,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -700,6 +904,8 @@ enabled: true
     )
     .unwrap();
     let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -718,7 +924,8 @@ enabled: true
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -805,6 +1012,8 @@ async fn status_reports_configured_lane_capacities() {
         subagent_capacity: 9,
         cron_capacity: 128,
     };
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(config),
@@ -823,7 +1032,8 @@ async fn status_reports_configured_lane_capacities() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -887,6 +1097,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -905,7 +1117,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1001,6 +1214,8 @@ async fn ws_rpc_health_reports_session_count() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1019,7 +1234,8 @@ async fn ws_rpc_health_reports_session_count() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1106,6 +1322,8 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1124,7 +1342,8 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1231,6 +1450,8 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1249,7 +1470,8 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1306,6 +1528,8 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1324,7 +1548,8 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1381,6 +1606,8 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1399,7 +1626,8 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1516,6 +1744,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1534,7 +1764,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1647,6 +1878,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1665,7 +1898,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1743,6 +1977,8 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1761,7 +1997,8 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -2150,9 +2387,9 @@ async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let pairing_request = body_json(response).await;
-    assert_eq!(pairing_request["device_name"], "paired-phone");
-    let request_id = pairing_request["id"].as_str().unwrap().to_string();
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
     let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    assert!(pairing_request["expires_at"].as_str().is_some());
 
     let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
 
@@ -2174,7 +2411,9 @@ async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
     assert_eq!(response.status(), StatusCode::OK);
     let approved = body_json(response).await;
     assert_eq!(approved["name"], "paired-phone");
+    assert_eq!(approved["role"], "operator");
     assert!(approved["token"].as_str().unwrap().len() >= 32);
+    assert!(approved["token_expires_at"].as_str().is_some());
 }
 
 #[tokio::test]
@@ -2203,7 +2442,7 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let pairing_request = body_json(response).await;
-    let request_id = pairing_request["id"].as_str().unwrap().to_string();
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
     let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
     let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
 
@@ -2251,9 +2490,9 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let payload = body_json(response).await;
-    assert_eq!(payload["code"], "forbidden");
+    assert_eq!(payload["code"], "unauthorized");
 
     let response = app
         .oneshot(
@@ -2267,6 +2506,418 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+#[tokio::test]
+async fn device_pair_approve_rejects_wrong_signature() {
+    use ed25519_dalek::SigningKey;
+
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "bad-sig-device",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
+
+    let response = app
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": "aa".repeat(64),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert_eq!(payload["code"], "bad_request");
+    assert_eq!(payload["message"], "bad request: challenge response verification failed");
+}
+
+#[tokio::test]
+async fn device_pair_approve_rejects_expired_request() {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let (app, device_repo) = build_test_app_parts(AppConfig::default(), Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[21u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "expired-device",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
+
+    {
+        let mut requests = device_repo.requests.lock().await;
+        let request = requests
+            .iter_mut()
+            .find(|request| request.id.to_string() == request_id)
+            .expect("pending request entry");
+        request.expires_at = chrono::Utc::now() - chrono::Duration::minutes(1);
+    }
+
+    let response = app
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = body_json(response).await;
+    assert_eq!(payload["code"], "bad_request");
+    assert!(payload["message"].as_str().unwrap().contains("pairing request expired"));
+}
+
+#[tokio::test]
+async fn device_pair_request_rejects_duplicate_public_key() {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[10u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "dup-a",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "dup-b",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn device_list_masks_tokens_and_includes_pending_requests() {
+    use ed25519_dalek::SigningKey;
+
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[11u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "list-me",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::get("/devices")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert!(payload["pending_requests"].as_array().unwrap().len() >= 1);
+    assert!(payload["devices"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn device_reject_rotate_and_delete_routes_work() {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let reject_key = SigningKey::from_bytes(&[12u8; 32]);
+    let reject_public_key = hex::encode(reject_key.verifying_key().as_bytes());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "reject-me",
+                        "public_key": reject_public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let pending = body_json(response).await;
+    let reject_request_id = pending["request_id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/reject")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::from(
+                    serde_json::json!({"request_id": reject_request_id}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert_eq!(payload["rejected"], true);
+
+    let rotate_key = SigningKey::from_bytes(&[13u8; 32]);
+    let rotate_public_key = hex::encode(rotate_key.verifying_key().as_bytes());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "rotate-me",
+                        "public_key": rotate_public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    let signature = rotate_key.sign(&hex::decode(&challenge).unwrap());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let approved = body_json(response).await;
+    let original_token = approved["token"].as_str().unwrap().to_string();
+    let device_id = approved["device_id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/devices/{device_id}/rotate-token"))
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let rotated = body_json(response).await;
+    let rotated_token = rotated["token"].as_str().unwrap().to_string();
+    assert_ne!(original_token, rotated_token);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/status")
+                .header(header::AUTHORIZATION, format!("Bearer {original_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::delete(format!("/devices/{device_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    assert_eq!(payload["deleted"], true);
+
+    let response = app
+        .oneshot(
+            Request::get("/status")
+                .header(header::AUTHORIZATION, format!("Bearer {rotated_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn device_pair_pending_route_requires_gateway_token() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/devices/pair/pending").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::get("/devices/pair/pending")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn mem_device_repo_prunes_expired_requests() {
+    let repo = MemDeviceRepo::new();
+    let now = chrono::Utc::now();
+
+    repo.create_pairing_request(NewPairingRequest {
+        id: Uuid::now_v7(),
+        device_name: "expired".into(),
+        public_key: "deadbeef".into(),
+        challenge: "beadfeed".into(),
+        created_at: now - chrono::Duration::minutes(10),
+        expires_at: now - chrono::Duration::minutes(5),
+    })
+    .await
+    .unwrap();
+
+    repo.create_pairing_request(NewPairingRequest {
+        id: Uuid::now_v7(),
+        device_name: "fresh".into(),
+        public_key: "cafebabe".into(),
+        challenge: "facefeed".into(),
+        created_at: now,
+        expires_at: now + chrono::Duration::minutes(5),
+    })
+    .await
+    .unwrap();
+
+    let pruned = repo.prune_expired_requests().await.unwrap();
+    assert_eq!(pruned, 1);
+
+    let pending = repo.list_pending_requests().await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].device_name, "fresh");
+}
 
 #[tokio::test]
 async fn patch_and_delete_session_routes_work() {
@@ -2401,6 +3052,8 @@ async fn send_message_and_transcript_with_shared_state() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -2419,7 +3072,8 @@ async fn send_message_and_transcript_with_shared_state() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -2614,6 +3268,8 @@ async fn get_session_status_surfaces_subagent_metadata() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -2632,7 +3288,8 @@ async fn get_session_status_surfaces_subagent_metadata() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -3183,6 +3840,9 @@ async fn list_sessions_filters_by_channel_and_activity() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+
     let state = AppState {
         config: Arc::new(AppConfig::default()),
         started_at: Arc::new(Instant::now()),
@@ -3200,7 +3860,8 @@ async fn list_sessions_filters_by_channel_and_activity() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,

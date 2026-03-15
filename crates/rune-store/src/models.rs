@@ -230,6 +230,65 @@ pub struct NewToolExecution {
     pub started_at: DateTime<Utc>,
 }
 
+// ── Device pairing ───────────────────────────────────────────────────────────
+
+/// A paired device row.
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = paired_devices)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PairedDeviceRow {
+    pub id: Uuid,
+    pub name: String,
+    pub public_key: String,
+    pub role: String,
+    pub scopes: serde_json::Value,
+    pub token_hash: String,
+    pub token_expires_at: DateTime<Utc>,
+    pub paired_at: DateTime<Utc>,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Insert payload for a new paired device.
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = paired_devices)]
+pub struct NewPairedDevice {
+    pub id: Uuid,
+    pub name: String,
+    pub public_key: String,
+    pub role: String,
+    pub scopes: serde_json::Value,
+    pub token_hash: String,
+    pub token_expires_at: DateTime<Utc>,
+    pub paired_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A pairing request row.
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = pairing_requests)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PairingRequestRow {
+    pub id: Uuid,
+    pub device_name: String,
+    pub public_key: String,
+    pub challenge: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Insert payload for a new pairing request.
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = pairing_requests)]
+pub struct NewPairingRequest {
+    pub id: Uuid,
+    pub device_name: String,
+    pub public_key: String,
+    pub challenge: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
 // ── Channel deliveries ────────────────────────────────────────────────
 
 /// A channel delivery row.
