@@ -24,7 +24,7 @@ use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
 use serde_json::Value;
 
 use crate::error::GatewayError;
-use crate::pairing::{PairedDevice, PairingError, PairingRequest};
+use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
 use crate::state::{AppState, SessionEvent};
 use crate::ws::active_ws_connections;
 use crate::{SupervisorDeps, run_job_lifecycle};
@@ -2275,6 +2275,28 @@ pub async fn device_pair_request(
 pub struct PairApproveBody {
     pub request_id: Uuid,
     pub challenge_response: String,
+    #[serde(default = "default_device_role")]
+    pub role: String,
+    #[serde(default = "default_device_scopes")]
+    pub scopes: Vec<String>,
+}
+
+fn default_device_role() -> String {
+    "operator".into()
+}
+
+fn default_device_scopes() -> Vec<String> {
+    vec!["sessions:read".into(), "sessions:write".into(), "status:read".into()]
+}
+
+#[derive(Serialize)]
+pub struct PairApproveResponse {
+    pub device_id: Uuid,
+    pub name: String,
+    pub role: String,
+    pub scopes: Vec<String>,
+    pub token: String,
+    pub token_expires_at: DateTime<Utc>,
 }
 
 /// `POST /devices/pair/approve` — approve a pending pairing request.
@@ -2285,14 +2307,27 @@ pub struct PairApproveBody {
 pub async fn device_pair_approve(
     State(state): State<AppState>,
     Json(body): Json<PairApproveBody>,
-) -> Result<Json<PairedDevice>, GatewayError> {
+) -> Result<Json<PairApproveResponse>, GatewayError> {
+    let role = DeviceRole::parse(&body.role);
     let device = state
         .device_registry
-        .approve_pairing(body.request_id, body.challenge_response)
+        .approve_pairing(
+            body.request_id,
+            body.challenge_response,
+            Some(role.clone()),
+            Some(body.scopes.clone()),
+        )
         .await
         .map_err(pairing_err)?;
 
-    Ok(Json(device))
+    Ok(Json(PairApproveResponse {
+        device_id: device.id,
+        name: device.name,
+        role: role.as_str().to_string(),
+        scopes: body.scopes,
+        token: device.token,
+        token_expires_at: device.token_expires_at,
+    }))
 }
 
 /// Request body for `POST /devices/pair/reject`.
@@ -2324,8 +2359,16 @@ pub async fn device_pair_pending(
     headers: HeaderMap,
 ) -> Result<Json<Vec<PairingRequest>>, GatewayError> {
     require_gateway_operator_token(&headers, &state)?;
-    let pending = state.device_registry.list_pending().await;
+    let pending = state.device_registry.list_pending().await.map_err(pairing_err)?;
     Ok(Json(pending))
+}
+
+#[derive(Serialize)]
+pub struct PendingRequestEntry {
+    pub id: Uuid,
+    pub device_name: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
 }
 
 /// Response type for device listings; masks the token field.
@@ -2334,29 +2377,31 @@ pub struct DeviceListEntry {
     pub id: Uuid,
     pub name: String,
     pub public_key: String,
-    pub role: crate::pairing::DeviceRole,
+    pub role: String,
     pub scopes: Vec<String>,
-    /// Masked token — only the first 8 characters are shown.
-    pub token_prefix: String,
+    pub token_masked: String,
     pub token_expires_at: chrono::DateTime<chrono::Utc>,
     pub paired_at: chrono::DateTime<chrono::Utc>,
     pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-impl From<PairedDevice> for DeviceListEntry {
-    fn from(d: PairedDevice) -> Self {
-        let token_prefix = if d.token.len() >= 8 {
-            format!("{}...", &d.token[..8])
-        } else {
-            "***".to_string()
-        };
+#[derive(Serialize)]
+pub struct DeviceListResponse {
+    pub devices: Vec<DeviceListEntry>,
+    pub pending_requests: Vec<PendingRequestEntry>,
+}
+
+impl From<StoredPairedDevice> for DeviceListEntry {
+    fn from(d: StoredPairedDevice) -> Self {
+        let prefix_len = d.token_hash.len().min(6);
+        let token_masked = format!("{}****", &d.token_hash[..prefix_len]);
         Self {
             id: d.id,
             name: d.name,
             public_key: d.public_key,
-            role: d.role,
+            role: d.role.as_str().to_string(),
             scopes: d.scopes,
-            token_prefix,
+            token_masked,
             token_expires_at: d.token_expires_at,
             paired_at: d.paired_at,
             last_seen_at: d.last_seen_at,
@@ -2368,11 +2413,22 @@ impl From<PairedDevice> for DeviceListEntry {
 pub async fn device_list(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<DeviceListEntry>>, GatewayError> {
+) -> Result<Json<DeviceListResponse>, GatewayError> {
     require_gateway_operator_token(&headers, &state)?;
-    let devices = state.device_registry.list_devices().await;
-    let entries: Vec<DeviceListEntry> = devices.into_iter().map(DeviceListEntry::from).collect();
-    Ok(Json(entries))
+    let devices = state.device_registry.list_devices().await.map_err(pairing_err)?;
+    let pending = state.device_registry.list_pending().await.map_err(pairing_err)?;
+    Ok(Json(DeviceListResponse {
+        devices: devices.into_iter().map(DeviceListEntry::from).collect(),
+        pending_requests: pending
+            .into_iter()
+            .map(|request| PendingRequestEntry {
+                id: request.id,
+                device_name: request.device_name,
+                created_at: request.created_at,
+                expires_at: request.expires_at,
+            })
+            .collect(),
+    }))
 }
 
 /// `DELETE /devices/{id}` — revoke a paired device.
@@ -2397,11 +2453,18 @@ pub async fn device_revoke(
 /// `POST /devices/{id}/rotate-token` — rotate the bearer token for a device.
 ///
 /// Returns the updated device **including the new full token**.
+#[derive(Serialize)]
+pub struct TokenRotateResponse {
+    pub device_id: Uuid,
+    pub token: String,
+    pub token_expires_at: DateTime<Utc>,
+}
+
 pub async fn device_rotate_token(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     headers: HeaderMap,
-) -> Result<Json<PairedDevice>, GatewayError> {
+) -> Result<Json<TokenRotateResponse>, GatewayError> {
     require_gateway_operator_token(&headers, &state)?;
     let device = state
         .device_registry
@@ -2409,20 +2472,25 @@ pub async fn device_rotate_token(
         .await
         .map_err(pairing_err)?;
 
-    Ok(Json(device))
+    Ok(Json(TokenRotateResponse {
+        device_id: device.id,
+        token: device.token,
+        token_expires_at: device.token_expires_at,
+    }))
 }
 
 /// Map [`PairingError`] variants to appropriate [`GatewayError`] variants.
 fn pairing_err(e: PairingError) -> GatewayError {
     match &e {
-        PairingError::RequestNotFound(_) | PairingError::DeviceNotFound(_) => {
-            GatewayError::BadRequest(e.to_string())
-        }
-        PairingError::RequestExpired(_) => GatewayError::BadRequest(e.to_string()),
-        PairingError::InvalidPublicKey(_) | PairingError::InvalidSignature(_) => {
-            GatewayError::BadRequest(e.to_string())
-        }
+        PairingError::RequestNotFound(_)
+        | PairingError::DeviceNotFound(_)
+        | PairingError::RequestExpired(_)
+        | PairingError::InvalidPublicKey(_)
+        | PairingError::InvalidSignature(_)
+        | PairingError::EmptyDeviceName
+        | PairingError::DuplicatePublicKey => GatewayError::BadRequest(e.to_string()),
         PairingError::VerificationFailed => GatewayError::Unauthorized,
+        PairingError::Store(_) => GatewayError::Internal(e.to_string()),
     }
 }
 

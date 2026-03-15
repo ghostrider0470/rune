@@ -19,7 +19,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
-    ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
+    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
 };
 use rune_tools::process_tool::ProcessManager;
 
@@ -71,6 +71,7 @@ pub struct Services {
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
     pub process_manager: ProcessManager,
     pub tool_count: usize,
+    pub device_repo: Arc<dyn DeviceRepo>,
 }
 
 /// Start the gateway HTTP server.
@@ -117,7 +118,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         tool_approval_repo: services.tool_approval_repo,
         process_manager: services.process_manager,
         tool_count: services.tool_count,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: services.device_repo.clone(),
+        device_registry: Arc::new(DeviceRegistry::new(services.device_repo)),
         skill_registry,
         skill_loader,
         event_tx,

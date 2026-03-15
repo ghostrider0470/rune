@@ -458,6 +458,197 @@ impl ToolApprovalPolicyRepo for MemToolApprovalPolicyRepo {
     }
 }
 
+struct MemDeviceRepo {
+    devices: Mutex<Vec<PairedDeviceRow>>,
+    requests: Mutex<Vec<PairingRequestRow>>,
+}
+
+impl MemDeviceRepo {
+    fn new() -> Self {
+        Self {
+            devices: Mutex::new(Vec::new()),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl DeviceRepo for MemDeviceRepo {
+    async fn create_device(&self, device: NewPairedDevice) -> Result<PairedDeviceRow, StoreError> {
+        let row = PairedDeviceRow {
+            id: device.id,
+            name: device.name,
+            public_key: device.public_key,
+            role: device.role,
+            scopes: device.scopes,
+            token_hash: device.token_hash,
+            token_expires_at: device.token_expires_at,
+            paired_at: device.paired_at,
+            last_seen_at: None,
+            created_at: device.created_at,
+        };
+        self.devices.lock().await.push(row.clone());
+        Ok(row)
+    }
+
+    async fn find_device_by_id(&self, id: Uuid) -> Result<PairedDeviceRow, StoreError> {
+        self.devices
+            .lock()
+            .await
+            .iter()
+            .find(|device| device.id == id)
+            .cloned()
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })
+    }
+
+    async fn find_device_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError> {
+        Ok(self
+            .devices
+            .lock()
+            .await
+            .iter()
+            .find(|device| device.token_hash == token_hash)
+            .cloned())
+    }
+
+    async fn find_device_by_public_key(
+        &self,
+        public_key: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError> {
+        Ok(self
+            .devices
+            .lock()
+            .await
+            .iter()
+            .find(|device| device.public_key == public_key)
+            .cloned())
+    }
+
+    async fn list_devices(&self) -> Result<Vec<PairedDeviceRow>, StoreError> {
+        Ok(self.devices.lock().await.clone())
+    }
+
+    async fn update_token(
+        &self,
+        id: Uuid,
+        token_hash: &str,
+        token_expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<PairedDeviceRow, StoreError> {
+        let mut devices = self.devices.lock().await;
+        let device = devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })?;
+        device.token_hash = token_hash.to_string();
+        device.token_expires_at = token_expires_at;
+        Ok(device.clone())
+    }
+
+    async fn update_role(
+        &self,
+        id: Uuid,
+        role: &str,
+        scopes: serde_json::Value,
+    ) -> Result<PairedDeviceRow, StoreError> {
+        let mut devices = self.devices.lock().await;
+        let device = devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })?;
+        device.role = role.to_string();
+        device.scopes = scopes;
+        Ok(device.clone())
+    }
+
+    async fn touch_last_seen(
+        &self,
+        id: Uuid,
+        last_seen_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError> {
+        let mut devices = self.devices.lock().await;
+        let device = devices
+            .iter_mut()
+            .find(|device| device.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "paired_device",
+                id: id.to_string(),
+            })?;
+        device.last_seen_at = Some(last_seen_at);
+        Ok(())
+    }
+
+    async fn delete_device(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut devices = self.devices.lock().await;
+        let before = devices.len();
+        devices.retain(|device| device.id != id);
+        Ok(devices.len() != before)
+    }
+
+    async fn create_pairing_request(
+        &self,
+        request: NewPairingRequest,
+    ) -> Result<PairingRequestRow, StoreError> {
+        let row = PairingRequestRow {
+            id: request.id,
+            device_name: request.device_name,
+            public_key: request.public_key,
+            challenge: request.challenge,
+            created_at: request.created_at,
+            expires_at: request.expires_at,
+        };
+        self.requests.lock().await.push(row.clone());
+        Ok(row)
+    }
+
+    async fn take_pairing_request(&self, id: Uuid) -> Result<Option<PairingRequestRow>, StoreError> {
+        let mut requests = self.requests.lock().await;
+        if let Some(index) = requests.iter().position(|request| request.id == id) {
+            Ok(Some(requests.remove(index)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn delete_pairing_request(&self, id: Uuid) -> Result<bool, StoreError> {
+        let mut requests = self.requests.lock().await;
+        let before = requests.len();
+        requests.retain(|request| request.id != id);
+        Ok(requests.len() != before)
+    }
+
+    async fn list_pending_requests(&self) -> Result<Vec<PairingRequestRow>, StoreError> {
+        let now = chrono::Utc::now();
+        Ok(self
+            .requests
+            .lock()
+            .await
+            .iter()
+            .filter(|request| request.expires_at > now)
+            .cloned()
+            .collect())
+    }
+
+    async fn prune_expired_requests(&self) -> Result<usize, StoreError> {
+        let now = chrono::Utc::now();
+        let mut requests = self.requests.lock().await;
+        let before = requests.len();
+        requests.retain(|request| request.expires_at > now);
+        Ok(before - requests.len())
+    }
+}
+
 // ── Fake tool executor ────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -528,6 +719,8 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
         config.paths.skills_dir.clone(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config,
@@ -546,7 +739,8 @@ fn build_test_app_with_config(mut config: AppConfig, auth_token: Option<String>)
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -607,6 +801,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -625,7 +821,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 3,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -700,6 +897,8 @@ enabled: true
     )
     .unwrap();
     let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -718,7 +917,8 @@ enabled: true
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -805,6 +1005,8 @@ async fn status_reports_configured_lane_capacities() {
         subagent_capacity: 9,
         cron_capacity: 128,
     };
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(config),
@@ -823,7 +1025,8 @@ async fn status_reports_configured_lane_capacities() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -887,6 +1090,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -905,7 +1110,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1001,6 +1207,8 @@ async fn ws_rpc_health_reports_session_count() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1019,7 +1227,8 @@ async fn ws_rpc_health_reports_session_count() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1106,6 +1315,8 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1124,7 +1335,8 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1231,6 +1443,8 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1249,7 +1463,8 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1306,6 +1521,8 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1324,7 +1541,8 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1381,6 +1599,8 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1399,7 +1619,8 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1516,6 +1737,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1534,7 +1757,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1647,6 +1871,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1665,7 +1891,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -1743,6 +1970,8 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -1761,7 +1990,8 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -2401,6 +2631,8 @@ async fn send_message_and_transcript_with_shared_state() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -2419,7 +2651,8 @@ async fn send_message_and_transcript_with_shared_state() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -2614,6 +2847,8 @@ async fn get_session_status_surfaces_subagent_metadata() {
         })
         .await
         .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
         config: Arc::new(AppConfig::default()),
@@ -2632,7 +2867,8 @@ async fn get_session_status_surfaces_subagent_metadata() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,
@@ -3183,6 +3419,9 @@ async fn list_sessions_filters_by_channel_and_activity() {
         std::env::temp_dir(),
         skill_registry.clone(),
     ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+
     let state = AppState {
         config: Arc::new(AppConfig::default()),
         started_at: Arc::new(Instant::now()),
@@ -3200,7 +3439,8 @@ async fn list_sessions_filters_by_channel_and_activity() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
         tool_count: 0,
-        device_registry: Arc::new(DeviceRegistry::new()),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
         skill_registry,
         skill_loader,
         event_tx,

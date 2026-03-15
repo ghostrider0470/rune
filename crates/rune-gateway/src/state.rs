@@ -11,7 +11,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
-    ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
+    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
 };
 use rune_tools::process_tool::ProcessManager;
 use tokio::sync::broadcast;
@@ -64,6 +64,8 @@ pub struct AppState {
     pub process_manager: ProcessManager,
     /// Number of registered tools in the runtime graph.
     pub tool_count: usize,
+    /// Persistent device pairing repository.
+    pub device_repo: Arc<dyn DeviceRepo>,
     /// Device pairing registry for Ed25519 challenge-response auth.
     pub device_registry: Arc<DeviceRegistry>,
     /// Dynamic skill registry populated from scanned `SKILL.md` directories.

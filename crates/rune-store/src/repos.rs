@@ -257,3 +257,77 @@ pub trait ToolExecutionRepo: Send + Sync {
         ended_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<ToolExecutionRow, StoreError>;
 }
+
+// ── Device pairing repository ───────────────────────────────────────────────
+
+/// Persistence contract for device pairing.
+#[async_trait]
+pub trait DeviceRepo: Send + Sync {
+    /// Insert a paired device.
+    async fn create_device(&self, device: NewPairedDevice) -> Result<PairedDeviceRow, StoreError>;
+
+    /// Find a device by ID.
+    async fn find_device_by_id(&self, id: Uuid) -> Result<PairedDeviceRow, StoreError>;
+
+    /// Find a device by token hash. Used for bearer-token auth.
+    async fn find_device_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError>;
+
+    /// Find a device by public key.
+    async fn find_device_by_public_key(
+        &self,
+        public_key: &str,
+    ) -> Result<Option<PairedDeviceRow>, StoreError>;
+
+    /// List all paired devices.
+    async fn list_devices(&self) -> Result<Vec<PairedDeviceRow>, StoreError>;
+
+    /// Update token hash and expiry (for rotation).
+    async fn update_token(
+        &self,
+        id: Uuid,
+        token_hash: &str,
+        token_expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<PairedDeviceRow, StoreError>;
+
+    /// Update role and scopes.
+    async fn update_role(
+        &self,
+        id: Uuid,
+        role: &str,
+        scopes: serde_json::Value,
+    ) -> Result<PairedDeviceRow, StoreError>;
+
+    /// Update last_seen_at timestamp.
+    async fn touch_last_seen(
+        &self,
+        id: Uuid,
+        last_seen_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError>;
+
+    /// Delete a device. Returns true if removed.
+    async fn delete_device(&self, id: Uuid) -> Result<bool, StoreError>;
+
+    /// Insert a pairing request.
+    async fn create_pairing_request(
+        &self,
+        request: NewPairingRequest,
+    ) -> Result<PairingRequestRow, StoreError>;
+
+    /// Find and remove a pairing request (consumed on use).
+    async fn take_pairing_request(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<PairingRequestRow>, StoreError>;
+
+    /// Delete a pending pairing request without returning it. Returns true if removed.
+    async fn delete_pairing_request(&self, id: Uuid) -> Result<bool, StoreError>;
+
+    /// List pending (non-expired) pairing requests.
+    async fn list_pending_requests(&self) -> Result<Vec<PairingRequestRow>, StoreError>;
+
+    /// Delete expired pairing requests. Returns count removed.
+    async fn prune_expired_requests(&self) -> Result<usize, StoreError>;
+}
