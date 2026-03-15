@@ -2792,6 +2792,41 @@ async fn device_reject_rotate_and_delete_routes_work() {
 }
 
 #[tokio::test]
+async fn mem_device_repo_prunes_expired_requests() {
+    let repo = MemDeviceRepo::new();
+    let now = chrono::Utc::now();
+
+    repo.create_pairing_request(NewPairingRequest {
+        id: Uuid::now_v7(),
+        device_name: "expired".into(),
+        public_key: "deadbeef".into(),
+        challenge: "beadfeed".into(),
+        created_at: now - chrono::Duration::minutes(10),
+        expires_at: now - chrono::Duration::minutes(5),
+    })
+    .await
+    .unwrap();
+
+    repo.create_pairing_request(NewPairingRequest {
+        id: Uuid::now_v7(),
+        device_name: "fresh".into(),
+        public_key: "cafebabe".into(),
+        challenge: "facefeed".into(),
+        created_at: now,
+        expires_at: now + chrono::Duration::minutes(5),
+    })
+    .await
+    .unwrap();
+
+    let pruned = repo.prune_expired_requests().await.unwrap();
+    assert_eq!(pruned, 1);
+
+    let pending = repo.list_pending_requests().await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].device_name, "fresh");
+}
+
+#[tokio::test]
 async fn patch_and_delete_session_routes_work() {
     let app = build_test_app(None);
 
