@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use diesel::OptionalExtension;
 use diesel::prelude::*;
+use diesel::sql_query;
+use diesel::sql_types::{BigInt, Int4, Text};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
@@ -12,6 +14,29 @@ use crate::models::*;
 use crate::pool::PgPool;
 use crate::repos::*;
 use crate::schema::*;
+
+const MEMORY_KEYWORD_SEARCH_SQL: &str = r#"SELECT file_path, chunk_text,
+       ts_rank(to_tsvector('english', chunk_text),
+               plainto_tsquery('english', $1)) AS score
+FROM memory_embeddings
+WHERE to_tsvector('english', chunk_text) @@ plainto_tsquery('english', $1)
+ORDER BY score DESC
+LIMIT $2"#;
+
+const MEMORY_VECTOR_SEARCH_SQL: &str = r#"SELECT file_path, chunk_text,
+       1 - (embedding <=> $1::vector) AS score
+FROM memory_embeddings
+ORDER BY embedding <=> $1::vector
+LIMIT $2"#;
+
+const MEMORY_UPSERT_CHUNK_SQL: &str = r#"INSERT INTO memory_embeddings (file_path, chunk_index, chunk_text, embedding)
+VALUES ($1, $2, $3, $4::vector)
+ON CONFLICT (file_path, chunk_index)
+DO UPDATE SET chunk_text = EXCLUDED.chunk_text,
+              embedding  = EXCLUDED.embedding,
+              created_at = now()"#;
+
+const MEMORY_DELETE_FILE_CHUNKS_SQL: &str = "DELETE FROM memory_embeddings WHERE file_path = $1";
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -785,6 +810,118 @@ impl PgDeviceRepo {
     }
 }
 
+/// PostgreSQL-backed memory embedding repository.
+#[derive(Clone)]
+pub struct PgMemoryEmbeddingRepo {
+    pool: PgPool,
+}
+
+impl PgMemoryEmbeddingRepo {
+    /// Create a new repository backed by the given connection pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+fn format_pgvector_literal(embedding: &[f32]) -> String {
+    let values = embedding
+        .iter()
+        .map(|value| {
+            if value.is_finite() {
+                value.to_string()
+            } else {
+                "0".to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{values}]")
+}
+
+#[async_trait]
+impl MemoryEmbeddingRepo for PgMemoryEmbeddingRepo {
+    async fn upsert_chunk(
+        &self,
+        file_path: &str,
+        chunk_index: i32,
+        chunk_text: &str,
+        embedding: &[f32],
+    ) -> Result<(), StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let embedding_literal = format_pgvector_literal(embedding);
+
+        sql_query(MEMORY_UPSERT_CHUNK_SQL)
+            .bind::<Text, _>(file_path)
+            .bind::<Int4, _>(chunk_index)
+            .bind::<Text, _>(chunk_text)
+            .bind::<Text, _>(&embedding_literal)
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+
+        Ok(())
+    }
+
+    async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let affected = sql_query(MEMORY_DELETE_FILE_CHUNKS_SQL)
+            .bind::<Text, _>(file_path)
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(affected)
+    }
+
+    async fn keyword_search(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<KeywordSearchRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        sql_query(MEMORY_KEYWORD_SEARCH_SQL)
+            .bind::<Text, _>(query)
+            .bind::<BigInt, _>(limit)
+            .load::<KeywordSearchRow>(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn vector_search(
+        &self,
+        embedding: &[f32],
+        limit: i64,
+    ) -> Result<Vec<VectorSearchRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let embedding_literal = format_pgvector_literal(embedding);
+
+        sql_query(MEMORY_VECTOR_SEARCH_SQL)
+            .bind::<Text, _>(&embedding_literal)
+            .bind::<BigInt, _>(limit)
+            .load::<VectorSearchRow>(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn count(&self) -> Result<i64, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let row = sql_query("SELECT COUNT(*) AS count FROM memory_embeddings")
+            .get_result::<CountRow>(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(row.count)
+    }
+
+    async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let rows =
+            sql_query("SELECT DISTINCT file_path FROM memory_embeddings ORDER BY file_path ASC")
+                .load::<IndexedFileRow>(&mut conn)
+                .await
+                .map_err(StoreError::from)?;
+        Ok(rows.into_iter().map(|row| row.file_path).collect())
+    }
+}
+
 #[async_trait]
 impl DeviceRepo for PgDeviceRepo {
     async fn create_device(&self, device: NewPairedDevice) -> Result<PairedDeviceRow, StoreError> {
@@ -871,7 +1008,10 @@ impl DeviceRepo for PgDeviceRepo {
     ) -> Result<PairedDeviceRow, StoreError> {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
         diesel::update(paired_devices::table.find(id))
-            .set((paired_devices::role.eq(role), paired_devices::scopes.eq(scopes)))
+            .set((
+                paired_devices::role.eq(role),
+                paired_devices::scopes.eq(scopes),
+            ))
             .returning(PairedDeviceRow::as_returning())
             .get_result(&mut conn)
             .await
@@ -949,10 +1089,12 @@ impl DeviceRepo for PgDeviceRepo {
 
     async fn prune_expired_requests(&self) -> Result<usize, StoreError> {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
-        let deleted = diesel::delete(pairing_requests::table.filter(pairing_requests::expires_at.le(Utc::now())))
-            .execute(&mut conn)
-            .await
-            .map_err(StoreError::from)?;
+        let deleted = diesel::delete(
+            pairing_requests::table.filter(pairing_requests::expires_at.le(Utc::now())),
+        )
+        .execute(&mut conn)
+        .await
+        .map_err(StoreError::from)?;
         Ok(deleted)
     }
 }

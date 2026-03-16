@@ -88,7 +88,8 @@ async fn setup() -> Option<PgPool> {
 
     if let Err(err) = diesel::sql_query(
         "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
-         tool_executions, channel_deliveries, paired_devices, pairing_requests CASCADE",
+         tool_executions, channel_deliveries, paired_devices, pairing_requests, \
+         memory_embeddings CASCADE",
     )
     .execute(&mut conn)
     .await
@@ -184,6 +185,57 @@ async fn session_not_found() {
 
     let result = repo.find_by_id(Uuid::now_v7()).await;
     assert!(matches!(result, Err(StoreError::NotFound { .. })));
+}
+
+// ── Memory embedding tests ───────────────────────────────────────────
+
+#[tokio::test]
+async fn memory_embedding_repo_round_trip_search_and_cleanup() {
+    let Some(pool) = setup().await else {
+        return;
+    };
+    let repo = PgMemoryEmbeddingRepo::new(pool);
+
+    repo.upsert_chunk(
+        "memory/preferences.md",
+        0,
+        "Prefers dark mode and keyboard shortcuts.",
+        &[0.9, 0.1, 0.0, 0.0],
+    )
+    .await
+    .unwrap();
+    repo.upsert_chunk(
+        "memory/tasks.md",
+        0,
+        "Reviewed build pipeline rollout notes.",
+        &[0.1, 0.9, 0.0, 0.0],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(repo.count().await.unwrap(), 2);
+
+    let keyword_hits = repo.keyword_search("dark mode", 5).await.unwrap();
+    assert_eq!(keyword_hits.len(), 1);
+    assert_eq!(keyword_hits[0].file_path, "memory/preferences.md");
+    assert!(keyword_hits[0].score > 0.0);
+
+    let vector_hits = repo
+        .vector_search(&[0.95, 0.05, 0.0, 0.0], 5)
+        .await
+        .unwrap();
+    assert!(!vector_hits.is_empty());
+    assert_eq!(vector_hits[0].file_path, "memory/preferences.md");
+
+    let indexed_files = repo.list_indexed_files().await.unwrap();
+    assert_eq!(
+        indexed_files,
+        vec!["memory/preferences.md", "memory/tasks.md"]
+    );
+
+    let deleted = repo.delete_by_file("memory/preferences.md").await.unwrap();
+    assert_eq!(deleted, 1);
+    assert_eq!(repo.count().await.unwrap(), 1);
 }
 
 // ── Turn tests ───────────────────────────────────────────────────────

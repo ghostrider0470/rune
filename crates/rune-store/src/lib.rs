@@ -11,9 +11,10 @@ pub mod schema;
 pub use embedded::EmbeddedPg;
 pub use error::StoreError;
 pub use pg::{
-    PgApprovalRepo, PgDeviceRepo, PgJobRepo, PgJobRunRepo, PgToolApprovalPolicyRepo,
-    PgToolExecutionRepo,
+    PgApprovalRepo, PgDeviceRepo, PgJobRepo, PgJobRunRepo, PgMemoryEmbeddingRepo,
+    PgToolApprovalPolicyRepo, PgToolExecutionRepo,
 };
 pub use repos::{
-    ApprovalRepo, DeviceRepo, JobRepo, JobRunRepo, ToolApprovalPolicy, ToolExecutionRepo,
+    ApprovalRepo, DeviceRepo, JobRepo, JobRunRepo, MemoryEmbeddingRepo, ToolApprovalPolicy,
+    ToolExecutionRepo,
 };

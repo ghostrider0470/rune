@@ -156,6 +156,17 @@ table! {
     }
 }
 
+table! {
+    /// Memory embedding chunks for hybrid search.
+    memory_embeddings (id) {
+        id -> Uuid,
+        file_path -> Text,
+        chunk_index -> Int4,
+        chunk_text -> Text,
+        created_at -> Timestamptz,
+    }
+}
+
 diesel::joinable!(turns -> sessions (session_id));
 diesel::joinable!(transcript_items -> sessions (session_id));
 diesel::joinable!(tool_executions -> sessions (session_id));
@@ -172,4 +183,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     job_runs,
     paired_devices,
     pairing_requests,
+    memory_embeddings,
 );

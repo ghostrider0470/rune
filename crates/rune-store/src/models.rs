@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::schema::*;
+use diesel::sql_types::{Float8, Int4, Text, Timestamptz};
 
 // ── Sessions ──────────────────────────────────────────────────────────
 
@@ -287,6 +288,71 @@ pub struct NewPairingRequest {
     pub challenge: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+}
+
+// ── Memory embeddings ─────────────────────────────────────────────────
+
+/// A persisted memory embedding chunk row (excluding the vector column).
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = memory_embeddings)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct MemoryEmbeddingRow {
+    pub id: Uuid,
+    pub file_path: String,
+    pub chunk_index: i32,
+    pub chunk_text: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Result row from keyword search raw SQL.
+#[derive(Debug, Clone, QueryableByName, Serialize, Deserialize)]
+pub struct KeywordSearchRow {
+    #[diesel(sql_type = Text)]
+    pub file_path: String,
+    #[diesel(sql_type = Text)]
+    pub chunk_text: String,
+    #[diesel(sql_type = Float8)]
+    pub score: f64,
+}
+
+/// Result row from vector search raw SQL.
+#[derive(Debug, Clone, QueryableByName, Serialize, Deserialize)]
+pub struct VectorSearchRow {
+    #[diesel(sql_type = Text)]
+    pub file_path: String,
+    #[diesel(sql_type = Text)]
+    pub chunk_text: String,
+    #[diesel(sql_type = Float8)]
+    pub score: f64,
+}
+
+/// Result row for listing distinct indexed files.
+#[derive(Debug, Clone, QueryableByName, Serialize, Deserialize)]
+pub struct IndexedFileRow {
+    #[diesel(sql_type = Text)]
+    pub file_path: String,
+}
+
+/// Result row for raw COUNT(*) queries over memory embeddings.
+#[derive(Debug, Clone, QueryableByName, Serialize, Deserialize)]
+pub struct CountRow {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    pub count: i64,
+}
+
+/// Result row for loading a memory embedding row via raw SQL.
+#[derive(Debug, Clone, QueryableByName, Serialize, Deserialize)]
+pub struct MemoryEmbeddingByNameRow {
+    #[diesel(sql_type = diesel::sql_types::Uuid)]
+    pub id: Uuid,
+    #[diesel(sql_type = Text)]
+    pub file_path: String,
+    #[diesel(sql_type = Int4)]
+    pub chunk_index: i32,
+    #[diesel(sql_type = Text)]
+    pub chunk_text: String,
+    #[diesel(sql_type = Timestamptz)]
+    pub created_at: DateTime<Utc>,
 }
 
 // ── Channel deliveries ────────────────────────────────────────────────
