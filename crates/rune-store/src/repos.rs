@@ -233,6 +233,44 @@ pub trait ToolApprovalPolicyRepo: Send + Sync {
     async fn clear_policy(&self, tool_name: &str) -> Result<bool, StoreError>;
 }
 
+// ── Memory embedding repository ───────────────────────────────────────
+
+/// Persistence contract for memory embedding chunks used by hybrid search.
+#[async_trait]
+pub trait MemoryEmbeddingRepo: Send + Sync {
+    /// Upsert a single embedded chunk (file_path + chunk_index is the natural key).
+    async fn upsert_chunk(
+        &self,
+        file_path: &str,
+        chunk_index: i32,
+        chunk_text: &str,
+        embedding: &[f32],
+    ) -> Result<(), StoreError>;
+
+    /// Delete all chunks for a given file.
+    async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError>;
+
+    /// Keyword search leg ordered by PostgreSQL `ts_rank` descending.
+    async fn keyword_search(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<KeywordSearchRow>, StoreError>;
+
+    /// Vector search leg ordered by cosine similarity descending.
+    async fn vector_search(
+        &self,
+        embedding: &[f32],
+        limit: i64,
+    ) -> Result<Vec<VectorSearchRow>, StoreError>;
+
+    /// Count total indexed chunks.
+    async fn count(&self) -> Result<i64, StoreError>;
+
+    /// List distinct indexed files.
+    async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError>;
+}
+
 // ── Tool execution repository ─────────────────────────────────────────
 
 /// Persistence contract for tool execution audit records.
@@ -317,10 +355,8 @@ pub trait DeviceRepo: Send + Sync {
     ) -> Result<PairingRequestRow, StoreError>;
 
     /// Find and remove a pairing request (consumed on use).
-    async fn take_pairing_request(
-        &self,
-        id: Uuid,
-    ) -> Result<Option<PairingRequestRow>, StoreError>;
+    async fn take_pairing_request(&self, id: Uuid)
+    -> Result<Option<PairingRequestRow>, StoreError>;
 
     /// Delete a pending pairing request without returning it. Returns true if removed.
     async fn delete_pairing_request(&self, id: Uuid) -> Result<bool, StoreError>;

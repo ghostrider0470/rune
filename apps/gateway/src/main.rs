@@ -36,12 +36,13 @@ use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo, TranscriptRepo, TurnRepo,
 };
-use rune_store::{JobRepo, PgApprovalRepo, PgJobRepo, PgToolExecutionRepo};
+use rune_store::{JobRepo, PgApprovalRepo, PgJobRepo, PgMemoryEmbeddingRepo, PgToolExecutionRepo};
 use rune_tools::ApprovalCheck;
 use rune_tools::approval::{ApprovalRequest, PolicyBasedApproval};
 use rune_tools::exec_tool::ExecToolExecutor;
 use rune_tools::file_tools::FileToolExecutor;
-use rune_tools::memory_tool::MemoryToolExecutor;
+use rune_tools::memory_index::{MemoryIndex, MemoryIndexConfig};
+use rune_tools::memory_tool::{MemoryToolExecutor, PersistedHybridMemorySearch};
 use rune_tools::process_audit::{
     CompletedProcessAudit, NewProcessAudit, ProcessAuditRecord, ProcessAuditStore,
 };
@@ -50,6 +51,9 @@ use rune_tools::session_tool::{SessionQuery, SessionToolExecutor};
 use rune_tools::spawn_tool::{SessionSpawner, SpawnToolExecutor};
 use rune_tools::subagent_tool::{SubagentManager, SubagentToolExecutor};
 use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolRegistry};
+
+const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
+const OPENAI_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -228,13 +232,20 @@ async fn build_services(
     );
     let live_subagent_manager =
         LiveSubagentManager::new(session_repo.clone(), transcript_repo.clone());
+    let memory = build_memory_tool_executor(
+        &config,
+        &workspace_root,
+        &database_url,
+        embedded_pg.is_some(),
+    )
+    .context("failed to initialize memory tool executor")?;
     let tool_executor = Arc::new(AppToolExecutor {
         file: FileToolExecutor::new(workspace_root.clone()),
         exec: ExecToolExecutor::new(workspace_root.clone(), Duration::from_secs(30))
             .with_process_manager(process_manager.clone())
             .with_audit_store(process_audit_store),
         process: ProcessToolExecutor::new(process_manager.clone()),
-        memory: MemoryToolExecutor::new(workspace_root),
+        memory,
         session: SessionToolExecutor::new(live_session_query),
         spawn: SpawnToolExecutor::new(live_session_spawner),
         subagents: SubagentToolExecutor::new(live_subagent_manager),
@@ -320,6 +331,76 @@ async fn build_services(
     };
 
     Ok((services, embedded_pg, session_loop))
+}
+
+fn build_memory_tool_executor(
+    config: &AppConfig,
+    workspace_root: &Path,
+    database_url: &str,
+    using_embedded_pg: bool,
+) -> Result<MemoryToolExecutor> {
+    if !config.memory.semantic_search_enabled {
+        info!("semantic memory search disabled; using local keyword memory search");
+        return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
+    }
+
+    let index_config = memory_index_config_from_env();
+    build_memory_tool_executor_with_index_config(
+        config,
+        workspace_root,
+        database_url,
+        using_embedded_pg,
+        index_config,
+    )
+}
+
+fn memory_index_config_from_env() -> MemoryIndexConfig {
+    MemoryIndexConfig {
+        api_key: std::env::var(OPENAI_API_KEY_ENV).ok(),
+        api_base_url: std::env::var(OPENAI_BASE_URL_ENV).ok(),
+        ..MemoryIndexConfig::default()
+    }
+}
+
+fn build_memory_tool_executor_with_index_config(
+    config: &AppConfig,
+    workspace_root: &Path,
+    database_url: &str,
+    using_embedded_pg: bool,
+    index_config: MemoryIndexConfig,
+) -> Result<MemoryToolExecutor> {
+    let provider = index_config.embedding_provider.clone();
+    let model = index_config.embedding_model.clone();
+    let index = match MemoryIndex::from_config(index_config) {
+        Ok(index) => index,
+        Err(err) => {
+            warn!(
+                error = %err,
+                semantic_search_enabled = config.memory.semantic_search_enabled,
+                provider = %provider,
+                model = %model,
+                "persisted hybrid memory search unavailable; using local keyword memory search"
+            );
+            return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
+        }
+    };
+
+    let repo = Arc::new(PgMemoryEmbeddingRepo::new(rune_store::pool::create_pool(
+        database_url,
+        config.database.max_connections as usize,
+    )?));
+    let backend = Arc::new(PersistedHybridMemorySearch::new(repo, index));
+
+    if using_embedded_pg {
+        info!("memory_search configured with persisted hybrid backend via embedded PostgreSQL");
+    } else {
+        info!("memory_search configured with persisted hybrid backend via external PostgreSQL");
+    }
+
+    Ok(MemoryToolExecutor::with_hybrid_search(
+        workspace_root.to_path_buf(),
+        backend,
+    ))
 }
 
 async fn shutdown_signal() {
@@ -1463,6 +1544,37 @@ mod tests {
     use tokio::sync::Mutex;
 
     use rune_store::StoreError;
+
+    #[test]
+    fn build_memory_tool_executor_falls_back_when_semantic_search_disabled() {
+        let mut config = AppConfig::default();
+        config.memory.semantic_search_enabled = false;
+
+        let executor =
+            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false)
+                .expect("memory tool executor should build");
+
+        assert!(executor.hybrid_search_backend().is_none());
+    }
+
+    #[test]
+    fn build_memory_tool_executor_falls_back_without_embedding_credentials() {
+        let config = AppConfig::default();
+        let executor = build_memory_tool_executor_with_index_config(
+            &config,
+            Path::new("."),
+            "postgres://unused",
+            false,
+            MemoryIndexConfig {
+                api_key: None,
+                api_base_url: None,
+                ..MemoryIndexConfig::default()
+            },
+        )
+        .expect("memory tool executor should fall back without OpenAI credentials");
+
+        assert!(executor.hybrid_search_backend().is_none());
+    }
 
     struct MemSessionRepo {
         sessions: Mutex<Vec<SessionRow>>,
