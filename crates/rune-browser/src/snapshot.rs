@@ -612,7 +612,7 @@ fn render_text(title: &str, url: &str, elements: &[SnapshotElement]) -> String {
     let mut out = String::with_capacity(4096);
 
     if !title.is_empty() {
-        let _ = writeln!(out, "Title: {title}");
+        let _ = writeln!(out, "Page: {title}");
     }
     if !url.is_empty() {
         let _ = writeln!(out, "URL: {url}");
@@ -633,25 +633,24 @@ fn render_element(out: &mut String, el: &SnapshotElement, indent: usize) {
 
     // Reference prefix
     let ref_prefix = match el.ref_id {
-        Some(id) => format!("[ref={id}] "),
+        Some(id) => format!("[{id}] "),
         None => String::new(),
     };
 
-    // Role tag
-    let role_tag = format!("[{}]", el.role);
-
-    // Value suffix (used for links to show href, textboxes to show current value)
-    let value_suffix = match (&el.role[..], &el.value) {
-        ("link", Some(href)) if !href.is_empty() => format!(" -> {href}"),
-        (_, Some(val)) if !val.is_empty() => format!(": {val}"),
-        _ => String::new(),
+    let line = match (&el.role[..], &el.value) {
+        ("heading", _) => format!("{ref_prefix}heading: \"{}\"", el.name),
+        ("paragraph", _) => format!("paragraph: \"{}\"", el.name),
+        ("link", Some(href)) if !href.is_empty() => {
+            format!("{ref_prefix}link: \"{}\" -> {href}", el.name)
+        }
+        ("button", _) => format!("{ref_prefix}button: \"{}\"", el.name),
+        (_, Some(val)) if !val.is_empty() => {
+            format!("{ref_prefix}{}: \"{}\" = \"{val}\"", el.role, el.name)
+        }
+        _ => format!("{ref_prefix}{}: \"{}\"", el.role, el.name),
     };
 
-    let _ = writeln!(
-        out,
-        "{pad}{ref_prefix}{role_tag} {name}{value_suffix}",
-        name = el.name
-    );
+    let _ = writeln!(out, "{pad}{line}");
 
     for child in &el.children {
         render_element(out, child, indent + 1);
@@ -915,16 +914,16 @@ mod tests {
         </html>"#;
         let snap = SnapshotEngine::from_html(html);
 
-        assert!(snap.text.contains("Title: Test Page"));
-        assert!(snap.text.contains("[heading] Welcome"));
-        assert!(snap.text.contains("[paragraph] Hello there"));
+        assert!(snap.text.contains("Page: Test Page"));
+        assert!(snap.text.contains("heading: \"Welcome\""));
+        assert!(snap.text.contains("paragraph: \"Hello there\""));
         assert!(
             snap.text
-                .contains("[link] Learn more -> https://example.com")
+                .contains("link: \"Learn more\" -> https://example.com")
         );
-        assert!(snap.text.contains("[button] Sign up"));
+        assert!(snap.text.contains("button: \"Sign up\""));
         // Interactive elements should have ref annotations
-        assert!(snap.text.contains("[ref="));
+        assert!(snap.text.contains("[1]"));
     }
 
     #[test]
@@ -990,7 +989,7 @@ mod tests {
             url: "https://example.com".to_string(),
             title: "Example".to_string(),
             elements: vec![],
-            text: "Title: Example\nURL: https://example.com\n\n".to_string(),
+            text: "Page: Example\nURL: https://example.com\n\n".to_string(),
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -1008,7 +1007,7 @@ mod tests {
     #[test]
     fn render_text_with_title_and_url() {
         let text = render_text("My Page", "https://example.com", &[]);
-        assert!(text.starts_with("Title: My Page\n"));
+        assert!(text.starts_with("Page: My Page\n"));
         assert!(text.contains("URL: https://example.com\n"));
     }
 
@@ -1119,7 +1118,7 @@ mod tests {
         assert_eq!(refs.len(), unique.len());
 
         // Text output contains expected markers
-        assert!(snap.text.contains("[heading] Dashboard"));
-        assert!(snap.text.contains("[ref="));
+        assert!(snap.text.contains("heading: \"Dashboard\""));
+        assert!(snap.text.contains("[1]"));
     }
 }

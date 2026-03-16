@@ -1,6 +1,14 @@
 /// Errors produced by the browser snapshot engine.
 #[derive(Debug, thiserror::Error)]
 pub enum BrowserError {
+    /// URL validation failed before any browser request was attempted.
+    #[error("invalid URL '{url}': {reason}")]
+    InvalidUrl { url: String, reason: String },
+
+    /// URL is blocked by configured policy.
+    #[error("URL blocked by policy: {url}")]
+    UrlBlocked { url: String },
+
     /// Chrome/Chromium is not reachable at the configured CDP endpoint.
     #[error("browser not available: {0}")]
     NotAvailable(String),

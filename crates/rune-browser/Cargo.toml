@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+rune-core = { path = "../rune-core" }
+rune-tools = { path = "../rune-tools" }
 async-trait.workspace = true
 reqwest.workspace = true
 serde.workspace = true

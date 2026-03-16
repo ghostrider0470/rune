@@ -91,7 +91,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | PTY Execution Sandbox | ✅ Basic | Via Unix script, no advanced PTY |
 | Heartbeat + Silent Eval | ✅ Done | HEARTBEAT_OK suppression works |
 | Sub-agents | ✅ Done | Session spawning + manager trait |
-| Semantic Browser Snapshots | ❌ Missing | No accessibility tree parsing |
+| Semantic Browser Snapshots | ⚠️ 2026-03-16 | `rune-browser` now emits semantic snapshots, exposes a real `browse` tool, and is wired through gateway/config against the existing CDP snapshot path; Chromium launch/pool lifecycle and selector-aware extraction still need follow-up |
 | A2UI Protocol | ❌ Missing | No streaming UI components |
 | TTS | ❌ Missing | No text-to-speech providers |
 | STT | ❌ Missing | No speech-to-text providers |
@@ -495,6 +495,8 @@ Uses routes from Phase 5 and a new `GET /agents` endpoint.
 
 **Tool integration**
 - `browse` tool returns semantic snapshot instead of screenshot
+
+Implementation note (2026-03-16): this checkpoint lands semantic snapshot formatting, blocked/invalid URL handling, config-driven browse tool registration, and gateway execution wiring/tests around the `browse` tool. The backend still reuses the in-tree CDP snapshot engine rather than launching and recycling Chromium instances itself, and selector-aware extraction remains unimplemented, so this phase is still partial rather than complete.
 
 ---
 

@@ -25,6 +25,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub mcp_servers: Vec<McpServerConfig>,
     pub memory: MemoryConfig,
+    #[serde(default)]
+    pub browser: BrowserConfig,
     pub media: MediaConfig,
     pub logging: LoggingConfig,
     pub paths: PathsConfig,
@@ -469,6 +471,51 @@ impl Default for MemoryConfig {
     }
 }
 
+/// Semantic browser snapshot settings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub chromium_path: Option<String>,
+    #[serde(default)]
+    pub cdp_endpoint: Option<String>,
+    #[serde(default = "default_max_browser_instances")]
+    pub max_instances: usize,
+    #[serde(default = "default_max_browser_chars")]
+    pub max_chars: usize,
+    #[serde(default = "default_browser_timeout_ms")]
+    pub page_load_timeout_ms: u64,
+    #[serde(default)]
+    pub blocked_urls: Vec<String>,
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            chromium_path: None,
+            cdp_endpoint: None,
+            max_instances: default_max_browser_instances(),
+            max_chars: default_max_browser_chars(),
+            page_load_timeout_ms: default_browser_timeout_ms(),
+            blocked_urls: Vec::new(),
+        }
+    }
+}
+
+const fn default_max_browser_instances() -> usize {
+    3
+}
+
+const fn default_max_browser_chars() -> usize {
+    30_000
+}
+
+const fn default_browser_timeout_ms() -> u64 {
+    15_000
+}
+
 /// Media pipeline feature flags and limits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaConfig {
@@ -670,6 +717,9 @@ mod tests {
         assert_eq!(config.paths.db_dir, PathBuf::from("/data/db"));
         assert_eq!(config.paths.config_dir, PathBuf::from("/config"));
         assert!(config.memory.semantic_search_enabled);
+        assert!(!config.browser.enabled);
+        assert_eq!(config.browser.max_instances, 3);
+        assert_eq!(config.browser.max_chars, 30_000);
         assert!(config.mcp_servers.is_empty());
     }
 
@@ -733,13 +783,16 @@ main_capacity = 4
         unsafe {
             std::env::set_var("RUNE_GATEWAY__PORT", "9090");
             std::env::set_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY", "12");
+            std::env::set_var("RUNE_BROWSER__ENABLED", "true");
         }
         let config = AppConfig::load(Some(&path)).unwrap();
         assert_eq!(config.gateway.port, 9090);
         assert_eq!(config.runtime.lanes.main_capacity, 12);
+        assert!(config.browser.enabled);
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
             std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
+            std::env::remove_var("RUNE_BROWSER__ENABLED");
         }
 
         let _ = fs::remove_file(path);

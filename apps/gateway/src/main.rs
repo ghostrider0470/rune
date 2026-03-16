@@ -15,6 +15,9 @@ use uuid::Uuid;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use rune_browser::{
+    BrowseTool, BrowserPool, BrowserPoolConfig, SnapshotOptions, browse_tool_definition,
+};
 use tokio::signal;
 use tracing::{error, info, warn};
 
@@ -220,7 +223,8 @@ async fn build_services(
     ));
     let reminder_store = Arc::new(ReminderStore::new_with_repo(job_repo));
     let mut registry = ToolRegistry::new();
-    register_real_tool_definitions(&mut registry);
+    let browse = build_browse_tool_executor(&config);
+    register_real_tool_definitions(&mut registry, browse.is_some());
     let mcp = build_mcp_tool_executor(&config, &workspace_root).await?;
     if let Some(ref executor) = mcp {
         registry.register_many(executor.tool_definitions());
@@ -257,6 +261,7 @@ async fn build_services(
             .with_audit_store(process_audit_store),
         process: ProcessToolExecutor::new(process_manager.clone()),
         memory,
+        browse,
         session: SessionToolExecutor::new(live_session_query),
         spawn: SpawnToolExecutor::new(live_session_spawner),
         subagents: SubagentToolExecutor::new(live_subagent_manager),
@@ -392,6 +397,30 @@ async fn build_mcp_tool_executor(
     let connected = manager.connected_servers();
     info!(servers = ?connected, "MCP servers connected");
     Ok(Some(Arc::new(McpToolExecutor::new(Arc::new(manager)))))
+}
+
+fn build_browse_tool_executor(config: &AppConfig) -> Option<Arc<dyn ToolExecutor>> {
+    if !config.browser.enabled {
+        return None;
+    }
+
+    let pool = BrowserPool::new(BrowserPoolConfig {
+        cdp_endpoint: config.browser.cdp_endpoint.clone(),
+        chromium_path: config.browser.chromium_path.clone(),
+        max_instances: config.browser.max_instances,
+        blocked_urls: config.browser.blocked_urls.clone(),
+    });
+    let options = SnapshotOptions {
+        cdp_endpoint: config.browser.cdp_endpoint.clone(),
+        timeout_ms: config.browser.page_load_timeout_ms,
+        ..SnapshotOptions::default()
+    };
+
+    Some(Arc::new(BrowseTool::new(
+        Arc::new(pool),
+        options,
+        config.browser.max_chars,
+    )))
 }
 
 fn runtime_mcp_config(
@@ -761,6 +790,7 @@ struct AppToolExecutor {
     exec: ExecToolExecutor,
     process: ProcessToolExecutor,
     memory: MemoryToolExecutor,
+    browse: Option<Arc<dyn ToolExecutor>>,
     session: SessionToolExecutor<LiveSessionQuery>,
     spawn: SpawnToolExecutor<LiveSessionSpawner>,
     subagents: SubagentToolExecutor<LiveSubagentManager>,
@@ -994,6 +1024,7 @@ impl ToolExecutor for AppToolExecutor {
             }
             "process" => self.process.execute(call).await,
             "memory_search" | "memory_get" => self.memory.execute(call).await,
+            "browse" => execute_browse_tool(call, &self.browse).await,
             "sessions_list" | "sessions_history" | "session_status" => {
                 self.session.execute(call).await
             }
@@ -1012,7 +1043,19 @@ impl ToolExecutor for AppToolExecutor {
     }
 }
 
-fn register_real_tool_definitions(registry: &mut ToolRegistry) {
+async fn execute_browse_tool(
+    call: ToolCall,
+    browse: &Option<Arc<dyn ToolExecutor>>,
+) -> Result<rune_tools::ToolResult, ToolError> {
+    match browse {
+        Some(browse) => browse.execute(call).await,
+        None => Err(ToolError::UnknownTool {
+            name: "browse".to_string(),
+        }),
+    }
+}
+
+fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: bool) {
     let builtins = [
         ToolDefinition {
             name: "read".into(),
@@ -1219,6 +1262,10 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry) {
 
     for tool in builtins {
         registry.register(tool);
+    }
+
+    if browse_enabled {
+        registry.register(browse_tool_definition());
     }
 }
 
@@ -1876,6 +1923,7 @@ fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rune_core::ToolCallId;
     use serde_json::Value;
     use tokio::sync::Mutex;
 
@@ -1914,6 +1962,78 @@ mod tests {
         .expect("memory tool executor should fall back without OpenAI credentials");
 
         assert!(executor.hybrid_search_backend().is_none());
+    }
+
+    #[test]
+    fn browse_tool_is_registered_only_when_enabled() {
+        let mut disabled_registry = ToolRegistry::new();
+        register_real_tool_definitions(&mut disabled_registry, false);
+        assert!(disabled_registry.lookup("browse").is_err());
+
+        let mut enabled_registry = ToolRegistry::new();
+        register_real_tool_definitions(&mut enabled_registry, true);
+        assert!(enabled_registry.lookup("browse").is_ok());
+    }
+
+    #[test]
+    fn build_browse_tool_executor_respects_browser_flag() {
+        let config = AppConfig::default();
+        assert!(build_browse_tool_executor(&config).is_none());
+
+        let mut enabled = AppConfig::default();
+        enabled.browser.enabled = true;
+        assert!(build_browse_tool_executor(&enabled).is_some());
+    }
+
+    struct StubToolExecutor {
+        response: std::sync::Mutex<Option<Result<rune_tools::ToolResult, ToolError>>>,
+    }
+
+    #[async_trait]
+    impl ToolExecutor for StubToolExecutor {
+        async fn execute(&self, _call: ToolCall) -> Result<rune_tools::ToolResult, ToolError> {
+            self.response
+                .lock()
+                .expect("stub tool executor mutex poisoned")
+                .take()
+                .expect("stub tool executor response already consumed")
+        }
+    }
+
+    fn browse_tool_call() -> ToolCall {
+        ToolCall {
+            tool_call_id: ToolCallId::new(),
+            tool_name: "browse".to_string(),
+            arguments: serde_json::json!({ "url": "https://example.com" }),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_browse_tool_returns_unknown_tool_when_disabled() {
+        let err = execute_browse_tool(browse_tool_call(), &None)
+            .await
+            .expect_err("disabled browse tool should reject execution");
+
+        assert!(matches!(err, ToolError::UnknownTool { name } if name == "browse"));
+    }
+
+    #[tokio::test]
+    async fn execute_browse_tool_delegates_to_registered_executor() {
+        let browse = Arc::new(StubToolExecutor {
+            response: std::sync::Mutex::new(Some(Ok(rune_tools::ToolResult {
+                tool_call_id: ToolCallId::new(),
+                output: "Page: Example".to_string(),
+                is_error: false,
+                tool_execution_id: None,
+            }))),
+        });
+
+        let result = execute_browse_tool(browse_tool_call(), &Some(browse))
+            .await
+            .expect("enabled browse tool should delegate");
+
+        assert_eq!(result.output, "Page: Example");
+        assert!(!result.is_error);
     }
 
     struct StubEmbeddingProvider;
