@@ -10,6 +10,7 @@ pub mod schema;
 
 pub use embedded::EmbeddedPg;
 pub use error::StoreError;
+pub use pool::PgVectorStatus;
 pub use pg::{
     PgApprovalRepo, PgDeviceRepo, PgJobRepo, PgJobRunRepo, PgMemoryEmbeddingRepo,
     PgToolApprovalPolicyRepo, PgToolExecutionRepo,

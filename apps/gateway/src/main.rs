@@ -37,7 +37,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
-use rune_store::EmbeddedPg;
+use rune_store::{EmbeddedPg, PgVectorStatus};
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
@@ -175,6 +175,15 @@ async fn build_services(
         rune_store::pool::run_migrations(&database_url)?;
     }
 
+    // Probe pgvector availability (never crashes — graceful fallback).
+    let pgvector_status = rune_store::pool::try_upgrade_pgvector(&database_url);
+    match &pgvector_status {
+        PgVectorStatus::Available => info!("pgvector available — vector search enabled"),
+        PgVectorStatus::Unavailable(reason) => {
+            warn!(reason, "pgvector unavailable — keyword search only")
+        }
+    }
+
     // Build connection pool.
     let pool =
         rune_store::pool::create_pool(&database_url, config.database.max_connections as usize)?;
@@ -251,6 +260,7 @@ async fn build_services(
         &workspace_root,
         &database_url,
         embedded_pg.is_some(),
+        pgvector_status.is_available(),
     )
     .await
     .context("failed to initialize memory tool executor")?;
@@ -329,6 +339,35 @@ async fn build_services(
         None
     };
 
+    // Emit capability summary.
+    let memory_mode = if !config.memory.semantic_search_enabled {
+        "disabled"
+    } else if pgvector_status.is_available() {
+        "hybrid"
+    } else {
+        "keyword-local"
+    };
+    let browser_enabled = config.browser.enabled;
+    let mcp_count = config
+        .mcp_servers
+        .iter()
+        .filter(|s| s.enabled)
+        .count();
+    let telegram_enabled = config
+        .channels
+        .telegram_token
+        .as_ref()
+        .is_some_and(|t| !t.is_empty());
+    info!(
+        pgvector = pgvector_status.is_available(),
+        memory = memory_mode,
+        browser = browser_enabled,
+        mcp_servers = mcp_count,
+        telegram = telegram_enabled,
+        tools = tool_count,
+        "capabilities"
+    );
+
     let services = Services {
         config,
         session_engine,
@@ -355,9 +394,15 @@ async fn build_memory_tool_executor(
     workspace_root: &Path,
     database_url: &str,
     using_embedded_pg: bool,
+    pgvector_available: bool,
 ) -> Result<MemoryToolExecutor> {
     if !config.memory.semantic_search_enabled {
         info!("semantic memory search disabled; using local keyword memory search");
+        return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
+    }
+
+    if !pgvector_available {
+        warn!("semantic memory search requested but pgvector unavailable; falling back to keyword search");
         return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
     }
 
@@ -1937,7 +1982,7 @@ mod tests {
         config.memory.semantic_search_enabled = false;
 
         let executor =
-            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false)
+            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
                 .await
                 .expect("memory tool executor should build");
 
