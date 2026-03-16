@@ -28,6 +28,7 @@ const SLACK_API_BASE: &str = "https://slack.com/api";
 /// the Slack Web API (`chat.postMessage`, `chat.update`, etc.).
 pub struct SlackAdapter {
     bot_token: String,
+    api_base: String,
     http: Client,
     rx: mpsc::Receiver<InboundEvent>,
     _tx: mpsc::Sender<InboundEvent>,
@@ -47,7 +48,17 @@ impl SlackAdapter {
         _app_token: impl Into<String>,
         listen_addr: Option<String>,
     ) -> Self {
+        Self::with_api_base(bot_token, _app_token, listen_addr, SLACK_API_BASE)
+    }
+
+    pub fn with_api_base(
+        bot_token: impl Into<String>,
+        _app_token: impl Into<String>,
+        listen_addr: Option<String>,
+        api_base: impl Into<String>,
+    ) -> Self {
         let bot_token = bot_token.into();
+        let api_base = api_base.into().trim_end_matches('/').to_string();
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -67,6 +78,7 @@ impl SlackAdapter {
 
         Self {
             bot_token,
+            api_base,
             http,
             rx,
             _tx: tx,
@@ -293,7 +305,7 @@ impl SlackAdapter {
         method: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ChannelError> {
-        let url = format!("{SLACK_API_BASE}/{method}");
+        let url = format!("{}/{method}", self.api_base);
         let resp = self
             .http
             .post(&url)
@@ -468,6 +480,9 @@ impl ChannelAdapter for SlackAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ChannelAdapter;
+    use wiremock::matchers::{body_partial_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn parse_slack_timestamp() {
@@ -591,5 +606,179 @@ mod tests {
         assert_eq!(attachments[0].name, "report.pdf");
         assert_eq!(attachments[0].mime_type.as_deref(), Some("application/pdf"));
         assert_eq!(attachments[0].size_bytes, Some(4096));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_reply_edit_delete_and_keyboard_use_configured_api_base() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .and(body_partial_json(serde_json::json!({
+                "channel": "C12345",
+                "text": "hello slack"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "ts": "1710320000.000100"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .and(body_partial_json(serde_json::json!({
+                "channel": "C12345",
+                "text": "reply text",
+                "thread_ts": "1710320000.000100"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "ts": "1710320001.000200"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.update"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .and(body_partial_json(serde_json::json!({
+                "channel": "C12345",
+                "ts": "1710320001.000200",
+                "text": "edited text"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "ts": "1710320001.000200"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.delete"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .and(body_partial_json(serde_json::json!({
+                "channel": "C12345",
+                "ts": "1710320001.000200"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "ts": "1710320001.000200"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .and(body_partial_json(serde_json::json!({
+                "channel": "C12345",
+                "text": "choose",
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "choose"
+                        }
+                    },
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "text": "One"
+                                },
+                                "action_id": "one",
+                                "value": "one"
+                            },
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "text": "Two"
+                                },
+                                "action_id": "two",
+                                "value": "two"
+                            }
+                        ]
+                    }
+                ]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "ts": "1710320002.000300"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let adapter = SlackAdapter::with_api_base(
+            "xoxb-test",
+            "xapp-test",
+            None,
+            server.uri(),
+        );
+
+        let send_receipt = adapter
+            .send(OutboundAction::Send {
+                channel_id: ChannelId::new(),
+                chat_id: "C12345".into(),
+                content: "hello slack".into(),
+            })
+            .await
+            .expect("send should succeed");
+        assert_eq!(send_receipt.provider_message_id, "1710320000.000100");
+
+        let reply_receipt = adapter
+            .send(OutboundAction::Reply {
+                channel_id: ChannelId::new(),
+                chat_id: "C12345".into(),
+                reply_to: "1710320000.000100".into(),
+                content: "reply text".into(),
+            })
+            .await
+            .expect("reply should succeed");
+        assert_eq!(reply_receipt.provider_message_id, "1710320001.000200");
+
+        let edit_receipt = adapter
+            .send(OutboundAction::Edit {
+                channel_id: ChannelId::new(),
+                chat_id: "C12345".into(),
+                message_id: "1710320001.000200".into(),
+                new_content: "edited text".into(),
+            })
+            .await
+            .expect("edit should succeed");
+        assert_eq!(edit_receipt.provider_message_id, "1710320001.000200");
+
+        let delete_receipt = adapter
+            .send(OutboundAction::Delete {
+                channel_id: ChannelId::new(),
+                chat_id: "C12345".into(),
+                message_id: "1710320001.000200".into(),
+            })
+            .await
+            .expect("delete should succeed");
+        assert_eq!(delete_receipt.provider_message_id, "1710320001.000200");
+
+        let keyboard_receipt = adapter
+            .send(OutboundAction::SendInlineKeyboard {
+                channel_id: ChannelId::new(),
+                chat_id: "C12345".into(),
+                content: "choose".into(),
+                buttons: vec![("One".into(), "one".into()), ("Two".into(), "two".into())],
+            })
+            .await
+            .expect("keyboard should succeed");
+        assert_eq!(keyboard_receipt.provider_message_id, "1710320002.000300");
     }
 }
