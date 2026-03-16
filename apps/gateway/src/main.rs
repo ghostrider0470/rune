@@ -5,6 +5,7 @@
 //! server via `postgresql_embedded` for zero-config local development.
 //! Data in both cases is durable and persisted to disk.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -34,7 +35,8 @@ use rune_runtime::{
 use rune_store::EmbeddedPg;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
-    ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo, TranscriptRepo, TurnRepo,
+    ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
+    TranscriptRepo, TurnRepo,
 };
 use rune_store::{JobRepo, PgApprovalRepo, PgJobRepo, PgMemoryEmbeddingRepo, PgToolExecutionRepo};
 use rune_tools::ApprovalCheck;
@@ -238,6 +240,7 @@ async fn build_services(
         &database_url,
         embedded_pg.is_some(),
     )
+    .await
     .context("failed to initialize memory tool executor")?;
     let tool_executor = Arc::new(AppToolExecutor {
         file: FileToolExecutor::new(workspace_root.clone()),
@@ -333,7 +336,7 @@ async fn build_services(
     Ok((services, embedded_pg, session_loop))
 }
 
-fn build_memory_tool_executor(
+async fn build_memory_tool_executor(
     config: &AppConfig,
     workspace_root: &Path,
     database_url: &str,
@@ -352,6 +355,7 @@ fn build_memory_tool_executor(
         using_embedded_pg,
         index_config,
     )
+    .await
 }
 
 fn memory_index_config_from_env() -> MemoryIndexConfig {
@@ -362,7 +366,7 @@ fn memory_index_config_from_env() -> MemoryIndexConfig {
     }
 }
 
-fn build_memory_tool_executor_with_index_config(
+async fn build_memory_tool_executor_with_index_config(
     config: &AppConfig,
     workspace_root: &Path,
     database_url: &str,
@@ -389,6 +393,7 @@ fn build_memory_tool_executor_with_index_config(
         database_url,
         config.database.max_connections as usize,
     )?));
+    sync_workspace_memory_index(workspace_root, repo.as_ref(), &index).await?;
     let backend = Arc::new(PersistedHybridMemorySearch::new(repo, index));
 
     if using_embedded_pg {
@@ -401,6 +406,97 @@ fn build_memory_tool_executor_with_index_config(
         workspace_root.to_path_buf(),
         backend,
     ))
+}
+
+async fn sync_workspace_memory_index(
+    workspace_root: &Path,
+    repo: &dyn MemoryEmbeddingRepo,
+    index: &MemoryIndex,
+) -> Result<()> {
+    let memory_files = collect_workspace_memory_files(workspace_root).await?;
+    let current_files: BTreeSet<String> = memory_files.iter().cloned().collect();
+    let indexed_files = repo.list_indexed_files().await?;
+    let stale_files: Vec<String> = indexed_files
+        .into_iter()
+        .filter(|path| !current_files.contains(path))
+        .collect();
+
+    for stale_path in &stale_files {
+        repo.delete_by_file(stale_path).await?;
+    }
+
+    let mut indexed_chunk_count = 0usize;
+    for relative_path in &memory_files {
+        let full_path = workspace_root.join(relative_path);
+        let content = tokio::fs::read_to_string(&full_path)
+            .await
+            .with_context(|| format!("failed to read memory file {}", full_path.display()))?;
+
+        repo.delete_by_file(relative_path).await?;
+
+        let embedded_chunks = index.index_file(Path::new(relative_path), &content).await?;
+        indexed_chunk_count += embedded_chunks.len();
+
+        for embedded in embedded_chunks {
+            let chunk_index = i32::try_from(embedded.chunk.chunk_index).with_context(|| {
+                format!(
+                    "memory chunk index overflow for {}:{}",
+                    relative_path, embedded.chunk.chunk_index
+                )
+            })?;
+            repo.upsert_chunk(
+                relative_path,
+                chunk_index,
+                &embedded.chunk.chunk_text,
+                &embedded.embedding,
+            )
+            .await?;
+        }
+    }
+
+    info!(
+        indexed_files = memory_files.len(),
+        indexed_chunks = indexed_chunk_count,
+        removed_stale_files = stale_files.len(),
+        "workspace memory synced into persisted hybrid index"
+    );
+
+    Ok(())
+}
+
+async fn collect_workspace_memory_files(workspace_root: &Path) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    let memory_md = workspace_root.join("MEMORY.md");
+    if memory_md.is_file() {
+        files.push("MEMORY.md".to_string());
+    }
+
+    let memory_dir = workspace_root.join("memory");
+    if memory_dir.is_dir() {
+        let mut entries = tokio::fs::read_dir(&memory_dir)
+            .await
+            .with_context(|| format!("failed to read {}", memory_dir.display()))?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "md") {
+                let relative = path
+                    .strip_prefix(workspace_root)
+                    .with_context(|| {
+                        format!(
+                            "memory file {} was not under workspace {}",
+                            path.display(),
+                            workspace_root.display()
+                        )
+                    })?
+                    .display()
+                    .to_string();
+                files.push(relative);
+            }
+        }
+    }
+
+    files.sort();
+    Ok(files)
 }
 
 async fn shutdown_signal() {
@@ -1544,21 +1640,24 @@ mod tests {
     use tokio::sync::Mutex;
 
     use rune_store::StoreError;
+    use rune_store::models::{KeywordSearchRow, VectorSearchRow};
+    use rune_tools::memory_index::EmbeddingProvider;
 
-    #[test]
-    fn build_memory_tool_executor_falls_back_when_semantic_search_disabled() {
+    #[tokio::test]
+    async fn build_memory_tool_executor_falls_back_when_semantic_search_disabled() {
         let mut config = AppConfig::default();
         config.memory.semantic_search_enabled = false;
 
         let executor =
             build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false)
+                .await
                 .expect("memory tool executor should build");
 
         assert!(executor.hybrid_search_backend().is_none());
     }
 
-    #[test]
-    fn build_memory_tool_executor_falls_back_without_embedding_credentials() {
+    #[tokio::test]
+    async fn build_memory_tool_executor_falls_back_without_embedding_credentials() {
         let config = AppConfig::default();
         let executor = build_memory_tool_executor_with_index_config(
             &config,
@@ -1571,9 +1670,159 @@ mod tests {
                 ..MemoryIndexConfig::default()
             },
         )
+        .await
         .expect("memory tool executor should fall back without OpenAI credentials");
 
         assert!(executor.hybrid_search_backend().is_none());
+    }
+
+    struct StubEmbeddingProvider;
+
+    #[async_trait]
+    impl EmbeddingProvider for StubEmbeddingProvider {
+        async fn embed(
+            &self,
+            texts: &[String],
+        ) -> Result<Vec<Vec<f32>>, rune_tools::memory_index::MemoryIndexError> {
+            Ok(texts
+                .iter()
+                .map(|text| vec![text.len() as f32, 1.0, 0.0, 0.0])
+                .collect())
+        }
+
+        fn dimension(&self) -> usize {
+            4
+        }
+    }
+
+    struct MemMemoryEmbeddingRepo {
+        existing_files: Mutex<Vec<String>>,
+        deleted_files: Mutex<Vec<String>>,
+        upserted_chunks: Mutex<Vec<(String, i32, String, Vec<f32>)>>,
+    }
+
+    impl MemMemoryEmbeddingRepo {
+        fn new(existing_files: Vec<String>) -> Self {
+            Self {
+                existing_files: Mutex::new(existing_files),
+                deleted_files: Mutex::new(Vec::new()),
+                upserted_chunks: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl MemoryEmbeddingRepo for MemMemoryEmbeddingRepo {
+        async fn upsert_chunk(
+            &self,
+            file_path: &str,
+            chunk_index: i32,
+            chunk_text: &str,
+            embedding: &[f32],
+        ) -> Result<(), StoreError> {
+            self.upserted_chunks.lock().await.push((
+                file_path.to_string(),
+                chunk_index,
+                chunk_text.to_string(),
+                embedding.to_vec(),
+            ));
+
+            let mut existing = self.existing_files.lock().await;
+            if !existing.iter().any(|path| path == file_path) {
+                existing.push(file_path.to_string());
+            }
+
+            Ok(())
+        }
+
+        async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError> {
+            self.deleted_files.lock().await.push(file_path.to_string());
+            let mut existing = self.existing_files.lock().await;
+            let before = existing.len();
+            existing.retain(|path| path != file_path);
+            Ok(before.saturating_sub(existing.len()))
+        }
+
+        async fn keyword_search(
+            &self,
+            _query: &str,
+            _limit: i64,
+        ) -> Result<Vec<KeywordSearchRow>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn vector_search(
+            &self,
+            _embedding: &[f32],
+            _limit: i64,
+        ) -> Result<Vec<VectorSearchRow>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn count(&self) -> Result<i64, StoreError> {
+            Ok(self.existing_files.lock().await.len() as i64)
+        }
+
+        async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
+            Ok(self.existing_files.lock().await.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_workspace_memory_index_reindexes_memory_files_and_cleans_stale_rows() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("docs"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            tmp.path().join("MEMORY.md"),
+            "# Memory\n\nAlpha preference\n",
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            tmp.path().join("memory/2026-03-16.md"),
+            "# Daily\n\nWorked on hybrid memory lane\n",
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(tmp.path().join("docs/ignored.md"), "# Ignore me\n")
+            .await
+            .unwrap();
+
+        let repo = MemMemoryEmbeddingRepo::new(vec!["memory/stale.md".into()]);
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                chunk_size: 512,
+                chunk_overlap: 0,
+                ..Default::default()
+            },
+            Box::new(StubEmbeddingProvider),
+        );
+
+        sync_workspace_memory_index(tmp.path(), &repo, &index)
+            .await
+            .expect("workspace memory sync should succeed");
+
+        let deleted = repo.deleted_files.lock().await.clone();
+        assert!(deleted.iter().any(|path| path == "memory/stale.md"));
+
+        let upserted = repo.upserted_chunks.lock().await.clone();
+        let upserted_paths: BTreeSet<String> = upserted
+            .iter()
+            .map(|(path, _, _, _)| path.clone())
+            .collect();
+        assert_eq!(
+            upserted_paths,
+            BTreeSet::from(["MEMORY.md".to_string(), "memory/2026-03-16.md".to_string()])
+        );
+        assert!(upserted.iter().all(|(path, _, _, embedding)| {
+            !path.starts_with(tmp.path().to_string_lossy().as_ref()) && embedding.len() == 4
+        }));
     }
 
     struct MemSessionRepo {

@@ -702,6 +702,21 @@ impl MemoryIndex {
             )));
         }
 
+        for (idx, embedding) in embeddings.iter().enumerate() {
+            if embedding.is_empty() {
+                return Err(MemoryIndexError::Embedding(format!(
+                    "embedding provider returned an empty vector for chunk {idx}"
+                )));
+            }
+            if embedding.len() != self.config.embedding_dimension {
+                return Err(MemoryIndexError::Embedding(format!(
+                    "expected embedding dimension {}, got {} for chunk {idx}",
+                    self.config.embedding_dimension,
+                    embedding.len()
+                )));
+            }
+        }
+
         Ok(chunks
             .into_iter()
             .zip(embeddings)
@@ -742,10 +757,26 @@ impl MemoryIndex {
 
     /// Embed a search query so the caller can execute the vector-search leg.
     pub async fn embed_query(&self, query: &str) -> Result<Vec<f32>, MemoryIndexError> {
-        let results = self.provider.embed(&[query.to_string()]).await?;
-        results.into_iter().next().ok_or_else(|| {
+        let mut results = self.provider.embed(&[query.to_string()]).await?;
+        let embedding = results.pop().ok_or_else(|| {
             MemoryIndexError::Embedding("embedding provider returned no vectors".into())
-        })
+        })?;
+
+        if embedding.is_empty() {
+            return Err(MemoryIndexError::Embedding(
+                "embedding provider returned an empty query vector".into(),
+            ));
+        }
+
+        if embedding.len() != self.config.embedding_dimension {
+            return Err(MemoryIndexError::Embedding(format!(
+                "expected query embedding dimension {}, got {}",
+                self.config.embedding_dimension,
+                embedding.len()
+            )));
+        }
+
+        Ok(embedding)
     }
 
     /// Perform hybrid search by combining pre-fetched keyword and vector hits.
@@ -1157,6 +1188,8 @@ Delta echo foxtrot.
 
     struct EmptyEmbeddingProvider;
 
+    struct WrongDimensionEmbeddingProvider;
+
     #[async_trait::async_trait]
     impl EmbeddingProvider for EmptyEmbeddingProvider {
         async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryIndexError> {
@@ -1165,6 +1198,17 @@ Delta echo foxtrot.
 
         fn dimension(&self) -> usize {
             4
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for WrongDimensionEmbeddingProvider {
+        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryIndexError> {
+            Ok(texts.iter().map(|_| vec![1.0, 2.0, 3.0]).collect())
+        }
+
+        fn dimension(&self) -> usize {
+            3
         }
     }
 
@@ -1282,6 +1326,45 @@ Delta echo foxtrot.
         assert!(
             err.to_string()
                 .contains("embedding provider returned no vectors")
+        );
+    }
+
+    #[tokio::test]
+    async fn index_file_rejects_embedding_dimension_mismatch() {
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                ..Default::default()
+            },
+            Box::new(WrongDimensionEmbeddingProvider),
+        );
+
+        let err = index
+            .index_file(Path::new("test.md"), "# Title\n\ncontent")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, MemoryIndexError::Embedding(_)));
+        assert!(
+            err.to_string()
+                .contains("expected embedding dimension 4, got 3 for chunk 0")
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_query_rejects_dimension_mismatch() {
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                ..Default::default()
+            },
+            Box::new(WrongDimensionEmbeddingProvider),
+        );
+
+        let err = index.embed_query("find this").await.unwrap_err();
+        assert!(matches!(err, MemoryIndexError::Embedding(_)));
+        assert!(
+            err.to_string()
+                .contains("expected query embedding dimension 4, got 3")
         );
     }
 
