@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use reqwest::Client;
+use reqwest::{Client, Method, Response};
 use rune_core::ChannelId;
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -20,8 +20,9 @@ use crate::{
     ChannelAdapter, ChannelError, ChannelMessage, DeliveryReceipt, InboundEvent, OutboundAction,
 };
 
-const DISCORD_API_BASE: &str = "https://discord.gg/api/v10";
+const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
+const RATE_LIMIT_RETRY_ATTEMPTS: usize = 3;
 
 /// Discord REST-based channel adapter.
 ///
@@ -227,31 +228,70 @@ impl DiscordAdapter {
         format!("Bot {}", self.token)
     }
 
+    async fn send_rest_request(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<Response, ChannelError> {
+        let url = format!("{}{}", self.api_base, path);
+        let method_name = method.as_str().to_string();
+        let mut attempt = 0usize;
+
+        loop {
+            let mut request = self
+                .http
+                .request(method.clone(), &url)
+                .header("Authorization", self.auth_header());
+
+            if let Some(body) = body {
+                request = request.json(body);
+            }
+
+            let resp = request.send().await.map_err(|e| ChannelError::Provider {
+                message: format!("discord REST error: {e}"),
+            })?;
+
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if attempt >= RATE_LIMIT_RETRY_ATTEMPTS {
+                    let text = resp.text().await.unwrap_or_default();
+                    return Err(ChannelError::Provider {
+                        message: format!(
+                            "discord API rate limited after {} retries: {}",
+                            RATE_LIMIT_RETRY_ATTEMPTS, text
+                        ),
+                    });
+                }
+
+                let retry_after = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(parse_retry_after_seconds)
+                    .unwrap_or(1.0);
+                tokio::time::sleep(Duration::from_secs_f64(retry_after.max(0.0))).await;
+                attempt += 1;
+                continue;
+            }
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(ChannelError::Provider {
+                    message: format!("discord API {method_name} {status}: {text}"),
+                });
+            }
+
+            return Ok(resp);
+        }
+    }
+
     async fn rest_post(
         &self,
         path: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ChannelError> {
-        let url = format!("{}{}", self.api_base, path);
-        let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", self.auth_header())
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| ChannelError::Provider {
-                message: format!("discord REST error: {e}"),
-            })?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(ChannelError::Provider {
-                message: format!("discord API {status}: {text}"),
-            });
-        }
-
+        let resp = self.send_rest_request(Method::POST, path, Some(body)).await?;
         resp.json().await.map_err(|e| ChannelError::Provider {
             message: format!("discord response parse error: {e}"),
         })
@@ -262,53 +302,26 @@ impl DiscordAdapter {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ChannelError> {
-        let url = format!("{}{}", self.api_base, path);
-        let resp = self
-            .http
-            .patch(&url)
-            .header("Authorization", self.auth_header())
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| ChannelError::Provider {
-                message: format!("discord REST error: {e}"),
-            })?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(ChannelError::Provider {
-                message: format!("discord API {status}: {text}"),
-            });
-        }
-
+        let resp = self.send_rest_request(Method::PATCH, path, Some(body)).await?;
         resp.json().await.map_err(|e| ChannelError::Provider {
             message: format!("discord response parse error: {e}"),
         })
     }
 
     async fn rest_delete(&self, path: &str) -> Result<(), ChannelError> {
-        let url = format!("{}{}", self.api_base, path);
-        let resp = self
-            .http
-            .delete(&url)
-            .header("Authorization", self.auth_header())
-            .send()
-            .await
-            .map_err(|e| ChannelError::Provider {
-                message: format!("discord REST error: {e}"),
-            })?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(ChannelError::Provider {
-                message: format!("discord API {status}: {text}"),
-            });
-        }
-
+        self.send_rest_request(Method::DELETE, path, None).await?;
         Ok(())
     }
+}
+
+fn parse_retry_after_seconds(value: &str) -> Option<f64> {
+    value.parse::<f64>().ok().map(|seconds| {
+        if seconds > 10.0 {
+            seconds / 1000.0
+        } else {
+            seconds
+        }
+    })
 }
 
 #[async_trait]
@@ -815,5 +828,56 @@ mod tests {
             .expect_err("react should not be implemented yet");
 
         assert!(matches!(err, ChannelError::NotImplemented));
+    }
+
+    #[test]
+    fn parse_retry_after_seconds_handles_seconds_and_millis() {
+        assert_eq!(parse_retry_after_seconds("2"), Some(2.0));
+        assert_eq!(parse_retry_after_seconds("2500"), Some(2.5));
+        assert_eq!(parse_retry_after_seconds("0.25"), Some(0.25));
+        assert_eq!(parse_retry_after_seconds("bogus"), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_retries_when_discord_rate_limits() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/channels/channel-1/messages"))
+            .and(header("authorization", "Bot discord-token"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("retry-after", "0")
+                    .set_body_string("rate limited"),
+            )
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/channels/channel-1/messages"))
+            .and(header("authorization", "Bot discord-token"))
+            .and(body_partial_json(serde_json::json!({
+                "content": "retry me"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "discord-msg-2"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let adapter = DiscordAdapter::with_base_url("discord-token", server.uri());
+        let receipt = adapter
+            .send(OutboundAction::Send {
+                channel_id: ChannelId::new(),
+                chat_id: "channel-1".into(),
+                content: "retry me".into(),
+            })
+            .await
+            .expect("send should retry after rate limit");
+
+        assert_eq!(receipt.provider_message_id, "discord-msg-2");
     }
 }

@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use chrono::Utc;
-use reqwest::Client;
+use reqwest::{Client, Response};
 use rune_core::ChannelId;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -20,6 +20,7 @@ use crate::{
 };
 
 const SLACK_API_BASE: &str = "https://slack.com/api";
+const RATE_LIMIT_RETRY_ATTEMPTS: usize = 3;
 
 /// Slack channel adapter using the Web API and Events API webhooks.
 ///
@@ -300,27 +301,70 @@ impl SlackAdapter {
 
     // ---------- Web API helpers ----------
 
+    async fn send_api_request(
+        &self,
+        method: &str,
+        body: &serde_json::Value,
+    ) -> Result<Response, ChannelError> {
+        let url = format!("{}/{method}", self.api_base);
+        let mut attempt = 0usize;
+
+        loop {
+            let resp = self
+                .http
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.bot_token))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| ChannelError::Provider {
+                    message: format!("slack API request error: {e}"),
+                })?;
+
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if attempt >= RATE_LIMIT_RETRY_ATTEMPTS {
+                    let text = resp.text().await.unwrap_or_default();
+                    return Err(ChannelError::Provider {
+                        message: format!(
+                            "slack API rate limited after {} retries: {}",
+                            RATE_LIMIT_RETRY_ATTEMPTS, text
+                        ),
+                    });
+                }
+
+                let retry_after = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(1.0);
+                tokio::time::sleep(Duration::from_secs_f64(retry_after.max(0.0))).await;
+                attempt += 1;
+                continue;
+            }
+
+            return Ok(resp);
+        }
+    }
+
     async fn api_post(
         &self,
         method: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ChannelError> {
-        let url = format!("{}/{method}", self.api_base);
-        let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.bot_token))
-            .header("Content-Type", "application/json; charset=utf-8")
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| ChannelError::Provider {
-                message: format!("slack API request error: {e}"),
-            })?;
-
+        let resp = self.send_api_request(method, body).await?;
+        let status = resp.status();
         let json: serde_json::Value = resp.json().await.map_err(|e| ChannelError::Provider {
             message: format!("slack API response parse error: {e}"),
         })?;
+
+        if !status.is_success() {
+            let err = json["error"].as_str().unwrap_or("unknown_error");
+            return Err(ChannelError::Provider {
+                message: format!("slack API HTTP {status}: {err}"),
+            });
+        }
 
         if !json["ok"].as_bool().unwrap_or(false) {
             let err = json["error"].as_str().unwrap_or("unknown_error");
@@ -780,5 +824,56 @@ mod tests {
             .await
             .expect("keyboard should succeed");
         assert_eq!(keyboard_receipt.provider_message_id, "1710320002.000300");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_retries_when_slack_rate_limits() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("retry-after", "0")
+                    .set_body_string("rate_limited"),
+            )
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .and(body_partial_json(serde_json::json!({
+                "channel": "C12345",
+                "text": "hello after retry"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "ts": "1710320003.000400"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let adapter = SlackAdapter::with_api_base(
+            "xoxb-test",
+            "xapp-test",
+            None,
+            server.uri(),
+        );
+
+        let receipt = adapter
+            .send(OutboundAction::Send {
+                channel_id: ChannelId::new(),
+                chat_id: "C12345".into(),
+                content: "hello after retry".into(),
+            })
+            .await
+            .expect("send should retry after rate limit");
+
+        assert_eq!(receipt.provider_message_id, "1710320003.000400");
     }
 }
