@@ -2420,7 +2420,8 @@ async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
 async fn paired_device_token_can_access_general_protected_routes_but_not_device_management() {
     use ed25519_dalek::{Signer, SigningKey};
 
-    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+    let (app, device_repo) =
+        build_test_app_parts(AppConfig::default(), Some(TEST_AUTH_TOKEN.to_string()));
     let signing_key = SigningKey::from_bytes(&[8u8; 32]);
     let public_key = hex::encode(signing_key.verifying_key().as_bytes());
 
@@ -2504,6 +2505,16 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    let devices = device_repo.devices.lock().await;
+    let device = devices
+        .iter()
+        .find(|device| device.public_key == public_key)
+        .expect("paired device should be stored");
+    assert!(
+        device.last_seen_at.is_some(),
+        "device token auth should touch last_seen_at"
+    );
 }
 
 #[tokio::test]
