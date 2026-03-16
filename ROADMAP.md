@@ -82,7 +82,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | WebSocket Gateway | ✅ Basic | Event broadcast only, no req/res/RPC framing |
 | Multi-channel Routing | ✅ Telegram only | Adapter trait exists; Discord/Slack/WhatsApp/Signal missing |
 | Device Pairing | ✅ 2026-03-16 | Ed25519 challenge-response pairing, PostgreSQL-backed device/request persistence, SHA-256 token storage, supervisor pruning, and route/integration coverage landed |
-| LaneQueue Concurrency | ❌ Missing | Sequential per-session, no lane caps |
+| LaneQueue Concurrency | ✅ 2026-03-16 | LaneQueue implemented with per-lane caps, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
 | File-based Identity | ✅ Done | SOUL.md, USER.md, AGENTS.md, TOOLS.md, IDENTITY.md |
 | Session History | ✅ Done | PostgreSQL-based (not JSONL) |
 | Hybrid Memory Search | ⚠️ Keyword only | No vector embeddings, no FTS5 |
