@@ -8,11 +8,14 @@ license.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+hex.workspace = true
+hmac = "0.12"
 reqwest = { workspace = true, features = ["json"] }
 rune-config = { path = "../rune-config" }
 rune-core = { path = "../rune-core" }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

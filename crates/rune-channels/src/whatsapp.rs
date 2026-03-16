@@ -6,11 +6,15 @@
 //! webhook POSTs from Meta, converts them into [`InboundEvent`]s, and pushes
 //! them into an mpsc queue.
 
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::Utc;
+use hmac::{Hmac, Mac};
 use reqwest::Client;
 use rune_core::ChannelId;
+use sha2::Sha256;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -21,6 +25,9 @@ use crate::{
 };
 
 const GRAPH_API_BASE: &str = "https://graph.facebook.com/v17.0";
+const RECENT_MESSAGE_ID_CAPACITY: usize = 1000;
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// WhatsApp Cloud API adapter.
 ///
@@ -32,6 +39,8 @@ pub struct WhatsAppAdapter {
     phone_number_id: String,
     #[allow(dead_code)]
     verify_token: String,
+    #[allow(dead_code)]
+    app_secret: Option<String>,
     graph_api_base: String,
     http: Client,
     rx: mpsc::Receiver<InboundEvent>,
@@ -51,12 +60,14 @@ impl WhatsAppAdapter {
         access_token: impl Into<String>,
         phone_number_id: impl Into<String>,
         verify_token: impl Into<String>,
+        app_secret: Option<String>,
         listen_addr: Option<String>,
     ) -> Self {
         Self::with_graph_api_base(
             access_token,
             phone_number_id,
             verify_token,
+            app_secret,
             listen_addr,
             GRAPH_API_BASE,
         )
@@ -67,6 +78,7 @@ impl WhatsAppAdapter {
         access_token: impl Into<String>,
         phone_number_id: impl Into<String>,
         verify_token: impl Into<String>,
+        app_secret: Option<String>,
         listen_addr: Option<String>,
         graph_api_base: impl Into<String>,
     ) -> Self {
@@ -85,8 +97,9 @@ impl WhatsAppAdapter {
         if let Some(addr) = listen_addr {
             let tx = tx.clone();
             let vt = verify_token.clone();
+            let app_secret = app_secret.clone();
             tokio::spawn(async move {
-                if let Err(e) = Self::run_webhook_listener(addr, tx, vt).await {
+                if let Err(e) = Self::run_webhook_listener(addr, tx, vt, app_secret).await {
                     error!("whatsapp webhook listener exited: {e}");
                 }
             });
@@ -96,6 +109,7 @@ impl WhatsAppAdapter {
             access_token,
             phone_number_id,
             verify_token,
+            app_secret,
             graph_api_base,
             http,
             rx,
@@ -111,6 +125,7 @@ impl WhatsAppAdapter {
         addr: String,
         tx: mpsc::Sender<InboundEvent>,
         verify_token: String,
+        app_secret: Option<String>,
     ) -> Result<(), String> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
@@ -120,6 +135,9 @@ impl WhatsAppAdapter {
             .map_err(|e| format!("failed to bind {addr}: {e}"))?;
 
         info!("whatsapp webhook listener bound to {addr}");
+        let recent_message_ids = Arc::new(Mutex::new(RecentMessageIds::new(
+            RECENT_MESSAGE_ID_CAPACITY,
+        )));
 
         loop {
             let (mut stream, peer) = listener
@@ -129,6 +147,8 @@ impl WhatsAppAdapter {
 
             let tx = tx.clone();
             let verify_token = verify_token.clone();
+            let app_secret = app_secret.clone();
+            let recent_message_ids = Arc::clone(&recent_message_ids);
 
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 65536];
@@ -139,7 +159,8 @@ impl WhatsAppAdapter {
                         return;
                     }
                 };
-                let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                let request = &buf[..n];
+                let raw = String::from_utf8_lossy(request).to_string();
 
                 // Parse the HTTP request line to determine GET vs POST.
                 let first_line = raw.lines().next().unwrap_or("");
@@ -147,23 +168,38 @@ impl WhatsAppAdapter {
                     // Webhook verification request.
                     Self::handle_verification(&raw, &verify_token)
                 } else {
-                    // Webhook event notification.
-                    let body = raw
-                        .split("\r\n\r\n")
-                        .nth(1)
-                        .or_else(|| raw.split("\n\n").nth(1))
-                        .unwrap_or("");
-
-                    match serde_json::from_str::<serde_json::Value>(body) {
-                        Ok(payload) => {
-                            let events = Self::extract_events(&payload);
-                            for event in events {
-                                let _ = tx.send(event).await;
+                    match Self::parse_http_request(request) {
+                        Some((headers, body)) => {
+                            if !Self::verify_signature(&headers, body, app_secret.as_deref()) {
+                                warn!("whatsapp webhook signature verification failed");
+                                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".to_string()
+                            } else {
+                                match serde_json::from_slice::<serde_json::Value>(body) {
+                                    Ok(payload) => {
+                                        let events = {
+                                            let mut recent_message_ids = recent_message_ids
+                                                .lock()
+                                                .expect("recent message id cache poisoned");
+                                            Self::extract_events_dedup(
+                                                &payload,
+                                                &mut recent_message_ids,
+                                            )
+                                        };
+                                        for event in events {
+                                            let _ = tx.send(event).await;
+                                        }
+                                        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_string()
+                                    }
+                                    Err(e) => {
+                                        warn!("whatsapp webhook json parse error: {e}");
+                                        "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
+                                            .to_string()
+                                    }
+                                }
                             }
-                            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_string()
                         }
-                        Err(e) => {
-                            warn!("whatsapp webhook json parse error: {e}");
+                        None => {
+                            warn!("whatsapp webhook request parse error");
                             "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".to_string()
                         }
                     }
@@ -172,6 +208,58 @@ impl WhatsAppAdapter {
                 let _ = stream.write_all(response.as_bytes()).await;
             });
         }
+    }
+
+    fn parse_http_request(request: &[u8]) -> Option<(HashMap<String, String>, &[u8])> {
+        let header_end = request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|idx| idx + 4)
+            .or_else(|| {
+                request
+                    .windows(2)
+                    .position(|window| window == b"\n\n")
+                    .map(|idx| idx + 2)
+            })?;
+
+        let header_text = std::str::from_utf8(&request[..header_end]).ok()?;
+        let mut headers = HashMap::new();
+        for line in header_text.lines().skip(1) {
+            let line = line.trim_end_matches('\r');
+            if line.is_empty() {
+                continue;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+            }
+        }
+
+        Some((headers, &request[header_end..]))
+    }
+
+    fn verify_signature(
+        headers: &HashMap<String, String>,
+        body: &[u8],
+        app_secret: Option<&str>,
+    ) -> bool {
+        let Some(app_secret) = app_secret else {
+            return true;
+        };
+
+        let Some(signature) = headers.get("x-hub-signature-256") else {
+            return false;
+        };
+        let Some(received_signature) = signature.strip_prefix("sha256=") else {
+            return false;
+        };
+        let Ok(expected_signature) = hex::decode(received_signature) else {
+            return false;
+        };
+        let Ok(mut mac) = HmacSha256::new_from_slice(app_secret.as_bytes()) else {
+            return false;
+        };
+        mac.update(body);
+        mac.verify_slice(&expected_signature).is_ok()
     }
 
     /// Handle the Meta webhook verification GET request.
@@ -234,7 +322,16 @@ impl WhatsAppAdapter {
     ///   }]
     /// }
     /// ```
+    #[cfg(test)]
     fn extract_events(payload: &serde_json::Value) -> Vec<InboundEvent> {
+        let mut recent_message_ids = RecentMessageIds::new(usize::MAX);
+        Self::extract_events_dedup(payload, &mut recent_message_ids)
+    }
+
+    fn extract_events_dedup(
+        payload: &serde_json::Value,
+        recent_message_ids: &mut RecentMessageIds,
+    ) -> Vec<InboundEvent> {
         let mut events = Vec::new();
 
         let entries = match payload["entry"].as_array() {
@@ -254,6 +351,13 @@ impl WhatsAppAdapter {
 
                 if let Some(msgs) = messages {
                     for msg in msgs {
+                        if let Some(message_id) = msg["id"].as_str()
+                            && !message_id.is_empty()
+                            && !recent_message_ids.insert(message_id)
+                        {
+                            debug!("whatsapp webhook duplicate delivery ignored: {message_id}");
+                            continue;
+                        }
                         if let Some(event) = Self::convert_message(msg) {
                             events.push(event);
                         }
@@ -468,6 +572,41 @@ impl WhatsAppAdapter {
     }
 }
 
+struct RecentMessageIds {
+    capacity: usize,
+    order: VecDeque<String>,
+    seen: HashMap<String, ()>,
+}
+
+impl RecentMessageIds {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            order: VecDeque::new(),
+            seen: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, message_id: &str) -> bool {
+        if self.capacity == 0 {
+            return true;
+        }
+        if self.seen.contains_key(message_id) {
+            return false;
+        }
+        if self.order.len() == self.capacity
+            && let Some(evicted) = self.order.pop_front()
+        {
+            self.seen.remove(&evicted);
+        }
+
+        let message_id = message_id.to_string();
+        self.order.push_back(message_id.clone());
+        self.seen.insert(message_id, ());
+        true
+    }
+}
+
 #[async_trait]
 impl ChannelAdapter for WhatsAppAdapter {
     async fn receive(&mut self) -> Result<InboundEvent, ChannelError> {
@@ -662,6 +801,82 @@ mod tests {
         assert!(response.contains("403 Forbidden"));
     }
 
+    #[test]
+    fn extract_events_deduplicates_repeated_message_ids() {
+        let payload = serde_json::json!({
+            "entry": [{
+                "changes": [{
+                    "value": {
+                        "messages": [{
+                            "from": "15559998888",
+                            "id": "wamid.duplicate",
+                            "timestamp": "1710320000",
+                            "type": "text",
+                            "text": { "body": "first" }
+                        }, {
+                            "from": "15559998888",
+                            "id": "wamid.duplicate",
+                            "timestamp": "1710320001",
+                            "type": "text",
+                            "text": { "body": "second" }
+                        }]
+                    }
+                }]
+            }]
+        });
+
+        let mut recent_message_ids = RecentMessageIds::new(1000);
+        let events = WhatsAppAdapter::extract_events_dedup(&payload, &mut recent_message_ids);
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            InboundEvent::Message(message) => {
+                assert_eq!(message.provider_message_id, "wamid.duplicate");
+                assert_eq!(message.content, "first");
+            }
+            other => panic!("expected deduplicated message event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn signature_verification_is_optional_without_secret() {
+        let headers = HashMap::new();
+        assert!(WhatsAppAdapter::verify_signature(
+            &headers,
+            br#"{"ok":true}"#,
+            None
+        ));
+    }
+
+    #[test]
+    fn signature_verification_accepts_valid_signature() {
+        let body = br#"{"entry":[]}"#;
+        let mut mac = HmacSha256::new_from_slice(b"app-secret").unwrap();
+        mac.update(body);
+        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+
+        let headers = HashMap::from([("x-hub-signature-256".to_string(), signature)]);
+        assert!(WhatsAppAdapter::verify_signature(
+            &headers,
+            body,
+            Some("app-secret")
+        ));
+    }
+
+    #[test]
+    fn signature_verification_rejects_invalid_signature_when_secret_is_configured() {
+        let headers = HashMap::from([(
+            "x-hub-signature-256".to_string(),
+            "sha256=deadbeef".to_string(),
+        )]);
+
+        assert!(!WhatsAppAdapter::verify_signature(
+            &headers,
+            br#"{"entry":[]}"#,
+            Some("app-secret")
+        ));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn send_text_uses_configurable_graph_api_base() {
         let server = MockServer::start().await;
@@ -688,6 +903,7 @@ mod tests {
             "wa-token",
             "phone-1",
             "verify-me",
+            None,
             None,
             format!("{}/v17.0", server.uri()),
         );
