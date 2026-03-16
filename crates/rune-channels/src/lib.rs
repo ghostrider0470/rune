@@ -98,6 +98,7 @@ pub fn create_adapter(
                 access_token,
                 phone_number_id,
                 verify_token,
+                config.whatsapp_app_secret.clone(),
                 config.whatsapp_listen_addr.clone(),
             )))
         }

@@ -407,6 +407,9 @@ pub struct ChannelsConfig {
     /// Token used by Meta to verify the WhatsApp webhook endpoint.
     #[serde(default)]
     pub whatsapp_verify_token: Option<String>,
+    /// App secret used to validate `X-Hub-Signature-256` on inbound webhook POSTs.
+    #[serde(default)]
+    pub whatsapp_app_secret: Option<String>,
     /// Local address for the WhatsApp webhook listener (for example `0.0.0.0:3200`).
     #[serde(default)]
     pub whatsapp_listen_addr: Option<String>,
@@ -908,6 +911,7 @@ slack_app_token = "xapp-token"
 whatsapp_access_token = "wa-token"
 whatsapp_phone_number_id = "phone-123"
 whatsapp_verify_token = "verify-token"
+whatsapp_app_secret = "app-secret"
 signal_number = "+15551234567"
 signal_api_url = "http://signal.local:8080"
 "#,
@@ -952,6 +956,10 @@ signal_api_url = "http://signal.local:8080"
             Some("verify-token")
         );
         assert_eq!(
+            config.channels.whatsapp_app_secret.as_deref(),
+            Some("app-secret")
+        );
+        assert_eq!(
             config.channels.signal_number.as_deref(),
             Some("+15551234567")
         );
@@ -973,6 +981,7 @@ signal_api_url = "http://signal.local:8080"
 [channels]
 discord_token = "discord-from-file"
 whatsapp_verify_token = "verify-from-file"
+whatsapp_app_secret = "secret-from-file"
 signal_api_url = "http://file-signal:8080"
 "#,
         )
@@ -981,6 +990,7 @@ signal_api_url = "http://file-signal:8080"
         unsafe {
             std::env::set_var("RUNE_CHANNELS__DISCORD_TOKEN", "discord-from-env");
             std::env::set_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN", "verify-from-env");
+            std::env::set_var("RUNE_CHANNELS__WHATSAPP_APP_SECRET", "secret-from-env");
             std::env::set_var("RUNE_CHANNELS__SIGNAL_API_URL", "http://env-signal:8080");
         }
 
@@ -994,6 +1004,10 @@ signal_api_url = "http://file-signal:8080"
             Some("verify-from-env")
         );
         assert_eq!(
+            config.channels.whatsapp_app_secret.as_deref(),
+            Some("secret-from-env")
+        );
+        assert_eq!(
             config.channels.signal_api_url.as_deref(),
             Some("http://env-signal:8080")
         );
@@ -1001,6 +1015,7 @@ signal_api_url = "http://file-signal:8080"
         unsafe {
             std::env::remove_var("RUNE_CHANNELS__DISCORD_TOKEN");
             std::env::remove_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__WHATSAPP_APP_SECRET");
             std::env::remove_var("RUNE_CHANNELS__SIGNAL_API_URL");
         }
         let _ = fs::remove_file(path);
@@ -1019,6 +1034,7 @@ signal_api_url = "http://file-signal:8080"
         assert_eq!(config.channels.whatsapp_access_token, None);
         assert_eq!(config.channels.whatsapp_phone_number_id, None);
         assert_eq!(config.channels.whatsapp_verify_token, None);
+        assert_eq!(config.channels.whatsapp_app_secret, None);
         assert_eq!(config.channels.signal_number, None);
         assert_eq!(config.channels.signal_api_url, None);
     }
@@ -1149,6 +1165,7 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
             std::env::set_var("RUNE_CHANNELS__WHATSAPP_ACCESS_TOKEN", "wa-env");
             std::env::set_var("RUNE_CHANNELS__WHATSAPP_PHONE_NUMBER_ID", "phone-env");
             std::env::set_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN", "verify-env");
+            std::env::set_var("RUNE_CHANNELS__WHATSAPP_APP_SECRET", "secret-env");
             std::env::set_var("RUNE_CHANNELS__SIGNAL_API_URL", "http://signal-env:8080");
         }
 
@@ -1180,6 +1197,10 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
             Some("verify-env")
         );
         assert_eq!(
+            config.channels.whatsapp_app_secret.as_deref(),
+            Some("secret-env")
+        );
+        assert_eq!(
             config.channels.signal_api_url.as_deref(),
             Some("http://signal-env:8080")
         );
@@ -1193,6 +1214,7 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
             std::env::remove_var("RUNE_CHANNELS__WHATSAPP_ACCESS_TOKEN");
             std::env::remove_var("RUNE_CHANNELS__WHATSAPP_PHONE_NUMBER_ID");
             std::env::remove_var("RUNE_CHANNELS__WHATSAPP_VERIFY_TOKEN");
+            std::env::remove_var("RUNE_CHANNELS__WHATSAPP_APP_SECRET");
             std::env::remove_var("RUNE_CHANNELS__SIGNAL_API_URL");
         }
     }

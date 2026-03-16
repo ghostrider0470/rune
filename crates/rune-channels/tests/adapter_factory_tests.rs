@@ -101,6 +101,7 @@ async fn configured_adapter_kinds_construct_successfully() {
             whatsapp_access_token: Some("wa-token".into()),
             whatsapp_phone_number_id: Some("phone-1".into()),
             whatsapp_verify_token: Some("verify-me".into()),
+            whatsapp_app_secret: Some("app-secret".into()),
             ..ChannelsConfig::default()
         },
     );
@@ -125,6 +126,7 @@ async fn whatsapp_adapter_uses_default_verify_token_when_missing() {
             whatsapp_access_token: Some("wa-token".into()),
             whatsapp_phone_number_id: Some("phone-1".into()),
             whatsapp_verify_token: None,
+            whatsapp_app_secret: Some("app-secret".into()),
             ..ChannelsConfig::default()
         },
     );
@@ -190,6 +192,7 @@ async fn whatsapp_adapter_defaults_verify_token_without_blocking_send_path() {
             whatsapp_access_token: Some("wa-token".into()),
             whatsapp_phone_number_id: Some("phone-1".into()),
             whatsapp_verify_token: None,
+            whatsapp_app_secret: Some("app-secret".into()),
             ..ChannelsConfig::default()
         },
     )
@@ -208,6 +211,7 @@ async fn channels_config_wiring_supports_optional_listener_and_polling_fields() 
         slack_listen_addr: Some("127.0.0.1:3100".into()),
         whatsapp_access_token: Some("wa-token".into()),
         whatsapp_phone_number_id: Some("phone-1".into()),
+        whatsapp_app_secret: Some("app-secret".into()),
         whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
         signal_number: Some("+15551234567".into()),
         ..ChannelsConfig::default()
@@ -232,6 +236,7 @@ fn channels_config_defaults_new_adapter_fields_safely() {
     assert!(config.discord_channel_ids.is_empty());
     assert_eq!(config.slack_listen_addr, None);
     assert_eq!(config.whatsapp_listen_addr, None);
+    assert_eq!(config.whatsapp_app_secret, None);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -243,6 +248,7 @@ async fn create_adapter_uses_configured_optional_listener_and_channel_fields() {
         slack_listen_addr: Some("127.0.0.1:3100".into()),
         whatsapp_access_token: Some("wa-token".into()),
         whatsapp_phone_number_id: Some("phone-1".into()),
+        whatsapp_app_secret: Some("app-secret".into()),
         whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
         signal_number: Some("+15551234567".into()),
         signal_api_url: Some("http://localhost:8080".into()),
