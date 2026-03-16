@@ -38,6 +38,7 @@ impl StdioTransport {
         command: &str,
         args: &[String],
         env: &HashMap<String, String>,
+        cwd: Option<&str>,
     ) -> Result<Self, McpError> {
         let mut cmd = Command::new(command);
         cmd.args(args)
@@ -46,6 +47,9 @@ impl StdioTransport {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
 
         let mut child = cmd
             .spawn()
@@ -108,6 +112,8 @@ impl StdioTransport {
                     }
                 }
             }
+
+            pending_clone.lock().await.clear();
         });
 
         Ok(Self {
@@ -159,6 +165,31 @@ impl StdioTransport {
         })
     }
 
+    /// Send a JSON-RPC notification without waiting for a response.
+    pub async fn notify(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<(), McpError> {
+        let mut line = serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }))
+        .map_err(|e| McpError::protocol(format!("failed to serialize notification: {e}")))?;
+        line.push('\n');
+
+        let mut stdin = self.stdin.lock().await;
+        stdin.write_all(line.as_bytes()).await.map_err(|e| {
+            McpError::transport(format!("failed to write notification to stdin: {e}"))
+        })?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| McpError::transport(format!("failed to flush stdin: {e}")))?;
+        Ok(())
+    }
+
     /// Kill the child process and clean up.
     pub async fn shutdown(&self) {
         // Kill the child process.
@@ -177,6 +208,20 @@ impl StdioTransport {
     }
 }
 
+impl Drop for StdioTransport {
+    fn drop(&mut self) {
+        if let Ok(mut child) = self.child.try_lock() {
+            let _ = child.start_kill();
+        }
+
+        if let Ok(mut handle) = self.reader_handle.try_lock() {
+            if let Some(handle) = handle.take() {
+                handle.abort();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,6 +232,7 @@ mod tests {
             "/usr/bin/this-command-does-not-exist-rune-test",
             &[],
             &HashMap::new(),
+            None,
         )
         .await;
         match result {

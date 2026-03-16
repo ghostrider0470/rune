@@ -7,7 +7,11 @@ pub mod transport_http;
 pub mod transport_stdio;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use async_trait::async_trait;
+use rune_core::ToolCategory;
+use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolResult};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
@@ -15,10 +19,12 @@ use crate::discovery::{McpServerConfig, McpTransportKind};
 use crate::error::McpError;
 use crate::protocol::{
     ClientCapabilities, ClientInfo, InitializeParams, InitializeResult, JsonRpcRequest,
-    MCP_PROTOCOL_VERSION, McpTool, McpToolResult, ToolsListResult,
+    MCP_PROTOCOL_VERSION, ToolsListResult,
 };
 use crate::transport_http::HttpTransport;
 use crate::transport_stdio::StdioTransport;
+
+pub use crate::protocol::{McpTool, McpToolResult};
 
 // ---------------------------------------------------------------------------
 // Transport abstraction (internal enum dispatch -- no dyn trait needed)
@@ -36,6 +42,13 @@ impl TransportHandle {
         match self {
             Self::Stdio(t) => t.send(request).await,
             Self::Http(t) => t.send(request).await,
+        }
+    }
+
+    async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), McpError> {
+        match self {
+            Self::Stdio(t) => t.notify(method, params).await,
+            Self::Http(t) => t.notify(method, params).await,
         }
     }
 
@@ -110,6 +123,10 @@ impl McpManager {
     /// servers are still connected.
     pub async fn connect_all(&mut self, configs: &[McpServerConfig]) -> Result<(), McpError> {
         for cfg in configs {
+            if !cfg.enabled {
+                info!(server = %cfg.name, "skipping disabled MCP server");
+                continue;
+            }
             if let Err(e) = self.connect_one(cfg).await {
                 warn!(server = %cfg.name, error = %e, "skipping MCP server that failed to connect");
             }
@@ -127,8 +144,7 @@ impl McpManager {
             McpTransportKind::Stdio => {
                 let command = cfg.command.as_deref().unwrap_or_default();
                 let args = cfg.args.clone().unwrap_or_default();
-                let env = cfg.env.clone().unwrap_or_default();
-                let t = StdioTransport::start(command, &args, &env).await?;
+                let t = StdioTransport::start(command, &args, &cfg.env, cfg.cwd.as_deref()).await?;
                 TransportHandle::Stdio(t)
             }
             McpTransportKind::Http => {
@@ -155,10 +171,7 @@ impl McpManager {
         // this as a notification by writing a request with id=0 and ignoring
         // the result.  In practice many servers simply do not reply to
         // notifications; the reader task will discard any response.
-        let notif_id = transport.next_request_id();
-        let notif = JsonRpcRequest::new(notif_id, "notifications/initialized", None);
-        // Best-effort: if this fails we still consider the connection alive.
-        if let Err(e) = transport.send(notif).await {
+        if let Err(e) = transport.notify("notifications/initialized", None).await {
             debug!(server = %cfg.name, error = %e, "initialized notification send failed (non-fatal)");
         }
 
@@ -247,6 +260,19 @@ impl McpManager {
         out
     }
 
+    /// Return every MCP tool definition with a `server__tool` prefix applied.
+    #[must_use]
+    pub fn list_prefixed_tools(&self) -> Vec<McpTool> {
+        let mut tools = Vec::new();
+        for (server, tool) in self.list_tools() {
+            let mut tool = tool.clone();
+            tool.name = format!("{server}__{}", tool.name);
+            tools.push(tool);
+        }
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        tools
+    }
+
     /// Return tools from a specific server.
     pub fn list_server_tools(&self, server: &str) -> Result<&[McpTool], McpError> {
         let conn = self
@@ -290,6 +316,21 @@ impl McpManager {
             .map_err(|e| McpError::protocol(format!("malformed tools/call result: {e}")))
     }
 
+    /// Invoke a tool using the `server__tool` registry name.
+    pub async fn call_prefixed_tool(
+        &self,
+        prefixed_tool_name: &str,
+        arguments: Value,
+    ) -> Result<McpToolResult, McpError> {
+        let (server, tool_name) = prefixed_tool_name.split_once("__").ok_or_else(|| {
+            McpError::protocol(format!(
+                "invalid MCP tool name '{prefixed_tool_name}'; expected server__tool"
+            ))
+        })?;
+
+        self.call_tool(server, tool_name, arguments).await
+    }
+
     /// Refresh the tool list for a specific server by re-invoking `tools/list`.
     pub async fn refresh_tools(&mut self, server: &str) -> Result<(), McpError> {
         let conn = self
@@ -324,9 +365,131 @@ impl Default for McpManager {
     }
 }
 
+/// Bridges MCP tools into Rune's tool registry and execution surface.
+pub struct McpToolExecutor {
+    manager: Arc<McpManager>,
+}
+
+impl McpToolExecutor {
+    #[must_use]
+    pub fn new(manager: Arc<McpManager>) -> Self {
+        Self { manager }
+    }
+
+    /// Convert connected MCP tools into Rune tool definitions.
+    #[must_use]
+    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.manager
+            .list_prefixed_tools()
+            .into_iter()
+            .map(|tool| ToolDefinition {
+                name: tool.name,
+                description: tool.description.unwrap_or_default(),
+                parameters: tool.input_schema,
+                category: ToolCategory::External,
+                requires_approval: false,
+            })
+            .collect()
+    }
+}
+
+#[async_trait]
+impl ToolExecutor for McpToolExecutor {
+    async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
+        let result = self
+            .manager
+            .call_prefixed_tool(&call.tool_name, call.arguments)
+            .await
+            .map_err(|error| ToolError::ExecutionFailed(error.to_string()))?;
+
+        let mut lines = Vec::new();
+        for item in &result.content {
+            match item {
+                protocol::McpContent::Text { text } => lines.push(text.clone()),
+                protocol::McpContent::Resource { uri, text } => {
+                    if let Some(text) = text {
+                        lines.push(text.clone());
+                    } else {
+                        lines.push(format!("[resource] {uri}"));
+                    }
+                }
+                protocol::McpContent::Image { mime_type, .. } => {
+                    lines.push(format!("[image] {mime_type}"));
+                }
+            }
+        }
+
+        Ok(ToolResult {
+            tool_call_id: call.tool_call_id,
+            output: lines.join("\n"),
+            is_error: result.is_error.unwrap_or(false),
+            tool_execution_id: None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rune_core::ToolCallId;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn write_stdio_server_script(tool_name: &str, description: &str, result_json: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("rune-mcp-test-{}.py", uuid::Uuid::now_v7()));
+        let script = format!(
+            r#"import json
+import sys
+
+TOOL_NAME = {tool_name:?}
+DESCRIPTION = {description:?}
+RESULT = json.loads({result_json:?})
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{
+            "jsonrpc": "2.0",
+            "id": msg["id"],
+            "result": {{
+                "protocolVersion": "2024-11-05",
+                "capabilities": {{"tools": {{"listChanged": True}}}},
+                "serverInfo": {{"name": "test-server", "version": "1.0.0"}}
+            }}
+        }}), flush=True)
+    elif method == "tools/list":
+        print(json.dumps({{
+            "jsonrpc": "2.0",
+            "id": msg["id"],
+            "result": {{
+                "tools": [{{
+                    "name": TOOL_NAME,
+                    "description": DESCRIPTION,
+                    "inputSchema": {{
+                        "type": "object",
+                        "properties": {{
+                            "path": {{"type": "string"}},
+                            "query": {{"type": "string"}}
+                        }}
+                    }}
+                }}]
+            }}
+        }}), flush=True)
+    elif method == "tools/call":
+        print(json.dumps({{
+            "jsonrpc": "2.0",
+            "id": msg["id"],
+            "result": RESULT
+        }}), flush=True)
+"#
+        );
+        fs::write(&path, script).unwrap();
+        path
+    }
 
     #[test]
     fn new_manager_is_empty() {
@@ -366,5 +529,86 @@ mod tests {
         let result = mgr.connect_all(&[]).await;
         assert!(result.is_ok());
         assert!(mgr.is_empty());
+    }
+
+    #[tokio::test]
+    async fn connect_http_server_registers_prefixed_tools_and_executes_calls() {
+        let script_path = write_stdio_server_script(
+            "read_file",
+            "Read a file",
+            r#"{"content":[{"type":"text","text":"demo output"}],"isError":false}"#,
+        );
+
+        let mut manager = McpManager::new();
+        manager
+            .connect_all(&[McpServerConfig {
+                name: "filesystem".into(),
+                transport: McpTransportKind::Stdio,
+                command: Some("python3".into()),
+                args: Some(vec![script_path.display().to_string()]),
+                env: HashMap::new(),
+                cwd: None,
+                url: None,
+                enabled: true,
+            }])
+            .await
+            .unwrap();
+
+        let tools = manager.list_prefixed_tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "filesystem__read_file");
+
+        let result = manager
+            .call_prefixed_tool(
+                "filesystem__read_file",
+                serde_json::json!({ "path": "/tmp/demo" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.content.len(), 1);
+
+        let _ = fs::remove_file(script_path);
+    }
+
+    #[tokio::test]
+    async fn tool_executor_maps_mcp_results_into_rune_output() {
+        let script_path = write_stdio_server_script(
+            "lookup",
+            "Lookup a note",
+            r#"{"content":[{"type":"text","text":"first line"},{"type":"resource","uri":"memory://note/42","text":"second line"}],"isError":false}"#,
+        );
+
+        let mut manager = McpManager::new();
+        manager
+            .connect_all(&[McpServerConfig {
+                name: "notes".into(),
+                transport: McpTransportKind::Stdio,
+                command: Some("python3".into()),
+                args: Some(vec![script_path.display().to_string()]),
+                env: HashMap::new(),
+                cwd: None,
+                url: None,
+                enabled: true,
+            }])
+            .await
+            .unwrap();
+
+        let executor = McpToolExecutor::new(Arc::new(manager));
+        let defs = executor.tool_definitions();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "notes__lookup");
+
+        let result = executor
+            .execute(ToolCall {
+                tool_call_id: ToolCallId::new(),
+                tool_name: "notes__lookup".into(),
+                arguments: serde_json::json!({ "query": "note" }),
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.output, "first line\nsecond line");
+        assert!(!result.is_error);
+
+        let _ = fs::remove_file(script_path);
     }
 }
