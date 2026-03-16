@@ -55,6 +55,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use rune_store::MemoryEmbeddingRepo;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument, warn};
 
@@ -755,6 +756,62 @@ impl MemoryIndex {
         Ok(all_chunks)
     }
 
+    /// Re-index a single file and persist its chunks into the repository.
+    #[instrument(skip(self, content, repo), fields(path = %path.display()))]
+    pub async fn reindex_file_to_repo(
+        &self,
+        path: &Path,
+        content: &str,
+        repo: &dyn MemoryEmbeddingRepo,
+    ) -> Result<usize, MemoryIndexError> {
+        let file_path = path.display().to_string();
+        repo.delete_by_file(&file_path).await.map_err(|err| {
+            MemoryIndexError::Indexing(format!(
+                "failed to delete existing chunks for {file_path}: {err}"
+            ))
+        })?;
+
+        let embedded_chunks = self.index_file(path, content).await?;
+        let chunk_count = embedded_chunks.len();
+
+        for embedded in embedded_chunks {
+            let chunk_index = i32::try_from(embedded.chunk.chunk_index).map_err(|_| {
+                MemoryIndexError::Indexing(format!(
+                    "memory chunk index overflow for {}:{}",
+                    file_path, embedded.chunk.chunk_index
+                ))
+            })?;
+
+            repo.upsert_chunk(
+                &file_path,
+                chunk_index,
+                &embedded.chunk.chunk_text,
+                &embedded.embedding,
+            )
+            .await
+            .map_err(|err| {
+                MemoryIndexError::Indexing(format!(
+                    "failed to persist chunk {file_path}:{chunk_index}: {err}"
+                ))
+            })?;
+        }
+
+        Ok(chunk_count)
+    }
+
+    /// Remove a file's persisted chunks from the repository.
+    #[instrument(skip(self, repo), fields(path = %path.display()))]
+    pub async fn remove_file_from_repo(
+        &self,
+        path: &Path,
+        repo: &dyn MemoryEmbeddingRepo,
+    ) -> Result<usize, MemoryIndexError> {
+        let file_path = path.display().to_string();
+        repo.delete_by_file(&file_path).await.map_err(|err| {
+            MemoryIndexError::Indexing(format!("failed to delete chunks for {file_path}: {err}"))
+        })
+    }
+
     /// Embed a search query so the caller can execute the vector-search leg.
     pub async fn embed_query(&self, query: &str) -> Result<Vec<f32>, MemoryIndexError> {
         let mut results = self.provider.embed(&[query.to_string()]).await?;
@@ -874,6 +931,11 @@ async fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, MemoryIndexError> 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use rune_store::StoreError;
+    use rune_store::models::{KeywordSearchRow, VectorSearchRow};
+
     use super::*;
 
     // -- Chunking tests -----------------------------------------------------
@@ -1190,6 +1252,63 @@ Delta echo foxtrot.
 
     struct WrongDimensionEmbeddingProvider;
 
+    #[derive(Default)]
+    struct RecordingMemoryEmbeddingRepo {
+        deleted_files: Mutex<Vec<String>>,
+        upserted_chunks: Mutex<Vec<(String, i32, String, Vec<f32>)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl MemoryEmbeddingRepo for RecordingMemoryEmbeddingRepo {
+        async fn upsert_chunk(
+            &self,
+            file_path: &str,
+            chunk_index: i32,
+            chunk_text: &str,
+            embedding: &[f32],
+        ) -> Result<(), StoreError> {
+            self.upserted_chunks.lock().unwrap().push((
+                file_path.to_string(),
+                chunk_index,
+                chunk_text.to_string(),
+                embedding.to_vec(),
+            ));
+            Ok(())
+        }
+
+        async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError> {
+            self.deleted_files
+                .lock()
+                .unwrap()
+                .push(file_path.to_string());
+            Ok(1)
+        }
+
+        async fn keyword_search(
+            &self,
+            _query: &str,
+            _limit: i64,
+        ) -> Result<Vec<KeywordSearchRow>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn vector_search(
+            &self,
+            _embedding: &[f32],
+            _limit: i64,
+        ) -> Result<Vec<VectorSearchRow>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn count(&self) -> Result<i64, StoreError> {
+            Ok(0)
+        }
+
+        async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
+            Ok(Vec::new())
+        }
+    }
+
     #[async_trait::async_trait]
     impl EmbeddingProvider for EmptyEmbeddingProvider {
         async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, MemoryIndexError> {
@@ -1293,6 +1412,66 @@ Delta echo foxtrot.
         let paths: Vec<_> = all.iter().map(|e| e.chunk.file_path.clone()).collect();
         assert!(paths.iter().any(|p| p.ends_with("readable.md")));
         assert!(!paths.iter().any(|p| p.ends_with("broken.md")));
+    }
+
+    #[tokio::test]
+    async fn reindex_file_to_repo_replaces_existing_chunks_and_persists_new_ones() {
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                chunk_size: 512,
+                chunk_overlap: 0,
+                ..Default::default()
+            },
+            Box::new(StubEmbedding { dim: 4 }),
+        );
+        let repo = RecordingMemoryEmbeddingRepo::default();
+
+        let persisted = index
+            .reindex_file_to_repo(
+                Path::new("memory/preferences.md"),
+                "# Preferences\n\nEnjoys concise logs.\n",
+                &repo,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(persisted, 1);
+        assert_eq!(
+            repo.deleted_files.lock().unwrap().as_slice(),
+            ["memory/preferences.md"]
+        );
+
+        let upserted = repo.upserted_chunks.lock().unwrap();
+        assert_eq!(upserted.len(), 1);
+        assert_eq!(upserted[0].0, "memory/preferences.md");
+        assert_eq!(upserted[0].1, 0);
+        assert!(upserted[0].2.contains("Preferences"));
+        assert_eq!(upserted[0].3.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn remove_file_from_repo_deletes_all_chunks_for_path() {
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                ..Default::default()
+            },
+            Box::new(StubEmbedding { dim: 4 }),
+        );
+        let repo = RecordingMemoryEmbeddingRepo::default();
+
+        let removed = index
+            .remove_file_from_repo(Path::new("memory/stale.md"), &repo)
+            .await
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(
+            repo.deleted_files.lock().unwrap().as_slice(),
+            ["memory/stale.md"]
+        );
+        assert!(repo.upserted_chunks.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
