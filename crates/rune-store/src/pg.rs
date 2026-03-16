@@ -17,7 +17,7 @@ use crate::schema::*;
 
 const MEMORY_KEYWORD_SEARCH_SQL: &str = r#"SELECT file_path, chunk_text,
        ts_rank(to_tsvector('english', chunk_text),
-               plainto_tsquery('english', $1)) AS score
+               plainto_tsquery('english', $1))::float8 AS score
 FROM memory_embeddings
 WHERE to_tsvector('english', chunk_text) @@ plainto_tsquery('english', $1)
 ORDER BY score DESC
@@ -820,6 +820,30 @@ impl PgMemoryEmbeddingRepo {
     /// Create a new repository backed by the given connection pool.
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Insert a chunk with keyword text only (no embedding column).
+    /// Used when pgvector is unavailable.
+    pub async fn upsert_keyword_only(
+        &self,
+        file_path: &str,
+        chunk_index: i32,
+        chunk_text: &str,
+    ) -> Result<(), StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        sql_query(
+            "INSERT INTO memory_embeddings (file_path, chunk_index, chunk_text) \
+             VALUES ($1, $2, $3) \
+             ON CONFLICT (file_path, chunk_index) \
+             DO UPDATE SET chunk_text = EXCLUDED.chunk_text, created_at = now()",
+        )
+        .bind::<Text, _>(file_path)
+        .bind::<Int4, _>(chunk_index)
+        .bind::<Text, _>(chunk_text)
+        .execute(&mut conn)
+        .await
+        .map_err(StoreError::from)?;
+        Ok(())
     }
 }
 

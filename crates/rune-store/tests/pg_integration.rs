@@ -15,7 +15,7 @@ use rune_store::StoreError;
 use rune_store::embedded::EmbeddedPg;
 use rune_store::models::*;
 use rune_store::pg::*;
-use rune_store::pool::{PgPool, create_pool, run_migrations};
+use rune_store::pool::{PgPool, PgVectorStatus, create_pool, run_migrations, try_upgrade_pgvector};
 use rune_store::repos::*;
 
 use std::sync::OnceLock;
@@ -54,7 +54,7 @@ async fn database_url() -> Result<String, String> {
         .map_err(Clone::clone)
 }
 
-async fn setup() -> Option<PgPool> {
+async fn setup() -> Option<(PgPool, PgVectorStatus)> {
     let _guard = SETUP_LOCK.get_or_init(|| Mutex::new(())).lock().await;
 
     let url = match database_url().await {
@@ -69,6 +69,8 @@ async fn setup() -> Option<PgPool> {
         eprintln!("skipping rune-store pg integration tests: migrations failed: {err}");
         return None;
     }
+
+    let pgvector_status = try_upgrade_pgvector(&url);
 
     let pool = match create_pool(&url, 5) {
         Ok(pool) => pool,
@@ -98,14 +100,14 @@ async fn setup() -> Option<PgPool> {
         return None;
     }
 
-    Some(pool)
+    Some((pool, pgvector_status))
 }
 
 // ── Session tests ────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn session_create_and_find() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let repo = PgSessionRepo::new(pool);
@@ -139,7 +141,7 @@ async fn session_create_and_find() {
 
 #[tokio::test]
 async fn session_list_and_update_status() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let repo = PgSessionRepo::new(pool);
@@ -178,7 +180,7 @@ async fn session_list_and_update_status() {
 
 #[tokio::test]
 async fn session_not_found() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let repo = PgSessionRepo::new(pool);
@@ -191,58 +193,80 @@ async fn session_not_found() {
 
 #[tokio::test]
 async fn memory_embedding_repo_round_trip_search_and_cleanup() {
-    let Some(pool) = setup().await else {
+    let Some((pool, pgvector_status)) = setup().await else {
         return;
     };
+    let has_pgvector = pgvector_status.is_available();
     let repo = PgMemoryEmbeddingRepo::new(pool);
 
-    repo.upsert_chunk(
-        "memory/preferences.md",
-        0,
-        "Prefers dark mode and keyboard shortcuts.",
-        &[0.9, 0.1, 0.0, 0.0],
-    )
-    .await
-    .unwrap();
-    repo.upsert_chunk(
-        "memory/tasks.md",
-        0,
-        "Reviewed build pipeline rollout notes.",
-        &[0.1, 0.9, 0.0, 0.0],
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(repo.count().await.unwrap(), 2);
-
-    let keyword_hits = repo.keyword_search("dark mode", 5).await.unwrap();
-    assert_eq!(keyword_hits.len(), 1);
-    assert_eq!(keyword_hits[0].file_path, "memory/preferences.md");
-    assert!(keyword_hits[0].score > 0.0);
-
-    let vector_hits = repo
-        .vector_search(&[0.95, 0.05, 0.0, 0.0], 5)
+    if has_pgvector {
+        // Full test with vector embeddings.
+        repo.upsert_chunk(
+            "memory/preferences.md",
+            0,
+            "Prefers dark mode and keyboard shortcuts.",
+            &[0.9, 0.1, 0.0, 0.0],
+        )
         .await
         .unwrap();
-    assert!(!vector_hits.is_empty());
-    assert_eq!(vector_hits[0].file_path, "memory/preferences.md");
+        repo.upsert_chunk(
+            "memory/tasks.md",
+            0,
+            "Reviewed build pipeline rollout notes.",
+            &[0.1, 0.9, 0.0, 0.0],
+        )
+        .await
+        .unwrap();
 
-    let indexed_files = repo.list_indexed_files().await.unwrap();
-    assert_eq!(
-        indexed_files,
-        vec!["memory/preferences.md", "memory/tasks.md"]
-    );
+        assert_eq!(repo.count().await.unwrap(), 2);
 
-    let deleted = repo.delete_by_file("memory/preferences.md").await.unwrap();
-    assert_eq!(deleted, 1);
-    assert_eq!(repo.count().await.unwrap(), 1);
+        let keyword_hits = repo.keyword_search("dark mode", 5).await.unwrap();
+        assert_eq!(keyword_hits.len(), 1);
+        assert_eq!(keyword_hits[0].file_path, "memory/preferences.md");
+        assert!(keyword_hits[0].score > 0.0);
+
+        let vector_hits = repo
+            .vector_search(&[0.95, 0.05, 0.0, 0.0], 5)
+            .await
+            .unwrap();
+        assert!(!vector_hits.is_empty());
+        assert_eq!(vector_hits[0].file_path, "memory/preferences.md");
+
+        let indexed_files = repo.list_indexed_files().await.unwrap();
+        assert_eq!(
+            indexed_files,
+            vec!["memory/preferences.md", "memory/tasks.md"]
+        );
+
+        let deleted = repo.delete_by_file("memory/preferences.md").await.unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(repo.count().await.unwrap(), 1);
+    } else {
+        // pgvector unavailable — verify keyword-only path works.
+        // Insert directly without embeddings for keyword search testing.
+        repo.upsert_keyword_only(
+            "memory/preferences.md",
+            0,
+            "Prefers dark mode and keyboard shortcuts.",
+        )
+        .await
+        .unwrap();
+
+        let keyword_hits = repo.keyword_search("dark mode", 5).await.unwrap();
+        assert_eq!(keyword_hits.len(), 1);
+        assert_eq!(keyword_hits[0].file_path, "memory/preferences.md");
+
+        let deleted = repo.delete_by_file("memory/preferences.md").await.unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(repo.count().await.unwrap(), 0);
+    }
 }
 
 // ── Turn tests ───────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn turn_create_find_list_update() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let session_repo = PgSessionRepo::new(pool.clone());
@@ -315,7 +339,7 @@ async fn turn_create_find_list_update() {
 
 #[tokio::test]
 async fn transcript_append_and_list_ordered() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let session_repo = PgSessionRepo::new(pool.clone());
@@ -376,7 +400,7 @@ async fn transcript_append_and_list_ordered() {
 
 #[tokio::test]
 async fn job_create_find_list_record_run() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let repo = PgJobRepo::new(pool);
@@ -412,7 +436,7 @@ async fn job_create_find_list_record_run() {
 
 #[tokio::test]
 async fn job_run_create_complete_and_list() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let job_repo = PgJobRepo::new(pool.clone());
@@ -468,7 +492,7 @@ async fn job_run_create_complete_and_list() {
 
 #[tokio::test]
 async fn approval_create_find_decide() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let repo = PgApprovalRepo::new(pool);
@@ -504,7 +528,7 @@ async fn approval_create_find_decide() {
 
 #[tokio::test]
 async fn tool_execution_create_find_complete() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let session_repo = PgSessionRepo::new(pool.clone());
@@ -560,7 +584,7 @@ async fn tool_execution_create_find_complete() {
 
 #[tokio::test]
 async fn duplicate_session_returns_conflict() {
-    let Some(pool) = setup().await else {
+    let Some((pool, _pgvector)) = setup().await else {
         return;
     };
     let repo = PgSessionRepo::new(pool);
