@@ -173,7 +173,6 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/assets/{path}", get(routes::branded_asset))
         .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
         .route("/devices/pair/request", post(routes::device_pair_request))
-        .route("/devices/pair/approve", post(routes::device_pair_approve))
         .with_state(state.clone());
 
     let protected_routes = Router::new()
@@ -228,6 +227,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
                 .delete(routes::clear_approval_policy),
         )
         // Device pairing routes
+        .route("/devices/pair/approve", post(routes::device_pair_approve))
         .route("/devices/pair/reject", post(routes::device_pair_reject))
         .route("/devices/pair/pending", get(routes::device_pair_pending))
         .route("/devices", get(routes::device_list))
