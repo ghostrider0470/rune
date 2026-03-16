@@ -2317,8 +2317,10 @@ pub struct PairApproveResponse {
 /// newly paired device **including the full bearer token**.
 pub async fn device_pair_approve(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<PairApproveBody>,
 ) -> Result<Json<PairApproveResponse>, GatewayError> {
+    require_gateway_operator_token(&headers, &state)?;
     let role = DeviceRole::parse(&body.role);
     let device = state
         .device_registry
@@ -2355,8 +2357,10 @@ pub struct PairRejectResponse {
 
 pub async fn device_pair_reject(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<PairRejectBody>,
 ) -> Result<Json<PairRejectResponse>, GatewayError> {
+    require_gateway_operator_token(&headers, &state)?;
     state
         .device_registry
         .reject_pairing(body.request_id)

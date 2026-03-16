@@ -2362,7 +2362,7 @@ async fn device_management_requires_gateway_token_even_when_auth_enabled() {
 }
 
 #[tokio::test]
-async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
+async fn device_pair_request_is_public_but_approve_requires_gateway_token() {
     use ed25519_dalek::{Signer, SigningKey};
 
     let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
@@ -2394,9 +2394,28 @@ async fn device_pair_request_and_approve_are_public_even_with_auth_enabled() {
     let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
 
     let response = app
+        .clone()
         .oneshot(
             Request::post("/devices/pair/approve")
                 .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::from(
                     serde_json::json!({
                         "request_id": request_id,
@@ -2452,6 +2471,7 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
         .oneshot(
             Request::post("/devices/pair/approve")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::from(
                     serde_json::json!({
                         "request_id": request_id,
@@ -2554,6 +2574,7 @@ async fn expired_paired_device_token_is_rejected_without_refreshing_last_seen() 
         .oneshot(
             Request::post("/devices/pair/approve")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::from(
                     serde_json::json!({
                         "request_id": request_id,
@@ -2633,6 +2654,7 @@ async fn device_pair_approve_rejects_wrong_signature() {
         .oneshot(
             Request::post("/devices/pair/approve")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::from(
                     serde_json::json!({
                         "request_id": request_id,
@@ -2693,6 +2715,7 @@ async fn device_pair_approve_rejects_expired_request() {
         .oneshot(
             Request::post("/devices/pair/approve")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::from(
                     serde_json::json!({
                         "request_id": request_id,
@@ -2744,6 +2767,7 @@ async fn device_pair_request_rejects_duplicate_public_key() {
         .oneshot(
             Request::post("/devices/pair/approve")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::from(
                     serde_json::json!({
                         "request_id": request_id,
@@ -2888,6 +2912,7 @@ async fn device_reject_rotate_and_delete_routes_work() {
         .oneshot(
             Request::post("/devices/pair/approve")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::from(
                     serde_json::json!({
                         "request_id": request_id,
@@ -2977,6 +3002,115 @@ async fn device_pair_pending_route_requires_gateway_token() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn paired_device_token_cannot_approve_or_reject_other_pairing_requests() {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let operator_device_key = SigningKey::from_bytes(&[31u8; 32]);
+    let operator_device_public_key = hex::encode(operator_device_key.verifying_key().as_bytes());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "existing-device",
+                        "public_key": operator_device_public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    let signature = operator_device_key.sign(&hex::decode(&challenge).unwrap());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let approved = body_json(response).await;
+    let device_token = approved["token"].as_str().unwrap().to_string();
+
+    let pending_key = SigningKey::from_bytes(&[32u8; 32]);
+    let pending_public_key = hex::encode(pending_key.verifying_key().as_bytes());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "pending-device",
+                        "public_key": pending_public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pending_request = body_json(response).await;
+    let pending_request_id = pending_request["request_id"].as_str().unwrap().to_string();
+    let pending_challenge = pending_request["challenge"].as_str().unwrap().to_string();
+    let pending_signature = pending_key.sign(&hex::decode(&pending_challenge).unwrap());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {device_token}"))
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": pending_request_id,
+                        "challenge_response": hex::encode(pending_signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::post("/devices/pair/reject")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {device_token}"))
+                .body(Body::from(
+                    serde_json::json!({ "request_id": pending_request_id }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
