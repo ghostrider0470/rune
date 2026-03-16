@@ -5,10 +5,10 @@
 //! server via `postgresql_embedded` for zero-config local development.
 //! Data in both cases is durable and persisted to disk.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::json;
 use uuid::Uuid;
@@ -56,6 +56,8 @@ use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolRegistry
 
 const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
+const MEMORY_INDEX_POLL_INTERVAL_SECS_ENV: &str = "RUNE_MEMORY_INDEX_POLL_INTERVAL_SECS";
+const DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS: u64 = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -366,6 +368,50 @@ fn memory_index_config_from_env() -> MemoryIndexConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct WorkspaceMemoryIndexState {
+    files: BTreeMap<String, WorkspaceMemoryFileFingerprint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkspaceMemoryFileFingerprint {
+    modified_at: Option<SystemTime>,
+    len_bytes: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct WorkspaceMemoryIndexSyncStats {
+    reindexed_files: usize,
+    reindexed_chunks: usize,
+    removed_files: usize,
+}
+
+impl WorkspaceMemoryIndexSyncStats {
+    fn has_changes(&self) -> bool {
+        self.reindexed_files > 0 || self.removed_files > 0
+    }
+}
+
+fn memory_index_poll_interval() -> Option<Duration> {
+    match std::env::var(MEMORY_INDEX_POLL_INTERVAL_SECS_ENV) {
+        Ok(value) => match value.parse::<u64>() {
+            Ok(0) => None,
+            Ok(secs) => Some(Duration::from_secs(secs)),
+            Err(err) => {
+                warn!(
+                    env = MEMORY_INDEX_POLL_INTERVAL_SECS_ENV,
+                    value,
+                    error = %err,
+                    fallback_secs = DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS,
+                    "invalid memory index poll interval; using default"
+                );
+                Some(Duration::from_secs(DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS))
+            }
+        },
+        Err(_) => Some(Duration::from_secs(DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS)),
+    }
+}
+
 async fn build_memory_tool_executor_with_index_config(
     config: &AppConfig,
     workspace_root: &Path,
@@ -375,7 +421,7 @@ async fn build_memory_tool_executor_with_index_config(
 ) -> Result<MemoryToolExecutor> {
     let provider = index_config.embedding_provider.clone();
     let model = index_config.embedding_model.clone();
-    let index = match MemoryIndex::from_config(index_config) {
+    let index = match MemoryIndex::from_config(index_config.clone()) {
         Ok(index) => index,
         Err(err) => {
             warn!(
@@ -389,11 +435,19 @@ async fn build_memory_tool_executor_with_index_config(
         }
     };
 
-    let repo = Arc::new(PgMemoryEmbeddingRepo::new(rune_store::pool::create_pool(
-        database_url,
-        config.database.max_connections as usize,
-    )?));
+    let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(PgMemoryEmbeddingRepo::new(
+        rune_store::pool::create_pool(database_url, config.database.max_connections as usize)?,
+    ));
     sync_workspace_memory_index(workspace_root, repo.as_ref(), &index).await?;
+    let initial_state = snapshot_workspace_memory_index_state(workspace_root).await?;
+    let watcher_index = MemoryIndex::from_config(index_config)
+        .context("failed to initialize background memory index watcher")?;
+    start_workspace_memory_index_watcher(
+        workspace_root.to_path_buf(),
+        repo.clone(),
+        watcher_index,
+        initial_state,
+    );
     let backend = Arc::new(PersistedHybridMemorySearch::new(repo, index));
 
     if using_embedded_pg {
@@ -462,6 +516,121 @@ async fn sync_workspace_memory_index(
     );
 
     Ok(())
+}
+
+async fn snapshot_workspace_memory_index_state(
+    workspace_root: &Path,
+) -> Result<WorkspaceMemoryIndexState> {
+    let mut files = BTreeMap::new();
+    for relative_path in collect_workspace_memory_files(workspace_root).await? {
+        let full_path = workspace_root.join(&relative_path);
+        let metadata = tokio::fs::metadata(&full_path)
+            .await
+            .with_context(|| format!("failed to stat memory file {}", full_path.display()))?;
+        files.insert(
+            relative_path,
+            WorkspaceMemoryFileFingerprint {
+                modified_at: metadata.modified().ok(),
+                len_bytes: metadata.len(),
+            },
+        );
+    }
+
+    Ok(WorkspaceMemoryIndexState { files })
+}
+
+async fn sync_workspace_memory_index_changes(
+    workspace_root: &Path,
+    repo: &dyn MemoryEmbeddingRepo,
+    index: &MemoryIndex,
+    previous_state: &WorkspaceMemoryIndexState,
+) -> Result<(WorkspaceMemoryIndexState, WorkspaceMemoryIndexSyncStats)> {
+    let next_state = snapshot_workspace_memory_index_state(workspace_root).await?;
+    let mut stats = WorkspaceMemoryIndexSyncStats::default();
+
+    for removed_path in previous_state
+        .files
+        .keys()
+        .filter(|path| !next_state.files.contains_key(*path))
+    {
+        index
+            .remove_file_from_repo(Path::new(removed_path), repo)
+            .await
+            .with_context(|| format!("failed to remove stale memory file {removed_path}"))?;
+        stats.removed_files += 1;
+    }
+
+    for (relative_path, fingerprint) in &next_state.files {
+        let changed = previous_state
+            .files
+            .get(relative_path)
+            .map(|previous| previous != fingerprint)
+            .unwrap_or(true);
+        if !changed {
+            continue;
+        }
+
+        let full_path = workspace_root.join(relative_path);
+        let content = tokio::fs::read_to_string(&full_path)
+            .await
+            .with_context(|| format!("failed to read memory file {}", full_path.display()))?;
+        let chunk_count = index
+            .reindex_file_to_repo(Path::new(relative_path), &content, repo)
+            .await
+            .with_context(|| format!("failed to reindex memory file {relative_path}"))?;
+        stats.reindexed_files += 1;
+        stats.reindexed_chunks += chunk_count;
+    }
+
+    Ok((next_state, stats))
+}
+
+fn start_workspace_memory_index_watcher(
+    workspace_root: PathBuf,
+    repo: Arc<dyn MemoryEmbeddingRepo>,
+    index: MemoryIndex,
+    initial_state: WorkspaceMemoryIndexState,
+) {
+    let Some(poll_interval) = memory_index_poll_interval() else {
+        info!(
+            env = MEMORY_INDEX_POLL_INTERVAL_SECS_ENV,
+            "workspace memory index watcher disabled"
+        );
+        return;
+    };
+
+    tokio::spawn(async move {
+        let mut state = initial_state;
+        let mut interval = tokio::time::interval(poll_interval);
+        interval.tick().await;
+
+        loop {
+            interval.tick().await;
+            match sync_workspace_memory_index_changes(
+                &workspace_root,
+                repo.as_ref(),
+                &index,
+                &state,
+            )
+            .await
+            {
+                Ok((next_state, stats)) => {
+                    if stats.has_changes() {
+                        info!(
+                            reindexed_files = stats.reindexed_files,
+                            reindexed_chunks = stats.reindexed_chunks,
+                            removed_files = stats.removed_files,
+                            "workspace memory watcher applied index updates"
+                        );
+                    }
+                    state = next_state;
+                }
+                Err(err) => {
+                    warn!(error = %err, "workspace memory watcher sync failed");
+                }
+            }
+        }
+    });
 }
 
 async fn collect_workspace_memory_files(workspace_root: &Path) -> Result<Vec<String>> {
@@ -1823,6 +1992,84 @@ mod tests {
         assert!(upserted.iter().all(|(path, _, _, embedding)| {
             !path.starts_with(tmp.path().to_string_lossy().as_ref()) && embedding.len() == 4
         }));
+    }
+
+    #[tokio::test]
+    async fn sync_workspace_memory_index_changes_reindexes_modified_files_and_removes_deleted_ones()
+    {
+        let tmp = tempfile::TempDir::new().unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory"))
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("MEMORY.md"), "# Memory\n\nAlpha\n")
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("memory/keep.md"), "# Keep\n\nBravo\n")
+            .await
+            .unwrap();
+
+        let repo = MemMemoryEmbeddingRepo::new(Vec::new());
+        let index = MemoryIndex::new(
+            MemoryIndexConfig {
+                embedding_dimension: 4,
+                chunk_size: 512,
+                chunk_overlap: 0,
+                ..Default::default()
+            },
+            Box::new(StubEmbeddingProvider),
+        );
+
+        sync_workspace_memory_index(tmp.path(), &repo, &index)
+            .await
+            .expect("initial workspace memory sync should succeed");
+        let initial_state = snapshot_workspace_memory_index_state(tmp.path())
+            .await
+            .expect("initial memory state snapshot should succeed");
+
+        let initial_deleted_count = repo.deleted_files.lock().await.len();
+        let initial_upserted_count = repo.upserted_chunks.lock().await.len();
+
+        tokio::fs::write(
+            tmp.path().join("MEMORY.md"),
+            "# Memory\n\nAlpha updated with extra detail.\n",
+        )
+        .await
+        .unwrap();
+        tokio::fs::remove_file(tmp.path().join("memory/keep.md"))
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("memory/new.md"), "# New\n\nCharlie delta\n")
+            .await
+            .unwrap();
+
+        let (next_state, stats) =
+            sync_workspace_memory_index_changes(tmp.path(), &repo, &index, &initial_state)
+                .await
+                .expect("incremental workspace memory sync should succeed");
+
+        assert_eq!(stats.reindexed_files, 2);
+        assert_eq!(stats.removed_files, 1);
+        assert!(stats.reindexed_chunks >= 2);
+        assert!(next_state.files.contains_key("MEMORY.md"));
+        assert!(next_state.files.contains_key("memory/new.md"));
+        assert!(!next_state.files.contains_key("memory/keep.md"));
+
+        let deleted = repo.deleted_files.lock().await.clone();
+        let deleted_delta = &deleted[initial_deleted_count..];
+        assert!(deleted_delta.iter().any(|path| path == "MEMORY.md"));
+        assert!(deleted_delta.iter().any(|path| path == "memory/new.md"));
+        assert!(deleted_delta.iter().any(|path| path == "memory/keep.md"));
+
+        let upserted = repo.upserted_chunks.lock().await.clone();
+        let upserted_delta = &upserted[initial_upserted_count..];
+        let upserted_paths: BTreeSet<String> = upserted_delta
+            .iter()
+            .map(|(path, _, _, _)| path.clone())
+            .collect();
+        assert_eq!(
+            upserted_paths,
+            BTreeSet::from(["MEMORY.md".to_string(), "memory/new.md".to_string()])
+        );
     }
 
     struct MemSessionRepo {
