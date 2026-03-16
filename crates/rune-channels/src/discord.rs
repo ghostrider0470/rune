@@ -156,23 +156,46 @@ impl DiscordAdapter {
             url.push_str(&format!("&after={after_id}"));
         }
 
-        let resp = http
-            .get(&url)
-            .header("Authorization", format!("Bot {token}"))
-            .send()
-            .await
-            .map_err(|e| format!("request failed: {e}"))?;
+        let mut attempt = 0usize;
+        let messages: Vec<DiscordMessage> = loop {
+            let resp = http
+                .get(&url)
+                .header("Authorization", format!("Bot {token}"))
+                .send()
+                .await
+                .map_err(|e| format!("request failed: {e}"))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("HTTP {status}: {body}"));
-        }
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if attempt >= RATE_LIMIT_RETRY_ATTEMPTS {
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(format!(
+                        "discord poll rate limited after {} retries: {}",
+                        RATE_LIMIT_RETRY_ATTEMPTS, body
+                    ));
+                }
 
-        let messages: Vec<DiscordMessage> = resp
-            .json()
-            .await
-            .map_err(|e| format!("json parse failed: {e}"))?;
+                let retry_after = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(parse_retry_after_seconds)
+                    .unwrap_or(1.0);
+                tokio::time::sleep(Duration::from_secs_f64(retry_after.max(0.0))).await;
+                attempt += 1;
+                continue;
+            }
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                return Err(format!("HTTP {status}: {body}"));
+            }
+
+            break resp
+                .json()
+                .await
+                .map_err(|e| format!("json parse failed: {e}"))?;
+        };
 
         let mut events = Vec::new();
         let mut newest_id: Option<String> = None;
@@ -291,7 +314,9 @@ impl DiscordAdapter {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ChannelError> {
-        let resp = self.send_rest_request(Method::POST, path, Some(body)).await?;
+        let resp = self
+            .send_rest_request(Method::POST, path, Some(body))
+            .await?;
         resp.json().await.map_err(|e| ChannelError::Provider {
             message: format!("discord response parse error: {e}"),
         })
@@ -302,7 +327,9 @@ impl DiscordAdapter {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ChannelError> {
-        let resp = self.send_rest_request(Method::PATCH, path, Some(body)).await?;
+        let resp = self
+            .send_rest_request(Method::PATCH, path, Some(body))
+            .await?;
         resp.json().await.map_err(|e| ChannelError::Provider {
             message: format!("discord response parse error: {e}"),
         })
@@ -879,5 +906,68 @@ mod tests {
             .expect("send should retry after rate limit");
 
         assert_eq!(receipt.provider_message_id, "discord-msg-2");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_new_messages_retries_when_discord_rate_limits() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/channels/channel-1/messages"))
+            .and(query_param("limit", "50"))
+            .and(header("authorization", "Bot discord-token"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("retry-after", "0")
+                    .set_body_string("rate limited"),
+            )
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/channels/channel-1/messages"))
+            .and(query_param("limit", "50"))
+            .and(header("authorization", "Bot discord-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": "103",
+                    "channel_id": "channel-1",
+                    "content": "after retry",
+                    "timestamp": "2026-03-16T08:20:00+00:00",
+                    "author": {
+                        "id": "u3",
+                        "username": "charlie",
+                        "bot": false
+                    },
+                    "attachments": []
+                }
+            ])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let http = Client::new();
+        let (events, newest_id) = DiscordAdapter::fetch_new_messages(
+            &http,
+            &server.uri(),
+            "discord-token",
+            "channel-1",
+            None,
+        )
+        .await
+        .expect("fetch should retry after rate limit");
+
+        assert_eq!(newest_id.as_deref(), Some("103"));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            InboundEvent::Message(msg) => {
+                assert_eq!(msg.provider_message_id, "103");
+                assert_eq!(msg.sender, "charlie");
+                assert_eq!(msg.content, "after retry");
+            }
+            other => panic!("expected message event after retry, got {other:?}"),
+        }
     }
 }
