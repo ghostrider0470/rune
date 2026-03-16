@@ -2518,6 +2518,90 @@ async fn paired_device_token_can_access_general_protected_routes_but_not_device_
 }
 
 #[tokio::test]
+async fn expired_paired_device_token_is_rejected_without_refreshing_last_seen() {
+    use chrono::{Duration, Utc};
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let (app, device_repo) =
+        build_test_app_parts(AppConfig::default(), Some(TEST_AUTH_TOKEN.to_string()));
+    let signing_key = SigningKey::from_bytes(&[18u8; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().as_bytes());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "device_name": "expired-tablet",
+                        "public_key": public_key,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pairing_request = body_json(response).await;
+    let request_id = pairing_request["request_id"].as_str().unwrap().to_string();
+    let challenge = pairing_request["challenge"].as_str().unwrap().to_string();
+    let signature = signing_key.sign(&hex::decode(&challenge).unwrap());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/devices/pair/approve")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "challenge_response": hex::encode(signature.to_bytes()),
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let approved = body_json(response).await;
+    let device_token = approved["token"].as_str().unwrap().to_string();
+
+    {
+        let mut devices = device_repo.devices.lock().await;
+        let device = devices
+            .iter_mut()
+            .find(|device| device.public_key == public_key)
+            .expect("paired device should be stored");
+        device.token_expires_at = Utc::now() - Duration::minutes(1);
+        device.last_seen_at = None;
+    }
+
+    let response = app
+        .oneshot(
+            Request::get("/status")
+                .header(header::AUTHORIZATION, format!("Bearer {device_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let devices = device_repo.devices.lock().await;
+    let device = devices
+        .iter()
+        .find(|device| device.public_key == public_key)
+        .expect("paired device should remain stored");
+    assert!(
+        device.last_seen_at.is_none(),
+        "expired device token must not touch last_seen_at"
+    );
+}
+
+#[tokio::test]
 async fn device_pair_approve_rejects_wrong_signature() {
     use ed25519_dalek::SigningKey;
 
