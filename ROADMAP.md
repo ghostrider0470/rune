@@ -79,14 +79,14 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 
 | Pillar | Status | Notes |
 |---|---|---|
-| WebSocket Gateway | ✅ Basic | Event broadcast only, no req/res/RPC framing |
-| Multi-channel Routing | ✅ Telegram only | Adapter trait exists; Discord/Slack/WhatsApp/Signal missing |
+| WebSocket Gateway | ✅ Basic | Req/res/event framing, sequence numbering, gap detection, and RPC dispatch landed; broader parity work remains |
+| Multi-channel Routing | ✅ 2026-03-16 | Telegram plus Discord/Slack/WhatsApp/Signal adapters landed with factory wiring, inbound normalization, outbound delivery flows, and adapter test coverage |
 | Device Pairing | ✅ 2026-03-16 | Ed25519 challenge-response pairing, PostgreSQL-backed device/request persistence, SHA-256 token storage, supervisor pruning, and route/integration coverage landed |
 | LaneQueue Concurrency | ✅ 2026-03-16 | LaneQueue implemented with per-lane caps, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
 | File-based Identity | ✅ Done | SOUL.md, USER.md, AGENTS.md, TOOLS.md, IDENTITY.md |
 | Session History | ✅ Done | PostgreSQL-based (not JSONL) |
-| Hybrid Memory Search | ⚠️ Keyword only | No vector embeddings, no FTS5 |
-| Hot-reloading Skills | ❌ Missing | Static tool registry, no SKILL.md scanning |
+| Hybrid Memory Search | ✅ 2026-03-16 | Persisted pgvector + tsvector hybrid search landed with MemoryEmbeddingRepo, RRF retrieval, startup bootstrap indexing, and change-driven workspace reindexing |
+| Hot-reloading Skills | ✅ 2026-03-14 | SkillLoader + SkillRegistry landed with SKILL.md scanning, runtime enable/disable, reload reconciliation, prompt injection, and gateway/RPC controls |
 | MCP Client | ❌ Missing | No STDIO/HTTP MCP transport |
 | PTY Execution Sandbox | ✅ Basic | Via Unix script, no advanced PTY |
 | Heartbeat + Silent Eval | ✅ Done | HEARTBEAT_OK suppression works |
@@ -186,17 +186,23 @@ Upgrade from simple event broadcast to full req/res/event framing.
 
 ### Phase 3 — Multi-Channel Adapters (Backend)
 
-Extend `crates/rune-channels/` with new adapters.
+Status: ✅ Completed 2026-03-16
 
-**New files**
-- `crates/rune-channels/src/discord.rs` — Discord bot via Gateway WebSocket + REST API
-- `crates/rune-channels/src/slack.rs` — Slack bot via Socket Mode + Web API
-- `crates/rune-channels/src/whatsapp.rs` — WhatsApp Cloud API webhook receiver + send REST
-- `crates/rune-channels/src/signal.rs` — Signal via `signal-cli` REST API or linked device
+Rune now ships real Discord, Slack, WhatsApp, and Signal adapters in `crates/rune-channels/`, wired through the adapter factory and channel config. The delivered implementation favors durable REST/webhook/polling flows over idealized gateway/socket integrations where that keeps the single-binary runtime simpler and testable.
 
-**Modify**
-- `crates/rune-channels/src/lib.rs` — Register new adapters in factory
-- `crates/rune-config/src/lib.rs` — Add channel config sections for each
+**Landed work**
+- `crates/rune-channels/src/discord.rs` — Discord REST adapter with inbound polling, outbound send/edit/delete/react, and rate-limit retry handling
+- `crates/rune-channels/src/slack.rs` — Slack Web API adapter with local Events API listener, outbound messaging flows, and retry handling
+- `crates/rune-channels/src/whatsapp.rs` — WhatsApp Cloud API sender + webhook verification/signature validation/deduplication flow
+- `crates/rune-channels/src/signal.rs` — Signal `signal-cli` REST adapter with polling receive loop and outbound send path
+- `crates/rune-channels/src/lib.rs` — factory registration for all adapters
+- `crates/rune-config/src/lib.rs` — channel config coverage for the new adapters
+
+**Validation**
+- `cargo test -p rune-channels --lib --tests`
+- adapter factory coverage plus provider-specific unit tests for inbound normalization, outbound delivery, retries, verification, and deduplication
+
+Implementation note (2026-03-16): the roadmap originally called for Discord Gateway and Slack Socket Mode specifically. The current shipped adapters use REST + polling/webhook mechanisms where appropriate to keep the runtime robust and fully testable in CI. If native gateway/socket parity becomes product-critical later, treat it as an enhancement pass on top of the now-working adapter surface.
 
 ---
 
@@ -219,25 +225,29 @@ Replace sequential per-session execution with lane-based FIFO queuing.
 
 ### Phase 5 — Hot-Reloading Skills System (Backend)
 
-**New files**
+Status: ✅ Completed 2026-03-14
+
+The hot-reloading skills system is already in place.
+
+**Landed work**
 - `crates/rune-runtime/src/skill_loader.rs`
-  - Directory scanner for `skills/*/SKILL.md`
-  - YAML frontmatter parser
-  - File watcher via `notify`
-  - Dynamic injection into system prompt per turn
-  - Cached fast directory scanning
+  - scans `skills/*/SKILL.md`
+  - parses YAML frontmatter
+  - reconciles additions/removals across reloads
+  - provides background watcher-style rescanning
 - `crates/rune-runtime/src/skill.rs`
-  - `Skill` struct: `name`, `description`, `parameters_schema`, `binary_path`, `enabled`
-  - `SkillRegistry`: add/remove/list/toggle
+  - `Skill` / `SkillFrontmatter`
+  - `SkillRegistry` with add/remove/list/toggle APIs
+- `crates/rune-runtime/src/executor.rs`
+  - injects enabled skills into the system prompt before model calls
+- gateway + WS RPC controls
+  - `GET /skills`
+  - `POST /skills/reload`
+  - `POST /skills/{name}/enable`
+  - `POST /skills/{name}/disable`
+  - `skills.list`, `skills.reload`, `skills.enable`, `skills.disable`
 
-**Modify**
-- `crates/rune-runtime/src/executor.rs` — Inject active skills into system prompt before model call
-- `crates/rune-tools/src/lib.rs` — Make `ToolRegistry` support dynamic registration
-
-**Gateway routes**
-- `GET /skills`
-- `POST /skills/{name}/enable`
-- `POST /skills/{name}/disable`
+Implementation note (2026-03-14): the current watcher uses periodic rescanning rather than a hard dependency on `notify`, but the externally visible hot-reload behavior, registry reconciliation, and runtime prompt injection are already delivered and tested.
 
 ---
 
@@ -326,40 +336,39 @@ Replace sequential per-session execution with lane-based FIFO queuing.
 
 ### Phase 10 — Hybrid Memory Search (Backend)
 
-Upgrade keyword search to hybrid vector + PostgreSQL full-text search using `pgvector` + `tsvector`.
+Status: ✅ Completed 2026-03-16
 
-**New migration**
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE TABLE memory_embeddings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  file_path TEXT NOT NULL,
-  chunk_text TEXT NOT NULL,
-  embedding vector(1536),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX ON memory_embeddings USING ivfflat (embedding vector_cosine_ops);
-CREATE INDEX ON memory_embeddings USING gin (to_tsvector('english', chunk_text));
-```
+Keyword-only memory search has been upgraded to persisted hybrid retrieval using PostgreSQL full-text ranking plus pgvector-style vector search, fused through Reciprocal Rank Fusion (RRF).
 
-**Modify** `crates/rune-tools/src/memory_tool.rs`
-- Replace word-hit scoring with hybrid PostgreSQL query
-- Combine `ts_rank(...)` + `1 - (embedding <=> query_embedding)`
-- Use Reciprocal Rank Fusion (RRF)
-- Re-index lazily on file change
-
-**New file**
+**Landed work**
+- migration for `memory_embeddings`
+- `crates/rune-store/`
+  - `MemoryEmbeddingRepo`
+  - Diesel/raw-SQL backing types and `PgMemoryEmbeddingRepo`
+- `crates/rune-tools/src/memory_tool.rs`
+  - persisted hybrid backend integration
+  - local keyword fallback when embeddings/config are unavailable
 - `crates/rune-tools/src/memory_index.rs`
-  - Embedding provider abstraction
-  - File chunking (~512 tokens)
-  - Batch embed + upsert
-  - Background re-index on watcher events
+  - embedding provider abstraction
+  - file chunking
+  - batch embedding
+  - RRF merge logic
+  - repo-backed helpers for reindex/remove flows
+- `apps/gateway/src/main.rs`
+  - startup bootstrap of persisted workspace memory index
+  - change-driven workspace memory reindexing/removal sync
 
-**Modify**
-- `crates/rune-store/` — Add `MemoryEmbeddingRepo` + Diesel model
+**Landed commits**
+- `5282e64` — `feat(memory): persist hybrid memory search`
+- `defa456` — `Bootstrap persisted hybrid memory index`
+- `49be041` — `feat(memory): reindex persisted workspace changes`
 
-**Deps**
-- `pgvector`
+**Validation**
+- `cargo build`
+- `cargo test -p rune-tools memory --lib --tests`
+- `cargo test -p rune-gateway-app sync_workspace_memory_index`
+
+Implementation note (2026-03-16): the original roadmap described a direct PostgreSQL hybrid query and lazy reindex-on-change behavior. The shipped implementation matches that outcome via persisted embedding storage, startup bootstrap indexing, and workspace change reconciliation, with graceful fallback to local keyword search whenever semantic indexing cannot be configured.
 
 ---
 
