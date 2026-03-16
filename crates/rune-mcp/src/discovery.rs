@@ -35,12 +35,24 @@ pub struct McpServerConfig {
     pub args: Option<Vec<String>>,
 
     /// Extra environment variables injected into the subprocess.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+
+    /// Working directory for the subprocess.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub env: Option<HashMap<String, String>>,
+    pub cwd: Option<String>,
 
     /// Server URL (required for `Http` transport).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+
+    /// Whether this server is enabled.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 impl McpServerConfig {
@@ -79,8 +91,10 @@ mod tests {
             transport: McpTransportKind::Stdio,
             command: Some("mcp-server-filesystem".into()),
             args: Some(vec!["/tmp".into()]),
-            env: None,
+            env: HashMap::new(),
+            cwd: None,
             url: None,
+            enabled: true,
         };
         assert!(cfg.validate().is_ok());
     }
@@ -92,8 +106,10 @@ mod tests {
             transport: McpTransportKind::Stdio,
             command: None,
             args: None,
-            env: None,
+            env: HashMap::new(),
+            cwd: None,
             url: None,
+            enabled: true,
         };
         assert!(cfg.validate().is_err());
     }
@@ -105,8 +121,10 @@ mod tests {
             transport: McpTransportKind::Http,
             command: None,
             args: None,
-            env: None,
+            env: HashMap::new(),
+            cwd: None,
             url: Some("http://localhost:3001".into()),
+            enabled: true,
         };
         assert!(cfg.validate().is_ok());
     }
@@ -118,8 +136,10 @@ mod tests {
             transport: McpTransportKind::Http,
             command: None,
             args: None,
-            env: None,
+            env: HashMap::new(),
+            cwd: None,
             url: None,
+            enabled: true,
         };
         assert!(cfg.validate().is_err());
     }
@@ -139,12 +159,15 @@ mod tests {
             transport: McpTransportKind::Http,
             command: None,
             args: None,
-            env: Some(HashMap::from([("API_KEY".into(), "secret".into())])),
+            env: HashMap::from([("API_KEY".into(), "secret".into())]),
+            cwd: None,
             url: Some("http://localhost:8080".into()),
+            enabled: false,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let restored: McpServerConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.name, "test");
         assert_eq!(restored.url.as_deref(), Some("http://localhost:8080"));
+        assert!(!restored.enabled);
     }
 }

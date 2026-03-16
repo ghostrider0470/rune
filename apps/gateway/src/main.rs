@@ -22,6 +22,8 @@ use rune_channels::TelegramAdapter;
 use rune_config::AppConfig;
 use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
+use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
+use rune_mcp::{McpManager, McpToolExecutor};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider,
     RoutedModelProvider, Usage,
@@ -219,6 +221,10 @@ async fn build_services(
     let reminder_store = Arc::new(ReminderStore::new_with_repo(job_repo));
     let mut registry = ToolRegistry::new();
     register_real_tool_definitions(&mut registry);
+    let mcp = build_mcp_tool_executor(&config, &workspace_root).await?;
+    if let Some(ref executor) = mcp {
+        registry.register_many(executor.tool_definitions());
+    }
     let tool_count = registry.len();
     let tool_registry = Arc::new(registry);
     let approval = Arc::new(PolicyBasedApproval::new(std::collections::HashSet::new()));
@@ -254,6 +260,7 @@ async fn build_services(
         session: SessionToolExecutor::new(live_session_query),
         spawn: SpawnToolExecutor::new(live_session_spawner),
         subagents: SubagentToolExecutor::new(live_subagent_manager),
+        mcp,
         approval,
         tool_approval_repo: tool_approval_repo.clone(),
     });
@@ -358,6 +365,63 @@ async fn build_memory_tool_executor(
         index_config,
     )
     .await
+}
+
+async fn build_mcp_tool_executor(
+    config: &AppConfig,
+    workspace_root: &Path,
+) -> Result<Option<Arc<McpToolExecutor>>> {
+    if config.mcp_servers.iter().all(|server| !server.enabled) {
+        return Ok(None);
+    }
+
+    let server_configs = config
+        .mcp_servers
+        .iter()
+        .map(|server| runtime_mcp_config(server, workspace_root))
+        .collect::<Vec<_>>();
+
+    let mut manager = McpManager::new();
+    manager.connect_all(&server_configs).await?;
+
+    if manager.is_empty() {
+        warn!("configured MCP servers did not yield any active tool connections");
+        return Ok(None);
+    }
+
+    let connected = manager.connected_servers();
+    info!(servers = ?connected, "MCP servers connected");
+    Ok(Some(Arc::new(McpToolExecutor::new(Arc::new(manager)))))
+}
+
+fn runtime_mcp_config(
+    server: &rune_config::McpServerConfig,
+    workspace_root: &Path,
+) -> RuntimeMcpServerConfig {
+    let cwd = server.cwd.as_ref().map(|cwd| {
+        let path = PathBuf::from(cwd);
+        if path.is_absolute() {
+            path
+        } else {
+            workspace_root.join(path)
+        }
+        .display()
+        .to_string()
+    });
+
+    RuntimeMcpServerConfig {
+        name: server.name.clone(),
+        transport: match server.transport {
+            rune_config::McpTransportKind::Stdio => rune_mcp::discovery::McpTransportKind::Stdio,
+            rune_config::McpTransportKind::Http => rune_mcp::discovery::McpTransportKind::Http,
+        },
+        command: server.command.clone(),
+        args: Some(server.args.clone()),
+        env: server.env.clone(),
+        cwd,
+        url: server.url.clone(),
+        enabled: server.enabled,
+    }
 }
 
 fn memory_index_config_from_env() -> MemoryIndexConfig {
@@ -700,6 +764,7 @@ struct AppToolExecutor {
     session: SessionToolExecutor<LiveSessionQuery>,
     spawn: SpawnToolExecutor<LiveSessionSpawner>,
     subagents: SubagentToolExecutor<LiveSubagentManager>,
+    mcp: Option<Arc<McpToolExecutor>>,
     approval: Arc<PolicyBasedApproval>,
     tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
 }
@@ -934,6 +999,12 @@ impl ToolExecutor for AppToolExecutor {
             }
             "sessions_spawn" | "sessions_send" => self.spawn.execute(call).await,
             "subagents" => self.subagents.execute(call).await,
+            other if other.contains("__") => match &self.mcp {
+                Some(mcp) => mcp.execute(call).await,
+                None => Err(ToolError::UnknownTool {
+                    name: other.to_string(),
+                }),
+            },
             other => Err(ToolError::UnknownTool {
                 name: other.to_string(),
             }),

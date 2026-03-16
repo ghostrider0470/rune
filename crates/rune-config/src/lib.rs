@@ -1,5 +1,6 @@
 #![doc = "Layered application configuration for Rune."]
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use figment::{
@@ -21,6 +22,8 @@ pub struct AppConfig {
     pub agents: AgentsConfig,
     #[serde(default)]
     pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerConfig>,
     pub memory: MemoryConfig,
     pub media: MediaConfig,
     pub logging: LoggingConfig,
@@ -136,6 +139,37 @@ impl Default for RuntimeConfig {
             lanes: LaneQueueConfig::default(),
         }
     }
+}
+
+/// MCP server configuration entry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub transport: McpTransportKind,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// MCP transport kind.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransportKind {
+    Stdio,
+    Http,
 }
 
 /// Per-lane concurrency caps for turn execution.
@@ -636,6 +670,7 @@ mod tests {
         assert_eq!(config.paths.db_dir, PathBuf::from("/data/db"));
         assert_eq!(config.paths.config_dir, PathBuf::from("/config"));
         assert!(config.memory.semantic_search_enabled);
+        assert!(config.mcp_servers.is_empty());
     }
 
     #[test]
@@ -967,6 +1002,47 @@ signal_api_url = "http://signal.local:8080"
             config.channels.signal_api_url.as_deref(),
             Some("http://signal.local:8080")
         );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn mcp_servers_load_from_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("mcp-servers");
+        fs::write(
+            &path,
+            r#"
+[[mcp_servers]]
+name = "filesystem"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+cwd = "/workspace"
+enabled = true
+
+[[mcp_servers]]
+name = "remote"
+transport = "http"
+url = "http://127.0.0.1:8788/mcp"
+enabled = false
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(config.mcp_servers.len(), 2);
+        assert_eq!(config.mcp_servers[0].name, "filesystem");
+        assert_eq!(config.mcp_servers[0].command.as_deref(), Some("npx"));
+        assert_eq!(config.mcp_servers[0].args.len(), 3);
+        assert_eq!(config.mcp_servers[0].cwd.as_deref(), Some("/workspace"));
+        assert!(config.mcp_servers[0].enabled);
+        assert_eq!(config.mcp_servers[1].transport, McpTransportKind::Http);
+        assert_eq!(
+            config.mcp_servers[1].url.as_deref(),
+            Some("http://127.0.0.1:8788/mcp")
+        );
+        assert!(!config.mcp_servers[1].enabled);
 
         let _ = fs::remove_file(path);
     }

@@ -87,7 +87,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Session History | ✅ Done | PostgreSQL-based (not JSONL) |
 | Hybrid Memory Search | ✅ 2026-03-16 | Persisted pgvector + tsvector hybrid search landed with MemoryEmbeddingRepo, RRF retrieval, startup bootstrap indexing, and change-driven workspace reindexing |
 | Hot-reloading Skills | ✅ 2026-03-14 | SkillLoader + SkillRegistry landed with SKILL.md scanning, runtime enable/disable, reload reconciliation, prompt injection, and gateway/RPC controls |
-| MCP Client | ❌ Missing | No STDIO/HTTP MCP transport |
+| MCP Client | ✅ 2026-03-16 | Config-driven STDIO/HTTP MCP client landed with initialize handshake, tool discovery, `server__tool` registry bridging, and gateway startup integration |
 | PTY Execution Sandbox | ✅ Basic | Via Unix script, no advanced PTY |
 | Heartbeat + Silent Eval | ✅ Done | HEARTBEAT_OK suppression works |
 | Sub-agents | ✅ Done | Session spawning + manager trait |
@@ -252,6 +252,28 @@ Implementation note (2026-03-14): the current watcher uses periodic rescanning r
 ---
 
 ### Phase 6 — MCP Client (Backend)
+
+Status: ✅ Completed 2026-03-16
+
+Rune now ships a config-driven MCP client that can connect to external tool servers over STDIO or HTTP, complete the initialize handshake, discover tools, and expose them through the existing tool registry.
+
+**Landed work**
+- `crates/rune-mcp/`
+  - STDIO and HTTP transports, including `notifications/initialized`
+  - multi-server manager with initialize + `tools/list` handshake flow
+  - `server__tool` namespacing and tool invocation routing
+  - `McpToolExecutor` bridge into Rune's tool registry/executor surface
+- `crates/rune-config/src/lib.rs`
+  - `mcp_servers` config entries with transport, args, env, cwd, URL, and enabled flag support
+- `apps/gateway/src/main.rs`
+  - startup bootstrap for configured MCP servers
+  - MCP tool registration alongside built-ins
+  - execution routing for MCP-prefixed tool names
+
+**Validation**
+- `cargo test -p rune-config`
+- `cargo test -p rune-mcp`
+- `cargo build -p rune-gateway-app`
 
 **New crate** `crates/rune-mcp/`
 - `src/lib.rs` — MCP client manager

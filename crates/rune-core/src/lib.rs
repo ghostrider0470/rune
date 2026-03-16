@@ -136,6 +136,7 @@ pub enum ToolCategory {
     SessionControl,
     MemoryAccess,
     SchedulerControl,
+    External,
 }
 
 /// A normalized cross-channel message representation used by adapters and runtime.

@@ -83,6 +83,34 @@ impl HttpTransport {
         })
     }
 
+    /// Send a JSON-RPC notification without expecting a response payload.
+    pub async fn notify(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<(), McpError> {
+        let resp = self
+            .client
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+            }))
+            .send()
+            .await
+            .map_err(|e| McpError::transport(format!("HTTP notification failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(McpError::transport(format!("HTTP {status}: {body}")));
+        }
+
+        Ok(())
+    }
+
     /// Return the base URL this transport is connected to.
     pub fn url(&self) -> &str {
         &self.url
