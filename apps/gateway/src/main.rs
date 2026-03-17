@@ -171,8 +171,9 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
 async fn build_services(
     config: AppConfig,
 ) -> Result<(Services, Option<EmbeddedPg>, Option<SessionLoop>)> {
-    let (repos, storage_info, embedded_pg) =
-        build_repos(&config).await.context("failed to initialize storage backends")?;
+    let (repos, storage_info, embedded_pg) = build_repos(&config)
+        .await
+        .context("failed to initialize storage backends")?;
 
     let pgvector_available = storage_info.pgvector_available();
 
@@ -382,10 +383,15 @@ async fn build_memory_tool_executor(
             Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()))
         }
         MemoryLevel::Keyword => {
-            info!(backend = storage_backend, "memory level=keyword; using persisted keyword memory search");
+            info!(
+                backend = storage_backend,
+                "memory level=keyword; using persisted keyword memory search"
+            );
             Ok(MemoryToolExecutor::with_hybrid_search(
                 workspace_root.to_path_buf(),
-                Arc::new(PersistedKeywordMemorySearch::new(memory_embedding_repo.clone())),
+                Arc::new(PersistedKeywordMemorySearch::new(
+                    memory_embedding_repo.clone(),
+                )),
             ))
         }
         MemoryLevel::Semantic => {
@@ -562,11 +568,15 @@ async fn build_memory_tool_executor_with_index_config(
             warn!(
                 error = %err,
                 semantic_search_enabled = config.memory.semantic_search_enabled,
+                backend = storage_backend,
                 provider = %provider,
                 model = %model,
-                "persisted hybrid memory search unavailable; using local keyword memory search"
+                "persisted hybrid memory search unavailable; falling back to persisted keyword memory search"
             );
-            return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
+            return Ok(MemoryToolExecutor::with_hybrid_search(
+                workspace_root.to_path_buf(),
+                Arc::new(PersistedKeywordMemorySearch::new(repo)),
+            ));
         }
     };
     sync_workspace_memory_index(workspace_root, repo.as_ref(), &index).await?;
@@ -581,7 +591,10 @@ async fn build_memory_tool_executor_with_index_config(
     );
     let backend = Arc::new(PersistedHybridMemorySearch::new(repo, index));
 
-    info!(backend = storage_backend, "memory_search configured with persisted hybrid backend");
+    info!(
+        backend = storage_backend,
+        "memory_search configured with persisted hybrid backend"
+    );
 
     Ok(MemoryToolExecutor::with_hybrid_search(
         workspace_root.to_path_buf(),
@@ -1971,10 +1984,9 @@ mod tests {
         config.memory.level = Some(MemoryLevel::File);
 
         let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(MemMemoryEmbeddingRepo::new(Vec::new()));
-        let executor =
-            build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
-                .await
-                .expect("memory tool executor should build");
+        let executor = build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
+            .await
+            .expect("memory tool executor should build");
 
         assert!(executor.hybrid_search_backend().is_none());
     }
@@ -1985,10 +1997,9 @@ mod tests {
         config.memory.semantic_search_enabled = false;
 
         let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(MemMemoryEmbeddingRepo::new(Vec::new()));
-        let executor =
-            build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
-                .await
-                .expect("memory tool executor should build");
+        let executor = build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
+            .await
+            .expect("memory tool executor should build");
 
         assert!(executor.hybrid_search_backend().is_some());
     }
@@ -1999,10 +2010,9 @@ mod tests {
         config.memory.level = Some(MemoryLevel::Semantic);
 
         let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(MemMemoryEmbeddingRepo::new(Vec::new()));
-        let executor =
-            build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
-                .await
-                .expect("memory tool executor should fall back cleanly");
+        let executor = build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
+            .await
+            .expect("memory tool executor should fall back cleanly");
 
         assert!(executor.hybrid_search_backend().is_some());
     }
@@ -2025,7 +2035,7 @@ mod tests {
         .await
         .expect("memory tool executor should fall back without OpenAI credentials");
 
-        assert!(executor.hybrid_search_backend().is_none());
+        assert!(executor.hybrid_search_backend().is_some());
     }
 
     #[test]
