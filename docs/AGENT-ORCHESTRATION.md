@@ -115,7 +115,7 @@ Implement:
 **Tests:** Unit tests for serialization round-trips, `Display`/`FromStr` on IDs, enum variant coverage.
 
 #### Agent 1B: `rune-config`
-Build the config loading system. Read `docs/DOCKER-DEPLOYMENT.md` for the canonical path layout.
+Build the config loading system. Read `docs/operator/DEPLOYMENT.md` for the canonical path layout.
 
 Implement:
 - `AppConfig` struct with sections: `gateway`, `database`, `models`, `channels`, `memory`, `media`, `logging`, `paths`
@@ -151,7 +151,7 @@ Implement:
 **Agents: 3 (parallel)**
 
 #### Agent 2A: `rune-store`
-Build the persistence layer. Read `docs/DATABASES.md` for decisions.
+Build the persistence layer. Read `docs/operator/DATABASES.md` for decisions.
 
 Implement:
 - Diesel schema + migrations for: `sessions`, `turns`, `transcript_items`, `jobs`, `approvals`, `tool_executions`, `channel_deliveries`
@@ -402,7 +402,7 @@ Every agent MUST read these files before writing code:
 | `rune-plan.md` | Canonical goals, product direction, and confirmed stack constraints |
 | `docs/CRATE-LAYOUT.md` | Crate responsibilities and dependency rules |
 | `docs/PROTOCOLS.md` | Entity model, state machines, subsystem contracts |
-| `docs/DATABASES.md` | PostgreSQL decision, Diesel, embedded PG, FTS, pgvector |
+| `docs/operator/DATABASES.md` | PostgreSQL decision, Diesel, embedded PG, FTS, pgvector |
 | `docs/PARITY-SPEC.md` | What parity means and what's in scope |
 | `docs/IMPLEMENTATION-PHASES.md` | Phase acceptance criteria and sequencing rules |
 | This file | Orchestration rules, wave model, escalation |

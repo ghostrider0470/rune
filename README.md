@@ -233,7 +233,7 @@ Persistent mounts: `./data` → `/data`, `./config` → `/config`
 | [`PARITY-INVENTORY.md`](docs/PARITY-INVENTORY.md) | OpenClaw feature parity map |
 | [`AZURE-COMPATIBILITY.md`](docs/AZURE-COMPATIBILITY.md) | Azure integration contract |
 | [`strategy/COMPETITIVE-RESEARCH.md`](docs/strategy/COMPETITIVE-RESEARCH.md) | Long-form competitive and product rationale |
-| [`DOCKER-DEPLOYMENT.md`](docs/DOCKER-DEPLOYMENT.md) | Docker deployment model |
+| [`operator/DEPLOYMENT.md`](docs/operator/DEPLOYMENT.md) | Docker deployment model |
 | [`PROTOCOLS.md`](docs/PROTOCOLS.md) | API and protocol contracts |
 
 ## License

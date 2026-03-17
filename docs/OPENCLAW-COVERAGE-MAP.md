@@ -33,7 +33,7 @@
 | Channels / adapters / messaging | [`PARITY-INVENTORY.md`](PARITY-INVENTORY.md), [`PROTOCOLS.md`](PROTOCOLS.md), crate-level channel tests | adapter behavior and inbound/outbound semantics |
 | Media / browser / OCR / TTS / STT | [`PARITY-INVENTORY.md`](PARITY-INVENTORY.md), [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) | adjacent parity surfaces and phase placement |
 | Config / secrets / precedence | [`PROTOCOLS.md`](PROTOCOLS.md), [`PARITY-CONTRACTS.md`](PARITY-CONTRACTS.md), operator docs | runtime config behavior and operator-facing expectations |
-| Deployment / Docker / persistence | [`DOCKER-DEPLOYMENT.md`](DOCKER-DEPLOYMENT.md), [`DATABASES.md`](DATABASES.md), [`PARITY-SPEC.md`](PARITY-SPEC.md) | persistent storage model and deployment contract |
+| Deployment / Docker / persistence | [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md), [`operator/DATABASES.md`](operator/DATABASES.md), [`PARITY-SPEC.md`](PARITY-SPEC.md) | persistent storage model and deployment contract |
 | Admin UI / operator visibility | [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md), relevant feature issues/PRs | visibility, diagnostics, and UI-facing evidence |
 
 ## How to use this file

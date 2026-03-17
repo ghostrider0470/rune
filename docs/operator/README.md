@@ -4,6 +4,6 @@ This folder is reserved for deployment, configuration, runtime health, and opera
 
 Current canonical entrypoints remain:
 - [`../INDEX.md`](../INDEX.md)
-- [`../DOCKER-DEPLOYMENT.md`](../DOCKER-DEPLOYMENT.md)
-- [`../DATABASES.md`](../DATABASES.md)
-- [`../OPERATOR-POLICY.md`](../OPERATOR-POLICY.md)
+- [`DEPLOYMENT.md`](DEPLOYMENT.md)
+- [`DATABASES.md`](DATABASES.md)
+- [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md)
