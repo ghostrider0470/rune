@@ -1033,22 +1033,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_postgres_checks_reflect_zero_config_layout() {
+    async fn sqlite_auto_backend_checks_reflect_zero_config_layout() {
         let tmp = TempDir::new().unwrap();
         create_path_layout(tmp.path()).await;
         let mut config = test_config_with_paths(tmp.path());
         config.database.database_url = None;
 
         let initial = check_database_config(&config).await;
-        assert!(
-            initial
-                .iter()
-                .any(|r| { r.name == "database.embedded.mode" && r.status == CheckStatus::Pass })
-        );
         assert!(initial.iter().any(|r| {
-            r.name == "database.embedded.install_dir" && r.status == CheckStatus::Skip
+            r.name == "database.backend"
+                && r.status == CheckStatus::Pass
+                && r.message.contains("resolved runtime backend = sqlite")
         }));
         assert!(initial.iter().any(|r| {
+            r.name == "database.url"
+                && r.status == CheckStatus::Pass
+                && r.message.contains("SQLite-backed repo path")
+        }));
+        assert!(!initial.iter().any(|r| r.name == "database.embedded.mode"));
+
+        config.database.backend = rune_config::StorageBackend::Postgres;
+        let postgres_fallback = check_database_config(&config).await;
+        assert!(postgres_fallback.iter().any(|r| {
+            r.name == "database.embedded.mode" && r.status == CheckStatus::Pass
+        }));
+        assert!(postgres_fallback.iter().any(|r| {
+            r.name == "database.embedded.install_dir" && r.status == CheckStatus::Skip
+        }));
+        assert!(postgres_fallback.iter().any(|r| {
             r.name == "database.embedded.cluster_dir" && r.status == CheckStatus::Skip
         }));
 
