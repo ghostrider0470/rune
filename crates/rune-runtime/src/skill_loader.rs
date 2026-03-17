@@ -144,10 +144,10 @@ impl SkillLoader {
         let current = self.registry.list().await;
         let mut removed = 0;
         for skill in current {
-            if !seen_names.iter().any(|name| name == &skill.name) {
-                if self.registry.remove(&skill.name).await.is_some() {
-                    removed += 1;
-                }
+            if !seen_names.iter().any(|name| name == &skill.name)
+                && self.registry.remove(&skill.name).await.is_some()
+            {
+                removed += 1;
             }
         }
         removed

@@ -44,8 +44,8 @@ impl DiscordAdapter {
     ///
     /// * `token`      - Bot token (prefixed with `Bot ` automatically).
     /// * `guild_id`   - The Discord server (guild) to watch.
-    /// * `channel_ids`- Specific text channels to poll.  If empty the adapter
-    ///                   will only be able to send but not receive.
+    /// * `channel_ids`- Specific text channels to poll. If empty the adapter
+    ///   will only be able to send but not receive.
     pub fn new(
         token: impl Into<String>,
         guild_id: impl Into<String>,
@@ -456,8 +456,7 @@ impl ChannelAdapter for DiscordAdapter {
                 // Map buttons to Discord action-row components.
                 let components: Vec<serde_json::Value> = buttons
                     .iter()
-                    .enumerate()
-                    .map(|(_i, (label, data))| {
+                    .map(|(label, data)| {
                         serde_json::json!({
                             "type": 2, // Button
                             "style": 1, // Primary

@@ -40,10 +40,9 @@ impl SlackAdapter {
     ///
     /// * `bot_token`  - Slack bot OAuth token (`xoxb-...`).
     /// * `app_token`  - Slack app-level token (`xapp-...`), reserved for future
-    ///                   Socket Mode support.
+    ///   Socket Mode support.
     /// * `listen_addr`- Local address to bind the Events API webhook receiver
-    ///                   (e.g. `"0.0.0.0:3100"`).  If `None`, only outbound
-    ///                   sending is available.
+    ///   (e.g. `"0.0.0.0:3100"`). If `None`, only outbound sending is available.
     pub fn new(
         bot_token: impl Into<String>,
         _app_token: impl Into<String>,
@@ -270,7 +269,7 @@ impl SlackAdapter {
 
         files
             .iter()
-            .filter_map(|f| {
+            .map(|f| {
                 let name = f["name"].as_str().unwrap_or("file").to_string();
                 let mime = f["mimetype"].as_str().map(|s| s.to_string());
                 let size = f["size"].as_u64();
@@ -279,12 +278,12 @@ impl SlackAdapter {
                     .or_else(|| f["url_private"].as_str())
                     .map(|s| s.to_string());
 
-                Some(rune_core::AttachmentRef {
+                rune_core::AttachmentRef {
                     name,
                     mime_type: mime,
                     size_bytes: size,
                     url,
-                })
+                }
             })
             .collect()
     }
@@ -765,12 +764,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let adapter = SlackAdapter::with_api_base(
-            "xoxb-test",
-            "xapp-test",
-            None,
-            server.uri(),
-        );
+        let adapter = SlackAdapter::with_api_base("xoxb-test", "xapp-test", None, server.uri());
 
         let send_receipt = adapter
             .send(OutboundAction::Send {
@@ -858,12 +852,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let adapter = SlackAdapter::with_api_base(
-            "xoxb-test",
-            "xapp-test",
-            None,
-            server.uri(),
-        );
+        let adapter = SlackAdapter::with_api_base("xoxb-test", "xapp-test", None, server.uri());
 
         let receipt = adapter
             .send(OutboundAction::Send {

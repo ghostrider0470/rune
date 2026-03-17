@@ -54,8 +54,7 @@ impl WhatsAppAdapter {
     /// * `phone_number_id`  - Phone number ID from the WhatsApp Business dashboard.
     /// * `verify_token`     - Token used by Meta to verify the webhook endpoint.
     /// * `listen_addr`      - Local address to bind the webhook receiver
-    ///                         (e.g. `"0.0.0.0:3200"`).  If `None`, only outbound
-    ///                         sending is available.
+    ///   (e.g. `"0.0.0.0:3200"`). If `None`, only outbound sending is available.
     pub fn new(
         access_token: impl Into<String>,
         phone_number_id: impl Into<String>,
