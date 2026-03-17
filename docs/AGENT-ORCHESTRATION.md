@@ -96,7 +96,7 @@ Work is organized into **waves**. All agents within a wave run in parallel. A wa
 **Agents: 3 (parallel)**
 
 #### Agent 1A: `rune-core`
-Build the domain type foundation. Read `docs/PROTOCOLS.md` for the canonical entity model.
+Build the domain type foundation. Read `docs/parity/PROTOCOLS.md` for the canonical entity model.
 
 Implement:
 - `SessionId`, `TurnId`, `ToolCallId`, `JobId`, `ApprovalId`, `ChannelId` — newtype wrappers over `uuid::Uuid`, with `Display`, `FromStr`, `Serialize`, `Deserialize`
@@ -135,7 +135,7 @@ Build the shared test infrastructure.
 
 Implement:
 - `TestDb` helper: spins up an embedded PostgreSQL instance for integration tests, runs migrations, provides connection, drops on `Drop`
-- `FakeModelProvider`: implements the model provider trait (define a placeholder trait if `rune-models` isn't ready — use the same trait signature planned in PROTOCOLS.md). Returns canned responses.
+- `FakeModelProvider`: implements the model provider trait (define a placeholder trait if `rune-models` isn't ready — use the same trait signature planned in `docs/parity/PROTOCOLS.md`). Returns canned responses.
 - `FakeChannel`: implements channel adapter trait. Captures sent messages for assertion.
 - `fixture!` macro or helper functions for creating test sessions, turns, transcript items with sensible defaults
 - Golden test helper: compare actual output against `.expected` files, with update-on-env-var (`RUNE_UPDATE_GOLDEN=1`)
@@ -180,7 +180,7 @@ Implement:
 **Tests:** Unit tests with mock HTTP (use `wiremock`). Verify Azure URL construction. Verify header handling. Verify error mapping from HTTP status codes. Test provider selection from config.
 
 #### Agent 2C: `rune-tools`
-Build the tool system skeleton. Read `docs/PROTOCOLS.md` tool execution contract.
+Build the tool system skeleton. Read `docs/parity/PROTOCOLS.md` tool execution contract.
 
 Implement:
 - `ToolDefinition` struct: name, description, parameters (JSON Schema), category, requires_approval
@@ -202,7 +202,7 @@ Implement:
 **Agents: 1** (this is the critical path — it wires everything together)
 
 #### Agent 3A: `rune-runtime`
-Build the session engine and turn loop. This is the heart of the system. Read `docs/PROTOCOLS.md` and `docs/IMPLEMENTATION-PHASES.md` Phase 2.
+Build the session engine and turn loop. This is the heart of the system. Read `docs/parity/PROTOCOLS.md` and `docs/IMPLEMENTATION-PHASES.md` Phase 2.
 
 Implement:
 - `SessionEngine`: creates sessions, manages lifecycle, persists state via `rune-store`
@@ -246,7 +246,7 @@ Implement:
 **Tests:** HTTP endpoint tests with `axum::test`. Health/status return correct shapes. Auth rejection on bad token. Session create → message → response flow through HTTP.
 
 #### Agent 4B: `rune-cli`
-Build the operator CLI. Read `docs/PARITY-INVENTORY.md` for Tier-0 commands.
+Build the operator CLI. Read `docs/parity/PARITY-INVENTORY.md` for Tier-0 commands.
 
 Implement:
 - Clap-based CLI with subcommands:
@@ -267,7 +267,7 @@ Implement:
 **Tests:** CLI argument parsing. Output format switching. Config validation catches errors.
 
 #### Agent 4C: `rune-channels` (skeleton)
-Build the normalized channel abstraction. Read `docs/PROTOCOLS.md` channel contracts.
+Build the normalized channel abstraction. Read `docs/parity/PROTOCOLS.md` channel contracts.
 
 Implement:
 - `ChannelAdapter` trait: `async fn receive(&mut self) -> Result<InboundEvent>`, `async fn send(&self, action: OutboundAction) -> Result<DeliveryReceipt>`
@@ -401,9 +401,9 @@ Every agent MUST read these files before writing code:
 |------|-----|
 | `rune-plan.md` | Canonical goals, product direction, and confirmed stack constraints |
 | `docs/CRATE-LAYOUT.md` | Crate responsibilities and dependency rules |
-| `docs/PROTOCOLS.md` | Entity model, state machines, subsystem contracts |
+| `docs/parity/PROTOCOLS.md` | Entity model, state machines, subsystem contracts |
 | `docs/operator/DATABASES.md` | PostgreSQL decision, Diesel, embedded PG, FTS, pgvector |
-| `docs/PARITY-SPEC.md` | What parity means and what's in scope |
+| `docs/parity/PARITY-SPEC.md` | What parity means and what's in scope |
 | `docs/IMPLEMENTATION-PHASES.md` | Phase acceptance criteria and sequencing rules |
 | This file | Orchestration rules, wave model, escalation |
 

@@ -2,10 +2,10 @@
 
 Use this as the execution checklist against:
 
-- `PARITY-INVENTORY.md` — exhaustive surface map and command/resource census
-- `PARITY-SPEC.md` — release rule
-- `PARITY-CONTRACTS.md` — subsystem invariants
-- `PROTOCOLS.md` — canonical entities/state machines/events
+- `parity/PARITY-INVENTORY.md` — exhaustive surface map and command/resource census
+- `parity/PARITY-SPEC.md` — release rule
+- `parity/PARITY-CONTRACTS.md` — subsystem invariants
+- `parity/PROTOCOLS.md` — canonical entities/state machines/events
 - `IMPLEMENTATION-PHASES.md` — sequencing
 
 Interpretation rules:
@@ -227,7 +227,7 @@ Implementation note (2026-03-13): current smoke evidence covers create-session -
 ### Tooling contract quality
 - [x] stable names and schemas
 - [ ] transcript/audit linkage
-  - 2026-03-14 watchdog verification: this remains partially open rather than absent. Tool-side durable audit rows now exist for background `exec` (`tool_executions`), and transcript attribution exists for tool/approval/subagent events, but the stricter parity invariant from `docs/PROTOCOLS.md` — transcript tool outputs matching audit records or carrying an explicit reference — still needs end-to-end evidence and black-box tests before this can be checked.
+  - 2026-03-14 watchdog verification: this remains partially open rather than absent. Tool-side durable audit rows now exist for background `exec` (`tool_executions`), and transcript attribution exists for tool/approval/subagent events, but the stricter parity invariant from `docs/parity/PROTOCOLS.md` — transcript tool outputs matching audit records or carrying an explicit reference — still needs end-to-end evidence and black-box tests before this can be checked.
   - 2026-03-14 late morning: background `exec` results now return explicit durable correlation fields (`toolCallId`, `toolExecutionId`) when a process audit store is configured, so operators and future runtime/gateway transcript surfaces can tie long-running tool handles back to persisted `tool_executions` rows without guessing from raw command text.
   - 2026-03-14 watchdog follow-up: the shared transcript contract now also has an optional `tool_execution_id` on `tool_result`, and `rune-runtime` preserves that field when a tool executor returns it. This closes the protocol gap for transcripted background `exec` results, but the checklist remains intentionally open until broader end-to-end black-box evidence exists across more than this one tool family.
 - [x] structured errors
