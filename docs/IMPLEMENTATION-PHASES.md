@@ -2,6 +2,8 @@
 
 This plan sequences the rewrite so parity can be proven incrementally.
 
+For the OpenClaw-surface navigation view, see [`OPENCLAW-COVERAGE-MAP.md`](OPENCLAW-COVERAGE-MAP.md).
+
 The rule is simple:
 
 - do not build broad feature surface before the contracts are frozen
