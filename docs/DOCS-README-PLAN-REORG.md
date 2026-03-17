@@ -341,7 +341,7 @@ Use for:
 | `docs/CRATE-LAYOUT.md` | Keep | likely `docs/reference/CRATE-LAYOUT.md` |
 | `docs/SUBSYSTEMS.md` | Keep | likely `docs/reference/SUBSYSTEMS.md` |
 | `docs/AZURE-COMPATIBILITY.md` | Keep | likely `docs/operator/` or `docs/reference/` depending scope |
-| `docs/DOCKER-DEPLOYMENT.md` | Keep / rename | likely `docs/operator/DEPLOYMENT.md` |
+| `docs/operator/DEPLOYMENT.md` | Canonical operator deployment doc | `docs/operator/` |
 | `docs/PARITY-*` | Keep | `docs/parity/` |
 | `docs/PROTOCOLS.md` | Keep | `docs/parity/PROTOCOLS.md` |
 | `docs/WORKTREE-EXECUTION.md` | Verify | likely `docs/contributor/WORKFLOW.md` if still relevant |
