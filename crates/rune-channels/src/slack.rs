@@ -29,6 +29,7 @@ const RATE_LIMIT_RETRY_ATTEMPTS: usize = 3;
 /// the Slack Web API (`chat.postMessage`, `chat.update`, etc.).
 pub struct SlackAdapter {
     bot_token: String,
+    _signing_secret: Option<String>,
     api_base: String,
     http: Client,
     rx: mpsc::Receiver<InboundEvent>,
@@ -38,22 +39,32 @@ pub struct SlackAdapter {
 impl SlackAdapter {
     /// Create a new Slack adapter.
     ///
+<<<<<<< HEAD
     /// * `bot_token`  - Slack bot OAuth token (`xoxb-...`).
     /// * `app_token`  - Slack app-level token (`xapp-...`), reserved for future
     ///   Socket Mode support.
     /// * `listen_addr`- Local address to bind the Events API webhook receiver
     ///   (e.g. `"0.0.0.0:3100"`). If `None`, only outbound sending is available.
+=======
+    /// * `bot_token`       - Slack bot OAuth token (`xoxb-...`).
+    /// * `signing_secret`  - Slack signing secret for HMAC-SHA256 webhook
+    ///                        verification.  When `None`, signature checks are
+    ///                        skipped (local dev mode).
+    /// * `listen_addr`     - Local address to bind the Events API webhook receiver
+    ///                        (e.g. `"0.0.0.0:3100"`).  If `None`, only outbound
+    ///                        sending is available.
+>>>>>>> 94a7ba8 (feat(channels): harden webhook verification)
     pub fn new(
         bot_token: impl Into<String>,
-        _app_token: impl Into<String>,
+        signing_secret: Option<String>,
         listen_addr: Option<String>,
     ) -> Self {
-        Self::with_api_base(bot_token, _app_token, listen_addr, SLACK_API_BASE)
+        Self::with_api_base(bot_token, signing_secret, listen_addr, SLACK_API_BASE)
     }
 
     pub fn with_api_base(
         bot_token: impl Into<String>,
-        _app_token: impl Into<String>,
+        signing_secret: Option<String>,
         listen_addr: Option<String>,
         api_base: impl Into<String>,
     ) -> Self {
@@ -68,9 +79,9 @@ impl SlackAdapter {
 
         if let Some(addr) = listen_addr {
             let tx = tx.clone();
-            let token = bot_token.clone();
+            let secret = signing_secret.clone();
             tokio::spawn(async move {
-                if let Err(e) = Self::run_event_listener(addr, tx, token).await {
+                if let Err(e) = Self::run_event_listener(addr, tx, secret).await {
                     error!("slack event listener exited: {e}");
                 }
             });
@@ -78,6 +89,7 @@ impl SlackAdapter {
 
         Self {
             bot_token,
+            _signing_secret: signing_secret,
             api_base,
             http,
             rx,
@@ -93,7 +105,7 @@ impl SlackAdapter {
     async fn run_event_listener(
         addr: String,
         tx: mpsc::Sender<InboundEvent>,
-        _token: String,
+        signing_secret: Option<String>,
     ) -> Result<(), String> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
@@ -111,25 +123,93 @@ impl SlackAdapter {
                 .map_err(|e| format!("accept failed: {e}"))?;
 
             let tx = tx.clone();
+            let signing_secret = signing_secret.clone();
 
             tokio::spawn(async move {
-                // Read the full HTTP request (we expect small payloads).
-                let mut buf = vec![0u8; 65536];
-                let n = match stream.read(&mut buf).await {
-                    Ok(n) => n,
-                    Err(e) => {
-                        warn!("slack listener read error from {peer}: {e}");
+                const MAX_BODY: usize = 1_048_576; // 1 MB
+
+                // Read until we have the full headers.
+                let mut buf = Vec::with_capacity(8192);
+                let header_end;
+                loop {
+                    let mut tmp = vec![0u8; 4096];
+                    let n = match stream.read(&mut tmp).await {
+                        Ok(0) => {
+                            warn!("slack listener: connection closed before headers from {peer}");
+                            return;
+                        }
+                        Ok(n) => n,
+                        Err(e) => {
+                            warn!("slack listener read error from {peer}: {e}");
+                            return;
+                        }
+                    };
+                    buf.extend_from_slice(&tmp[..n]);
+
+                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        header_end = pos + 4;
+                        break;
+                    }
+                    if let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+                        header_end = pos + 2;
+                        break;
+                    }
+                    if buf.len() > 16_384 {
+                        warn!("slack listener: headers too large from {peer}");
                         return;
                     }
-                };
-                let raw = String::from_utf8_lossy(&buf[..n]);
+                }
 
-                // Extract the JSON body (after the blank line separating headers from body).
-                let body = raw
-                    .split("\r\n\r\n")
-                    .nth(1)
-                    .or_else(|| raw.split("\n\n").nth(1))
-                    .unwrap_or("");
+                // Parse Content-Length and read the full body.
+                let header_text = String::from_utf8_lossy(&buf[..header_end]);
+                let content_length: usize = header_text
+                    .lines()
+                    .find_map(|line| {
+                        let line = line.trim_end_matches('\r');
+                        let (name, value) = line.split_once(':')?;
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            value.trim().parse().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0)
+                    .min(MAX_BODY);
+
+                let total_needed = header_end + content_length;
+                while buf.len() < total_needed {
+                    let mut tmp = vec![0u8; 4096];
+                    let n = match stream.read(&mut tmp).await {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(e) => {
+                            warn!("slack listener body read error from {peer}: {e}");
+                            return;
+                        }
+                    };
+                    buf.extend_from_slice(&tmp[..n]);
+                }
+
+                let raw = String::from_utf8_lossy(&buf);
+
+                // Extract headers and body
+                let (headers_section, body) = match raw.split_once("\r\n\r\n") {
+                    Some((h, b)) => (h, b),
+                    None => match raw.split_once("\n\n") {
+                        Some((h, b)) => (h, b),
+                        None => {
+                            warn!("slack listener: no header/body separator found");
+                            return;
+                        }
+                    },
+                };
+
+                // Verify signature
+                if !verify_slack_signature(headers_section, body, signing_secret.as_deref()) {
+                    let response = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
 
                 let parsed: Result<serde_json::Value, _> = serde_json::from_str(body);
                 let response = match parsed {
@@ -520,6 +600,70 @@ impl ChannelAdapter for SlackAdapter {
     }
 }
 
+/// Verify a Slack webhook request using HMAC-SHA256 signature verification.
+///
+/// When `signing_secret` is `None`, verification is skipped (local dev mode).
+fn verify_slack_signature(headers: &str, body: &str, signing_secret: Option<&str>) -> bool {
+    let Some(secret) = signing_secret else {
+        tracing::warn!("slack signing_secret not configured — skipping signature verification");
+        return true;
+    };
+
+    // Extract X-Slack-Request-Timestamp header
+    let timestamp = headers.lines().find_map(|line| {
+        let line = line.trim_end_matches('\r');
+        line.strip_prefix("X-Slack-Request-Timestamp:")
+            .or_else(|| line.strip_prefix("x-slack-request-timestamp:"))
+            .map(|v| v.trim())
+    });
+
+    let Some(timestamp) = timestamp else {
+        return false;
+    };
+
+    // Reject timestamps older than 5 minutes
+    let ts: i64 = match timestamp.parse() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let now = chrono::Utc::now().timestamp();
+    if (now - ts).abs() > 300 {
+        tracing::warn!("slack request timestamp too old: {timestamp}");
+        return false;
+    }
+
+    // Extract X-Slack-Signature header
+    let signature = headers.lines().find_map(|line| {
+        let line = line.trim_end_matches('\r');
+        line.strip_prefix("X-Slack-Signature:")
+            .or_else(|| line.strip_prefix("x-slack-signature:"))
+            .map(|v| v.trim())
+    });
+
+    let Some(sig_value) = signature else {
+        return false;
+    };
+
+    let Some(received_hex) = sig_value.strip_prefix("v0=") else {
+        return false;
+    };
+
+    // Compute expected signature
+    let basestring = format!("v0:{timestamp}:{body}");
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    type HmacSha256 = Hmac<Sha256>;
+
+    let Ok(mut mac) = HmacSha256::new_from_slice(secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(basestring.as_bytes());
+    let expected = hex::encode(mac.finalize().into_bytes());
+
+    // Constant-time comparison
+    expected == received_hex
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -764,7 +908,11 @@ mod tests {
             .mount(&server)
             .await;
 
+<<<<<<< HEAD
         let adapter = SlackAdapter::with_api_base("xoxb-test", "xapp-test", None, server.uri());
+=======
+        let adapter = SlackAdapter::with_api_base("xoxb-test", None, None, server.uri());
+>>>>>>> 94a7ba8 (feat(channels): harden webhook verification)
 
         let send_receipt = adapter
             .send(OutboundAction::Send {
@@ -852,7 +1000,11 @@ mod tests {
             .mount(&server)
             .await;
 
+<<<<<<< HEAD
         let adapter = SlackAdapter::with_api_base("xoxb-test", "xapp-test", None, server.uri());
+=======
+        let adapter = SlackAdapter::with_api_base("xoxb-test", None, None, server.uri());
+>>>>>>> 94a7ba8 (feat(channels): harden webhook verification)
 
         let receipt = adapter
             .send(OutboundAction::Send {
@@ -864,5 +1016,63 @@ mod tests {
             .expect("send should retry after rate limit");
 
         assert_eq!(receipt.provider_message_id, "1710320003.000400");
+    }
+
+    #[test]
+    fn verify_slack_signature_accepts_valid() {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+
+        let secret = "test-signing-secret";
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+        let body = r#"{"type":"event_callback","event":{}}"#;
+        let basestring = format!("v0:{timestamp}:{body}");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(basestring.as_bytes());
+        let sig = format!("v0={}", hex::encode(mac.finalize().into_bytes()));
+
+        let headers = format!(
+            "POST /slack HTTP/1.1\r\nHost: localhost\r\nX-Slack-Request-Timestamp: {timestamp}\r\nX-Slack-Signature: {sig}"
+        );
+        assert!(verify_slack_signature(&headers, body, Some(secret)));
+    }
+
+    #[test]
+    fn verify_slack_signature_rejects_bad_sig() {
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+        let headers = format!(
+            "POST /slack HTTP/1.1\r\nX-Slack-Request-Timestamp: {timestamp}\r\nX-Slack-Signature: v0=deadbeef"
+        );
+        assert!(!verify_slack_signature(&headers, "body", Some("secret")));
+    }
+
+    #[test]
+    fn verify_slack_signature_rejects_stale_timestamp() {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+
+        let secret = "test-secret";
+        let old_ts = (chrono::Utc::now().timestamp() - 600).to_string();
+        let body = "body";
+        let basestring = format!("v0:{old_ts}:{body}");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(basestring.as_bytes());
+        let sig = format!("v0={}", hex::encode(mac.finalize().into_bytes()));
+
+        let headers = format!(
+            "POST /slack HTTP/1.1\r\nX-Slack-Request-Timestamp: {old_ts}\r\nX-Slack-Signature: {sig}"
+        );
+        assert!(!verify_slack_signature(&headers, body, Some(secret)));
+    }
+
+    #[test]
+    fn verify_slack_signature_passes_when_none() {
+        assert!(verify_slack_signature(
+            "POST /slack HTTP/1.1\r\n",
+            "body",
+            None
+        ));
     }
 }

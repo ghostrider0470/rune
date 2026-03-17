@@ -7,7 +7,7 @@
 //! them into an mpsc queue.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -15,7 +15,7 @@ use hmac::{Hmac, Mac};
 use reqwest::Client;
 use rune_core::ChannelId;
 use sha2::Sha256;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info, warn};
 
 use async_trait::async_trait;
@@ -150,15 +150,71 @@ impl WhatsAppAdapter {
             let recent_message_ids = Arc::clone(&recent_message_ids);
 
             tokio::spawn(async move {
-                let mut buf = vec![0u8; 65536];
-                let n = match stream.read(&mut buf).await {
-                    Ok(n) => n,
-                    Err(e) => {
-                        warn!("whatsapp webhook read error from {peer}: {e}");
+                const MAX_BODY: usize = 1_048_576; // 1 MB
+
+                // Read until we have the full headers.
+                let mut buf = Vec::with_capacity(8192);
+                let header_end;
+                loop {
+                    let mut tmp = vec![0u8; 4096];
+                    let n = match stream.read(&mut tmp).await {
+                        Ok(0) => {
+                            warn!("whatsapp webhook: connection closed before headers from {peer}");
+                            return;
+                        }
+                        Ok(n) => n,
+                        Err(e) => {
+                            warn!("whatsapp webhook read error from {peer}: {e}");
+                            return;
+                        }
+                    };
+                    buf.extend_from_slice(&tmp[..n]);
+
+                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        header_end = pos + 4;
+                        break;
+                    }
+                    if let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+                        header_end = pos + 2;
+                        break;
+                    }
+                    if buf.len() > 16_384 {
+                        warn!("whatsapp webhook: headers too large from {peer}");
                         return;
                     }
-                };
-                let request = &buf[..n];
+                }
+
+                // Parse Content-Length and read the full body.
+                let header_text = String::from_utf8_lossy(&buf[..header_end]);
+                let content_length: usize = header_text
+                    .lines()
+                    .find_map(|line| {
+                        let line = line.trim_end_matches('\r');
+                        let (name, value) = line.split_once(':')?;
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            value.trim().parse().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0)
+                    .min(MAX_BODY);
+
+                let total_needed = header_end + content_length;
+                while buf.len() < total_needed {
+                    let mut tmp = vec![0u8; 4096];
+                    let n = match stream.read(&mut tmp).await {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(e) => {
+                            warn!("whatsapp webhook body read error from {peer}: {e}");
+                            return;
+                        }
+                    };
+                    buf.extend_from_slice(&tmp[..n]);
+                }
+
+                let request = &buf[..];
                 let raw = String::from_utf8_lossy(request).to_string();
 
                 // Parse the HTTP request line to determine GET vs POST.
@@ -176,9 +232,8 @@ impl WhatsAppAdapter {
                                 match serde_json::from_slice::<serde_json::Value>(body) {
                                     Ok(payload) => {
                                         let events = {
-                                            let mut recent_message_ids = recent_message_ids
-                                                .lock()
-                                                .expect("recent message id cache poisoned");
+                                            let mut recent_message_ids =
+                                                recent_message_ids.lock().await;
                                             Self::extract_events_dedup(
                                                 &payload,
                                                 &mut recent_message_ids,

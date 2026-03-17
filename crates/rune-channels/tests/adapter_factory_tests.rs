@@ -119,7 +119,7 @@ async fn configured_adapter_kinds_construct_successfully() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn whatsapp_adapter_uses_default_verify_token_when_missing() {
+async fn whatsapp_adapter_requires_verify_token() {
     let adapter = create_adapter(
         "whatsapp",
         &ChannelsConfig {
@@ -130,7 +130,11 @@ async fn whatsapp_adapter_uses_default_verify_token_when_missing() {
             ..ChannelsConfig::default()
         },
     );
-    assert!(adapter.is_ok());
+    let err = match adapter {
+        Ok(_) => panic!("whatsapp should require verify_token"),
+        Err(e) => e,
+    };
+    assert_provider_error(err, "whatsapp_verify_token is required");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -185,8 +189,8 @@ async fn signal_adapter_defaults_api_url_when_missing() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn whatsapp_adapter_defaults_verify_token_without_blocking_send_path() {
-    let adapter = create_adapter(
+async fn whatsapp_adapter_rejects_missing_verify_token() {
+    let result = create_adapter(
         "whatsapp",
         &ChannelsConfig {
             whatsapp_access_token: Some("wa-token".into()),
@@ -195,10 +199,8 @@ async fn whatsapp_adapter_defaults_verify_token_without_blocking_send_path() {
             whatsapp_app_secret: Some("app-secret".into()),
             ..ChannelsConfig::default()
         },
-    )
-    .expect("whatsapp adapter should construct with default verify token");
-
-    drop(adapter);
+    );
+    assert!(result.is_err());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -211,6 +213,7 @@ async fn channels_config_wiring_supports_optional_listener_and_polling_fields() 
         slack_listen_addr: Some("127.0.0.1:3100".into()),
         whatsapp_access_token: Some("wa-token".into()),
         whatsapp_phone_number_id: Some("phone-1".into()),
+        whatsapp_verify_token: Some("verify-me".into()),
         whatsapp_app_secret: Some("app-secret".into()),
         whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
         signal_number: Some("+15551234567".into()),
@@ -248,6 +251,7 @@ async fn create_adapter_uses_configured_optional_listener_and_channel_fields() {
         slack_listen_addr: Some("127.0.0.1:3100".into()),
         whatsapp_access_token: Some("wa-token".into()),
         whatsapp_phone_number_id: Some("phone-1".into()),
+        whatsapp_verify_token: Some("verify-me".into()),
         whatsapp_app_secret: Some("app-secret".into()),
         whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
         signal_number: Some("+15551234567".into()),

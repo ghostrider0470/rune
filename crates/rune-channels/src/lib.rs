@@ -69,10 +69,9 @@ pub fn create_adapter(
                     .ok_or_else(|| ChannelError::Provider {
                         message: "slack_bot_token is required for the Slack adapter".into(),
                     })?;
-            let app_token = config.slack_app_token.as_deref().unwrap_or("");
             Ok(Box::new(SlackAdapter::new(
                 bot_token,
-                app_token,
+                config.slack_signing_secret.clone(),
                 config.slack_listen_addr.clone(),
             )))
         }
@@ -90,10 +89,14 @@ pub fn create_adapter(
                     message: "whatsapp_phone_number_id is required for the WhatsApp adapter".into(),
                 }
             })?;
-            let verify_token = config
-                .whatsapp_verify_token
-                .as_deref()
-                .unwrap_or("rune-verify");
+            let verify_token =
+                config
+                    .whatsapp_verify_token
+                    .as_deref()
+                    .ok_or_else(|| ChannelError::Provider {
+                        message: "whatsapp_verify_token is required for the WhatsApp adapter"
+                            .into(),
+                    })?;
             Ok(Box::new(WhatsAppAdapter::new(
                 access_token,
                 phone_number_id,
