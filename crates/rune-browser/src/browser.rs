@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
+use tracing::{info, warn};
 
 use crate::error::BrowserError;
+use crate::launcher::{ChromiumLauncher, LaunchOptions};
 use crate::snapshot::{BrowserSnapshot, SnapshotEngine, SnapshotOptions};
 
 /// Configuration for the browser pool.
@@ -35,10 +37,11 @@ impl Default for BrowserPoolConfig {
 pub struct BrowserPool {
     semaphore: Arc<Semaphore>,
     config: BrowserPoolConfig,
+    launcher: Option<Arc<Mutex<ChromiumLauncher>>>,
 }
 
 impl BrowserPool {
-    /// Create a new browser pool from config.
+    /// Create a new browser pool from config (no auto-launch).
     #[must_use]
     pub fn new(config: BrowserPoolConfig) -> Self {
         let max_instances = config.max_instances.max(1);
@@ -48,10 +51,52 @@ impl BrowserPool {
                 max_instances,
                 ..config
             },
+            launcher: None,
+        }
+    }
+
+    /// Create a browser pool that automatically launches a local Chromium
+    /// instance when no `cdp_endpoint` is configured.
+    ///
+    /// If launch fails the pool falls back to HTML-only snapshots (no CDP).
+    pub async fn new_with_auto_launch(mut config: BrowserPoolConfig) -> Self {
+        let max_instances = config.max_instances.max(1);
+
+        let launcher = if config.cdp_endpoint.is_none() {
+            let options = LaunchOptions {
+                binary_path: config.chromium_path.clone(),
+                ..LaunchOptions::default()
+            };
+
+            match ChromiumLauncher::launch(options).await {
+                Ok(l) => {
+                    info!(endpoint = l.cdp_endpoint(), "auto-launched Chromium");
+                    config.cdp_endpoint = Some(l.cdp_endpoint().to_string());
+                    Some(Arc::new(Mutex::new(l)))
+                }
+                Err(e) => {
+                    warn!(%e, "Chromium auto-launch failed; falling back to HTML-only snapshots");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        Self {
+            semaphore: Arc::new(Semaphore::new(max_instances)),
+            config: BrowserPoolConfig {
+                max_instances,
+                ..config
+            },
+            launcher,
         }
     }
 
     /// Browse a URL and return a semantic snapshot.
+    ///
+    /// Uses CDP when available; falls back to fetching raw HTML and extracting
+    /// a simplified snapshot when no browser is reachable.
     pub async fn browse(
         &self,
         url: &str,
@@ -76,7 +121,34 @@ impl BrowserPool {
         }
 
         let engine = SnapshotEngine::new(effective_options);
-        engine.navigate_and_snapshot(url).await
+        match engine.navigate_and_snapshot(url).await {
+            Ok(snap) => Ok(snap),
+            Err(BrowserError::NotAvailable(_)) if self.launcher.is_none() => {
+                // No CDP available and no launcher — fall back to raw HTML fetch.
+                self.html_fallback(url).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch the page via plain HTTP and build a simplified snapshot from HTML.
+    async fn html_fallback(&self, url: &str) -> Result<BrowserSnapshot, BrowserError> {
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(url)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|e| BrowserError::NavigationFailed(format!("HTTP fetch failed: {e}")))?;
+
+        let html = resp
+            .text()
+            .await
+            .map_err(|e| BrowserError::SnapshotFailed(format!("failed to read HTML body: {e}")))?;
+
+        let mut snap = SnapshotEngine::from_html(&html);
+        snap.url = url.to_string();
+        Ok(snap)
     }
 
     fn is_blocked(&self, url: &str) -> bool {
@@ -108,6 +180,24 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
     if pattern == "*" {
         return true;
     }
+
+    // Collapse consecutive '*' so "a***b" behaves the same as "a*b".
+    let collapsed: String;
+    let pattern = if pattern.contains("**") {
+        collapsed = pattern
+            .chars()
+            .fold(String::with_capacity(pattern.len()), |mut acc, c| {
+                if c == '*' && acc.ends_with('*') {
+                    // skip duplicate
+                } else {
+                    acc.push(c);
+                }
+                acc
+            });
+        collapsed.as_str()
+    } else {
+        pattern
+    };
 
     let parts = pattern.split('*').collect::<Vec<_>>();
     if parts.len() == 1 {
@@ -168,6 +258,17 @@ mod tests {
             "https://internal.example.com/*",
             "https://public.example.com/a"
         ));
+    }
+
+    #[test]
+    fn wildcard_match_collapses_consecutive_stars() {
+        // "a***b" should behave identically to "a*b"
+        assert!(wildcard_match(
+            "https://**example.com**",
+            "https://www.example.com/docs"
+        ));
+        assert!(wildcard_match("a***b", "a_x_b"));
+        assert!(!wildcard_match("a***b", "a_x_c"));
     }
 
     #[tokio::test]

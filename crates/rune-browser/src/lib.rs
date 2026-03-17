@@ -2,10 +2,12 @@
 
 pub mod browser;
 pub mod error;
+pub mod launcher;
 pub mod snapshot;
 pub mod tool;
 
 pub use browser::{BrowserPool, BrowserPoolConfig};
 pub use error::BrowserError;
+pub use launcher::{ChromiumLauncher, LaunchOptions, find_chromium_binary};
 pub use snapshot::{BrowserSnapshot, SnapshotElement, SnapshotEngine, SnapshotOptions};
 pub use tool::{BrowseBackend, BrowseParams, BrowseTool, browse_tool_definition};

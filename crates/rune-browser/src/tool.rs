@@ -14,7 +14,7 @@ use crate::snapshot::{BrowserSnapshot, SnapshotOptions};
 pub struct BrowseParams {
     /// URL to browse.
     pub url: String,
-    /// Reserved for future DOM stabilization support.
+    /// CSS selector to wait for before capturing the snapshot.
     pub wait_for: Option<String>,
     /// Optional maximum characters in the returned snapshot.
     pub max_chars: Option<usize>,
@@ -77,7 +77,7 @@ pub fn browse_tool_definition() -> ToolDefinition {
                 },
                 "wait_for": {
                     "type": "string",
-                    "description": "Reserved selector hint for dynamic pages"
+                    "description": "CSS selector to wait for before capturing the snapshot (useful for dynamic/SPA pages)"
                 },
                 "max_chars": {
                     "type": "integer",
@@ -103,9 +103,9 @@ where
                 reason: err.to_string(),
             })?;
 
-        let options = self.default_options.clone();
-        if let Some(wait_for) = params.wait_for.as_deref() {
-            let _ = wait_for;
+        let mut options = self.default_options.clone();
+        if params.wait_for.is_some() {
+            options.wait_for = params.wait_for.clone();
         }
         let max_chars = params.max_chars.unwrap_or(self.default_max_chars).max(1);
 

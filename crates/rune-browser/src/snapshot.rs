@@ -53,6 +53,10 @@ pub struct SnapshotOptions {
     pub timeout_ms: u64,
     /// Maximum accessibility tree depth to capture.
     pub max_depth: u32,
+    /// Optional CSS selector to wait for before capturing the snapshot.
+    /// When set, the engine polls `document.querySelector(selector)` until the
+    /// element exists (or the timeout expires) instead of using a fixed delay.
+    pub wait_for: Option<String>,
 }
 
 impl Default for SnapshotOptions {
@@ -61,6 +65,7 @@ impl Default for SnapshotOptions {
             cdp_endpoint: None,
             timeout_ms: 30_000,
             max_depth: 10,
+            wait_for: None,
         }
     }
 }
@@ -177,7 +182,6 @@ fn is_interactive_role(role: &str) -> bool {
 pub struct SnapshotEngine {
     options: SnapshotOptions,
     client: reqwest::Client,
-    ref_counter: AtomicU32,
 }
 
 impl SnapshotEngine {
@@ -187,7 +191,6 @@ impl SnapshotEngine {
         Self {
             options,
             client: reqwest::Client::new(),
-            ref_counter: AtomicU32::new(1),
         }
     }
 
@@ -213,13 +216,16 @@ impl SnapshotEngine {
         let nav_params = serde_json::json!({ "url": url });
         let _nav_result = self.cdp_send(ws_url, "Page.navigate", nav_params).await?;
 
-        // Give the page time to load. A production implementation would
-        // subscribe to `Page.loadEventFired` over the persistent WebSocket.
-        // For simplicity we poll readiness with a short delay.
-        tokio::time::sleep(tokio::time::Duration::from_millis(
-            self.options.timeout_ms.min(5_000),
-        ))
-        .await;
+        // Wait for the page to be ready.
+        if let Some(ref selector) = self.options.wait_for {
+            self.wait_for_selector(ws_url, selector).await?;
+        } else {
+            // Fallback: fixed delay when no selector is specified.
+            tokio::time::sleep(tokio::time::Duration::from_millis(
+                self.options.timeout_ms.min(5_000),
+            ))
+            .await;
+        }
 
         // Snapshot
         self.snapshot_ws(ws_url, url).await
@@ -337,6 +343,46 @@ impl SnapshotEngine {
     }
 
     // -- private helpers ----------------------------------------------------
+
+    /// Poll `document.querySelector(selector)` via CDP `Runtime.evaluate`
+    /// every 200 ms until the element exists or the timeout expires.
+    async fn wait_for_selector(&self, ws_url: &str, selector: &str) -> Result<(), BrowserError> {
+        let escaped = selector.replace('\\', "\\\\").replace('\'', "\\'");
+        let expression = format!("document.querySelector('{}') !== null", escaped);
+        let deadline = tokio::time::Instant::now()
+            + tokio::time::Duration::from_millis(self.options.timeout_ms);
+
+        loop {
+            let params = serde_json::json!({
+                "expression": expression,
+                "returnByValue": true,
+            });
+
+            match self.cdp_send(ws_url, "Runtime.evaluate", params).await {
+                Ok(result) => {
+                    let found = result
+                        .get("result")
+                        .and_then(|r| r.get("value"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    if found {
+                        debug!(selector, "wait_for selector matched");
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    debug!(?e, "wait_for_selector poll error (will retry)");
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return Err(BrowserError::Timeout(self.options.timeout_ms));
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+    }
 
     /// Resolved CDP HTTP endpoint.
     fn cdp_endpoint(&self) -> String {
@@ -472,11 +518,11 @@ impl SnapshotEngine {
             .unwrap_or("")
             .to_string();
 
-        // Reset the ref counter for this snapshot.
-        self.ref_counter.store(1, Ordering::Relaxed);
+        // Use a per-snapshot ref counter to avoid races between concurrent calls.
+        let ref_counter = AtomicU32::new(1);
 
         // Build the element tree.
-        let elements = self.build_element_tree(&ax_nodes, 0, self.options.max_depth);
+        let elements = Self::build_element_tree(&ref_counter, &ax_nodes, 0, self.options.max_depth);
 
         let text = render_text(&title, page_url, &elements);
 
@@ -492,7 +538,7 @@ impl SnapshotEngine {
     /// [`SnapshotElement`]s, starting from nodes that have no parent (roots)
     /// or from a specific parent id.
     fn build_element_tree(
-        &self,
+        ref_counter: &AtomicU32,
         nodes: &[AXNode],
         depth: u32,
         max_depth: u32,
@@ -509,7 +555,7 @@ impl SnapshotEngine {
 
         let mut elements = Vec::new();
         for root in roots {
-            if let Some(el) = self.convert_node(root, &by_id, depth, max_depth) {
+            if let Some(el) = Self::convert_node(ref_counter, root, &by_id, depth, max_depth) {
                 elements.push(el);
             }
         }
@@ -518,7 +564,7 @@ impl SnapshotEngine {
 
     /// Convert a single AX node and its children into a [`SnapshotElement`].
     fn convert_node(
-        &self,
+        ref_counter: &AtomicU32,
         node: &AXNode,
         by_id: &std::collections::HashMap<&str, &AXNode>,
         depth: u32,
@@ -572,7 +618,7 @@ impl SnapshotEngine {
             });
 
         let ref_id = if interactive {
-            Some(self.ref_counter.fetch_add(1, Ordering::Relaxed))
+            Some(ref_counter.fetch_add(1, Ordering::Relaxed))
         } else {
             None
         };
@@ -583,7 +629,7 @@ impl SnapshotEngine {
                 .iter()
                 .filter_map(|cid| {
                     let child_node = by_id.get(cid.as_str())?;
-                    self.convert_node(child_node, by_id, depth + 1, max_depth)
+                    Self::convert_node(ref_counter, child_node, by_id, depth + 1, max_depth)
                 })
                 .collect()
         } else {
