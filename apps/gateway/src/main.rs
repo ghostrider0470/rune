@@ -22,8 +22,7 @@ use tokio::signal;
 use tracing::{error, info, warn};
 
 use rune_channels::TelegramAdapter;
-use rune_config::{AppConfig, MemoryLevel};
-use rune_core::ToolCategory;
+use rune_config::{AppConfig, MemoryLevel};use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
 use rune_mcp::{McpManager, McpToolExecutor};
@@ -156,7 +155,6 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
 async fn build_services(
     config: AppConfig,
 ) -> Result<(Services, Option<EmbeddedPg>, Option<SessionLoop>)> {
-    // Resolve the database URL — either from config or by starting embedded PG.
     let (database_url, embedded_pg) = if let Some(ref url) = config.database.database_url {
         info!("using external PostgreSQL");
         (url.clone(), None)
@@ -169,13 +167,11 @@ async fn build_services(
         (url, Some(epg))
     };
 
-    // Run migrations.
     if config.database.run_migrations {
         info!("running pending database migrations");
         rune_store::pool::run_migrations(&database_url)?;
     }
 
-    // Probe pgvector availability (never crashes — graceful fallback).
     let pgvector_status = rune_store::pool::try_upgrade_pgvector(&database_url);
     match &pgvector_status {
         PgVectorStatus::Available => info!("pgvector available — vector search enabled"),
@@ -184,7 +180,6 @@ async fn build_services(
         }
     }
 
-    // Build connection pool.
     let pool =
         rune_store::pool::create_pool(&database_url, config.database.max_connections as usize)?;
 
@@ -232,7 +227,7 @@ async fn build_services(
     ));
     let reminder_store = Arc::new(ReminderStore::new_with_repo(job_repo));
     let mut registry = ToolRegistry::new();
-    let browse = build_browse_tool_executor(&config);
+    let browse = build_browse_tool_executor(&config).await;
     register_real_tool_definitions(&mut registry, browse.is_some());
     let mcp = build_mcp_tool_executor(&config, &workspace_root).await?;
     if let Some(ref executor) = mcp {
@@ -361,8 +356,7 @@ async fn build_services(
         mcp_servers = mcp_count,
         telegram = telegram_enabled,
         tools = tool_count,
-        "capabilities"
-    );
+        "capabilities"    );
 
     let services = Services {
         config,
@@ -378,7 +372,7 @@ async fn build_services(
         approval_repo,
         tool_approval_repo,
         process_manager,
-        tool_count,
+        capabilities,
         device_repo,
     };
 
@@ -449,17 +443,18 @@ async fn build_mcp_tool_executor(
     Ok(Some(Arc::new(McpToolExecutor::new(Arc::new(manager)))))
 }
 
-fn build_browse_tool_executor(config: &AppConfig) -> Option<Arc<dyn ToolExecutor>> {
+async fn build_browse_tool_executor(config: &AppConfig) -> Option<Arc<dyn ToolExecutor>> {
     if !config.browser.enabled {
         return None;
     }
 
-    let pool = BrowserPool::new(BrowserPoolConfig {
+    let pool = BrowserPool::new_with_auto_launch(BrowserPoolConfig {
         cdp_endpoint: config.browser.cdp_endpoint.clone(),
         chromium_path: config.browser.chromium_path.clone(),
         max_instances: config.browser.max_instances,
         blocked_urls: config.browser.blocked_urls.clone(),
-    });
+    })
+    .await;
     let options = SnapshotOptions {
         cdp_endpoint: config.browser.cdp_endpoint.clone(),
         timeout_ms: config.browser.page_load_timeout_ms,
@@ -577,7 +572,6 @@ async fn build_memory_tool_executor_with_index_config(
             return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
         }
     };
-
     let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(PgMemoryEmbeddingRepo::new(
         rune_store::pool::create_pool(database_url, config.database.max_connections as usize)?,
     ));
@@ -2040,6 +2034,19 @@ mod tests {
         assert!(executor.hybrid_search_backend().is_none());
     }
 
+    #[tokio::test]
+    async fn build_memory_tool_executor_falls_back_without_pgvector_for_semantic_mode() {
+        let mut config = AppConfig::default();
+        config.memory.level = Some(MemoryLevel::Semantic);
+
+        let executor =
+            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
+                .await
+                .expect("memory tool executor should fall back cleanly");
+
+        assert!(executor.hybrid_search_backend().is_none());
+    }
+
     #[test]
     fn browse_tool_is_registered_only_when_enabled() {
         let mut disabled_registry = ToolRegistry::new();
@@ -2051,14 +2058,14 @@ mod tests {
         assert!(enabled_registry.lookup("browse").is_ok());
     }
 
-    #[test]
-    fn build_browse_tool_executor_respects_browser_flag() {
+    #[tokio::test]
+    async fn build_browse_tool_executor_respects_browser_flag() {
         let config = AppConfig::default();
-        assert!(build_browse_tool_executor(&config).is_none());
+        assert!(build_browse_tool_executor(&config).await.is_none());
 
         let mut enabled = AppConfig::default();
         enabled.browser.enabled = true;
-        assert!(build_browse_tool_executor(&enabled).is_some());
+        assert!(build_browse_tool_executor(&enabled).await.is_some());
     }
 
     struct StubToolExecutor {
