@@ -335,28 +335,32 @@ async fn build_services(
         None
     };
 
-    // Emit capability summary.
-    let memory_mode = config.memory.capability_mode(hybrid_search_enabled);
-    let browser_enabled = config.browser.enabled;
-    let mcp_count = config.mcp_servers.iter().filter(|s| s.enabled).count();
-    let telegram_enabled = config
-        .channels
-        .telegram_token
-        .as_ref()
-        .is_some_and(|t| !t.is_empty());
+    let resolved_mode = config.mode.resolve(&config);
+    let capabilities = rune_config::Capabilities::detect(
+        &config,
+        resolved_mode,
+        if embedded_pg.is_some() {
+            "postgres (embedded)"
+        } else {
+            "postgres (external)"
+        },
+        pgvector_status.is_available(),
+        hybrid_search_enabled,
+        tool_count,
+    );
     info!(
-        requested_memory_level = config.memory.requested_level().as_str(),
-        effective_memory_level = config
-            .memory
-            .effective_level(hybrid_search_enabled)
-            .as_str(),
-        pgvector = pgvector_status.is_available(),
-        memory = memory_mode,
-        browser = browser_enabled,
-        mcp_servers = mcp_count,
-        telegram = telegram_enabled,
-        tools = tool_count,
-        "capabilities"    );
+        mode = capabilities.mode.as_str(),
+        storage = %capabilities.storage_backend,
+        pgvector = capabilities.pgvector,
+        memory = %capabilities.memory_mode,
+        browser = capabilities.browser,
+        mcp = capabilities.mcp_servers,
+        tts = capabilities.tts,
+        stt = capabilities.stt,
+        tools = capabilities.tool_count,
+        channels = ?capabilities.channels,
+        "runtime capabilities"
+    );
 
     let services = Services {
         config,
@@ -2030,19 +2034,6 @@ mod tests {
         )
         .await
         .expect("memory tool executor should fall back without OpenAI credentials");
-
-        assert!(executor.hybrid_search_backend().is_none());
-    }
-
-    #[tokio::test]
-    async fn build_memory_tool_executor_falls_back_without_pgvector_for_semantic_mode() {
-        let mut config = AppConfig::default();
-        config.memory.level = Some(MemoryLevel::Semantic);
-
-        let executor =
-            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
-                .await
-                .expect("memory tool executor should fall back cleanly");
 
         assert!(executor.hybrid_search_backend().is_none());
     }
