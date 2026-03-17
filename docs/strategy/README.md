@@ -5,5 +5,5 @@ This folder is reserved for long-form design rationale and supporting strategy d
 Current canonical entrypoints remain:
 - [`../INDEX.md`](../INDEX.md)
 - [`../../rune-plan.md`](../../rune-plan.md)
-- [`../COMPETITIVE-RESEARCH.md`](../COMPETITIVE-RESEARCH.md)
-- [`../AZURE-DATA-OPTIONS.md`](../AZURE-DATA-OPTIONS.md)
+- [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md)
+- [`AZURE-DATA-OPTIONS.md`](AZURE-DATA-OPTIONS.md)
