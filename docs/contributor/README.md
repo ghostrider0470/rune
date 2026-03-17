@@ -1,0 +1,8 @@
+# Contributor Docs
+
+This folder is reserved for development workflow, contributor guidance, and testing-oriented docs during the docs structure cleanup transition.
+
+Current canonical entrypoints remain:
+- [`../INDEX.md`](../INDEX.md)
+- [`../AGENT-ORCHESTRATION.md`](../AGENT-ORCHESTRATION.md)
+- [`../CRATE-LAYOUT.md`](../CRATE-LAYOUT.md)

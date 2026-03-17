@@ -19,6 +19,20 @@ Use it to find the right source of truth by audience and concern.
 | Contributor/reference docs | [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md), [`SUBSYSTEMS.md`](SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |
 | Long-form strategy / rationale | [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md), [`AZURE-DATA-OPTIONS.md`](AZURE-DATA-OPTIONS.md), [`DOCS-README-PLAN-REORG.md`](DOCS-README-PLAN-REORG.md) | design rationale and planning context |
 
+## Transitional structure scaffold
+
+The approved audience-based folder layout now exists in scaffold form:
+
+- [`getting-started/`](getting-started/README.md)
+- [`operator/`](operator/README.md)
+- [`contributor/`](contributor/README.md)
+- [`reference/`](reference/README.md)
+- [`parity/`](parity/README.md)
+- [`strategy/`](strategy/README.md)
+- [`adr/`](adr/README.md)
+
+The current top-level docs remain authoritative until content is intentionally moved.
+
 ## Recommended reading paths
 
 ### If you are evaluating Rune
