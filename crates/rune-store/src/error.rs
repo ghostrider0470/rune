@@ -36,6 +36,7 @@ impl From<serde_json::Error> for StoreError {
     }
 }
 
+#[cfg(feature = "postgres")]
 impl From<diesel::result::Error> for StoreError {
     fn from(err: diesel::result::Error) -> Self {
         match err {
@@ -47,6 +48,35 @@ impl From<diesel::result::Error> for StoreError {
                 diesel::result::DatabaseErrorKind::UniqueViolation,
                 info,
             ) => Self::Conflict(info.message().to_string()),
+            other => Self::Database(other.to_string()),
+        }
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl From<rusqlite::Error> for StoreError {
+    fn from(err: rusqlite::Error) -> Self {
+        match &err {
+            rusqlite::Error::QueryReturnedNoRows => Self::NotFound {
+                entity: "record",
+                id: "unknown".to_string(),
+            },
+            rusqlite::Error::SqliteFailure(ffi_err, _)
+                if ffi_err.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                    || ffi_err.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY =>
+            {
+                Self::Conflict(err.to_string())
+            }
+            _ => Self::Database(err.to_string()),
+        }
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl From<tokio_rusqlite::Error<rusqlite::Error>> for StoreError {
+    fn from(err: tokio_rusqlite::Error<rusqlite::Error>) -> Self {
+        match err {
+            tokio_rusqlite::Error::Error(e) => Self::from(e),
             other => Self::Database(other.to_string()),
         }
     }

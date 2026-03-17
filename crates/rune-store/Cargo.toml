@@ -5,13 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+default = ["postgres", "sqlite"]
+postgres = ["dep:diesel", "dep:diesel-async", "dep:diesel_migrations", "dep:postgresql_embedded"]
+sqlite = ["dep:rusqlite", "dep:tokio-rusqlite"]
+
 [dependencies]
 rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
 async-trait.workspace = true
-diesel = { workspace = true, features = ["postgres", "uuid", "chrono", "serde_json"] }
-diesel-async = { workspace = true, features = ["postgres", "deadpool"] }
-diesel_migrations.workspace = true
+diesel = { workspace = true, features = ["postgres", "uuid", "chrono", "serde_json"], optional = true }
+diesel-async = { workspace = true, features = ["postgres", "deadpool"], optional = true }
+diesel_migrations = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -19,7 +24,9 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
-postgresql_embedded.workspace = true
+postgresql_embedded = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
+tokio-rusqlite = { workspace = true, optional = true }
 
 [dev-dependencies]
 diesel-async = { workspace = true, features = ["postgres", "deadpool"] }

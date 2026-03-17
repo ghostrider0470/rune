@@ -1,20 +1,31 @@
-#![doc = "Persistence layer for Rune: Diesel repos, migrations, and embedded PostgreSQL fallback."]
+#![doc = "Persistence layer for Rune: trait-based repos with Postgres and SQLite backends."]
 
+#[cfg(feature = "postgres")]
 pub mod embedded;
 pub mod error;
+pub mod factory;
 pub mod models;
+#[cfg(feature = "postgres")]
 pub mod pg;
+#[cfg(feature = "postgres")]
 pub mod pool;
 pub mod repos;
+#[cfg(feature = "postgres")]
 pub mod schema;
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 
+#[cfg(feature = "postgres")]
 pub use embedded::EmbeddedPg;
 pub use error::StoreError;
-pub use pool::PgVectorStatus;
+pub use factory::{RepoSet, StorageInfo, build_repos};
+#[cfg(feature = "postgres")]
 pub use pg::{
     PgApprovalRepo, PgDeviceRepo, PgJobRepo, PgJobRunRepo, PgMemoryEmbeddingRepo,
     PgToolApprovalPolicyRepo, PgToolExecutionRepo,
 };
+#[cfg(feature = "postgres")]
+pub use pool::PgVectorStatus;
 pub use repos::{
     ApprovalRepo, DeviceRepo, JobRepo, JobRunRepo, MemoryEmbeddingRepo, ToolApprovalPolicy,
     ToolExecutionRepo,

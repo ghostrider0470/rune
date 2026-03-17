@@ -65,7 +65,9 @@ async fn setup() -> Option<PgPool> {
     let pool = match create_pool(&url, 5) {
         Ok(pool) => pool,
         Err(err) => {
-            eprintln!("skipping rune-store device pairing integration tests: pool creation failed: {err}");
+            eprintln!(
+                "skipping rune-store device pairing integration tests: pool creation failed: {err}"
+            );
             return None;
         }
     };
@@ -73,7 +75,9 @@ async fn setup() -> Option<PgPool> {
     let mut conn = match pool.get().await {
         Ok(conn) => conn,
         Err(err) => {
-            eprintln!("skipping rune-store device pairing integration tests: failed to get connection: {err}");
+            eprintln!(
+                "skipping rune-store device pairing integration tests: failed to get connection: {err}"
+            );
             return None;
         }
     };
@@ -158,14 +162,25 @@ async fn device_repo_create_find_rotate_touch_and_delete() {
     repo.touch_last_seen(device_id, touched_at).await.unwrap();
     let touched = repo.find_device_by_id(device_id).await.unwrap();
     let stored_last_seen = touched.last_seen_at.expect("last_seen_at should be set");
-    assert!((stored_last_seen - touched_at).num_microseconds().unwrap().abs() <= 1);
+    assert!(
+        (stored_last_seen - touched_at)
+            .num_microseconds()
+            .unwrap()
+            .abs()
+            <= 1
+    );
 
     let listed = repo.list_devices().await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, device_id);
 
     assert!(repo.delete_device(device_id).await.unwrap());
-    assert!(repo.find_device_by_token_hash(&("feedface".repeat(8))).await.unwrap().is_none());
+    assert!(
+        repo.find_device_by_token_hash(&("feedface".repeat(8)))
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -215,7 +230,11 @@ async fn device_repo_pairing_request_take_and_prune() {
 
     let pending_before_take = repo.list_pending_requests().await.unwrap();
     assert_eq!(pending_before_take.len(), 2);
-    assert!(pending_before_take.iter().all(|request| request.id != expired_id));
+    assert!(
+        pending_before_take
+            .iter()
+            .all(|request| request.id != expired_id)
+    );
 
     let taken = repo.take_pairing_request(taken_id).await.unwrap().unwrap();
     assert_eq!(taken.device_name, "take-me");
@@ -270,5 +289,8 @@ async fn device_repo_rejects_duplicate_public_keys() {
         })
         .await;
 
-    assert!(matches!(duplicate, Err(rune_store::StoreError::Conflict(_))));
+    assert!(matches!(
+        duplicate,
+        Err(rune_store::StoreError::Conflict(_))
+    ));
 }
