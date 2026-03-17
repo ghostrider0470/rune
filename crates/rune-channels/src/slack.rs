@@ -39,21 +39,13 @@ pub struct SlackAdapter {
 impl SlackAdapter {
     /// Create a new Slack adapter.
     ///
-<<<<<<< HEAD
-    /// * `bot_token`  - Slack bot OAuth token (`xoxb-...`).
-    /// * `app_token`  - Slack app-level token (`xapp-...`), reserved for future
-    ///   Socket Mode support.
-    /// * `listen_addr`- Local address to bind the Events API webhook receiver
-    ///   (e.g. `"0.0.0.0:3100"`). If `None`, only outbound sending is available.
-=======
     /// * `bot_token`       - Slack bot OAuth token (`xoxb-...`).
     /// * `signing_secret`  - Slack signing secret for HMAC-SHA256 webhook
-    ///                        verification.  When `None`, signature checks are
+    ///                        verification. When `None`, signature checks are
     ///                        skipped (local dev mode).
     /// * `listen_addr`     - Local address to bind the Events API webhook receiver
-    ///                        (e.g. `"0.0.0.0:3100"`).  If `None`, only outbound
+    ///                        (e.g. `"0.0.0.0:3100"`). If `None`, only outbound
     ///                        sending is available.
->>>>>>> 94a7ba8 (feat(channels): harden webhook verification)
     pub fn new(
         bot_token: impl Into<String>,
         signing_secret: Option<String>,
@@ -908,11 +900,7 @@ mod tests {
             .mount(&server)
             .await;
 
-<<<<<<< HEAD
-        let adapter = SlackAdapter::with_api_base("xoxb-test", "xapp-test", None, server.uri());
-=======
         let adapter = SlackAdapter::with_api_base("xoxb-test", None, None, server.uri());
->>>>>>> 94a7ba8 (feat(channels): harden webhook verification)
 
         let send_receipt = adapter
             .send(OutboundAction::Send {
@@ -1000,11 +988,7 @@ mod tests {
             .mount(&server)
             .await;
 
-<<<<<<< HEAD
-        let adapter = SlackAdapter::with_api_base("xoxb-test", "xapp-test", None, server.uri());
-=======
         let adapter = SlackAdapter::with_api_base("xoxb-test", None, None, server.uri());
->>>>>>> 94a7ba8 (feat(channels): harden webhook verification)
 
         let receipt = adapter
             .send(OutboundAction::Send {
