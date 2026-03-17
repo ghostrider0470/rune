@@ -227,7 +227,7 @@ Persistent mounts: `./data` → `/data`, `./config` → `/config`
 
 | Doc | What |
 |-----|------|
-| [`PLAN.md`](docs/PLAN.md) | Scope, architecture, subsystem breakdown |
+| [`rune-plan.md`](rune-plan.md) | Canonical strategy, goals, stack direction |
 | [`PARITY-INVENTORY.md`](docs/PARITY-INVENTORY.md) | OpenClaw feature parity map |
 | [`AZURE-COMPATIBILITY.md`](docs/AZURE-COMPATIBILITY.md) | Azure integration contract |
 | [`DOCKER-DEPLOYMENT.md`](docs/DOCKER-DEPLOYMENT.md) | Docker deployment model |

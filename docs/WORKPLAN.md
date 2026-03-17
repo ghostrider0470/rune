@@ -2,6 +2,8 @@
 
 This file is historical context, not current execution authority.
 
+Canonical product strategy now lives in `../rune-plan.md`.
+
 The original overnight planning package described here has already been completed and materially superseded by:
 
 - the live Cargo workspace and crate skeletons

@@ -399,10 +399,9 @@ Every agent MUST read these files before writing code:
 
 | File | Why |
 |------|-----|
-| `docs/PLAN.md` | Overall goals, principles, constraints |
+| `rune-plan.md` | Canonical goals, product direction, and confirmed stack constraints |
 | `docs/CRATE-LAYOUT.md` | Crate responsibilities and dependency rules |
 | `docs/PROTOCOLS.md` | Entity model, state machines, subsystem contracts |
-| `docs/STACK.md` | Confirmed technology choices |
 | `docs/DATABASES.md` | PostgreSQL decision, Diesel, embedded PG, FTS, pgvector |
 | `docs/PARITY-SPEC.md` | What parity means and what's in scope |
 | `docs/IMPLEMENTATION-PHASES.md` | Phase acceptance criteria and sequencing rules |

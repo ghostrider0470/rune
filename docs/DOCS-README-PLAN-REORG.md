@@ -5,6 +5,10 @@
 > This document is a planning/review artifact only. It does **not** authorize automatic
 > rewrites, deletions, or moves by itself. Structural/content changes should begin only after
 > explicit verification from Hamza.
+>
+> Verification note (2026-03-17): `rune-plan.md` has now been introduced at repo root as the
+> canonical strategy file. `docs/PLAN.md`, `docs/STACK.md`, and `docs/WORKPLAN.md` remain in
+> place as transitional provenance while the wider docs/README cleanup remains pending.
 
 ---
 
@@ -92,7 +96,7 @@ Current planning surfaces include:
 - `rune-plan.md`
 - `docs/IMPLEMENTATION-PHASES.md`
 - `docs/STANDALONE-STRATEGY.md`
-- older files being retired or already deleted from active use (`docs/PLAN.md`, `docs/STACK.md`, `docs/WORKPLAN.md`)
+- legacy planning files still present during transition (`docs/PLAN.md`, `docs/STACK.md`, `docs/WORKPLAN.md`)
 
 Problems:
 - overlap between product roadmap and implementation-phase plans
