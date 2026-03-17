@@ -210,7 +210,33 @@ fn check_docker_path_layout(config: &AppConfig) -> CheckResult {
 async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
     let mut results = Vec::new();
 
-    let using_embedded = config.database.database_url.is_none();
+    let using_external_postgres = config.database.database_url.is_some();
+    let resolved_backend = match config.database.backend {
+        rune_config::StorageBackend::Postgres => "postgres",
+        rune_config::StorageBackend::Sqlite => "sqlite",
+        rune_config::StorageBackend::Auto => {
+            if using_external_postgres {
+                "postgres"
+            } else {
+                "sqlite"
+            }
+        }
+    };
+
+    results.push(CheckResult {
+        name: "database.backend".into(),
+        category: "database".into(),
+        status: CheckStatus::Pass,
+        message: format!(
+            "Configured backend = {:?}; resolved runtime backend = {resolved_backend}",
+            config.database.backend
+        ),
+        hint: if matches!(config.database.backend, rune_config::StorageBackend::Auto) {
+            Some("Auto resolves to PostgreSQL when database_url is set, otherwise SQLite".into())
+        } else {
+            None
+        },
+    });
 
     results.push(if let Some(url) = &config.database.database_url {
         let scheme = url.split(':').next().unwrap_or_default();
@@ -226,24 +252,32 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             hint: if scheme.starts_with("postgres") {
                 None
             } else {
-                Some("Expected postgres:// or postgresql:// URL for parity target".into())
+                Some("Expected postgres:// or postgresql:// URL when using external PostgreSQL".into())
             },
         }
     } else {
         CheckResult {
             name: "database.url".into(),
             category: "database".into(),
-            status: CheckStatus::Warn,
-            message: "database_url not set; runtime will rely on embedded PostgreSQL fallback"
-                .into(),
-            hint: Some(
-                "Fine for zero-config local dev; production should usually point at durable PostgreSQL"
-                    .into(),
-            ),
+            status: if resolved_backend == "sqlite" {
+                CheckStatus::Pass
+            } else {
+                CheckStatus::Warn
+            },
+            message: if resolved_backend == "sqlite" {
+                "database_url not set; runtime will use the SQLite-backed repo path".into()
+            } else {
+                "database_url not set; runtime will rely on embedded PostgreSQL".into()
+            },
+            hint: if resolved_backend == "sqlite" {
+                Some("Fine for standalone/local mode; set database.backend=postgres or database_url to use PostgreSQL".into())
+            } else {
+                Some("Fine for zero-config local dev; production should usually point at durable PostgreSQL".into())
+            },
         }
     });
 
-    if using_embedded {
+    if resolved_backend == "postgres" && !using_external_postgres {
         results.extend(check_embedded_postgres_layout(config));
     }
 
@@ -301,7 +335,7 @@ fn check_embedded_postgres_layout(config: &AppConfig) -> Vec<CheckResult> {
             db_dir.display()
         ),
         hint: Some(
-            "For zero-config local dev this is expected; production can switch to external PostgreSQL via database_url".into(),
+            "For zero-config local dev this is expected; production can switch to external PostgreSQL via database_url or use SQLite-backed standalone mode where appropriate".into(),
         ),
     }];
 
