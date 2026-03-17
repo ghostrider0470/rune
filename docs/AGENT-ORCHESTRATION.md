@@ -400,7 +400,7 @@ Every agent MUST read these files before writing code:
 | File | Why |
 |------|-----|
 | `rune-plan.md` | Canonical goals, product direction, and confirmed stack constraints |
-| `docs/CRATE-LAYOUT.md` | Crate responsibilities and dependency rules |
+| `docs/reference/CRATE-LAYOUT.md` | Crate responsibilities and dependency rules |
 | `docs/parity/PROTOCOLS.md` | Entity model, state machines, subsystem contracts |
 | `docs/operator/DATABASES.md` | PostgreSQL decision, Diesel, embedded PG, FTS, pgvector |
 | `docs/parity/PARITY-SPEC.md` | What parity means and what's in scope |
