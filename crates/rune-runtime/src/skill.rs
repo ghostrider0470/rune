@@ -113,6 +113,11 @@ impl SkillRegistry {
         self.inner.read().await.len()
     }
 
+    /// Whether there are no registered skills.
+    pub async fn is_empty(&self) -> bool {
+        self.inner.read().await.is_empty()
+    }
+
     /// Build a system prompt fragment for all enabled skills.
     pub async fn system_prompt_fragment(&self) -> Option<String> {
         let enabled = self.list_enabled().await;

@@ -319,9 +319,9 @@ impl ModelProvider for BedrockProvider {
             .map(|msg| {
                 msg.content
                     .into_iter()
-                    .filter_map(|block| {
+                    .map(|block| {
                         let BedrockContentBlock::Text { text } = block;
-                        Some(text)
+                        text
                     })
                     .collect::<Vec<_>>()
                     .join("")

@@ -541,13 +541,14 @@ impl DeviceRepo for MemDeviceRepo {
         token_expires_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<PairedDeviceRow, StoreError> {
         let mut devices = self.devices.lock().await;
-        let device = devices
-            .iter_mut()
-            .find(|device| device.id == id)
-            .ok_or(StoreError::NotFound {
-                entity: "paired_device",
-                id: id.to_string(),
-            })?;
+        let device =
+            devices
+                .iter_mut()
+                .find(|device| device.id == id)
+                .ok_or(StoreError::NotFound {
+                    entity: "paired_device",
+                    id: id.to_string(),
+                })?;
         device.token_hash = token_hash.to_string();
         device.token_expires_at = token_expires_at;
         Ok(device.clone())
@@ -560,13 +561,14 @@ impl DeviceRepo for MemDeviceRepo {
         scopes: serde_json::Value,
     ) -> Result<PairedDeviceRow, StoreError> {
         let mut devices = self.devices.lock().await;
-        let device = devices
-            .iter_mut()
-            .find(|device| device.id == id)
-            .ok_or(StoreError::NotFound {
-                entity: "paired_device",
-                id: id.to_string(),
-            })?;
+        let device =
+            devices
+                .iter_mut()
+                .find(|device| device.id == id)
+                .ok_or(StoreError::NotFound {
+                    entity: "paired_device",
+                    id: id.to_string(),
+                })?;
         device.role = role.to_string();
         device.scopes = scopes;
         Ok(device.clone())
@@ -578,13 +580,14 @@ impl DeviceRepo for MemDeviceRepo {
         last_seen_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), StoreError> {
         let mut devices = self.devices.lock().await;
-        let device = devices
-            .iter_mut()
-            .find(|device| device.id == id)
-            .ok_or(StoreError::NotFound {
-                entity: "paired_device",
-                id: id.to_string(),
-            })?;
+        let device =
+            devices
+                .iter_mut()
+                .find(|device| device.id == id)
+                .ok_or(StoreError::NotFound {
+                    entity: "paired_device",
+                    id: id.to_string(),
+                })?;
         device.last_seen_at = Some(last_seen_at);
         Ok(())
     }
@@ -612,7 +615,10 @@ impl DeviceRepo for MemDeviceRepo {
         Ok(row)
     }
 
-    async fn take_pairing_request(&self, id: Uuid) -> Result<Option<PairingRequestRow>, StoreError> {
+    async fn take_pairing_request(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<PairingRequestRow>, StoreError> {
         let mut requests = self.requests.lock().await;
         if let Some(index) = requests.iter().position(|request| request.id == id) {
             Ok(Some(requests.remove(index)))
@@ -1360,7 +1366,10 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
 
     assert_eq!(payload["session_id"], session_id.to_string());
     assert_eq!(payload["channel_ref"], "telegram:chat-1");
-    assert_eq!(payload["runtime"], "kind=direct | channel=telegram:chat-1 | status=created");
+    assert_eq!(
+        payload["runtime"],
+        "kind=direct | channel=telegram:chat-1 | status=created"
+    );
     assert_eq!(payload["current_model"], "fake-model");
     assert_eq!(payload["model_override"], Value::Null);
     assert_eq!(payload["turn_count"], 1);
@@ -1376,9 +1385,11 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
     assert!(payload["last_turn_started_at"].is_string());
     assert!(payload["last_turn_ended_at"].is_string());
     let unresolved = payload["unresolved"].as_array().unwrap();
-    assert!(unresolved.iter().any(|item| item.as_str() == Some("cost posture is estimate-only; provider pricing is not wired yet")));
+    assert!(unresolved.iter().any(|item| item.as_str()
+        == Some("cost posture is estimate-only; provider pricing is not wired yet")));
     assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
-    assert!(unresolved.iter().any(|item| item.as_str() == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
+    assert!(unresolved.iter().any(|item| item.as_str()
+        == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
 }
 
 #[tokio::test]
@@ -1479,7 +1490,10 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
 
     let dispatcher = RpcDispatcher::new(state);
     let payload = dispatcher
-        .dispatch("session.get", serde_json::json!({ "session_id": session_id.to_string() }))
+        .dispatch(
+            "session.get",
+            serde_json::json!({ "session_id": session_id.to_string() }),
+        )
         .await
         .unwrap();
 
@@ -2669,14 +2683,18 @@ async fn device_pair_approve_rejects_wrong_signature() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let payload = body_json(response).await;
     assert_eq!(payload["code"], "bad_request");
-    assert_eq!(payload["message"], "bad request: challenge response verification failed");
+    assert_eq!(
+        payload["message"],
+        "bad request: challenge response verification failed"
+    );
 }
 
 #[tokio::test]
 async fn device_pair_approve_rejects_expired_request() {
     use ed25519_dalek::{Signer, SigningKey};
 
-    let (app, device_repo) = build_test_app_parts(AppConfig::default(), Some(TEST_AUTH_TOKEN.to_string()));
+    let (app, device_repo) =
+        build_test_app_parts(AppConfig::default(), Some(TEST_AUTH_TOKEN.to_string()));
     let signing_key = SigningKey::from_bytes(&[21u8; 32]);
     let public_key = hex::encode(signing_key.verifying_key().as_bytes());
 
@@ -2730,7 +2748,12 @@ async fn device_pair_approve_rejects_expired_request() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let payload = body_json(response).await;
     assert_eq!(payload["code"], "bad_request");
-    assert!(payload["message"].as_str().unwrap().contains("pairing request expired"));
+    assert!(
+        payload["message"]
+            .as_str()
+            .unwrap()
+            .contains("pairing request expired")
+    );
 }
 
 #[tokio::test]
@@ -2836,7 +2859,7 @@ async fn device_list_masks_tokens_and_includes_pending_requests() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let payload = body_json(response).await;
-    assert!(payload["pending_requests"].as_array().unwrap().len() >= 1);
+    assert!(!payload["pending_requests"].as_array().unwrap().is_empty());
     assert!(payload["devices"].as_array().unwrap().is_empty());
 }
 
@@ -2987,7 +3010,11 @@ async fn device_pair_pending_route_requires_gateway_token() {
 
     let response = app
         .clone()
-        .oneshot(Request::get("/devices/pair/pending").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/devices/pair/pending")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -3536,7 +3563,10 @@ async fn get_session_status_surfaces_subagent_metadata() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["session_id"], session_id.to_string());
-    assert_eq!(json["runtime"], "kind=subagent | channel=local | status=running");
+    assert_eq!(
+        json["runtime"],
+        "kind=subagent | channel=local | status=running"
+    );
     assert_eq!(json["status"], "running");
     assert_eq!(json["current_model"], "gpt-5.4");
     assert_eq!(json["model_override"], "gpt-5.4");
@@ -3551,9 +3581,11 @@ async fn get_session_status_surfaces_subagent_metadata() {
         "Steering message queued for subagent/session: tighten the tests"
     );
     let unresolved = json["unresolved"].as_array().unwrap();
-    assert!(unresolved.iter().any(|item| item.as_str() == Some("cost posture is estimate-only; provider pricing is not wired yet")));
+    assert!(unresolved.iter().any(|item| item.as_str()
+        == Some("cost posture is estimate-only; provider pricing is not wired yet")));
     assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
-    assert!(unresolved.iter().any(|item| item.as_str() == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
+    assert!(unresolved.iter().any(|item| item.as_str()
+        == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
     assert!(unresolved.iter().any(|item| item.as_str() == Some("subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete")));
 }
 

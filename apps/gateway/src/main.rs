@@ -2131,10 +2131,12 @@ mod tests {
         }
     }
 
+    type UpsertedChunk = (String, i32, String, Vec<f32>);
+
     struct MemMemoryEmbeddingRepo {
         existing_files: Mutex<Vec<String>>,
         deleted_files: Mutex<Vec<String>>,
-        upserted_chunks: Mutex<Vec<(String, i32, String, Vec<f32>)>>,
+        upserted_chunks: Mutex<Vec<UpsertedChunk>>,
     }
 
     impl MemMemoryEmbeddingRepo {
