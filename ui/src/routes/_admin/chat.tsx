@@ -31,9 +31,11 @@ import {
   useChatSend,
   useChatMergedTranscript,
 } from "@/hooks/use-chat";
+import { useA2ui } from "@/hooks/use-a2ui";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { A2uiRenderer } from "@/components/a2ui/A2uiRenderer";
 import {
   CHAT_FOCUS_MODE_KEY,
   CHAT_SHOW_THINKING_KEY,
@@ -106,6 +108,7 @@ function ChatPage() {
 
   const {
     entries,
+    rawEvents,
     isLoading: transcriptLoading,
     isFetching: transcriptFetching,
     isError: transcriptError,
@@ -113,6 +116,7 @@ function ChatPage() {
     refetch: refetchTranscript,
   } = useChatMergedTranscript(activeSessionId);
 
+  const { state: a2uiState } = useA2ui(rawEvents);
   const sendMutation = useChatSend(activeSessionId);
 
   const activeSession = useMemo(
@@ -241,7 +245,7 @@ function ChatPage() {
     }
   }, [showThinking]);
 
-  const inspectorOpen = Boolean(selectedToolEntry);
+  const inspectorOpen = Boolean(selectedToolEntry) || a2uiState.panel.length > 0;
 
   const handleResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const container = splitContainerRef.current;
@@ -584,13 +588,19 @@ function ChatPage() {
                         <div className="absolute left-1/2 top-1/2 h-10 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border/80 transition-colors group-hover:bg-primary/50" />
                       </div>
                       <div style={{ width: `${(1 - inspectorRatio) * 100}%` }} className="min-w-[280px] max-w-[520px]">
-                        <ChatSidebar
-                          mode="inspector"
-                          selectedToolEntry={selectedToolEntry}
-                          selectedToolPair={selectedToolPair}
-                          onCloseInspector={clearInspector}
-                          className="h-full rounded-none border-y-0 border-r-0 shadow-none"
-                        />
+                        {selectedToolEntry ? (
+                          <ChatSidebar
+                            mode="inspector"
+                            selectedToolEntry={selectedToolEntry}
+                            selectedToolPair={selectedToolPair}
+                            onCloseInspector={clearInspector}
+                            className="h-full rounded-none border-y-0 border-r-0 shadow-none"
+                          />
+                        ) : (
+                          <div className="h-full overflow-y-auto border-l border-border/70 p-4">
+                            <A2uiRenderer components={a2uiState.panel} />
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -627,6 +637,12 @@ function ChatPage() {
                   {createSession.isPending ? "Creating..." : "Create session"}
                 </Button>
               </div>
+            </div>
+          )}
+
+          {activeSessionId && a2uiState.inline.length > 0 && (
+            <div className="border-t border-border/70 bg-background/80 px-4 py-2">
+              <A2uiRenderer components={a2uiState.inline} />
             </div>
           )}
 

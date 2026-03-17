@@ -605,7 +605,10 @@ mod tests {
         assert_eq!(decoded["id"], "2");
         assert_eq!(decoded["ok"], true);
         assert_eq!(decoded["payload"]["unsubscribed"]["session_id"], "sess-1");
-        assert_eq!(decoded["payload"]["unsubscribed"]["event"], "turn_completed");
+        assert_eq!(
+            decoded["payload"]["unsubscribed"]["event"],
+            "turn_completed"
+        );
         assert_eq!(decoded["stateVersion"], 101);
         assert_eq!(state_version.load(Ordering::Relaxed), 101);
         assert!(!conn.subscribed_sessions.contains("sess-1"));

@@ -11,6 +11,7 @@ use uuid::Uuid;
 use rune_core::SessionKind;
 use rune_runtime::SkillScanSummary;
 
+use crate::a2ui::{A2uiActionParams, A2uiEvent, A2uiFormSubmitParams, broadcast_a2ui_event};
 use crate::state::AppState;
 use crate::ws::active_ws_connections;
 
@@ -86,6 +87,8 @@ impl RpcDispatcher {
             "session.send" => self.session_send(params).await,
             "session.transcript" => self.session_transcript(params).await,
             "session.status" => self.session_status(params).await,
+            "a2ui.form_submit" => self.a2ui_form_submit(params).await,
+            "a2ui.action" => self.a2ui_action(params).await,
             "cron.list" => self.cron_list(params).await,
             "cron.status" => self.cron_status(params).await,
             "runtime.lanes" => self.runtime_lanes().await,
@@ -396,8 +399,14 @@ impl RpcDispatcher {
         let approval_mode = metadata_str(metadata, "approval_mode").unwrap_or("on-miss");
         let security_mode = metadata_str(metadata, "security_mode").unwrap_or("allowlist");
         let reasoning = metadata_str(metadata, "reasoning").unwrap_or("off");
-        let verbose = metadata.get("verbose").and_then(Value::as_bool).unwrap_or(false);
-        let elevated = metadata.get("elevated").and_then(Value::as_bool).unwrap_or(false);
+        let verbose = metadata
+            .get("verbose")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let elevated = metadata
+            .get("elevated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let subagent_lifecycle = metadata_str(metadata, "subagent_lifecycle");
         let subagent_runtime_status = metadata_str(metadata, "subagent_runtime_status");
         let subagent_runtime_attached = metadata
@@ -406,9 +415,8 @@ impl RpcDispatcher {
         let subagent_status_updated_at = metadata_str(metadata, "subagent_status_updated_at");
         let subagent_last_note = metadata_str(metadata, "subagent_last_note");
 
-        let mut unresolved = vec![
-            "cost posture is estimate-only; provider pricing is not wired yet".to_string(),
-        ];
+        let mut unresolved =
+            vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
         if approval_mode == "on-miss" {
             unresolved.push(
                 "approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet".to_string(),
@@ -457,6 +465,44 @@ impl RpcDispatcher {
             "subagent_status_updated_at": subagent_status_updated_at,
             "subagent_last_note": subagent_last_note,
             "unresolved": unresolved,
+        }))
+    }
+
+    async fn a2ui_form_submit(&self, params: Value) -> Result<Value, RpcError> {
+        let params: A2uiFormSubmitParams =
+            serde_json::from_value(params).map_err(|err| RpcError::bad_request(err.to_string()))?;
+        let event = A2uiEvent::FormSubmit {
+            session_id: params.session_id.clone(),
+            callback_id: params.callback_id,
+            data: params.data,
+            timestamp: chrono::Utc::now(),
+        };
+        broadcast_a2ui_event(&self.state.event_tx, &event).map_err(RpcError::internal)?;
+
+        Ok(json!({
+            "accepted": true,
+            "message": "Form submitted to agent event bus",
+            "session_id": params.session_id,
+        }))
+    }
+
+    async fn a2ui_action(&self, params: Value) -> Result<Value, RpcError> {
+        let params: A2uiActionParams =
+            serde_json::from_value(params).map_err(|err| RpcError::bad_request(err.to_string()))?;
+        let event = A2uiEvent::Action {
+            session_id: params.session_id.clone(),
+            component_id: params.component_id.clone(),
+            action_target: params.action_target.clone(),
+            timestamp: chrono::Utc::now(),
+        };
+        broadcast_a2ui_event(&self.state.event_tx, &event).map_err(RpcError::internal)?;
+
+        Ok(json!({
+            "accepted": true,
+            "message": "Action submitted to agent event bus",
+            "session_id": params.session_id,
+            "component_id": params.component_id,
+            "action_target": params.action_target,
         }))
     }
 
@@ -609,13 +655,14 @@ impl RpcDispatcher {
             })
         });
 
+        let config = self.state.config.read().await;
         Ok(json!({
             "status": "running",
             "version": env!("CARGO_PKG_VERSION"),
-            "bind": format!("{}:{}", self.state.config.gateway.host, self.state.config.gateway.port),
-            "auth_enabled": self.state.config.gateway.auth_token.is_some(),
-            "configured_model_providers": self.state.config.models.providers.len(),
-            "registered_tools": self.state.tool_count,
+            "bind": format!("{}:{}", config.gateway.host, config.gateway.port),
+            "auth_enabled": config.gateway.auth_token.is_some(),
+            "configured_model_providers": config.models.providers.len(),
+            "registered_tools": self.state.capabilities.tool_count,
             "session_count": sessions.len(),
             "cron_job_count": cron_job_count,
             "ws_subscribers": self.state.event_tx.receiver_count(),
@@ -628,9 +675,9 @@ impl RpcDispatcher {
                 "skills_dir": self.state.skill_loader.skills_dir().display().to_string(),
             },
             "config_paths": {
-                "sessions_dir": self.state.config.paths.sessions_dir.display().to_string(),
-                "memory_dir": self.state.config.paths.memory_dir.display().to_string(),
-                "logs_dir": self.state.config.paths.logs_dir.display().to_string(),
+                "sessions_dir": config.paths.sessions_dir.display().to_string(),
+                "memory_dir": config.paths.memory_dir.display().to_string(),
+                "logs_dir": config.paths.logs_dir.display().to_string(),
             },
         }))
     }

@@ -41,6 +41,8 @@ pub struct HealthResponse {
     pub session_count: usize,
     pub ws_subscribers: usize,
     pub ws_connections: usize,
+    pub mode: &'static str,
+    pub storage_backend: String,
 }
 
 /// Health check with runtime counters.
@@ -59,6 +61,8 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         session_count: sessions.len(),
         ws_subscribers: state.event_tx.receiver_count(),
         ws_connections: active_ws_connections(),
+        mode: state.capabilities.mode.as_str(),
+        storage_backend: state.capabilities.storage_backend.clone(),
     }))
 }
 
@@ -80,6 +84,20 @@ pub struct StatusResponse {
     pub lane_stats: Option<LaneStatsResponse>,
     pub skills: SkillStatusResponse,
     pub config_paths: StatusPaths,
+    pub capabilities: CapabilitiesResponse,
+}
+
+#[derive(Serialize)]
+pub struct CapabilitiesResponse {
+    pub mode: &'static str,
+    pub storage_backend: String,
+    pub pgvector: bool,
+    pub memory_mode: String,
+    pub browser: bool,
+    pub mcp_servers: usize,
+    pub tts: bool,
+    pub stt: bool,
+    pub channels: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -117,22 +135,20 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
 
     let skills = state.skill_registry.list().await;
     let lane_stats = state.turn_executor.lane_stats().map(lane_stats_response);
+    let config = state.config.read().await;
 
     Ok(Json(StatusResponse {
         status: "running",
         version: env!("CARGO_PKG_VERSION"),
-        bind: format!(
-            "{}:{}",
-            state.config.gateway.host, state.config.gateway.port
-        ),
-        auth_enabled: state.config.gateway.auth_token.is_some(),
-        configured_model_providers: state.config.models.providers.len(),
-        active_model_backend: if state.config.models.providers.is_empty() {
+        bind: format!("{}:{}", config.gateway.host, config.gateway.port),
+        auth_enabled: config.gateway.auth_token.is_some(),
+        configured_model_providers: config.models.providers.len(),
+        active_model_backend: if config.models.providers.is_empty() {
             "demo-echo"
         } else {
             "configured-provider"
         },
-        registered_tools: state.tool_count,
+        registered_tools: state.capabilities.tool_count,
         session_count: sessions.len(),
         cron_job_count,
         ws_subscribers: state.event_tx.receiver_count(),
@@ -145,9 +161,20 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             skills_dir: state.skill_loader.skills_dir().display().to_string(),
         },
         config_paths: StatusPaths {
-            sessions_dir: state.config.paths.sessions_dir.display().to_string(),
-            memory_dir: state.config.paths.memory_dir.display().to_string(),
-            logs_dir: state.config.paths.logs_dir.display().to_string(),
+            sessions_dir: config.paths.sessions_dir.display().to_string(),
+            memory_dir: config.paths.memory_dir.display().to_string(),
+            logs_dir: config.paths.logs_dir.display().to_string(),
+        },
+        capabilities: CapabilitiesResponse {
+            mode: state.capabilities.mode.as_str(),
+            storage_backend: state.capabilities.storage_backend.clone(),
+            pgvector: state.capabilities.pgvector,
+            memory_mode: state.capabilities.memory_mode.clone(),
+            browser: state.capabilities.browser,
+            mcp_servers: state.capabilities.mcp_servers,
+            tts: state.capabilities.tts,
+            stt: state.capabilities.stt,
+            channels: state.capabilities.channels.clone(),
         },
     }))
 }
@@ -253,7 +280,12 @@ fn file_response(path: std::path::PathBuf, request_path: &str) -> Response {
                 Some("woff") => "font/woff",
                 _ => "application/octet-stream",
             };
-            (StatusCode::OK, [(header::CONTENT_TYPE, content_type)], bytes).into_response()
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, content_type)],
+                bytes,
+            )
+                .into_response()
         }
         Err(_) => (StatusCode::NOT_FOUND, "UI asset missing").into_response(),
     }
@@ -300,30 +332,28 @@ pub async fn dashboard_summary(
         .list(i64::MAX / 4, 0)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let config = state.config.read().await;
 
     Ok(Json(DashboardSummaryResponse {
         gateway_status: "running",
-        bind: format!(
-            "{}:{}",
-            state.config.gateway.host, state.config.gateway.port
-        ),
+        bind: format!("{}:{}", config.gateway.host, config.gateway.port),
         uptime_seconds: state.started_at.elapsed().as_secs(),
-        default_model: resolved_default_model(&state),
-        provider_count: state.config.models.providers.len(),
-        configured_model_count: state.config.models.inventory().len(),
+        default_model: resolved_default_model(&config),
+        provider_count: config.models.providers.len(),
+        configured_model_count: config.models.inventory().len(),
         session_count: sessions.len(),
-        auth_enabled: state.config.gateway.auth_token.is_some(),
+        auth_enabled: config.gateway.auth_token.is_some(),
         ws_subscribers: state.event_tx.receiver_count(),
-        channels: configured_channels(&state),
+        channels: configured_channels(&config),
     }))
 }
 
 pub async fn dashboard_models(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<DashboardModelItem>>, GatewayError> {
-    let default_model = resolved_default_model(&state);
-    let mut items = state
-        .config
+    let config = state.config.read().await;
+    let default_model = resolved_default_model(&config);
+    let mut items = config
         .models
         .inventory()
         .into_iter()
@@ -362,10 +392,11 @@ pub async fn dashboard_sessions(
 pub async fn dashboard_diagnostics(
     State(state): State<AppState>,
 ) -> Result<Json<DashboardDiagnosticsResponse>, GatewayError> {
+    let config = state.config.read().await;
     let mut items = Vec::new();
     let now = Utc::now().to_rfc3339();
 
-    if state.config.models.providers.is_empty() {
+    if config.models.providers.is_empty() {
         items.push(DashboardDiagnosticItem {
             level: "warn",
             source: "models",
@@ -375,7 +406,7 @@ pub async fn dashboard_diagnostics(
         });
     }
 
-    if configured_channels(&state).is_empty() {
+    if configured_channels(&config).is_empty() {
         items.push(DashboardDiagnosticItem {
             level: "info",
             source: "channels",
@@ -685,13 +716,14 @@ pub async fn cron_run(
         .await
         .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
 
+    let workspace_root = state.config.read().await.agents.defaults.workspace.clone();
     let deps = SupervisorDeps {
         heartbeat: state.heartbeat.clone(),
         scheduler: state.scheduler.clone(),
         reminder_store: state.reminder_store.clone(),
         session_engine: state.session_engine.clone(),
         turn_executor: state.turn_executor.clone(),
-        workspace_root: state.config.agents.defaults.workspace.clone(),
+        workspace_root,
         device_registry: state.device_registry.clone(),
     };
 
@@ -1486,19 +1518,18 @@ fn aggregate_turns(turns: &[TurnRow]) -> SessionTurnAggregate {
     }
 }
 
-fn resolved_default_model(state: &AppState) -> Option<String> {
-    state
-        .config
+fn resolved_default_model(config: &rune_config::AppConfig) -> Option<String> {
+    config
         .agents
         .default_agent()
-        .and_then(|agent| state.config.agents.effective_model(agent))
+        .and_then(|agent| config.agents.effective_model(agent))
         .map(str::to_string)
-        .or_else(|| state.config.models.default_model.clone())
+        .or_else(|| config.models.default_model.clone())
 }
 
-fn configured_channels(state: &AppState) -> Vec<String> {
-    let mut channels = state.config.channels.enabled.clone();
-    if state.config.channels.telegram_token.is_some() && !channels.iter().any(|c| c == "telegram") {
+fn configured_channels(config: &rune_config::AppConfig) -> Vec<String> {
+    let mut channels = config.channels.enabled.clone();
+    if config.channels.telegram_token.is_some() && !channels.iter().any(|c| c == "telegram") {
         channels.push("telegram".to_string());
     }
     channels.sort();
@@ -2107,9 +2138,11 @@ pub async fn telegram_webhook(
     // Validate the webhook token matches the configured bot token
     let expected_token = state
         .config
+        .read()
+        .await
         .channels
         .telegram_token
-        .as_deref()
+        .clone()
         .unwrap_or_default();
 
     if token != expected_token {
@@ -2161,9 +2194,10 @@ pub struct ScannedModel {
 pub async fn scan_models(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ScanModelsResponse>>, GatewayError> {
+    let providers = state.config.read().await.models.providers.clone();
     let mut results = Vec::new();
 
-    for provider_cfg in &state.config.models.providers {
+    for provider_cfg in &providers {
         let kind = if provider_cfg.kind.is_empty() {
             provider_cfg.name.as_str()
         } else {
@@ -2297,7 +2331,11 @@ fn default_device_role() -> String {
 }
 
 fn default_device_scopes() -> Vec<String> {
-    vec!["sessions:read".into(), "sessions:write".into(), "status:read".into()]
+    vec![
+        "sessions:read".into(),
+        "sessions:write".into(),
+        "status:read".into(),
+    ]
 }
 
 #[derive(Serialize)]
@@ -2320,7 +2358,9 @@ pub async fn device_pair_approve(
     headers: HeaderMap,
     Json(body): Json<PairApproveBody>,
 ) -> Result<Json<PairApproveResponse>, GatewayError> {
-    require_gateway_operator_token(&headers, &state)?;
+    let config = state.config.read().await;
+    require_gateway_operator_token(&headers, &config)?;
+    drop(config);
     let role = DeviceRole::parse(&body.role);
     let device = state
         .device_registry
@@ -2360,7 +2400,9 @@ pub async fn device_pair_reject(
     headers: HeaderMap,
     Json(body): Json<PairRejectBody>,
 ) -> Result<Json<PairRejectResponse>, GatewayError> {
-    require_gateway_operator_token(&headers, &state)?;
+    let config = state.config.read().await;
+    require_gateway_operator_token(&headers, &config)?;
+    drop(config);
     state
         .device_registry
         .reject_pairing(body.request_id)
@@ -2375,8 +2417,14 @@ pub async fn device_pair_pending(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<PairingRequest>>, GatewayError> {
-    require_gateway_operator_token(&headers, &state)?;
-    let pending = state.device_registry.list_pending().await.map_err(pairing_err)?;
+    let config = state.config.read().await;
+    require_gateway_operator_token(&headers, &config)?;
+    drop(config);
+    let pending = state
+        .device_registry
+        .list_pending()
+        .await
+        .map_err(pairing_err)?;
     Ok(Json(pending))
 }
 
@@ -2431,9 +2479,19 @@ pub async fn device_list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DeviceListResponse>, GatewayError> {
-    require_gateway_operator_token(&headers, &state)?;
-    let devices = state.device_registry.list_devices().await.map_err(pairing_err)?;
-    let pending = state.device_registry.list_pending().await.map_err(pairing_err)?;
+    let config = state.config.read().await;
+    require_gateway_operator_token(&headers, &config)?;
+    drop(config);
+    let devices = state
+        .device_registry
+        .list_devices()
+        .await
+        .map_err(pairing_err)?;
+    let pending = state
+        .device_registry
+        .list_pending()
+        .await
+        .map_err(pairing_err)?;
     Ok(Json(DeviceListResponse {
         devices: devices.into_iter().map(DeviceListEntry::from).collect(),
         pending_requests: pending
@@ -2459,7 +2517,9 @@ pub async fn device_revoke(
     Path(id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<DeviceDeleteResponse>, GatewayError> {
-    require_gateway_operator_token(&headers, &state)?;
+    let config = state.config.read().await;
+    require_gateway_operator_token(&headers, &config)?;
+    drop(config);
     state
         .device_registry
         .revoke_device(id)
@@ -2484,7 +2544,9 @@ pub async fn device_rotate_token(
     Path(id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<TokenRotateResponse>, GatewayError> {
-    require_gateway_operator_token(&headers, &state)?;
+    let config = state.config.read().await;
+    require_gateway_operator_token(&headers, &config)?;
+    drop(config);
     let device = state
         .device_registry
         .rotate_token(id)
@@ -2513,13 +2575,13 @@ fn pairing_err(e: PairingError) -> GatewayError {
     }
 }
 
-fn require_gateway_operator_token(headers: &HeaderMap, state: &AppState) -> Result<(), GatewayError> {
-    let expected = state
-        .config
-        .gateway
-        .auth_token
-        .as_deref()
-        .ok_or_else(|| GatewayError::Forbidden("device management requires gateway operator auth".to_string()))?;
+fn require_gateway_operator_token(
+    headers: &HeaderMap,
+    config: &rune_config::AppConfig,
+) -> Result<(), GatewayError> {
+    let expected = config.gateway.auth_token.as_deref().ok_or_else(|| {
+        GatewayError::Forbidden("device management requires gateway operator auth".to_string())
+    })?;
 
     let Some(token) = headers
         .get(header::AUTHORIZATION)
@@ -2534,4 +2596,249 @@ fn require_gateway_operator_token(headers: &HeaderMap, state: &AppState) -> Resu
     } else {
         Err(GatewayError::Unauthorized)
     }
+}
+
+// ── TTS Routes ──────────────────────────────────────────────────────────────
+
+/// Response for `GET /tts/status`.
+#[derive(Serialize)]
+pub struct TtsStatusResponse {
+    pub available: bool,
+    pub enabled: bool,
+    pub provider: String,
+    pub voice: String,
+    pub model: String,
+    pub auto_mode: String,
+    pub voices: Vec<TtsVoiceEntry>,
+}
+
+#[derive(Serialize)]
+pub struct TtsVoiceEntry {
+    pub id: String,
+    pub name: String,
+    pub language: Option<String>,
+}
+
+pub async fn tts_status(
+    State(state): State<AppState>,
+) -> Result<Json<TtsStatusResponse>, GatewayError> {
+    let Some(ref engine_lock) = state.tts_engine else {
+        let config = state.config.read().await;
+        return Ok(Json(TtsStatusResponse {
+            available: false,
+            enabled: false,
+            provider: config.media.tts.provider.clone(),
+            voice: config.media.tts.voice.clone(),
+            model: config.media.tts.model.clone(),
+            auto_mode: format!("{:?}", config.media.tts.auto_mode).to_lowercase(),
+            voices: vec![],
+        }));
+    };
+
+    let engine = engine_lock.read().await;
+    let voices = engine
+        .available_voices()
+        .into_iter()
+        .map(|v| TtsVoiceEntry {
+            id: v.id,
+            name: v.name,
+            language: v.language,
+        })
+        .collect();
+    let cfg = engine.config();
+    Ok(Json(TtsStatusResponse {
+        available: true,
+        enabled: engine.is_enabled(),
+        provider: cfg.provider.clone(),
+        voice: cfg.voice.clone(),
+        model: cfg.model.clone(),
+        auto_mode: format!("{:?}", cfg.auto_mode).to_lowercase(),
+        voices,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct TtsSynthesizeRequest {
+    pub text: String,
+    pub voice: Option<String>,
+    pub model: Option<String>,
+}
+
+pub async fn tts_synthesize(
+    State(state): State<AppState>,
+    Json(body): Json<TtsSynthesizeRequest>,
+) -> Result<Response, GatewayError> {
+    let engine_lock = state
+        .tts_engine
+        .as_ref()
+        .ok_or_else(|| GatewayError::BadRequest("TTS engine not configured".to_string()))?;
+
+    let engine = engine_lock.read().await;
+    let audio = match (body.voice.as_deref(), body.model.as_deref()) {
+        (Some(voice), Some(model)) => engine.convert_with(&body.text, voice, model).await,
+        _ => engine.convert(&body.text).await,
+    }
+    .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "audio/mpeg")],
+        audio,
+    )
+        .into_response())
+}
+
+pub async fn tts_enable(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+    let engine_lock = state
+        .tts_engine
+        .as_ref()
+        .ok_or_else(|| GatewayError::BadRequest("TTS engine not configured".to_string()))?;
+    engine_lock.write().await.enable();
+    Ok(Json(json!({ "enabled": true })))
+}
+
+pub async fn tts_disable(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+    let engine_lock = state
+        .tts_engine
+        .as_ref()
+        .ok_or_else(|| GatewayError::BadRequest("TTS engine not configured".to_string()))?;
+    engine_lock.write().await.disable();
+    Ok(Json(json!({ "enabled": false })))
+}
+
+// ── STT Routes ──────────────────────────────────────────────────────────────
+
+/// Response for `GET /stt/status`.
+#[derive(Serialize)]
+pub struct SttStatusResponse {
+    pub available: bool,
+    pub enabled: bool,
+    pub provider: String,
+    pub model: String,
+}
+
+pub async fn stt_status(
+    State(state): State<AppState>,
+) -> Result<Json<SttStatusResponse>, GatewayError> {
+    let Some(ref engine_lock) = state.stt_engine else {
+        let config = state.config.read().await;
+        return Ok(Json(SttStatusResponse {
+            available: false,
+            enabled: false,
+            provider: config.media.stt.provider.clone(),
+            model: config.media.stt.model.clone(),
+        }));
+    };
+
+    let engine = engine_lock.read().await;
+    let cfg = engine.config();
+    Ok(Json(SttStatusResponse {
+        available: true,
+        enabled: engine.is_enabled(),
+        provider: cfg.provider.clone(),
+        model: cfg.model.clone(),
+    }))
+}
+
+#[derive(Serialize)]
+pub struct TranscribeResponse {
+    pub text: String,
+    pub language: Option<String>,
+    pub duration_seconds: Option<f64>,
+}
+
+pub async fn stt_transcribe(
+    State(state): State<AppState>,
+    mut multipart: axum::extract::Multipart,
+) -> Result<Json<TranscribeResponse>, GatewayError> {
+    let engine_lock = state
+        .stt_engine
+        .as_ref()
+        .ok_or_else(|| GatewayError::BadRequest("STT engine not configured".to_string()))?;
+
+    // Extract the first file field from the multipart body.
+    let mut audio_bytes: Option<Vec<u8>> = None;
+    let mut mime_type = "audio/wav".to_string();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| GatewayError::BadRequest(e.to_string()))?
+    {
+        if field.name() == Some("file") {
+            if let Some(ct) = field.content_type() {
+                mime_type = ct.to_string();
+            }
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| GatewayError::BadRequest(e.to_string()))?;
+            audio_bytes = Some(data.to_vec());
+            break;
+        }
+    }
+
+    let audio = audio_bytes.ok_or_else(|| {
+        GatewayError::BadRequest("missing 'file' field in multipart body".to_string())
+    })?;
+
+    let engine = engine_lock.read().await;
+    let result = engine
+        .transcribe(&audio, &mime_type)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(TranscribeResponse {
+        text: result.text,
+        language: result.language,
+        duration_seconds: result.duration_seconds,
+    }))
+}
+
+pub async fn stt_enable(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+    let engine_lock = state
+        .stt_engine
+        .as_ref()
+        .ok_or_else(|| GatewayError::BadRequest("STT engine not configured".to_string()))?;
+    engine_lock.write().await.enable();
+    Ok(Json(json!({ "enabled": true })))
+}
+
+pub async fn stt_disable(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+    let engine_lock = state
+        .stt_engine
+        .as_ref()
+        .ok_or_else(|| GatewayError::BadRequest("STT engine not configured".to_string()))?;
+    engine_lock.write().await.disable();
+    Ok(Json(json!({ "enabled": false })))
+}
+
+// ── Config Editor ───────────────────────────────────────────────────────────
+
+/// `GET /config` — return the current configuration with secrets redacted.
+pub async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+    let config = state.config.read().await;
+    let redacted = config.redacted();
+    let value =
+        serde_json::to_value(&redacted).map_err(|e| GatewayError::Internal(e.to_string()))?;
+    Ok(Json(value))
+}
+
+/// `PUT /config` — replace the live configuration.
+pub async fn update_config(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, GatewayError> {
+    let new_config: rune_config::AppConfig = serde_json::from_value(body)
+        .map_err(|e| GatewayError::BadRequest(format!("invalid config: {e}")))?;
+
+    let mut config = state.config.write().await;
+    *config = new_config;
+    drop(config);
+
+    let config = state.config.read().await;
+    let redacted = config.redacted();
+    let value =
+        serde_json::to_value(&redacted).map_err(|e| GatewayError::Internal(e.to_string()))?;
+    Ok(Json(value))
 }
