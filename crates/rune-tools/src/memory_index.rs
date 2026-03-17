@@ -301,7 +301,7 @@ fn estimate_tokens(text: &str) -> usize {
     // A simple heuristic that works well for English prose and markdown.
     // For a more accurate count one would use tiktoken, but that adds a
     // heavy dependency that is not justified for chunking heuristics.
-    (text.len() + 3) / 4
+    text.len().div_ceil(4)
 }
 
 /// Split file content into chunks suitable for embedding.
@@ -1252,10 +1252,12 @@ Delta echo foxtrot.
 
     struct WrongDimensionEmbeddingProvider;
 
+    type UpsertedChunk = (String, i32, String, Vec<f32>);
+
     #[derive(Default)]
     struct RecordingMemoryEmbeddingRepo {
         deleted_files: Mutex<Vec<String>>,
-        upserted_chunks: Mutex<Vec<(String, i32, String, Vec<f32>)>>,
+        upserted_chunks: Mutex<Vec<UpsertedChunk>>,
     }
 
     #[async_trait::async_trait]
