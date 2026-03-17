@@ -4,5 +4,5 @@ This folder is reserved for stable technical reference material during the docs 
 
 Current canonical entrypoints remain:
 - [`../INDEX.md`](../INDEX.md)
-- [`../PROTOCOLS.md`](../PROTOCOLS.md)
+- [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md)
 - [`../SUBSYSTEMS.md`](../SUBSYSTEMS.md)

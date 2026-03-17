@@ -46,10 +46,10 @@ Convert planning assumptions into explicit parity contracts.
 
 ### Acceptance criteria
 
-- `PARITY-INVENTORY.md` captures the observable CLI/gateway/tool/runtime/channel/config/diagnostic surface to be replicated, including command-family tiering and minimum HTTP/WS surface expectations
+- `parity/PARITY-INVENTORY.md` captures the observable CLI/gateway/tool/runtime/channel/config/diagnostic surface to be replicated, including command-family tiering and minimum HTTP/WS surface expectations
 - command-family inventory is cross-checked against the local OpenClaw CLI docs/registration, not inferred from memory alone
-- `PARITY-SPEC.md` defines what is and is not in scope for parity
-- `PROTOCOLS.md` defines canonical entities, states, and event boundaries
+- `parity/PARITY-SPEC.md` defines what is and is not in scope for parity
+- `parity/PROTOCOLS.md` defines canonical entities, states, and event boundaries
 - each subsystem has black-box test categories identified
 - no implementation starts without a written decision on unresolved protocol assumptions that would cause churn
 
