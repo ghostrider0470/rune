@@ -13,6 +13,7 @@ Use it to find the right source of truth by audience and concern.
 | Parity execution phases | [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) | phase sequencing and acceptance criteria |
 | Live execution queue | GitHub Project 2 | what is active now |
 | Runtime orchestration rules | [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md) | agent workflow and execution guardrails |
+| Parity docs front door | [`OPENCLAW-COVERAGE-MAP.md`](OPENCLAW-COVERAGE-MAP.md) | where to start for OpenClaw-surface coverage and parity navigation |
 | Parity contracts | [`PARITY-SPEC.md`](PARITY-SPEC.md), [`PARITY-CONTRACTS.md`](PARITY-CONTRACTS.md), [`PROTOCOLS.md`](PROTOCOLS.md) | observable runtime behavior and subsystem invariants |
 | Operator deployment/runtime docs | [`DOCKER-DEPLOYMENT.md`](DOCKER-DEPLOYMENT.md), [`DATABASES.md`](DATABASES.md), [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md) | deployment, storage, health, operational rules |
 | Contributor/reference docs | [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md), [`SUBSYSTEMS.md`](SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |

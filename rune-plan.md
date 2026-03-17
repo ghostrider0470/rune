@@ -13,6 +13,7 @@
 |---|---|---|
 | Product strategy | `rune-plan.md` | Goals, constraints, product shape, stack direction |
 | Parity execution phases | `docs/IMPLEMENTATION-PHASES.md` | Acceptance criteria and sequencing rules |
+| OpenClaw coverage navigation | `docs/OPENCLAW-COVERAGE-MAP.md` | Front door from OpenClaw surfaces to the right parity docs |
 | Live execution state | GitHub Project 2 | Current epics, features, stories, and batch progress |
 | Runtime orchestration rules | `docs/AGENT-ORCHESTRATION.md` | Agent workflow and implementation guardrails |
 | Detailed parity contracts | `docs/PARITY-SPEC.md`, `docs/PARITY-CONTRACTS.md`, `docs/PROTOCOLS.md` | Subsystem invariants and observable behavior |
