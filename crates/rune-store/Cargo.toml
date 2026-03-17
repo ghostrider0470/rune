@@ -31,4 +31,5 @@ tokio-rusqlite = { workspace = true, optional = true }
 [dev-dependencies]
 diesel-async = { workspace = true, features = ["postgres", "deadpool"] }
 serde_json.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
