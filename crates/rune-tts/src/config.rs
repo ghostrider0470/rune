@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 /// Controls when automatic TTS synthesis is triggered.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TtsAutoMode {
     /// Manual invocation only.
+    #[default]
     Off,
     /// Synthesize every assistant response.
     Always,
@@ -12,12 +13,6 @@ pub enum TtsAutoMode {
     Inbound,
     /// Synthesize only when the response contains a `[tts]` tag.
     Tagged,
-}
-
-impl Default for TtsAutoMode {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 /// Configuration for the TTS engine.
