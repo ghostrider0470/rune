@@ -1,9 +1,10 @@
 //! Thin gateway binary — loads config and starts the Rune gateway daemon.
 //!
-//! When `database.database_url` is configured, connects to the external
-//! PostgreSQL instance. Otherwise bootstraps an embedded PostgreSQL
-//! server via `postgresql_embedded` for zero-config local development.
-//! Data in both cases is durable and persisted to disk.
+//! Storage resolution follows `rune_store::build_repos(...)`:
+//! - `database.backend = "sqlite"` uses the SQLite-backed repo set
+//! - `database.backend = "postgres"` uses external or embedded PostgreSQL
+//! - `database.backend = "auto"` resolves to PostgreSQL when `database_url`
+//!   is set, otherwise SQLite for standalone/local operation
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -102,7 +103,8 @@ async fn main() -> Result<()> {
     handle.shutdown();
 
     // Explicitly stop embedded PG if it was started (also happens on drop,
-    // but this lets us log any errors).
+    // but this lets us log any errors). SQLite/local backends have no extra
+    // shutdown step here.
     if let Some(epg) = _embedded_pg {
         if let Err(e) = epg.stop().await {
             warn!(error = %e, "error stopping embedded PostgreSQL");
