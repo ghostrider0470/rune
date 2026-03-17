@@ -868,6 +868,7 @@ main_capacity = 4
 
     #[test]
     fn legacy_semantic_toggle_maps_to_keyword_level() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let path = temp_config_path("legacy-memory-toggle");
         fs::write(
             &path,
@@ -888,6 +889,7 @@ semantic_search_enabled = false
 
     #[test]
     fn memory_level_takes_precedence_over_legacy_toggle() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let path = temp_config_path("memory-level-precedence");
         fs::write(
             &path,
