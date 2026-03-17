@@ -49,7 +49,9 @@ use rune_tools::approval::{ApprovalRequest, PolicyBasedApproval};
 use rune_tools::exec_tool::ExecToolExecutor;
 use rune_tools::file_tools::FileToolExecutor;
 use rune_tools::memory_index::{MemoryIndex, MemoryIndexConfig};
-use rune_tools::memory_tool::{MemoryToolExecutor, PersistedHybridMemorySearch};
+use rune_tools::memory_tool::{
+    MemoryToolExecutor, PersistedHybridMemorySearch, PersistedKeywordMemorySearch,
+};
 use rune_tools::process_audit::{
     CompletedProcessAudit, NewProcessAudit, ProcessAuditRecord, ProcessAuditStore,
 };
@@ -380,8 +382,11 @@ async fn build_memory_tool_executor(
             Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()))
         }
         MemoryLevel::Keyword => {
-            info!("memory level=keyword; using local keyword memory search");
-            Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()))
+            info!(backend = storage_backend, "memory level=keyword; using persisted keyword memory search");
+            Ok(MemoryToolExecutor::with_hybrid_search(
+                workspace_root.to_path_buf(),
+                Arc::new(PersistedKeywordMemorySearch::new(memory_embedding_repo)),
+            ))
         }
         MemoryLevel::Semantic => {
             if !pgvector_available {
@@ -1971,7 +1976,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_memory_tool_executor_maps_legacy_toggle_to_keyword_mode() {
+    async fn build_memory_tool_executor_maps_legacy_toggle_to_persisted_keyword_mode() {
         let mut config = AppConfig::default();
         config.memory.semantic_search_enabled = false;
 
@@ -1981,7 +1986,7 @@ mod tests {
                 .await
                 .expect("memory tool executor should build");
 
-        assert!(executor.hybrid_search_backend().is_none());
+        assert!(executor.hybrid_search_backend().is_some());
     }
 
     #[tokio::test]

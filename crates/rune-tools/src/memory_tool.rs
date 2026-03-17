@@ -48,6 +48,40 @@ impl PersistedHybridMemorySearch {
     }
 }
 
+pub struct PersistedKeywordMemorySearch {
+    repo: Arc<dyn MemoryEmbeddingRepo>,
+}
+
+impl PersistedKeywordMemorySearch {
+    pub fn new(repo: Arc<dyn MemoryEmbeddingRepo>) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl HybridMemorySearchBackend for PersistedKeywordMemorySearch {
+    async fn search(
+        &self,
+        query: &str,
+        max_results: usize,
+    ) -> Result<Vec<HybridMemorySearchHit>, ToolError> {
+        let limit = i64::try_from(max_results)
+            .map_err(|_| ToolError::InvalidArgument("maxResults is too large".into()))?;
+
+        let keyword_hits = self.repo.keyword_search(query, limit).await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("persisted memory keyword search failed: {e}"))
+        })?;
+
+        Ok(keyword_hits
+            .into_iter()
+            .map(|row| HybridMemorySearchHit {
+                file_path: row.file_path,
+                chunk_text: row.chunk_text,
+            })
+            .collect())
+    }
+}
+
 #[async_trait]
 impl HybridMemorySearchBackend for PersistedHybridMemorySearch {
     async fn search(
