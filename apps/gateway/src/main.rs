@@ -22,7 +22,8 @@ use tokio::signal;
 use tracing::{error, info, warn};
 
 use rune_channels::TelegramAdapter;
-use rune_config::{AppConfig, MemoryLevel};use rune_core::ToolCategory;
+use rune_config::{AppConfig, MemoryLevel, StorageBackend};
+use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
 use rune_mcp::{McpManager, McpToolExecutor};
@@ -41,8 +42,7 @@ use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
     TranscriptRepo, TurnRepo,
 };
-use rune_store::{EmbeddedPg, PgVectorStatus};
-use rune_store::{JobRepo, PgApprovalRepo, PgJobRepo, PgMemoryEmbeddingRepo, PgToolExecutionRepo};
+use rune_store::{EmbeddedPg, JobRepo, PgMemoryEmbeddingRepo, build_repos};
 use rune_tools::ApprovalCheck;
 use rune_tools::approval::{ApprovalRequest, PolicyBasedApproval};
 use rune_tools::exec_tool::ExecToolExecutor;
@@ -133,10 +133,22 @@ fn display_config_path(path: Option<&Path>) -> String {
 }
 
 fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
-    let store_backend = if config.database.database_url.is_some() {
-        "postgres (external)"
-    } else {
-        "postgres (embedded)"
+    let store_backend = match config.database.backend {
+        StorageBackend::Sqlite => "sqlite",
+        StorageBackend::Postgres => {
+            if config.database.database_url.is_some() {
+                "postgres (external)"
+            } else {
+                "postgres (embedded)"
+            }
+        }
+        StorageBackend::Auto => {
+            if config.database.database_url.is_some() {
+                "postgres (external)"
+            } else {
+                "sqlite"
+            }
+        }
     };
 
     info!(
@@ -155,48 +167,22 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
 async fn build_services(
     config: AppConfig,
 ) -> Result<(Services, Option<EmbeddedPg>, Option<SessionLoop>)> {
-    let (database_url, embedded_pg) = if let Some(ref url) = config.database.database_url {
-        info!("using external PostgreSQL");
-        (url.clone(), None)
-    } else {
-        info!("no DATABASE_URL configured — starting embedded PostgreSQL");
-        let epg = EmbeddedPg::start(&config.paths.db_dir, "rune")
-            .await
-            .context("failed to start embedded PostgreSQL")?;
-        let url = epg.database_url().to_owned();
-        (url, Some(epg))
-    };
+    let (repos, storage_info, embedded_pg) =
+        build_repos(&config).await.context("failed to initialize storage backends")?;
 
-    if config.database.run_migrations {
-        info!("running pending database migrations");
-        rune_store::pool::run_migrations(&database_url)?;
-    }
+    let database_url = storage_info.database_url.clone().unwrap_or_default();
+    let pgvector_available = storage_info.pgvector_available();
 
-    let pgvector_status = rune_store::pool::try_upgrade_pgvector(&database_url);
-    match &pgvector_status {
-        PgVectorStatus::Available => info!("pgvector available — vector search enabled"),
-        PgVectorStatus::Unavailable(reason) => {
-            warn!(reason, "pgvector unavailable — keyword search only")
-        }
-    }
-
-    let pool =
-        rune_store::pool::create_pool(&database_url, config.database.max_connections as usize)?;
-
-    let session_repo: Arc<dyn SessionRepo> =
-        Arc::new(rune_store::pg::PgSessionRepo::new(pool.clone()));
-    let turn_repo: Arc<dyn TurnRepo> = Arc::new(rune_store::pg::PgTurnRepo::new(pool.clone()));
-    let transcript_repo: Arc<dyn TranscriptRepo> =
-        Arc::new(rune_store::pg::PgTranscriptRepo::new(pool.clone()));
-    let job_repo: Arc<dyn JobRepo> = Arc::new(PgJobRepo::new(pool.clone()));
-    let job_run_repo: Arc<dyn rune_store::repos::JobRunRepo> =
-        Arc::new(rune_store::pg::PgJobRunRepo::new(pool.clone()));
-    let approval_repo: Arc<dyn ApprovalRepo> = Arc::new(PgApprovalRepo::new(pool.clone()));
+    let session_repo: Arc<dyn SessionRepo> = repos.session_repo.clone();
+    let turn_repo: Arc<dyn TurnRepo> = repos.turn_repo.clone();
+    let transcript_repo: Arc<dyn TranscriptRepo> = repos.transcript_repo.clone();
+    let job_repo: Arc<dyn JobRepo> = repos.job_repo.clone();
+    let job_run_repo: Arc<dyn rune_store::repos::JobRunRepo> = repos.job_run_repo.clone();
+    let approval_repo: Arc<dyn ApprovalRepo> = repos.approval_repo.clone();
     let tool_approval_repo: Arc<dyn rune_store::repos::ToolApprovalPolicyRepo> =
-        Arc::new(rune_store::pg::PgToolApprovalPolicyRepo::new(pool.clone()));
-    let device_repo: Arc<dyn rune_store::repos::DeviceRepo> =
-        Arc::new(rune_store::pg::PgDeviceRepo::new(pool.clone()));
-    let tool_execution_repo: Arc<dyn ToolExecutionRepo> = Arc::new(PgToolExecutionRepo::new(pool));
+        repos.tool_approval_repo.clone();
+    let device_repo: Arc<dyn rune_store::repos::DeviceRepo> = repos.device_repo.clone();
+    let tool_execution_repo: Arc<dyn ToolExecutionRepo> = repos.tool_execution_repo.clone();
 
     let session_engine = Arc::new(
         SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
@@ -255,7 +241,7 @@ async fn build_services(
         &workspace_root,
         &database_url,
         embedded_pg.is_some(),
-        pgvector_status.is_available(),
+        pgvector_available,
     )
     .await
     .context("failed to initialize memory tool executor")?;
@@ -339,12 +325,8 @@ async fn build_services(
     let capabilities = rune_config::Capabilities::detect(
         &config,
         resolved_mode,
-        if embedded_pg.is_some() {
-            "postgres (embedded)"
-        } else {
-            "postgres (external)"
-        },
-        pgvector_status.is_available(),
+        storage_info.backend_name,
+        pgvector_available,
         hybrid_search_enabled,
         tool_count,
     );
