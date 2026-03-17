@@ -233,13 +233,13 @@ export function useChatWebSocket(sessionId: string | undefined) {
     [events],
   );
 
-  return { liveEntries, connected, clearEvents };
+  return { liveEntries, connected, clearEvents, rawEvents: events };
 }
 
 export function useChatMergedTranscript(sessionId: string | undefined) {
   const queryClient = useQueryClient();
   const transcript = useChatTranscript(sessionId);
-  const { liveEntries, connected, clearEvents } = useChatWebSocket(sessionId);
+  const { liveEntries, connected, clearEvents, rawEvents } = useChatWebSocket(sessionId);
   const lastInvalidatedLiveKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -301,6 +301,7 @@ export function useChatMergedTranscript(sessionId: string | undefined) {
 
   return {
     entries: mergedEntries,
+    rawEvents,
     isLoading: transcript.isLoading,
     isFetching: transcript.isFetching,
     isError: transcript.isError,
