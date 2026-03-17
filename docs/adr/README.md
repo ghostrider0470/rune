@@ -5,6 +5,7 @@ This folder holds durable decisions that should not be rediscovered in chat or b
 ## Current ADRs
 
 - [`ADR-0001-execution-workflow-and-speed.md`](ADR-0001-execution-workflow-and-speed.md)
+- [`ADR-0002-standalone-first-product-shape.md`](ADR-0002-standalone-first-product-shape.md)
 
 ## Planned early ADRs
 
