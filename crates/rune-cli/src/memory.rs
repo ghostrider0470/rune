@@ -83,6 +83,7 @@ pub async fn status() -> Result<MemoryStatusResponse> {
     Ok(MemoryStatusResponse {
         workspace_root: workspace_root.display().to_string(),
         memory_dir: workspace_root.join("memory").display().to_string(),
+        memory_level: config.memory.requested_level().as_str().to_string(),
         semantic_search_enabled: config.memory.semantic_search_enabled,
         long_term_exists: workspace_root.join("MEMORY.md").exists(),
         daily_file_count: files
