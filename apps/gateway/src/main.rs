@@ -22,7 +22,7 @@ use tokio::signal;
 use tracing::{error, info, warn};
 
 use rune_channels::TelegramAdapter;
-use rune_config::AppConfig;
+use rune_config::{AppConfig, MemoryLevel};
 use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
@@ -37,12 +37,12 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
-use rune_store::{EmbeddedPg, PgVectorStatus};
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
     TranscriptRepo, TurnRepo,
 };
+use rune_store::{EmbeddedPg, PgVectorStatus};
 use rune_store::{JobRepo, PgApprovalRepo, PgJobRepo, PgMemoryEmbeddingRepo, PgToolExecutionRepo};
 use rune_tools::ApprovalCheck;
 use rune_tools::approval::{ApprovalRequest, PolicyBasedApproval};
@@ -264,6 +264,7 @@ async fn build_services(
     )
     .await
     .context("failed to initialize memory tool executor")?;
+    let hybrid_search_enabled = memory.hybrid_search_backend().is_some();
     let tool_executor = Arc::new(AppToolExecutor {
         file: FileToolExecutor::new(workspace_root.clone()),
         exec: ExecToolExecutor::new(workspace_root.clone(), Duration::from_secs(30))
@@ -340,25 +341,20 @@ async fn build_services(
     };
 
     // Emit capability summary.
-    let memory_mode = if !config.memory.semantic_search_enabled {
-        "disabled"
-    } else if pgvector_status.is_available() {
-        "hybrid"
-    } else {
-        "keyword-local"
-    };
+    let memory_mode = config.memory.capability_mode(hybrid_search_enabled);
     let browser_enabled = config.browser.enabled;
-    let mcp_count = config
-        .mcp_servers
-        .iter()
-        .filter(|s| s.enabled)
-        .count();
+    let mcp_count = config.mcp_servers.iter().filter(|s| s.enabled).count();
     let telegram_enabled = config
         .channels
         .telegram_token
         .as_ref()
         .is_some_and(|t| !t.is_empty());
     info!(
+        requested_memory_level = config.memory.requested_level().as_str(),
+        effective_memory_level = config
+            .memory
+            .effective_level(hybrid_search_enabled)
+            .as_str(),
         pgvector = pgvector_status.is_available(),
         memory = memory_mode,
         browser = browser_enabled,
@@ -396,25 +392,34 @@ async fn build_memory_tool_executor(
     using_embedded_pg: bool,
     pgvector_available: bool,
 ) -> Result<MemoryToolExecutor> {
-    if !config.memory.semantic_search_enabled {
-        info!("semantic memory search disabled; using local keyword memory search");
-        return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
-    }
+    match config.memory.requested_level() {
+        MemoryLevel::File => {
+            info!("memory level=file; using local file memory scan");
+            Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()))
+        }
+        MemoryLevel::Keyword => {
+            info!("memory level=keyword; using local keyword memory search");
+            Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()))
+        }
+        MemoryLevel::Semantic => {
+            if !pgvector_available {
+                warn!(
+                    "memory level=semantic requested but pgvector unavailable; falling back to local keyword memory search"
+                );
+                return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
+            }
 
-    if !pgvector_available {
-        warn!("semantic memory search requested but pgvector unavailable; falling back to keyword search");
-        return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
+            let index_config = memory_index_config_from_env();
+            build_memory_tool_executor_with_index_config(
+                config,
+                workspace_root,
+                database_url,
+                using_embedded_pg,
+                index_config,
+            )
+            .await
+        }
     }
-
-    let index_config = memory_index_config_from_env();
-    build_memory_tool_executor_with_index_config(
-        config,
-        workspace_root,
-        database_url,
-        using_embedded_pg,
-        index_config,
-    )
-    .await
 }
 
 async fn build_mcp_tool_executor(
@@ -1977,7 +1982,20 @@ mod tests {
     use rune_tools::memory_index::EmbeddingProvider;
 
     #[tokio::test]
-    async fn build_memory_tool_executor_falls_back_when_semantic_search_disabled() {
+    async fn build_memory_tool_executor_uses_file_mode_local_scan() {
+        let mut config = AppConfig::default();
+        config.memory.level = Some(MemoryLevel::File);
+
+        let executor =
+            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
+                .await
+                .expect("memory tool executor should build");
+
+        assert!(executor.hybrid_search_backend().is_none());
+    }
+
+    #[tokio::test]
+    async fn build_memory_tool_executor_maps_legacy_toggle_to_keyword_mode() {
         let mut config = AppConfig::default();
         config.memory.semantic_search_enabled = false;
 
@@ -1985,6 +2003,19 @@ mod tests {
             build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
                 .await
                 .expect("memory tool executor should build");
+
+        assert!(executor.hybrid_search_backend().is_none());
+    }
+
+    #[tokio::test]
+    async fn build_memory_tool_executor_falls_back_without_pgvector_for_semantic_mode() {
+        let mut config = AppConfig::default();
+        config.memory.level = Some(MemoryLevel::Semantic);
+
+        let executor =
+            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
+                .await
+                .expect("memory tool executor should fall back cleanly");
 
         assert!(executor.hybrid_search_backend().is_none());
     }

@@ -880,10 +880,8 @@ impl fmt::Display for DashboardResponse {
         )?;
         writeln!(
             f,
-            "  Memory:    daily={} long-term={} semantic-search={}",
-            self.memory.daily_file_count,
-            self.memory.long_term_exists,
-            self.memory.semantic_search_enabled
+            "  Memory:    daily={} long-term={} level={}",
+            self.memory.daily_file_count, self.memory.long_term_exists, self.memory.memory_level
         )?;
         write!(
             f,
@@ -898,6 +896,7 @@ impl fmt::Display for DashboardResponse {
 pub struct MemoryStatusResponse {
     pub workspace_root: String,
     pub memory_dir: String,
+    pub memory_level: String,
     pub semantic_search_enabled: bool,
     pub long_term_exists: bool,
     pub daily_file_count: usize,
@@ -909,6 +908,7 @@ impl fmt::Display for MemoryStatusResponse {
         writeln!(f, "Memory")?;
         writeln!(f, "  Workspace:               {}", self.workspace_root)?;
         writeln!(f, "  Memory dir:              {}", self.memory_dir)?;
+        writeln!(f, "  Configured level:        {}", self.memory_level)?;
         writeln!(
             f,
             "  Semantic search enabled: {}",
@@ -1764,6 +1764,7 @@ mod tests {
         let response = MemoryStatusResponse {
             workspace_root: "/workspace".into(),
             memory_dir: "/workspace/memory".into(),
+            memory_level: "semantic".into(),
             semantic_search_enabled: true,
             long_term_exists: true,
             daily_file_count: 2,
@@ -1842,6 +1843,7 @@ mod tests {
             memory: MemoryStatusResponse {
                 workspace_root: "/workspace".into(),
                 memory_dir: "/workspace/memory".into(),
+                memory_level: "semantic".into(),
                 semantic_search_enabled: true,
                 long_term_exists: true,
                 daily_file_count: 4,

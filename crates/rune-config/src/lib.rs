@@ -458,14 +458,71 @@ pub struct ChannelsConfig {
 }
 
 /// Memory indexing and retrieval settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryLevel {
+    File,
+    Keyword,
+    #[default]
+    Semantic,
+}
+
+impl MemoryLevel {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Keyword => "keyword",
+            Self::Semantic => "semantic",
+        }
+    }
+}
+
+/// Memory indexing and retrieval settings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryConfig {
+    #[serde(default)]
+    pub level: Option<MemoryLevel>,
+    #[serde(default = "default_true")]
     pub semantic_search_enabled: bool,
+}
+
+impl MemoryConfig {
+    #[must_use]
+    pub fn requested_level(&self) -> MemoryLevel {
+        self.level.unwrap_or_else(|| {
+            if self.semantic_search_enabled {
+                MemoryLevel::Semantic
+            } else {
+                MemoryLevel::Keyword
+            }
+        })
+    }
+
+    #[must_use]
+    pub fn effective_level(&self, hybrid_search_enabled: bool) -> MemoryLevel {
+        match self.requested_level() {
+            MemoryLevel::Semantic if hybrid_search_enabled => MemoryLevel::Semantic,
+            MemoryLevel::Semantic => MemoryLevel::Keyword,
+            level => level,
+        }
+    }
+
+    #[must_use]
+    pub fn capability_mode(&self, hybrid_search_enabled: bool) -> &'static str {
+        match (self.requested_level(), hybrid_search_enabled) {
+            (MemoryLevel::File, _) => "file-local",
+            (MemoryLevel::Keyword, _) => "keyword-local",
+            (MemoryLevel::Semantic, true) => "semantic-hybrid",
+            (MemoryLevel::Semantic, false) => "semantic-keyword-fallback",
+        }
+    }
 }
 
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            level: None,
             semantic_search_enabled: true,
         }
     }
@@ -716,7 +773,9 @@ mod tests {
         assert_eq!(config.gateway.port, 8787);
         assert_eq!(config.paths.db_dir, PathBuf::from("/data/db"));
         assert_eq!(config.paths.config_dir, PathBuf::from("/config"));
+        assert_eq!(config.memory.level, None);
         assert!(config.memory.semantic_search_enabled);
+        assert_eq!(config.memory.requested_level(), MemoryLevel::Semantic);
         assert!(!config.browser.enabled);
         assert_eq!(config.browser.max_instances, 3);
         assert_eq!(config.browser.max_chars, 30_000);
@@ -747,6 +806,9 @@ run_migrations = false
 main_capacity = 6
 subagent_capacity = 9
 cron_capacity = 128
+
+[memory]
+level = "keyword"
 "#,
         )
         .unwrap();
@@ -759,6 +821,8 @@ cron_capacity = 128
         assert_eq!(config.runtime.lanes.main_capacity, 6);
         assert_eq!(config.runtime.lanes.subagent_capacity, 9);
         assert_eq!(config.runtime.lanes.cron_capacity, 128);
+        assert_eq!(config.memory.level, Some(MemoryLevel::Keyword));
+        assert_eq!(config.memory.requested_level(), MemoryLevel::Keyword);
 
         let _ = fs::remove_file(path);
     }
@@ -784,16 +848,61 @@ main_capacity = 4
             std::env::set_var("RUNE_GATEWAY__PORT", "9090");
             std::env::set_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY", "12");
             std::env::set_var("RUNE_BROWSER__ENABLED", "true");
+            std::env::set_var("RUNE_MEMORY__LEVEL", "file");
         }
         let config = AppConfig::load(Some(&path)).unwrap();
         assert_eq!(config.gateway.port, 9090);
         assert_eq!(config.runtime.lanes.main_capacity, 12);
         assert!(config.browser.enabled);
+        assert_eq!(config.memory.level, Some(MemoryLevel::File));
+        assert_eq!(config.memory.requested_level(), MemoryLevel::File);
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
             std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
             std::env::remove_var("RUNE_BROWSER__ENABLED");
+            std::env::remove_var("RUNE_MEMORY__LEVEL");
         }
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn legacy_semantic_toggle_maps_to_keyword_level() {
+        let path = temp_config_path("legacy-memory-toggle");
+        fs::write(
+            &path,
+            r#"
+[memory]
+semantic_search_enabled = false
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(config.memory.level, None);
+        assert!(!config.memory.semantic_search_enabled);
+        assert_eq!(config.memory.requested_level(), MemoryLevel::Keyword);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn memory_level_takes_precedence_over_legacy_toggle() {
+        let path = temp_config_path("memory-level-precedence");
+        fs::write(
+            &path,
+            r#"
+[memory]
+level = "file"
+semantic_search_enabled = true
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(config.memory.level, Some(MemoryLevel::File));
+        assert!(config.memory.semantic_search_enabled);
+        assert_eq!(config.memory.requested_level(), MemoryLevel::File);
 
         let _ = fs::remove_file(path);
     }
