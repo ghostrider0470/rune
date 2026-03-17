@@ -338,8 +338,8 @@ Use for:
 | `docs/IMPLEMENTATION-PHASES.md` | Keep | canonical parity execution spec |
 | `docs/STANDALONE-STRATEGY.md` | Keep but re-home conceptually | `docs/strategy/STANDALONE-STRATEGY.md` |
 | `docs/strategy/COMPETITIVE-RESEARCH.md` | Keep | `docs/strategy/` |
-| `docs/CRATE-LAYOUT.md` | Keep | likely `docs/reference/CRATE-LAYOUT.md` |
-| `docs/SUBSYSTEMS.md` | Keep | likely `docs/reference/SUBSYSTEMS.md` |
+| `docs/reference/CRATE-LAYOUT.md` | Canonical reference doc | `docs/reference/` |
+| `docs/reference/SUBSYSTEMS.md` | Canonical reference doc | `docs/reference/` |
 | `docs/AZURE-COMPATIBILITY.md` | Keep | likely `docs/operator/` or `docs/reference/` depending scope |
 | `docs/operator/DEPLOYMENT.md` | Canonical operator deployment doc | `docs/operator/` |
 | `docs/PARITY-*` | Keep | `docs/parity/` |

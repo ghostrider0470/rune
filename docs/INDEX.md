@@ -16,7 +16,7 @@ Use it to find the right source of truth by audience and concern.
 | Parity docs front door | [`OPENCLAW-COVERAGE-MAP.md`](OPENCLAW-COVERAGE-MAP.md) | where to start for OpenClaw-surface coverage and parity navigation |
 | Parity contracts | [`PARITY-SPEC.md`](parity/PARITY-SPEC.md), [`PARITY-CONTRACTS.md`](parity/PARITY-CONTRACTS.md), [`PROTOCOLS.md`](parity/PROTOCOLS.md) | observable runtime behavior and subsystem invariants |
 | Operator deployment/runtime docs | [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md), [`operator/DATABASES.md`](operator/DATABASES.md), [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md) | deployment, storage, health, operational rules |
-| Contributor/reference docs | [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md), [`SUBSYSTEMS.md`](SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |
+| Contributor/reference docs | [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md), [`reference/SUBSYSTEMS.md`](reference/SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |
 | Long-form strategy / rationale | [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md), [`strategy/AZURE-DATA-OPTIONS.md`](strategy/AZURE-DATA-OPTIONS.md), [`DOCS-README-PLAN-REORG.md`](DOCS-README-PLAN-REORG.md) | design rationale and planning context |
 
 ## Transitional structure scaffold
@@ -52,7 +52,7 @@ Docs remain authoritative at their current locations until content is intentiona
 2. [`rune-plan.md`](../rune-plan.md)
 3. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md)
 4. [`PROTOCOLS.md`](parity/PROTOCOLS.md)
-5. [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md)
+5. [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md)
 
 ## Transitional note
 
