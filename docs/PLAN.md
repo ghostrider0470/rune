@@ -1,5 +1,10 @@
 # Plan — OpenClaw Rust Rewrite
 
+> Status: Legacy planning record retained for provenance during the planning-canonicalization transition.
+>
+> Canonical strategy now lives in `../rune-plan.md`.
+> Use `docs/IMPLEMENTATION-PHASES.md` for parity-phase sequencing and GitHub Project 2 for live execution state.
+
 ## 1. Objective
 
 Build a Rust-based system that replicates OpenClaw’s practical functionality.

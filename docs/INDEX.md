@@ -1,0 +1,49 @@
+# Rune Docs Index
+
+This is the docs front door for Rune.
+
+Use it to find the right source of truth by audience and concern.
+
+## Source of truth map
+
+| Concern | Canonical source | Use when you need |
+|---|---|---|
+| Public product entry | [`README.md`](../README.md) | quick understanding, quick start, project positioning |
+| Product strategy | [`rune-plan.md`](../rune-plan.md) | goals, direction, confirmed stack choices, high-level delivery map |
+| Parity execution phases | [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) | phase sequencing and acceptance criteria |
+| Live execution queue | GitHub Project 2 | what is active now |
+| Runtime orchestration rules | [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md) | agent workflow and execution guardrails |
+| Parity contracts | [`PARITY-SPEC.md`](PARITY-SPEC.md), [`PARITY-CONTRACTS.md`](PARITY-CONTRACTS.md), [`PROTOCOLS.md`](PROTOCOLS.md) | observable runtime behavior and subsystem invariants |
+| Operator deployment/runtime docs | [`DOCKER-DEPLOYMENT.md`](DOCKER-DEPLOYMENT.md), [`DATABASES.md`](DATABASES.md), [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md) | deployment, storage, health, operational rules |
+| Contributor/reference docs | [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md), [`SUBSYSTEMS.md`](SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |
+| Long-form strategy / rationale | [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md), [`AZURE-DATA-OPTIONS.md`](AZURE-DATA-OPTIONS.md), [`DOCS-README-PLAN-REORG.md`](DOCS-README-PLAN-REORG.md) | design rationale and planning context |
+
+## Recommended reading paths
+
+### If you are evaluating Rune
+1. [`README.md`](../README.md)
+2. [`rune-plan.md`](../rune-plan.md)
+3. [`AZURE-COMPATIBILITY.md`](AZURE-COMPATIBILITY.md)
+
+### If you are operating Rune
+1. [`DOCKER-DEPLOYMENT.md`](DOCKER-DEPLOYMENT.md)
+2. [`DATABASES.md`](DATABASES.md)
+3. [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md)
+4. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) for parity-phase context
+
+### If you are building Rune
+1. [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md)
+2. [`rune-plan.md`](../rune-plan.md)
+3. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md)
+4. [`PROTOCOLS.md`](PROTOCOLS.md)
+5. [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md)
+
+## Transitional note
+
+Legacy planning files still exist during the docs cleanup transition:
+
+- [`PLAN.md`](PLAN.md)
+- [`STACK.md`](STACK.md)
+- [`WORKPLAN.md`](WORKPLAN.md)
+
+Treat those as provenance and historical context unless a file explicitly says otherwise.

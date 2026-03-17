@@ -87,7 +87,7 @@ For this rewrite, the equivalent boundaries should be explicit traits/interfaces
 - media providers
 - auth / approval backends
 
-That maps cleanly to the existing `PLAN.md` direction.
+That maps cleanly to the canonical direction in `rune-plan.md`.
 
 #### 2. Binary-first operational mindset
 

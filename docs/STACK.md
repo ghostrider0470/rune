@@ -1,5 +1,10 @@
 # Confirmed Stack
 
+> Status: Legacy stack snapshot retained for provenance during the planning-canonicalization transition.
+>
+> Canonical stack direction now lives in `../rune-plan.md`.
+> Keep this file as supporting historical detail until the broader docs reorganization lands.
+
 ## Backend / Runtime
 
 Azure compatibility is mandatory.
