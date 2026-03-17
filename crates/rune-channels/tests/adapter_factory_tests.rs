@@ -45,6 +45,40 @@ fn whatsapp_adapter_requires_both_credentials() {
 }
 
 #[test]
+fn slack_listener_requires_signing_secret() {
+    let config = ChannelsConfig {
+        slack_bot_token: Some("xoxb-test".into()),
+        slack_listen_addr: Some("127.0.0.1:3100".into()),
+        ..ChannelsConfig::default()
+    };
+
+    let err = match create_adapter("slack", &config) {
+        Ok(_) => panic!("slack listener should require signing secret"),
+        Err(err) => err,
+    };
+
+    assert_provider_error(err, "slack_signing_secret is required");
+}
+
+#[test]
+fn whatsapp_listener_requires_app_secret() {
+    let config = ChannelsConfig {
+        whatsapp_access_token: Some("wa-token".into()),
+        whatsapp_phone_number_id: Some("phone-1".into()),
+        whatsapp_verify_token: Some("verify-me".into()),
+        whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
+        ..ChannelsConfig::default()
+    };
+
+    let err = match create_adapter("whatsapp", &config) {
+        Ok(_) => panic!("whatsapp listener should require app secret"),
+        Err(err) => err,
+    };
+
+    assert_provider_error(err, "whatsapp_app_secret is required");
+}
+
+#[test]
 fn signal_adapter_requires_number() {
     let config = ChannelsConfig::default();
     let err = match create_adapter("signal", &config) {
@@ -161,6 +195,22 @@ async fn slack_and_signal_allow_optional_secondary_connection_fields() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn whatsapp_send_only_mode_allows_missing_app_secret() {
+    let adapter = create_adapter(
+        "whatsapp",
+        &ChannelsConfig {
+            whatsapp_access_token: Some("wa-token".into()),
+            whatsapp_phone_number_id: Some("phone-1".into()),
+            whatsapp_verify_token: Some("verify-me".into()),
+            whatsapp_app_secret: None,
+            whatsapp_listen_addr: None,
+            ..ChannelsConfig::default()
+        },
+    );
+    assert!(adapter.is_ok());
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn discord_adapter_allows_missing_guild_id_for_send_only_mode() {
     let adapter = create_adapter(
         "discord",
@@ -211,6 +261,7 @@ async fn channels_config_wiring_supports_optional_listener_and_polling_fields() 
         discord_channel_ids: vec!["chan-1".into(), "chan-2".into()],
         slack_bot_token: Some("xoxb-test".into()),
         slack_listen_addr: Some("127.0.0.1:3100".into()),
+        slack_signing_secret: Some("slack-secret".into()),
         whatsapp_access_token: Some("wa-token".into()),
         whatsapp_phone_number_id: Some("phone-1".into()),
         whatsapp_verify_token: Some("verify-me".into()),
@@ -249,6 +300,7 @@ async fn create_adapter_uses_configured_optional_listener_and_channel_fields() {
         discord_channel_ids: vec!["chan-1".into(), "chan-2".into()],
         slack_bot_token: Some("xoxb-test".into()),
         slack_listen_addr: Some("127.0.0.1:3100".into()),
+        slack_signing_secret: Some("slack-secret".into()),
         whatsapp_access_token: Some("wa-token".into()),
         whatsapp_phone_number_id: Some("phone-1".into()),
         whatsapp_verify_token: Some("verify-me".into()),
