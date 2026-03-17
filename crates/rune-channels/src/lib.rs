@@ -69,6 +69,13 @@ pub fn create_adapter(
                     .ok_or_else(|| ChannelError::Provider {
                         message: "slack_bot_token is required for the Slack adapter".into(),
                     })?;
+            if config.slack_listen_addr.is_some() && config.slack_signing_secret.is_none() {
+                return Err(ChannelError::Provider {
+                    message:
+                        "slack_signing_secret is required when slack_listen_addr is configured"
+                            .into(),
+                });
+            }
             Ok(Box::new(SlackAdapter::new(
                 bot_token,
                 config.slack_signing_secret.clone(),
@@ -97,6 +104,13 @@ pub fn create_adapter(
                         message: "whatsapp_verify_token is required for the WhatsApp adapter"
                             .into(),
                     })?;
+            if config.whatsapp_listen_addr.is_some() && config.whatsapp_app_secret.is_none() {
+                return Err(ChannelError::Provider {
+                    message:
+                        "whatsapp_app_secret is required when whatsapp_listen_addr is configured"
+                            .into(),
+                });
+            }
             Ok(Box::new(WhatsAppAdapter::new(
                 access_token,
                 phone_number_id,
