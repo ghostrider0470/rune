@@ -129,18 +129,10 @@ impl Default for DatabaseConfig {
 }
 
 /// Runtime execution controls.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeConfig {
     #[serde(default)]
     pub lanes: LaneQueueConfig,
-}
-
-impl Default for RuntimeConfig {
-    fn default() -> Self {
-        Self {
-            lanes: LaneQueueConfig::default(),
-        }
-    }
 }
 
 /// MCP server configuration entry.
@@ -490,12 +482,10 @@ pub struct MemoryConfig {
 impl MemoryConfig {
     #[must_use]
     pub fn requested_level(&self) -> MemoryLevel {
-        self.level.unwrap_or_else(|| {
-            if self.semantic_search_enabled {
-                MemoryLevel::Semantic
-            } else {
-                MemoryLevel::Keyword
-            }
+        self.level.unwrap_or(if self.semantic_search_enabled {
+            MemoryLevel::Semantic
+        } else {
+            MemoryLevel::Keyword
         })
     }
 
