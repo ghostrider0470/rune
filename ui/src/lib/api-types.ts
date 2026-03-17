@@ -336,3 +336,85 @@ export interface SessionEvent {
   kind: string;
   payload: unknown;
 }
+
+export type A2uiTarget = "inline" | "panel";
+
+export interface A2uiComponent {
+  type: string;
+  id: string;
+  [key: string]: unknown;
+}
+
+export interface A2uiPushEvent {
+  action: "push";
+  session_id: string;
+  component: A2uiComponent;
+  target: A2uiTarget;
+  timestamp: string;
+}
+
+export interface A2uiRemoveEvent {
+  action: "remove";
+  session_id: string;
+  component_id: string;
+  timestamp: string;
+}
+
+export interface A2uiResetEvent {
+  action: "reset";
+  session_id: string;
+  timestamp: string;
+}
+
+export interface A2uiFormSubmitEvent {
+  action: "form_submit";
+  session_id: string;
+  callback_id: string;
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface A2uiActionEvent {
+  action: "action";
+  session_id: string;
+  component_id: string;
+  action_target: string;
+  timestamp: string;
+}
+
+export type A2uiEvent =
+  | A2uiPushEvent
+  | A2uiRemoveEvent
+  | A2uiResetEvent
+  | A2uiFormSubmitEvent
+  | A2uiActionEvent;
+
+// TTS/STT
+export interface TtsVoiceEntry {
+  id: string;
+  name: string;
+  language: string | null;
+}
+
+export interface TtsStatusResponse {
+  available: boolean;
+  enabled: boolean;
+  provider: string;
+  voice: string;
+  model: string;
+  auto_mode: string;
+  voices: TtsVoiceEntry[];
+}
+
+export interface SttStatusResponse {
+  available: boolean;
+  enabled: boolean;
+  provider: string;
+  model: string;
+}
+
+export interface TranscribeResponse {
+  text: string;
+  language: string | null;
+  duration_seconds: number | null;
+}
