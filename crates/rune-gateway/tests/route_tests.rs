@@ -2116,6 +2116,8 @@ async fn health_returns_200() {
     assert_eq!(json["status"], "ok");
     assert_eq!(json["service"], "rune-gateway");
     assert_eq!(json["ws_connections"], 0);
+    assert_eq!(json["mode"], "standalone");
+    assert_eq!(json["storage_backend"], "test");
 }
 
 #[tokio::test]
@@ -2134,6 +2136,16 @@ async fn status_returns_correct_shape() {
     assert!(json["uptime_seconds"].is_number());
     assert!(json["registered_tools"].is_number());
     assert!(json["session_count"].is_number());
+    assert!(json["capabilities"].is_object());
+    assert_eq!(json["capabilities"]["mode"], "standalone");
+    assert_eq!(json["capabilities"]["storage_backend"], "test");
+    assert_eq!(json["capabilities"]["pgvector"], false);
+    assert_eq!(json["capabilities"]["memory_mode"], "disabled");
+    assert_eq!(json["capabilities"]["browser"], false);
+    assert_eq!(json["capabilities"]["mcp_servers"], 0);
+    assert_eq!(json["capabilities"]["tts"], false);
+    assert_eq!(json["capabilities"]["stt"], false);
+    assert_eq!(json["capabilities"]["channels"], serde_json::json!([]));
 }
 
 #[tokio::test]
