@@ -11,9 +11,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+// Re-export media engine configs so consumers only need rune-config.
+pub use rune_stt::SttConfig;
+pub use rune_tts::{TtsAutoMode, TtsConfig};
+
 /// Top-level application configuration resolved from defaults, files, and environment.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub mode: RuntimeMode,
     pub gateway: GatewayConfig,
     pub database: DatabaseConfig,
     pub models: ModelsConfig,
@@ -54,6 +60,30 @@ impl AppConfig {
         override_config
     }
 
+    /// Return a clone with all secret fields replaced by `"***"`.
+    #[must_use]
+    pub fn redacted(&self) -> Self {
+        let mask = |opt: &Option<String>| opt.as_ref().map(|_| "***".to_string());
+
+        let mut out = self.clone();
+        out.gateway.auth_token = mask(&self.gateway.auth_token);
+        out.database.database_url = mask(&self.database.database_url);
+        out.media.tts.api_key = mask(&self.media.tts.api_key);
+        out.media.stt.api_key = mask(&self.media.stt.api_key);
+        for p in &mut out.models.providers {
+            p.api_key = mask(&p.api_key);
+        }
+        out.channels.telegram_token = mask(&self.channels.telegram_token);
+        out.channels.discord_token = mask(&self.channels.discord_token);
+        out.channels.slack_bot_token = mask(&self.channels.slack_bot_token);
+        out.channels.slack_app_token = mask(&self.channels.slack_app_token);
+        out.channels.slack_signing_secret = mask(&self.channels.slack_signing_secret);
+        out.channels.whatsapp_access_token = mask(&self.channels.whatsapp_access_token);
+        out.channels.whatsapp_app_secret = mask(&self.channels.whatsapp_app_secret);
+        out.channels.whatsapp_verify_token = mask(&self.channels.whatsapp_verify_token);
+        out
+    }
+
     /// Validate that required persistent paths exist and are writable.
     ///
     /// Per DOCKER-DEPLOYMENT.md §9.1 the runtime must fail fast on
@@ -90,6 +120,92 @@ impl AppConfig {
             Err(errors)
         }
     }
+
+    /// When mode resolves to Standalone and paths are still at Docker defaults,
+    /// swap to `~/.rune/*`.
+    pub fn adjust_paths_for_mode(&mut self, resolved_mode: &RuntimeMode) {
+        if *resolved_mode != RuntimeMode::Standalone {
+            return;
+        }
+        if self.paths != PathsConfig::default() {
+            return; // user overrode, don't touch
+        }
+        if let Some(home) = home_dir() {
+            let r = home.join(".rune");
+            self.paths = PathsConfig {
+                db_dir: r.join("db"),
+                sessions_dir: r.join("sessions"),
+                memory_dir: r.join("memory"),
+                media_dir: r.join("media"),
+                skills_dir: r.join("skills"),
+                logs_dir: r.join("logs"),
+                backups_dir: r.join("backups"),
+                config_dir: r.join("config"),
+                secrets_dir: r.join("secrets"),
+            };
+        }
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+/// Consolidated runtime capabilities detected from config and environment.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Capabilities {
+    pub mode: RuntimeMode,
+    pub storage_backend: String,
+    pub pgvector: bool,
+    pub memory_mode: String,
+    pub browser: bool,
+    pub mcp_servers: usize,
+    pub tts: bool,
+    pub stt: bool,
+    pub tool_count: usize,
+    pub channels: Vec<String>,
+}
+
+impl Capabilities {
+    pub fn detect(
+        config: &AppConfig,
+        resolved_mode: RuntimeMode,
+        backend_name: &str,
+        pgvector_available: bool,
+        hybrid_search_enabled: bool,
+        tool_count: usize,
+    ) -> Self {
+        let memory_mode = config.memory.capability_mode(hybrid_search_enabled);
+        let mcp_count = config.mcp_servers.iter().filter(|s| s.enabled).count();
+        let channels: Vec<String> = config.channels.enabled.clone();
+        let tts = config
+            .media
+            .tts
+            .api_key
+            .as_deref()
+            .is_some_and(|k| !k.is_empty());
+        let stt = config
+            .media
+            .stt
+            .api_key
+            .as_deref()
+            .is_some_and(|k| !k.is_empty());
+
+        Self {
+            mode: resolved_mode,
+            storage_backend: backend_name.to_string(),
+            pgvector: pgvector_available,
+            memory_mode: memory_mode.to_string(),
+            browser: config.browser.enabled,
+            mcp_servers: mcp_count,
+            tts,
+            stt,
+            tool_count,
+            channels,
+        }
+    }
 }
 
 /// Gateway listener and authentication settings.
@@ -110,20 +226,86 @@ impl Default for GatewayConfig {
     }
 }
 
+/// Which runtime mode the process is operating in.
+///
+/// `Auto` (the default) heuristically resolves to `Server` when a database URL
+/// is set, Docker/Kubernetes is detected, or paths begin with `/data`.
+/// Otherwise resolves to `Standalone`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeMode {
+    #[default]
+    Auto,
+    Standalone,
+    Server,
+}
+
+impl RuntimeMode {
+    /// Resolve `Auto` to a concrete mode based on config and environment signals.
+    pub fn resolve(&self, config: &AppConfig) -> RuntimeMode {
+        match self {
+            RuntimeMode::Standalone => RuntimeMode::Standalone,
+            RuntimeMode::Server => RuntimeMode::Server,
+            RuntimeMode::Auto => {
+                if config.database.database_url.is_some() {
+                    return RuntimeMode::Server;
+                }
+                if config.paths.db_dir.starts_with("/data") {
+                    return RuntimeMode::Server;
+                }
+                if std::path::Path::new("/.dockerenv").exists()
+                    || std::env::var("KUBERNETES_SERVICE_HOST").is_ok()
+                {
+                    return RuntimeMode::Server;
+                }
+                RuntimeMode::Standalone
+            }
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RuntimeMode::Auto => "auto",
+            RuntimeMode::Standalone => "standalone",
+            RuntimeMode::Server => "server",
+        }
+    }
+}
+
+/// Which storage backend to use.
+///
+/// `Auto` (the default) resolves to Postgres when `database_url` is set,
+/// otherwise SQLite — so existing configs with no `backend` field keep working.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageBackend {
+    #[default]
+    Auto,
+    Sqlite,
+    Postgres,
+}
+
 /// Database connectivity and migration settings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatabaseConfig {
+    #[serde(default)]
+    pub backend: StorageBackend,
     pub database_url: Option<String>,
     pub max_connections: u32,
     pub run_migrations: bool,
+    /// Path to the SQLite database file. Defaults to `{db_dir}/rune.db`.
+    #[serde(default)]
+    pub sqlite_path: Option<PathBuf>,
 }
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
+            backend: StorageBackend::default(),
             database_url: None,
             max_connections: 10,
             run_migrations: true,
+            sqlite_path: None,
         }
     }
 }
@@ -426,6 +608,9 @@ pub struct ChannelsConfig {
     /// Local address for the Slack Events API listener (for example `0.0.0.0:3100`).
     #[serde(default)]
     pub slack_listen_addr: Option<String>,
+    /// Slack signing secret used to verify inbound webhook signatures (HMAC-SHA256).
+    #[serde(default)]
+    pub slack_signing_secret: Option<String>,
     /// WhatsApp Cloud API permanent access token.
     #[serde(default)]
     pub whatsapp_access_token: Option<String>,
@@ -482,10 +667,12 @@ pub struct MemoryConfig {
 impl MemoryConfig {
     #[must_use]
     pub fn requested_level(&self) -> MemoryLevel {
-        self.level.unwrap_or(if self.semantic_search_enabled {
-            MemoryLevel::Semantic
-        } else {
-            MemoryLevel::Keyword
+        self.level.unwrap_or_else(|| {
+            if self.semantic_search_enabled {
+                MemoryLevel::Semantic
+            } else {
+                MemoryLevel::Keyword
+            }
         })
     }
 
@@ -563,18 +750,20 @@ const fn default_browser_timeout_ms() -> u64 {
     15_000
 }
 
-/// Media pipeline feature flags and limits.
+/// Media pipeline configuration embedding TTS and STT engine configs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaConfig {
-    pub transcription_enabled: bool,
-    pub tts_enabled: bool,
+    #[serde(default)]
+    pub tts: TtsConfig,
+    #[serde(default)]
+    pub stt: SttConfig,
 }
 
 impl Default for MediaConfig {
     fn default() -> Self {
         Self {
-            transcription_enabled: true,
-            tts_enabled: true,
+            tts: TtsConfig::default(),
+            stt: SttConfig::default(),
         }
     }
 }
@@ -1447,5 +1636,144 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
             std::env::remove_var("RUNE_CHANNELS__WHATSAPP_APP_SECRET");
             std::env::remove_var("RUNE_CHANNELS__SIGNAL_API_URL");
         }
+    }
+
+    #[test]
+    fn runtime_mode_defaults_to_auto() {
+        let config = AppConfig::default();
+        assert_eq!(config.mode, RuntimeMode::Auto);
+    }
+
+    #[test]
+    fn runtime_mode_explicit_standalone() {
+        let mode = RuntimeMode::Standalone;
+        let config = AppConfig::default();
+        assert_eq!(mode.resolve(&config), RuntimeMode::Standalone);
+    }
+
+    #[test]
+    fn runtime_mode_explicit_server() {
+        let mode = RuntimeMode::Server;
+        let config = AppConfig::default();
+        assert_eq!(mode.resolve(&config), RuntimeMode::Server);
+    }
+
+    #[test]
+    fn runtime_mode_auto_resolves_server_with_database_url() {
+        let mut config = AppConfig::default();
+        config.database.database_url = Some("postgres://localhost/rune".into());
+        // paths are Docker-default (/data), but database_url triggers server first
+        let resolved = config.mode.resolve(&config);
+        assert_eq!(resolved, RuntimeMode::Server);
+    }
+
+    #[test]
+    fn runtime_mode_auto_resolves_standalone_without_signals() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
+        let mut config = AppConfig::default();
+        // Override paths to non-Docker to avoid the /data heuristic
+        config.paths.db_dir = PathBuf::from("/tmp/rune-test/db");
+        let resolved = config.mode.resolve(&config);
+        assert_eq!(resolved, RuntimeMode::Standalone);
+    }
+
+    #[test]
+    fn adjust_paths_standalone_swaps_to_home() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("HOME", "/home/testuser");
+            std::env::remove_var("KUBERNETES_SERVICE_HOST");
+        }
+        let mut config = AppConfig::default();
+        config.adjust_paths_for_mode(&RuntimeMode::Standalone);
+        assert_eq!(
+            config.paths.db_dir,
+            PathBuf::from("/home/testuser/.rune/db")
+        );
+        assert_eq!(
+            config.paths.sessions_dir,
+            PathBuf::from("/home/testuser/.rune/sessions")
+        );
+        unsafe {
+            // Restore — don't leak into other tests
+            std::env::remove_var("HOME");
+        }
+    }
+
+    #[test]
+    fn adjust_paths_noop_for_server_mode() {
+        let mut config = AppConfig::default();
+        let original_paths = config.paths.clone();
+        config.adjust_paths_for_mode(&RuntimeMode::Server);
+        assert_eq!(config.paths, original_paths);
+    }
+
+    #[test]
+    fn adjust_paths_noop_when_paths_customized() {
+        let mut config = AppConfig::default();
+        config.paths.db_dir = PathBuf::from("/custom/db");
+        let original_paths = config.paths.clone();
+        config.adjust_paths_for_mode(&RuntimeMode::Standalone);
+        assert_eq!(config.paths, original_paths);
+    }
+
+    #[test]
+    fn capabilities_detect_basic() {
+        let config = AppConfig::default();
+        let caps =
+            Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 5);
+        assert_eq!(caps.mode, RuntimeMode::Standalone);
+        assert_eq!(caps.storage_backend, "sqlite");
+        assert!(!caps.pgvector);
+        assert_eq!(caps.memory_mode, "semantic-keyword-fallback");
+        assert!(!caps.browser);
+        assert_eq!(caps.mcp_servers, 0);
+        assert!(!caps.tts);
+        assert!(!caps.stt);
+        assert_eq!(caps.tool_count, 5);
+    }
+
+    #[test]
+    fn capabilities_detect_hybrid_memory() {
+        let config = AppConfig::default();
+        let caps = Capabilities::detect(
+            &config,
+            RuntimeMode::Server,
+            "postgres (external)",
+            true,
+            true,
+            10,
+        );
+        assert_eq!(caps.memory_mode, "semantic-hybrid");
+        assert!(caps.pgvector);
+    }
+
+    #[test]
+    fn capabilities_detect_keyword_memory() {
+        let mut config = AppConfig::default();
+        config.memory.level = Some(MemoryLevel::Keyword);
+        config.memory.semantic_search_enabled = false;
+        let caps =
+            Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 0);
+        assert_eq!(caps.memory_mode, "keyword-local");
+    }
+
+    #[test]
+    fn capabilities_detect_file_memory() {
+        let mut config = AppConfig::default();
+        config.memory.level = Some(MemoryLevel::File);
+        let caps =
+            Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 0);
+        assert_eq!(caps.memory_mode, "file-local");
+    }
+
+    #[test]
+    fn runtime_mode_as_str() {
+        assert_eq!(RuntimeMode::Auto.as_str(), "auto");
+        assert_eq!(RuntimeMode::Standalone.as_str(), "standalone");
+        assert_eq!(RuntimeMode::Server.as_str(), "server");
     }
 }

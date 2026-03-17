@@ -104,3 +104,22 @@ export function useCancelReminder() {
     },
   });
 }
+
+export function useConfig() {
+  return useQuery({
+    queryKey: ["config"],
+    queryFn: () => api.get<Record<string, unknown>>("/config"),
+  });
+}
+
+export function useUpdateConfig() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) =>
+      api.put<Record<string, unknown>>("/config", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}

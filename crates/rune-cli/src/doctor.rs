@@ -234,8 +234,12 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             name: "database.url".into(),
             category: "database".into(),
             status: CheckStatus::Warn,
-            message: "database_url not set; runtime will rely on embedded PostgreSQL fallback".into(),
-            hint: Some("Fine for zero-config local dev; production should usually point at durable PostgreSQL".into()),
+            message: "database_url not set; runtime will rely on embedded PostgreSQL fallback"
+                .into(),
+            hint: Some(
+                "Fine for zero-config local dev; production should usually point at durable PostgreSQL"
+                    .into(),
+            ),
         }
     });
 

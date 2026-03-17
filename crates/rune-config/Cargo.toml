@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 rune-core = { path = "../rune-core" }
+rune-tts = { path = "../rune-tts" }
+rune-stt = { path = "../rune-stt" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -7,14 +7,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useStatus } from "@/hooks/use-system";
+import { useConfig, useUpdateConfig } from "@/hooks/use-system";
 import {
   Settings2,
-  RotateCcw,
+  Save,
   Search,
   FileJson,
-  AlertTriangle,
-  Ban,
+  CheckCircle2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/config")({
@@ -22,46 +21,50 @@ export const Route = createFileRoute("/_admin/config")({
 });
 
 function ConfigPage() {
-  const { data: status, isLoading } = useStatus();
+  const { data: config, isLoading } = useConfig();
+  const updateConfig = useUpdateConfig();
   const [search, setSearch] = useState("");
-
-  const derivedConfig = useMemo<Record<string, unknown> | null>(() => {
-    if (!status) return null;
-
-    return {
-      gateway: {
-        bind: status.bind,
-        auth_enabled: status.auth_enabled,
-        active_model_backend: status.active_model_backend,
-      },
-      counts: {
-        configured_model_providers: status.configured_model_providers,
-        registered_tools: status.registered_tools,
-        session_count: status.session_count,
-        cron_job_count: status.cron_job_count,
-        ws_subscribers: status.ws_subscribers,
-      },
-      paths: status.config_paths,
-      runtime: {
-        version: status.version,
-        uptime_seconds: status.uptime_seconds,
-        status: status.status,
-      },
-    };
-  }, [status]);
+  const [editMode, setEditMode] = useState(false);
+  const [editJson, setEditJson] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const configSections = useMemo(() => {
-    if (!derivedConfig) return [];
+    if (!config) return [];
 
-    return Object.entries(derivedConfig).filter(([key]) =>
+    return Object.entries(config).filter(([key]) =>
       search ? key.toLowerCase().includes(search.toLowerCase()) : true,
     );
-  }, [derivedConfig, search]);
+  }, [config, search]);
 
   const rawJson = useMemo(
-    () => (derivedConfig ? JSON.stringify(derivedConfig, null, 2) : ""),
-    [derivedConfig],
+    () => (config ? JSON.stringify(config, null, 2) : ""),
+    [config],
   );
+
+  function handleEditToggle() {
+    if (!editMode) {
+      setEditJson(rawJson);
+      setSaveError(null);
+    }
+    setEditMode(!editMode);
+  }
+
+  function handleSave() {
+    try {
+      const parsed = JSON.parse(editJson);
+      setSaveError(null);
+      updateConfig.mutate(parsed, {
+        onSuccess: () => {
+          setEditMode(false);
+        },
+        onError: (err) => {
+          setSaveError(err instanceof Error ? err.message : "Save failed");
+        },
+      });
+    } catch {
+      setSaveError("Invalid JSON");
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -69,27 +72,14 @@ function ConfigPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Configuration</h1>
           <p className="text-muted-foreground">
-            Runtime-derived configuration view until config read/write endpoints land.
+            Live application configuration (secrets redacted).
           </p>
         </div>
-        <Badge variant="outline" className="gap-1 text-yellow-700">
-          <Ban className="h-3.5 w-3.5" />
-          Read-only
+        <Badge variant="outline" className="gap-1 text-green-700">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Live
         </Badge>
       </div>
-
-      <Card className="border-yellow-500/30 bg-yellow-500/5">
-        <CardContent className="flex items-start gap-3 pt-6 text-sm text-muted-foreground">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
-          <div className="space-y-1">
-            <p className="font-medium text-foreground">Config endpoints are not wired yet.</p>
-            <p>
-              This page now reflects live gateway status and resolved paths instead of calling
-              missing <code>/config</code> and <code>/config/schema</code> routes.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
 
       <Tabs defaultValue="form">
         <TabsList>
@@ -122,7 +112,7 @@ function ConfigPage() {
             </div>
           ) : !configSections.length ? (
             <p className="text-sm text-muted-foreground">
-              {search ? "No matching configuration sections" : "No runtime configuration available"}
+              {search ? "No matching configuration sections" : "No configuration available"}
             </p>
           ) : (
             configSections.map(([section, value]) => (
@@ -146,18 +136,39 @@ function ConfigPage() {
         <TabsContent value="json">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-3">
-              <CardTitle className="text-base">Resolved Runtime Snapshot</CardTitle>
-              <Button variant="outline" size="sm" disabled>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Snapshot current
-              </Button>
+              <CardTitle className="text-base">
+                {editMode ? "Edit Configuration" : "Full Configuration"}
+              </CardTitle>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEditToggle}
+                >
+                  {editMode ? "Cancel" : "Edit"}
+                </Button>
+                {editMode && (
+                  <Button
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={updateConfig.isPending}
+                  >
+                    <Save className="mr-2 h-4 w-4" />
+                    {updateConfig.isPending ? "Saving..." : "Save"}
+                  </Button>
+                )}
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-2">
+              {saveError && (
+                <p className="text-sm text-red-600">{saveError}</p>
+              )}
               <Textarea
-                value={rawJson}
-                readOnly
+                value={editMode ? editJson : rawJson}
+                readOnly={!editMode}
+                onChange={editMode ? (e) => setEditJson(e.target.value) : undefined}
                 className="min-h-[500px] font-mono text-sm"
-                placeholder="Loading runtime configuration..."
+                placeholder="Loading configuration..."
               />
             </CardContent>
           </Card>
