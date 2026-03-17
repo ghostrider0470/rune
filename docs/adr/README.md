@@ -1,10 +1,16 @@
 # Architecture Decision Records
 
-This folder is reserved for ADRs during the docs structure cleanup transition.
+This folder holds durable decisions that should not be rediscovered in chat or buried inside PR discussions.
 
-Planned early ADRs from the reorg proposal include:
+## Current ADRs
+
+- [`ADR-0001-execution-workflow-and-speed.md`](ADR-0001-execution-workflow-and-speed.md)
+
+## Planned early ADRs
+
 - source-of-truth model
 - standalone-first product shape
+- multi-database storage architecture
 - Project 2 execution model
 
 Current planning context remains in:
