@@ -17,7 +17,7 @@ Use it to find the right source of truth by audience and concern.
 | Parity contracts | [`PARITY-SPEC.md`](PARITY-SPEC.md), [`PARITY-CONTRACTS.md`](PARITY-CONTRACTS.md), [`PROTOCOLS.md`](PROTOCOLS.md) | observable runtime behavior and subsystem invariants |
 | Operator deployment/runtime docs | [`DOCKER-DEPLOYMENT.md`](DOCKER-DEPLOYMENT.md), [`DATABASES.md`](DATABASES.md), [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md) | deployment, storage, health, operational rules |
 | Contributor/reference docs | [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md), [`SUBSYSTEMS.md`](SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |
-| Long-form strategy / rationale | [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md), [`AZURE-DATA-OPTIONS.md`](AZURE-DATA-OPTIONS.md), [`DOCS-README-PLAN-REORG.md`](DOCS-README-PLAN-REORG.md) | design rationale and planning context |
+| Long-form strategy / rationale | [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md), [`strategy/AZURE-DATA-OPTIONS.md`](strategy/AZURE-DATA-OPTIONS.md), [`DOCS-README-PLAN-REORG.md`](DOCS-README-PLAN-REORG.md) | design rationale and planning context |
 
 ## Transitional structure scaffold
 
@@ -39,6 +39,7 @@ The current top-level docs remain authoritative until content is intentionally m
 1. [`README.md`](../README.md)
 2. [`rune-plan.md`](../rune-plan.md)
 3. [`AZURE-COMPATIBILITY.md`](AZURE-COMPATIBILITY.md)
+4. [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md)
 
 ### If you are operating Rune
 1. [`DOCKER-DEPLOYMENT.md`](DOCKER-DEPLOYMENT.md)

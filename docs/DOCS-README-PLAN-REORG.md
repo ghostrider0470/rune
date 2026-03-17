@@ -178,8 +178,8 @@ docs/
 
   strategy/
     STANDALONE-STRATEGY.md
-    COMPETITIVE-RESEARCH.md
-    AZURE-DATA-OPTIONS.md
+    strategy/COMPETITIVE-RESEARCH.md
+    strategy/AZURE-DATA-OPTIONS.md
 
   adr/
     ADR-0001-source-of-truth-model.md
@@ -337,7 +337,7 @@ Use for:
 | `ROADMAP.md` | Verify then likely fold/retire | potentially merged into `rune-plan.md` |
 | `docs/IMPLEMENTATION-PHASES.md` | Keep | canonical parity execution spec |
 | `docs/STANDALONE-STRATEGY.md` | Keep but re-home conceptually | `docs/strategy/STANDALONE-STRATEGY.md` |
-| `docs/COMPETITIVE-RESEARCH.md` | Keep | `docs/strategy/` |
+| `docs/strategy/COMPETITIVE-RESEARCH.md` | Keep | `docs/strategy/` |
 | `docs/CRATE-LAYOUT.md` | Keep | likely `docs/reference/CRATE-LAYOUT.md` |
 | `docs/SUBSYSTEMS.md` | Keep | likely `docs/reference/SUBSYSTEMS.md` |
 | `docs/AZURE-COMPATIBILITY.md` | Keep | likely `docs/operator/` or `docs/reference/` depending scope |
