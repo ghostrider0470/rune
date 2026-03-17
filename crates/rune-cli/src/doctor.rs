@@ -571,25 +571,27 @@ async fn check_channels_config(config: &AppConfig) -> Vec<CheckResult> {
 
 async fn check_memory_config(config: &AppConfig) -> Vec<CheckResult> {
     let mut results = Vec::new();
+    let requested_level = config.memory.requested_level();
 
     results.push(CheckResult {
-        name: "memory.search".into(),
+        name: "memory.level".into(),
         category: "memory".into(),
-        status: if config.memory.semantic_search_enabled {
-            CheckStatus::Pass
-        } else {
-            CheckStatus::Warn
+        status: CheckStatus::Pass,
+        message: match requested_level {
+            rune_config::MemoryLevel::File => {
+                "Configured memory level: file (local file scan only)".into()
+            }
+            rune_config::MemoryLevel::Keyword => {
+                "Configured memory level: keyword (local keyword retrieval)".into()
+            }
+            rune_config::MemoryLevel::Semantic => {
+                "Configured memory level: semantic (hybrid when available, keyword fallback otherwise)".into()
+            }
         },
-        message: if config.memory.semantic_search_enabled {
-            "Semantic memory search is enabled".into()
-        } else {
-            "Semantic memory search is disabled".into()
-        },
-        hint: if config.memory.semantic_search_enabled {
-            None
-        } else {
-            Some("Disable only intentionally; parity expects searchable memory surfaces".into())
-        },
+        hint: Some(format!(
+            "Resolved from memory.level or legacy semantic_search_enabled; active preference is `{}`",
+            requested_level.as_str()
+        )),
     });
 
     let memory_dir = &config.paths.memory_dir;
