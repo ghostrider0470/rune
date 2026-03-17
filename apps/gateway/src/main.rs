@@ -42,7 +42,7 @@ use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
     TranscriptRepo, TurnRepo,
 };
-use rune_store::{EmbeddedPg, JobRepo, PgMemoryEmbeddingRepo, build_repos};
+use rune_store::{EmbeddedPg, JobRepo, build_repos};
 use rune_tools::ApprovalCheck;
 use rune_tools::approval::{ApprovalRequest, PolicyBasedApproval};
 use rune_tools::exec_tool::ExecToolExecutor;
@@ -170,7 +170,6 @@ async fn build_services(
     let (repos, storage_info, embedded_pg) =
         build_repos(&config).await.context("failed to initialize storage backends")?;
 
-    let database_url = storage_info.database_url.clone().unwrap_or_default();
     let pgvector_available = storage_info.pgvector_available();
 
     let session_repo: Arc<dyn SessionRepo> = repos.session_repo.clone();
@@ -181,6 +180,7 @@ async fn build_services(
     let approval_repo: Arc<dyn ApprovalRepo> = repos.approval_repo.clone();
     let tool_approval_repo: Arc<dyn rune_store::repos::ToolApprovalPolicyRepo> =
         repos.tool_approval_repo.clone();
+    let memory_embedding_repo: Arc<dyn MemoryEmbeddingRepo> = repos.memory_embedding_repo.clone();
     let device_repo: Arc<dyn rune_store::repos::DeviceRepo> = repos.device_repo.clone();
     let tool_execution_repo: Arc<dyn ToolExecutionRepo> = repos.tool_execution_repo.clone();
 
@@ -239,8 +239,8 @@ async fn build_services(
     let memory = build_memory_tool_executor(
         &config,
         &workspace_root,
-        &database_url,
-        embedded_pg.is_some(),
+        memory_embedding_repo,
+        storage_info.backend_name,
         pgvector_available,
     )
     .await
@@ -368,8 +368,8 @@ async fn build_services(
 async fn build_memory_tool_executor(
     config: &AppConfig,
     workspace_root: &Path,
-    database_url: &str,
-    using_embedded_pg: bool,
+    memory_embedding_repo: Arc<dyn MemoryEmbeddingRepo>,
+    storage_backend: &str,
     pgvector_available: bool,
 ) -> Result<MemoryToolExecutor> {
     match config.memory.requested_level() {
@@ -393,8 +393,8 @@ async fn build_memory_tool_executor(
             build_memory_tool_executor_with_index_config(
                 config,
                 workspace_root,
-                database_url,
-                using_embedded_pg,
+                memory_embedding_repo,
+                storage_backend,
                 index_config,
             )
             .await
@@ -539,8 +539,8 @@ fn memory_index_poll_interval() -> Option<Duration> {
 async fn build_memory_tool_executor_with_index_config(
     config: &AppConfig,
     workspace_root: &Path,
-    database_url: &str,
-    using_embedded_pg: bool,
+    repo: Arc<dyn MemoryEmbeddingRepo>,
+    storage_backend: &str,
     index_config: MemoryIndexConfig,
 ) -> Result<MemoryToolExecutor> {
     let provider = index_config.embedding_provider.clone();
@@ -558,9 +558,6 @@ async fn build_memory_tool_executor_with_index_config(
             return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
         }
     };
-    let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(PgMemoryEmbeddingRepo::new(
-        rune_store::pool::create_pool(database_url, config.database.max_connections as usize)?,
-    ));
     sync_workspace_memory_index(workspace_root, repo.as_ref(), &index).await?;
     let initial_state = snapshot_workspace_memory_index_state(workspace_root).await?;
     let watcher_index = MemoryIndex::from_config(index_config)
@@ -573,11 +570,7 @@ async fn build_memory_tool_executor_with_index_config(
     );
     let backend = Arc::new(PersistedHybridMemorySearch::new(repo, index));
 
-    if using_embedded_pg {
-        info!("memory_search configured with persisted hybrid backend via embedded PostgreSQL");
-    } else {
-        info!("memory_search configured with persisted hybrid backend via external PostgreSQL");
-    }
+    info!(backend = storage_backend, "memory_search configured with persisted hybrid backend");
 
     Ok(MemoryToolExecutor::with_hybrid_search(
         workspace_root.to_path_buf(),
@@ -1966,8 +1959,9 @@ mod tests {
         let mut config = AppConfig::default();
         config.memory.level = Some(MemoryLevel::File);
 
+        let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(MemMemoryEmbeddingRepo::new(Vec::new()));
         let executor =
-            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
+            build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
                 .await
                 .expect("memory tool executor should build");
 
@@ -1979,8 +1973,9 @@ mod tests {
         let mut config = AppConfig::default();
         config.memory.semantic_search_enabled = false;
 
+        let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(MemMemoryEmbeddingRepo::new(Vec::new()));
         let executor =
-            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
+            build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
                 .await
                 .expect("memory tool executor should build");
 
@@ -1992,8 +1987,9 @@ mod tests {
         let mut config = AppConfig::default();
         config.memory.level = Some(MemoryLevel::Semantic);
 
+        let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(MemMemoryEmbeddingRepo::new(Vec::new()));
         let executor =
-            build_memory_tool_executor(&config, Path::new("."), "postgres://unused", false, false)
+            build_memory_tool_executor(&config, Path::new("."), repo, "test", false)
                 .await
                 .expect("memory tool executor should fall back cleanly");
 
@@ -2003,11 +1999,12 @@ mod tests {
     #[tokio::test]
     async fn build_memory_tool_executor_falls_back_without_embedding_credentials() {
         let config = AppConfig::default();
+        let repo: Arc<dyn MemoryEmbeddingRepo> = Arc::new(MemMemoryEmbeddingRepo::new(Vec::new()));
         let executor = build_memory_tool_executor_with_index_config(
             &config,
             Path::new("."),
-            "postgres://unused",
-            false,
+            repo,
+            "test",
             MemoryIndexConfig {
                 api_key: None,
                 api_base_url: None,
