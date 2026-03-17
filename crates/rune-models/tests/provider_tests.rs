@@ -1,3 +1,5 @@
+use std::sync::{LazyLock, Mutex};
+
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
     AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason, ModelError, ModelProvider,
@@ -5,6 +7,8 @@ use rune_models::{
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn simple_request() -> CompletionRequest {
     CompletionRequest {
@@ -270,6 +274,7 @@ fn selects_azure_provider() {
 
 #[test]
 fn selects_openai_provider() {
+    let _guard = ENV_LOCK.lock().unwrap();
     unsafe { std::env::set_var("TEST_OAI_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "openai".into(),
@@ -550,7 +555,12 @@ fn selects_bedrock_provider_with_aws_default_region_fallback() {
     let provider = provider_from_config(&cfg).unwrap();
     let debug = format!("{provider:?}");
     assert!(debug.contains("BedrockProvider"));
-    let concrete = rune_models::BedrockProvider::new("", "ENV_AWS_ACCESS_DEFAULT", "ENV_AWS_SECRET_DEFAULT", None);
+    let concrete = rune_models::BedrockProvider::new(
+        "",
+        "ENV_AWS_ACCESS_DEFAULT",
+        "ENV_AWS_SECRET_DEFAULT",
+        None,
+    );
     assert_eq!(concrete.region(), "eu-central-1");
     unsafe {
         std::env::remove_var("AWS_ACCESS_KEY_ID");
@@ -582,7 +592,12 @@ fn selects_bedrock_provider_with_default_region_when_no_region_is_configured() {
     let provider = provider_from_config(&cfg).unwrap();
     let debug = format!("{provider:?}");
     assert!(debug.contains("BedrockProvider"));
-    let concrete = rune_models::BedrockProvider::new("", "ENV_AWS_ACCESS_FALLBACK", "ENV_AWS_SECRET_FALLBACK", None);
+    let concrete = rune_models::BedrockProvider::new(
+        "",
+        "ENV_AWS_ACCESS_FALLBACK",
+        "ENV_AWS_SECRET_FALLBACK",
+        None,
+    );
     assert_eq!(concrete.region(), "us-east-1");
     unsafe {
         std::env::remove_var("AWS_ACCESS_KEY_ID");
@@ -693,6 +708,7 @@ fn azure_requires_deployment_name() {
 
 #[test]
 fn azure_requires_api_version() {
+    let _guard = ENV_LOCK.lock().unwrap();
     unsafe { std::env::set_var("TEST_AZURE_KEY_VER", "fake") };
     let cfg = ModelProviderConfig {
         name: "azure".into(),
