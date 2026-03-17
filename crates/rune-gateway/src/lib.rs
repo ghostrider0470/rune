@@ -1,5 +1,6 @@
 #![doc = "Daemon, HTTP/WS server, auth middleware, and service wiring for Rune."]
 
+mod a2ui;
 mod auth;
 mod error;
 mod logging;
