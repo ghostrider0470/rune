@@ -385,15 +385,19 @@ async fn build_memory_tool_executor(
             info!(backend = storage_backend, "memory level=keyword; using persisted keyword memory search");
             Ok(MemoryToolExecutor::with_hybrid_search(
                 workspace_root.to_path_buf(),
-                Arc::new(PersistedKeywordMemorySearch::new(memory_embedding_repo)),
+                Arc::new(PersistedKeywordMemorySearch::new(memory_embedding_repo.clone())),
             ))
         }
         MemoryLevel::Semantic => {
             if !pgvector_available {
                 warn!(
-                    "memory level=semantic requested but pgvector unavailable; falling back to local keyword memory search"
+                    backend = storage_backend,
+                    "memory level=semantic requested but pgvector unavailable; falling back to persisted keyword memory search"
                 );
-                return Ok(MemoryToolExecutor::new(workspace_root.to_path_buf()));
+                return Ok(MemoryToolExecutor::with_hybrid_search(
+                    workspace_root.to_path_buf(),
+                    Arc::new(PersistedKeywordMemorySearch::new(memory_embedding_repo)),
+                ));
             }
 
             let index_config = memory_index_config_from_env();
@@ -2000,7 +2004,7 @@ mod tests {
                 .await
                 .expect("memory tool executor should fall back cleanly");
 
-        assert!(executor.hybrid_search_backend().is_none());
+        assert!(executor.hybrid_search_backend().is_some());
     }
 
     #[tokio::test]
