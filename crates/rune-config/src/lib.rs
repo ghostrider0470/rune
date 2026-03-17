@@ -667,12 +667,10 @@ pub struct MemoryConfig {
 impl MemoryConfig {
     #[must_use]
     pub fn requested_level(&self) -> MemoryLevel {
-        self.level.unwrap_or_else(|| {
-            if self.semantic_search_enabled {
-                MemoryLevel::Semantic
-            } else {
-                MemoryLevel::Keyword
-            }
+        self.level.unwrap_or(if self.semantic_search_enabled {
+            MemoryLevel::Semantic
+        } else {
+            MemoryLevel::Keyword
         })
     }
 
@@ -751,21 +749,12 @@ const fn default_browser_timeout_ms() -> u64 {
 }
 
 /// Media pipeline configuration embedding TTS and STT engine configs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MediaConfig {
     #[serde(default)]
     pub tts: TtsConfig,
     #[serde(default)]
     pub stt: SttConfig,
-}
-
-impl Default for MediaConfig {
-    fn default() -> Self {
-        Self {
-            tts: TtsConfig::default(),
-            stt: SttConfig::default(),
-        }
-    }
 }
 
 /// Logging behavior.

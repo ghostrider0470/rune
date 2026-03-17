@@ -39,13 +39,11 @@ pub struct SlackAdapter {
 impl SlackAdapter {
     /// Create a new Slack adapter.
     ///
-    /// * `bot_token`       - Slack bot OAuth token (`xoxb-...`).
-    /// * `signing_secret`  - Slack signing secret for HMAC-SHA256 webhook
-    ///                        verification. When `None`, signature checks are
-    ///                        skipped (local dev mode).
-    /// * `listen_addr`     - Local address to bind the Events API webhook receiver
-    ///                        (e.g. `"0.0.0.0:3100"`). If `None`, only outbound
-    ///                        sending is available.
+    /// * `bot_token` - Slack bot OAuth token (`xoxb-...`).
+    /// * `signing_secret` - Slack signing secret for HMAC-SHA256 webhook
+    ///   verification. When `None`, signature checks are skipped (local dev mode).
+    /// * `listen_addr` - Local address to bind the Events API webhook receiver
+    ///   (e.g. `"0.0.0.0:3100"`). If `None`, only outbound sending is available.
     pub fn new(
         bot_token: impl Into<String>,
         signing_secret: Option<String>,

@@ -528,7 +528,7 @@ impl TranscriptRepo for SqliteTranscriptRepo {
         let sid = session_id.to_string();
         self.conn
             .call(move |conn| {
-                Ok(conn.execute("DELETE FROM transcript_items WHERE session_id = ?1", [&sid])?)
+                conn.execute("DELETE FROM transcript_items WHERE session_id = ?1", [&sid])
             })
             .await
             .map_err(StoreError::from)
@@ -1088,7 +1088,7 @@ impl MemoryEmbeddingRepo for SqliteMemoryEmbeddingRepo {
         let fp = file_path.to_string();
         self.conn
             .call(move |conn| {
-                Ok(conn.execute("DELETE FROM memory_embeddings WHERE file_path = ?1", [&fp])?)
+                conn.execute("DELETE FROM memory_embeddings WHERE file_path = ?1", [&fp])
             })
             .await
             .map_err(StoreError::from)
@@ -1406,10 +1406,10 @@ impl DeviceRepo for SqliteDeviceRepo {
     async fn prune_expired_requests(&self) -> Result<usize, StoreError> {
         self.conn
             .call(move |conn| {
-                Ok(conn.execute(
+                conn.execute(
                     "DELETE FROM pairing_requests WHERE expires_at <= ?1",
                     [&to_rfc3339(&Utc::now())],
-                )?)
+                )
             })
             .await
             .map_err(StoreError::from)
