@@ -227,6 +227,7 @@ Persistent mounts: `./data` → `/data`, `./config` → `/config`
 
 | Doc | What |
 |-----|------|
+| [`docs/INDEX.md`](docs/INDEX.md) | Docs front door by audience and concern |
 | [`rune-plan.md`](rune-plan.md) | Canonical strategy, goals, stack direction |
 | [`PARITY-INVENTORY.md`](docs/PARITY-INVENTORY.md) | OpenClaw feature parity map |
 | [`AZURE-COMPATIBILITY.md`](docs/AZURE-COMPATIBILITY.md) | Azure integration contract |
