@@ -571,6 +571,7 @@ fn selects_bedrock_provider_with_aws_default_region_fallback() {
 
 #[test]
 fn selects_bedrock_provider_with_default_region_when_no_region_is_configured() {
+    let _guard = ENV_LOCK.lock().unwrap();
     unsafe {
         std::env::remove_var("TEST_BEDROCK_DEFAULT_REGION_NONE");
         std::env::remove_var("AWS_REGION");
