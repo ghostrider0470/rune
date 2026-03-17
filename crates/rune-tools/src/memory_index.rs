@@ -297,10 +297,16 @@ impl EmbeddingProvider for OpenAiEmbedding {
 // ---------------------------------------------------------------------------
 
 /// Rough token count estimate: ~4 characters per token for English text.
+///
+/// This uses a byte-length heuristic (`(len + 3) / 4`) that works well for
+/// English prose and markdown but **under-counts** for CJK text (where each
+/// character is often 1 token despite being 3-4 UTF-8 bytes) and **over-counts**
+/// for source code (where long identifier names compress into fewer tokens).
+/// For chunking purposes this is acceptable — the resulting chunks may be
+/// slightly larger or smaller than the configured `chunk_size` target, but the
+/// overlap window compensates. For a precise count, `tiktoken` or a similar
+/// tokenizer would be needed, but the added dependency is not justified here.
 fn estimate_tokens(text: &str) -> usize {
-    // A simple heuristic that works well for English prose and markdown.
-    // For a more accurate count one would use tiktoken, but that adds a
-    // heavy dependency that is not justified for chunking heuristics.
     text.len().div_ceil(4)
 }
 

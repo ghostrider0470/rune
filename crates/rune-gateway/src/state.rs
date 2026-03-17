@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use rune_config::AppConfig;
+use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
     SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
@@ -13,8 +13,10 @@ use rune_runtime::{
 use rune_store::repos::{
     ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
 };
+use rune_stt::SttEngine;
 use rune_tools::process_tool::ProcessManager;
-use tokio::sync::broadcast;
+use rune_tts::TtsEngine;
+use tokio::sync::{RwLock, broadcast};
 
 use crate::pairing::DeviceRegistry;
 
@@ -34,8 +36,8 @@ pub struct SessionEvent {
 /// Shared state accessible from all route handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// Resolved application configuration.
-    pub config: Arc<AppConfig>,
+    /// Resolved application configuration (behind RwLock for live editing).
+    pub config: Arc<RwLock<AppConfig>>,
     /// Process start time for uptime/status reporting.
     pub started_at: Arc<Instant>,
     /// Session engine for lifecycle management.
@@ -62,8 +64,8 @@ pub struct AppState {
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
     /// Background process manager for operator inspection/control surfaces.
     pub process_manager: ProcessManager,
-    /// Number of registered tools in the runtime graph.
-    pub tool_count: usize,
+    /// Consolidated runtime capabilities (immutable after boot).
+    pub capabilities: Arc<Capabilities>,
     /// Persistent device pairing repository.
     pub device_repo: Arc<dyn DeviceRepo>,
     /// Device pairing registry for Ed25519 challenge-response auth.
@@ -74,4 +76,8 @@ pub struct AppState {
     pub skill_loader: Arc<SkillLoader>,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
+    /// Text-to-speech engine (constructed when TTS API key is configured).
+    pub tts_engine: Option<Arc<RwLock<TtsEngine>>>,
+    /// Speech-to-text engine (constructed when STT API key is configured).
+    pub stt_engine: Option<Arc<RwLock<SttEngine>>>,
 }

@@ -56,9 +56,7 @@ pub fn try_upgrade_pgvector(database_url: &str) -> PgVectorStatus {
         Err(e) => return PgVectorStatus::Unavailable(format!("connection failed: {e}")),
     };
 
-    if let Err(e) =
-        diesel::sql_query("CREATE EXTENSION IF NOT EXISTS vector").execute(&mut conn)
-    {
+    if let Err(e) = diesel::sql_query("CREATE EXTENSION IF NOT EXISTS vector").execute(&mut conn) {
         return PgVectorStatus::Unavailable(format!("CREATE EXTENSION vector failed: {e}"));
     }
 

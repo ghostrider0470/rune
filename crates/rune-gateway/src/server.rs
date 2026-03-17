@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::info;
 
-use rune_config::AppConfig;
+use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
     SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
@@ -21,7 +21,13 @@ use rune_runtime::{
 use rune_store::repos::{
     ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
 };
+use rune_stt::SttEngine;
+use rune_stt::openai::OpenAiStt;
 use rune_tools::process_tool::ProcessManager;
+use rune_tts::TtsEngine;
+use rune_tts::elevenlabs::ElevenLabsTts;
+use rune_tts::openai::OpenAiTts;
+use tokio::sync::RwLock;
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
@@ -70,7 +76,7 @@ pub struct Services {
     pub approval_repo: Arc<dyn ApprovalRepo>,
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
     pub process_manager: ProcessManager,
-    pub tool_count: usize,
+    pub capabilities: Capabilities,
     pub device_repo: Arc<dyn DeviceRepo>,
 }
 
@@ -80,6 +86,7 @@ pub struct Services {
 pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let (event_tx, _) = broadcast::channel::<SessionEvent>(256);
 
+    // Extract values from config before wrapping in RwLock.
     let auth_token = services.config.gateway.auth_token.clone();
     let addr: SocketAddr = format!(
         "{}:{}",
@@ -88,12 +95,49 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     .parse()
     .map_err(|e: std::net::AddrParseError| GatewayError::Internal(e.to_string()))?;
 
-    let config = Arc::new(services.config);
+    let skills_dir = services.config.paths.skills_dir.clone();
+    let workspace_root = services.config.agents.defaults.workspace.clone();
+
+    // Build TTS engine if an API key is configured.
+    let tts_engine = services
+        .config
+        .media
+        .tts
+        .api_key
+        .as_deref()
+        .filter(|k| !k.is_empty())
+        .map(|key| {
+            let provider: Box<dyn rune_tts::TtsProvider> =
+                if services.config.media.tts.provider == "elevenlabs" {
+                    Box::new(ElevenLabsTts::new(key))
+                } else {
+                    Box::new(OpenAiTts::new(key))
+                };
+            Arc::new(RwLock::new(TtsEngine::new(
+                provider,
+                services.config.media.tts.clone(),
+            )))
+        });
+
+    // Build STT engine if an API key is configured.
+    let stt_engine = services
+        .config
+        .media
+        .stt
+        .api_key
+        .as_deref()
+        .filter(|k| !k.is_empty())
+        .map(|key| {
+            let provider: Box<dyn rune_stt::SttProvider> = Box::new(OpenAiStt::new(key));
+            Arc::new(RwLock::new(SttEngine::new(
+                provider,
+                services.config.media.stt.clone(),
+            )))
+        });
+
+    let config = Arc::new(RwLock::new(services.config));
     let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        config.paths.skills_dir.clone(),
-        skill_registry.clone(),
-    ));
+    let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
     let _ = skill_loader.scan().await;
 
     let turn_executor = Arc::new(
@@ -117,12 +161,14 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         approval_repo: services.approval_repo,
         tool_approval_repo: services.tool_approval_repo,
         process_manager: services.process_manager,
-        tool_count: services.tool_count,
+        capabilities: Arc::new(services.capabilities),
         device_repo: services.device_repo.clone(),
         device_registry: Arc::new(DeviceRegistry::new(services.device_repo)),
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine,
+        stt_engine,
     };
 
     let supervisor_deps = SupervisorDeps {
@@ -131,7 +177,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         reminder_store: state.reminder_store.clone(),
         session_engine: state.session_engine.clone(),
         turn_executor: state.turn_executor.clone(),
-        workspace_root: state.config.agents.defaults.workspace.clone(),
+        workspace_root,
         device_registry: state.device_registry.clone(),
     };
 
@@ -254,6 +300,21 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             get(routes::reminders_list).post(routes::reminders_add),
         )
         .route("/reminders/{id}", delete(routes::reminders_cancel))
+        // TTS routes
+        .route("/tts/status", get(routes::tts_status))
+        .route("/tts/synthesize", post(routes::tts_synthesize))
+        .route("/tts/enable", post(routes::tts_enable))
+        .route("/tts/disable", post(routes::tts_disable))
+        // STT routes
+        .route("/stt/status", get(routes::stt_status))
+        .route("/stt/transcribe", post(routes::stt_transcribe))
+        .route("/stt/enable", post(routes::stt_enable))
+        .route("/stt/disable", post(routes::stt_disable))
+        // Config editor routes
+        .route(
+            "/config",
+            get(routes::get_config).put(routes::update_config),
+        )
         .layer(middleware::from_fn(move |req, next| {
             bearer_auth(req, next, auth_token.clone(), device_registry.clone())
         }))

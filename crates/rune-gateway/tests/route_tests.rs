@@ -9,13 +9,15 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde_json::Value;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tower::ServiceExt;
 use uuid::Uuid;
 
 use chrono::Timelike;
 
-use rune_config::{AppConfig, ConfiguredModel, LaneQueueConfig, ModelProviderConfig};
+use rune_config::{
+    AppConfig, Capabilities, ConfiguredModel, LaneQueueConfig, ModelProviderConfig, RuntimeMode,
+};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };
@@ -33,6 +35,21 @@ use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
+
+fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
+    Arc::new(Capabilities {
+        mode: RuntimeMode::Standalone,
+        storage_backend: "test".to_string(),
+        pgvector: false,
+        memory_mode: "disabled".to_string(),
+        browser: false,
+        mcp_servers: 0,
+        tts: false,
+        stt: false,
+        tool_count,
+        channels: vec![],
+    })
+}
 
 // ── In-memory repos ───────────────────────────────────────────────────────────
 
@@ -726,12 +743,10 @@ fn build_test_app_parts(
     let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
 
     config.gateway.auth_token = auth_token.clone();
-    let config = Arc::new(config);
+    let skills_dir = config.paths.skills_dir.clone();
+    let config = Arc::new(RwLock::new(config));
     let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        config.paths.skills_dir.clone(),
-        skill_registry.clone(),
-    ));
+    let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
@@ -751,12 +766,14 @@ fn build_test_app_parts(
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     (build_router(state, auth_token), device_repo)
@@ -818,7 +835,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -833,12 +850,14 @@ async fn ws_rpc_status_matches_http_status_basics() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 3,
+        capabilities: test_capabilities(3),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -914,7 +933,7 @@ enabled: true
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -929,12 +948,14 @@ enabled: true
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1022,7 +1043,7 @@ async fn status_reports_configured_lane_capacities() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(config),
+        config: Arc::new(RwLock::new(config)),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1037,12 +1058,14 @@ async fn status_reports_configured_lane_capacities() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let app = build_router(state, None);
@@ -1107,7 +1130,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1122,12 +1145,14 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1224,7 +1249,7 @@ async fn ws_rpc_health_reports_session_count() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1239,12 +1264,14 @@ async fn ws_rpc_health_reports_session_count() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1332,7 +1359,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1347,12 +1374,14 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1465,7 +1494,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1480,12 +1509,14 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1546,7 +1577,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1561,12 +1592,14 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1624,7 +1657,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1639,12 +1672,14 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1762,7 +1797,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1777,12 +1812,14 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1896,7 +1933,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -1911,12 +1948,14 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1995,7 +2034,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -2010,12 +2049,14 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3312,7 +3353,7 @@ async fn send_message_and_transcript_with_shared_state() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -3327,12 +3368,14 @@ async fn send_message_and_transcript_with_shared_state() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let app = build_router(state, None);
@@ -3528,7 +3571,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -3543,12 +3586,14 @@ async fn get_session_status_surfaces_subagent_metadata() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let app = build_router(state, None);
@@ -4105,7 +4150,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
 
     let state = AppState {
-        config: Arc::new(AppConfig::default()),
+        config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -4120,12 +4165,14 @@ async fn list_sessions_filters_by_channel_and_activity() {
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
         process_manager: ProcessManager::new(),
-        tool_count: 0,
+        capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
         skill_loader,
         event_tx,
+        tts_engine: None,
+        stt_engine: None,
     };
 
     let app = build_router(state, None);

@@ -397,7 +397,11 @@ impl DeviceRegistry {
         let token = generate_token();
         let updated = self
             .repo
-            .update_token(device_id, &hash_token(&token), Utc::now() + Duration::days(30))
+            .update_token(
+                device_id,
+                &hash_token(&token),
+                Utc::now() + Duration::days(30),
+            )
             .await
             .map_err(|e| PairingError::Store(e.to_string()))?;
         info!(device_id = %device_id, "device token rotated");
@@ -416,7 +420,11 @@ impl DeviceRegistry {
 
     pub async fn validate_token(&self, token: &str) -> Option<StoredPairedDevice> {
         let token_hash = hash_token(token);
-        let device = self.repo.find_device_by_token_hash(&token_hash).await.ok()??;
+        let device = self
+            .repo
+            .find_device_by_token_hash(&token_hash)
+            .await
+            .ok()??;
         if Utc::now() > device.token_expires_at {
             return None;
         }

@@ -12,9 +12,11 @@ rune-store = { path = "../rune-store" }
 rune-runtime = { path = "../rune-runtime" }
 rune-models = { path = "../rune-models" }
 rune-tools = { path = "../rune-tools" }
+rune-tts = { path = "../rune-tts" }
+rune-stt = { path = "../rune-stt" }
 
 async-trait.workspace = true
-axum = { workspace = true, features = ["ws"] }
+axum = { workspace = true, features = ["ws", "multipart"] }
 ed25519-dalek.workspace = true
 hex.workspace = true
 http-body-util = "0.1"

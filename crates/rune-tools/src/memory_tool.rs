@@ -4,7 +4,7 @@
 //! Search prefers the persisted hybrid backend when one is configured, falling back
 //! to local keyword scanning when persistence or embeddings are unavailable.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -277,6 +277,16 @@ impl MemoryToolExecutor {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgument("missing required parameter: path".into()))?;
 
+        // Reject any path with parent directory traversal
+        if Path::new(path_str)
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+        {
+            return Err(ToolError::InvalidArgument(
+                "path traversal is not allowed in memory_get".into(),
+            ));
+        }
+
         // Only allow MEMORY.md and memory/*.md
         let path = Path::new(path_str);
         let is_memory_md = path_str == "MEMORY.md";
@@ -290,6 +300,18 @@ impl MemoryToolExecutor {
         }
 
         let full_path = self.workspace_root.join(path);
+
+        // Defense-in-depth: ensure resolved path is within workspace
+        if let Ok(canonical) = full_path.canonicalize() {
+            if let Ok(ws_canonical) = self.workspace_root.canonicalize() {
+                if !canonical.starts_with(&ws_canonical) {
+                    return Err(ToolError::InvalidArgument(
+                        "resolved path escapes workspace boundary".into(),
+                    ));
+                }
+            }
+        }
+
         let content = tokio::fs::read_to_string(&full_path)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to read {path_str}: {e}")))?;
@@ -600,6 +622,32 @@ mod tests {
         let exec = MemoryToolExecutor::new(tmp.path());
 
         let call = make_call("memory_get", serde_json::json!({"path": "secrets/keys.md"}));
+        let err = exec.execute(call).await.unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn get_rejects_path_traversal() {
+        let tmp = setup_workspace().await;
+        let exec = MemoryToolExecutor::new(tmp.path());
+
+        let call = make_call(
+            "memory_get",
+            serde_json::json!({"path": "memory/../../etc/passwd"}),
+        );
+        let err = exec.execute(call).await.unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn get_rejects_dotdot_in_memory_dir() {
+        let tmp = setup_workspace().await;
+        let exec = MemoryToolExecutor::new(tmp.path());
+
+        let call = make_call(
+            "memory_get",
+            serde_json::json!({"path": "memory/../secrets.md"}),
+        );
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }
