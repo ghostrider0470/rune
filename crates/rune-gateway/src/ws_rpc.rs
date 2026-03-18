@@ -12,6 +12,7 @@ use rune_core::SessionKind;
 use rune_runtime::SkillScanSummary;
 
 use crate::a2ui::{A2uiActionParams, A2uiEvent, A2uiFormSubmitParams, broadcast_a2ui_event};
+use crate::events::{RuntimeEvent, TurnEvent, UsageSummary, broadcast_runtime_event};
 use crate::state::AppState;
 use crate::ws::active_ws_connections;
 
@@ -301,19 +302,18 @@ impl RpcDispatcher {
                     .map(String::from)
             });
 
-        // Broadcast turn completion event.
-        let _ = self.state.event_tx.send(crate::state::SessionEvent {
-            session_id: session_id.to_string(),
-            kind: "turn_completed".to_string(),
-            payload: json!({
-                "session_id": session_id,
-                "turn_id": turn_row.id,
-                "assistant_reply": assistant_reply,
-                "prompt_tokens": usage.prompt_tokens,
-                "completion_tokens": usage.completion_tokens,
+        // Broadcast typed turn completion event.
+        let _ = broadcast_runtime_event(
+            &self.state.event_tx,
+            RuntimeEvent::Turn(TurnEvent::Completed {
+                session_id,
+                turn_id: turn_row.id,
+                usage: Some(UsageSummary {
+                    prompt_tokens: u64::from(usage.prompt_tokens),
+                    completion_tokens: u64::from(usage.completion_tokens),
+                }),
             }),
-            state_changed: true,
-        });
+        );
 
         Ok(json!({
             "turn_id": turn_row.id,
