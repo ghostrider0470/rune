@@ -1,5 +1,11 @@
 # Rune — Full OpenClaw Parity + Superior Multi-Agent Orchestration & Context Management
 
+> Status: Legacy roadmap/planning artifact retained for provenance during the planning-canonicalization transition.
+>
+> Canonical product strategy now lives in `rune-plan.md`.
+> Use `docs/IMPLEMENTATION-PHASES.md` for parity-phase sequencing and acceptance criteria.
+> Use GitHub Project 2 for live execution state.
+
 ## Goal
 
 Build a single Rust binary that does everything OpenClaw does — messaging-first AI agent across 12+ channels, skills ecosystem, file/shell/browser tools, TTS/STT, MCP, device pairing, cron/heartbeat automation — but with two critical advantages that none of the competition (OpenClaw, OpenCode, Kilo Code) have:
