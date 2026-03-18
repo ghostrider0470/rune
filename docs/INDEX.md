@@ -36,28 +36,23 @@ These folders are now valid first-stop entrypoints rather than placeholder-only 
 ## Recommended reading paths
 
 ### If you are evaluating Rune
-1. [`README.md`](../README.md)
-2. [`getting-started/README.md`](getting-started/README.md)
-3. [`rune-plan.md`](../rune-plan.md)
-4. [`AZURE-COMPATIBILITY.md`](AZURE-COMPATIBILITY.md)
-5. [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md)
+1. Start with [`README.md`](../README.md) for the honest product entry.
+2. Move to [`getting-started/README.md`](getting-started/README.md) if you want the local bring-up path.
+3. Use [`rune-plan.md`](../rune-plan.md) for product direction and confirmed strategic shape.
+4. Use [`AZURE-COMPATIBILITY.md`](AZURE-COMPATIBILITY.md) and [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md) when you need compatibility/positioning detail.
 
 ### If you are operating Rune
-1. [`operator/README.md`](operator/README.md)
-2. [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md)
-3. [`operator/DATABASES.md`](operator/DATABASES.md)
-4. [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md)
-5. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) for parity-phase context
+1. Start with [`operator/README.md`](operator/README.md) for the operator docs hub.
+2. Use [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md) and [`operator/DATABASES.md`](operator/DATABASES.md) for runtime/storage/deployment shape.
+3. Use [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md) for operating rules.
+4. Use [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) when parity-phase context matters.
 
 ### If you are building Rune
-1. [`contributor/README.md`](contributor/README.md)
-2. [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md)
-3. [`rune-plan.md`](../rune-plan.md)
-4. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md)
-5. [`PROTOCOLS.md`](parity/PROTOCOLS.md)
-6. [`reference/README.md`](reference/README.md)
-7. [`reference/ARCHITECTURE.md`](reference/ARCHITECTURE.md)
-8. [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md)
+1. Start with [`contributor/README.md`](contributor/README.md) for the contributor docs hub.
+2. Use [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md) for deeper runtime/repo execution context.
+3. Use [`rune-plan.md`](../rune-plan.md) and [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) for product + phase context.
+4. Use [`PROTOCOLS.md`](parity/PROTOCOLS.md) for runtime behavior semantics.
+5. Use [`reference/README.md`](reference/README.md), [`reference/ARCHITECTURE.md`](reference/ARCHITECTURE.md), and [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md) for technical reference material.
 
 ## Transitional note
 
