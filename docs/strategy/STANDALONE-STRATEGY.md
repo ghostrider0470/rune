@@ -21,9 +21,15 @@ Use these docs for the current strategy picture:
 - [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md)
 - [`../INDEX.md`](../INDEX.md)
 
-## What belongs here over time
+## Current strategy use
 
-This file should become the stable strategy entry for:
+Use this doc as the strategy entrypoint for:
+- understanding Rune's standalone-first posture today
+- navigating from high-level product-shape questions into the deeper rationale and ADR references
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - standalone-first rationale
 - local-first vs server-grade positioning
 - deployment-shape tradeoffs
