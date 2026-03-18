@@ -307,14 +307,16 @@ Do **not** use for:
 - product marketing or release planning
 
 ### `ROADMAP.md`
-Needs explicit decision.
+Use for:
+- historical roadmap and planning context retained for provenance
+- older long-form planning detail that has not yet been folded elsewhere
 
-Options:
-1. retire it and fold remaining unique value into `rune-plan.md`
-2. keep it as a short public roadmap pointer
-3. keep it as a compatibility/history document only
+Do **not** use for:
+- live execution control
+- current branch/PR workflow authority
+- canonical product strategy
 
-**Recommendation:** likely fold/retire unless it contains unique material not already captured.
+Current direction: keep it as a legacy/historical planning artifact unless and until a tighter fold/retire pass is executed.
 
 ### GitHub Project 2
 Use for:
@@ -335,7 +337,7 @@ Use for:
 |---|---|---|
 | `README.md` | Rewrite | stay at repo root |
 | `rune-plan.md` | Keep | canonical product strategy |
-| `ROADMAP.md` | Verify then likely fold/retire | potentially merged into `rune-plan.md` |
+| `ROADMAP.md` | Keep as historical planning artifact for now | legacy roadmap/provenance; not current execution authority |
 | `docs/IMPLEMENTATION-PHASES.md` | Keep | canonical parity execution spec |
 | `docs/STANDALONE-STRATEGY.md` | Keep but re-home conceptually | `docs/strategy/STANDALONE-STRATEGY.md` |
 | `docs/strategy/COMPETITIVE-RESEARCH.md` | Keep | `docs/strategy/` |
@@ -365,7 +367,7 @@ This lane should be verification-gated.
 
 ### Phase B — structure approval
 - Hamza verifies IA + source-of-truth model
-- resolve decisions around `ROADMAP.md`, `README.md`, and strategy/reference placement
+- resolve any remaining cleanup around `README.md` and strategy/reference placement after the roadmap authority decision already shipped
 
 ### Phase C — non-destructive scaffolding PR
 - add `docs/INDEX.md`
@@ -450,13 +452,12 @@ Approve PR order and one-active-PR sequencing.
 
 ## 12. Decisions/questions for Hamza
 
-1. Should `ROADMAP.md` survive as a public-facing short roadmap, or be folded into `rune-plan.md`?
-2. Should `rune-plan.md` remain at repo root, or move into `docs/strategy/` with a root pointer?
-3. How aggressive should the README be about OpenClaw comparison?
-4. Should `notes/` be treated as internal/private and excluded from canonical docs?
-5. Do you want ADRs public in-repo from the start, or only after initial curation?
-6. Should Azure-specific docs live under Operator docs or Reference docs?
-7. Do you want release-style milestones renamed from `M4/M5/M6/M7` to versioned names later?
+1. Should `rune-plan.md` remain at repo root, or move into `docs/strategy/` with a root pointer?
+2. How aggressive should the README be about OpenClaw comparison?
+3. Should `notes/` be treated as internal/private and excluded from canonical docs?
+4. Do you want ADRs public in-repo from the start, or only after initial curation?
+5. Should Azure-specific docs live under Operator docs or Reference docs?
+6. Do you want release-style milestones renamed from `M4/M5/M6/M7` to versioned names later?
 
 ---
 
@@ -465,7 +466,7 @@ Approve PR order and one-active-PR sequencing.
 If no contrary preference is given, I recommend:
 
 - keep `rune-plan.md` at repo root for now
-- fold/retire `ROADMAP.md` unless it has unique public value
+- keep `ROADMAP.md` only as historical planning/provenance unless a later cleanup folds it away
 - soften README replacement language until parity is fully verified
 - add `docs/INDEX.md` as the canonical docs front door
 - treat Project 2 as the live execution truth
