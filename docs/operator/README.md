@@ -4,6 +4,11 @@ This folder is reserved for deployment, configuration, runtime health, and opera
 
 Current canonical entrypoints remain:
 - [`../INDEX.md`](../INDEX.md)
+- [`CONFIGURATION.md`](CONFIGURATION.md)
+- [`PROVIDERS.md`](PROVIDERS.md)
+- [`CHANNELS.md`](CHANNELS.md)
 - [`DEPLOYMENT.md`](DEPLOYMENT.md)
 - [`DATABASES.md`](DATABASES.md)
+- [`MEMORY.md`](MEMORY.md)
+- [`HEALTH-AND-DOCTOR.md`](HEALTH-AND-DOCTOR.md)
 - [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md)

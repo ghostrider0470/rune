@@ -16,7 +16,6 @@ This folder holds durable decisions that should not be rediscovered in chat or b
 ## Planned next ADRs
 
 - multi-database storage architecture
-- Project 2 execution model
 
 Current planning context remains in:
 - [`../DOCS-README-PLAN-REORG.md`](../DOCS-README-PLAN-REORG.md)

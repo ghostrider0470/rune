@@ -8,233 +8,91 @@
   <img src="assets/rune-logo-wordmark-dark.svg" alt="Rune Logo" height="48" />
 </p>
 
-A high-performance personal AI gateway written in Rust. Drop-in replacement for [OpenClaw](https://github.com/openclaw/openclaw) with full Azure compatibility, Docker-first deployment, and PostgreSQL persistence.
+A Rust-based personal AI runtime designed as a high-performance OpenClaw-style gateway with strong Azure-oriented provider support, durable state, and standalone-first operation.
 
-## Why Rune?
+## Current status
 
-- **Fast** — native Rust binary, no Node.js runtime overhead
-- **Azure-native** — first-class Azure OpenAI and Azure AI Foundry compatibility, including deployment-aware request construction and Azure-specific auth/version handling
-- **Zero-config local dev** — embedded PostgreSQL starts automatically, no external DB needed
-- **Docker-first** — mountable persistent storage at `/data/*`, `/config/*`, `/secrets/*`
-- **OpenClaw compatible** — same user/operator experience, same channel integrations, same tool surface
+Rune is an active parity-seeking runtime buildout, not a parity-complete replacement claim.
 
-## What It Does
+Today, the project already has:
+- standalone and service-style runtime operation
+- durable PostgreSQL-backed state with embedded local fallback
+- gateway, dashboard, sessions, cron, and tool-execution surfaces
+- strong Azure-oriented model-provider support
+- GitHub Project 2 as the live execution control plane
 
-Rune sits between your messaging channels (Telegram, Signal, Discord) and AI model providers (Azure OpenAI, Anthropic, OpenAI). It manages sessions, executes tools, persists conversations, runs scheduled jobs, and handles multi-agent orchestration.
+## Why Rune
 
-```
-Channels ──▶ Gateway ──▶ Session Engine ──▶ Model Provider
-(Telegram)   (Axum)      (turns, tools,     (Azure AI Foundry,
-                          memory, cron)       OpenAI, Anthropic)
-                  │
-            PostgreSQL
-            (embedded or external)
-```
+- **Rust runtime core** — durable, inspectable, and built for long-running gateway operation
+- **Standalone-first** — runs well on one machine without forcing distributed-system complexity
+- **Server-grade path** — still designed to scale into Docker, VM, and broader hosted deployments
+- **Azure-oriented** — Azure OpenAI / Azure AI Foundry support is a first-class requirement, not an afterthought
+- **Operator-visible** — health, status, diagnostics, logs, and persistent state matter as product features
 
-## Architecture
-
-| Crate | Purpose |
-|-------|---------|
-| `rune-config` | Configuration loading and validation |
-| `rune-store` | PostgreSQL persistence via Diesel + embedded PG fallback |
-| `rune-models` | Model providers — Azure AI Foundry, OpenAI, Anthropic |
-| `rune-tools` | Tool registry + 15 built-in tool executors |
-| `rune-runtime` | Session engine, turn executor, scheduler, memory loader |
-| `rune-channels` | Channel adapters (Telegram live, Signal/Discord planned) |
-| `rune-gateway` | Axum HTTP server, routes, auth, middleware |
-| `rune-cli` | CLI interface |
-| `rune-testkit` | Test utilities and fixtures |
-
-**10 library crates, 2 binaries, and an actively growing parity-oriented test surface.**
-
-## Model Providers
-
-### Azure AI Foundry (recommended)
-
-Single endpoint for all Azure-hosted models — routes automatically by model name:
-
-```toml
-[[models.providers]]
-name = "azure-foundry"
-kind = "azure-foundry"
-base_url = "https://your-resource.services.ai.azure.com"
-api_key = "your-key"
-
-[models]
-default_model = "gpt-5.4"  # or claude-sonnet-4-6, claude-opus-4-6, etc.
-```
-
-- `gpt-*`, `o1-*`, etc. → OpenAI Chat Completions API
-- `claude-*` → Anthropic Messages API
-
-Also supports `openai`, `anthropic`, and `azure-openai` provider kinds for non-Foundry setups.
-
-## CLI
+## Quick start
 
 ```bash
-rune status                    # Gateway + system status
-rune doctor                    # Diagnostic checks
-rune gateway start|stop|restart|status|health
-
-rune sessions list             # Active sessions
-rune sessions show <id>        # Session details
-
-rune cron list                 # Scheduled jobs
-rune cron add --text "..." --at "2026-01-01T09:00:00"
-
-rune config show               # Current effective config
-rune config file               # Local config file path used for mutations
-rune config get gateway.port   # Read a TOML key from local config
-rune config set gateway.port 9090
-rune config unset gateway.auth_token
-rune config validate           # Validate config file
-```
-
-## HTTP API
-
-Gateway exposes a REST API on the configured port:
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Health check |
-| `GET /status` | Gateway status |
-| `GET /dashboard` | Operator dashboard HTML |
-| `GET /api/dashboard/summary` | Dashboard summary metrics |
-| `GET /api/dashboard/models` | Configured model inventory |
-| `GET /api/dashboard/sessions` | Recent session summaries |
-| `GET /api/dashboard/diagnostics` | Minimal runtime diagnostics |
-| `GET /sessions` | List sessions |
-| `POST /sessions` | Create session |
-| `POST /sessions/{id}/messages` | Send message |
-| `GET /sessions/{id}/transcript` | Get transcript |
-| `POST /gateway/start\|stop\|restart` | Gateway lifecycle |
-
----
-
-## Development
-
-### Prerequisites
-
-- Rust 1.80+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
-- `build-essential`, `pkg-config` (Linux)
-
-### Build
-
-```bash
-cargo build --release
-# Binaries: target/release/rune, target/release/rune-gateway
-```
-
-### Configure
-
-```bash
+cargo build --release --bin rune-gateway
 cp config.example.toml config.toml
-# Fill in: API key, Telegram bot token, model name
-```
-
-### Run
-
-```bash
-# Foreground (Ctrl+C to stop)
-cargo run --release --bin rune-gateway -- --config config.toml
-
-# Or run the built binary directly
+# fill in your provider + channel settings
 ./target/release/rune-gateway --config config.toml
 ```
 
-Open `http://127.0.0.1:8787/dashboard` after the gateway starts to inspect the operator dashboard. If `gateway.auth_token` is configured, the dashboard uses the same bearer-token protection as the rest of the protected gateway routes.
+Then open `http://127.0.0.1:8787/dashboard`.
 
-### Run as systemd service (recommended for dev)
+For fuller development setup and service-style local operation, see [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md).
 
-```bash
-# Start
-systemctl --user start rune-gateway
+## What Rune does
 
-# Stop
-systemctl --user stop rune-gateway
+Rune sits between messaging channels and model providers. It manages:
+- sessions and turn execution
+- tool calls and approvals
+- cron jobs, reminders, and automation
+- memory and retrieval workflows
+- provider routing and model invocation
+- operator-facing control-plane visibility
 
-# Restart (after rebuilding)
-cargo build --release --bin rune-gateway && systemctl --user restart rune-gateway
+## Core features (current-state view)
 
-# Logs (live tail)
-journalctl --user -u rune-gateway -f
+- **Gateway + dashboard** — health/status surfaces and an operator dashboard are live
+- **Durable storage** — PostgreSQL-backed persistence with embedded local fallback for zero-config development
+- **Tool runtime** — built-in file, exec/process, cron, session, and memory-oriented tools are implemented
+- **Provider layer** — Azure AI Foundry, Azure OpenAI, OpenAI, and Anthropic provider paths are part of the active runtime shape
+- **Docs + execution discipline** — ADR trail, source-of-truth boundaries, and Project 2 execution model are now explicit
 
-# Status
-systemctl --user status rune-gateway
-```
+## Standalone vs server runtime modes
 
-<details>
-<summary>Install the systemd service (one-time)</summary>
+Rune is **standalone-first** by default:
+- one operator
+- one machine
+- clear local control plane
+- durable local state
 
-```bash
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/rune-gateway.service << 'EOF'
-[Unit]
-Description=Rune Gateway
+It also supports a broader server-grade path:
+- Docker deployment
+- service-manager operation
+- external PostgreSQL
+- future Azure-hosted deployment options
 
-[Service]
-Type=simple
-WorkingDirectory=%h/Development/rune
-ExecStart=%h/Development/rune/target/release/rune-gateway --config config.toml
-Restart=on-failure
-RestartSec=5
-Environment=RUST_LOG=info
+That means local-first is the default experience, not a throwaway dev-only mode.
 
-[Install]
-WantedBy=default.target
-EOF
+## Documentation
 
-systemctl --user daemon-reload
-```
-</details>
+- [`docs/INDEX.md`](docs/INDEX.md) — docs front door by audience and concern
+- [`rune-plan.md`](rune-plan.md) — canonical product strategy and planning summary
+- [`docs/OPENCLAW-COVERAGE-MAP.md`](docs/OPENCLAW-COVERAGE-MAP.md) — OpenClaw-surface parity navigation
+- [`docs/operator/DEPLOYMENT.md`](docs/operator/DEPLOYMENT.md) — deployment model
+- [`docs/operator/DATABASES.md`](docs/operator/DATABASES.md) — storage model and database choices
+- [`docs/parity/PROTOCOLS.md`](docs/parity/PROTOCOLS.md) — runtime and protocol contracts
+- [`docs/adr/README.md`](docs/adr/README.md) — durable architecture decision trail
 
-### Kill
+## For contributors
 
-```bash
-# Graceful
-systemctl --user stop rune-gateway
-
-# Force kill (gateway + embedded postgres)
-pkill -f rune-gateway && pkill postgres
-```
-
-### Test
-
-```bash
-cargo test --workspace
-cargo clippy --workspace -- -D warnings
-```
-
-### Release
-
-Tag-driven via GitHub Actions — push a `v*` tag to build cross-compiled binaries:
-
-```bash
-git tag v0.5.0 && git push origin v0.5.0
-```
-
----
-
-## Docker
-
-```bash
-docker compose up -d
-```
-
-Persistent mounts: `./data` → `/data`, `./config` → `/config`
-
-## Docs
-
-| Doc | What |
-|-----|------|
-| [`docs/INDEX.md`](docs/INDEX.md) | Docs front door by audience and concern |
-| [`rune-plan.md`](rune-plan.md) | Canonical strategy, goals, stack direction |
-| [`docs/OPENCLAW-COVERAGE-MAP.md`](docs/OPENCLAW-COVERAGE-MAP.md) | Docs front door for OpenClaw parity coverage |
-| [`PARITY-INVENTORY.md`](docs/parity/PARITY-INVENTORY.md) | OpenClaw feature parity map |
-| [`AZURE-COMPATIBILITY.md`](docs/AZURE-COMPATIBILITY.md) | Azure integration contract |
-| [`strategy/COMPETITIVE-RESEARCH.md`](docs/strategy/COMPETITIVE-RESEARCH.md) | Long-form competitive and product rationale |
-| [`operator/DEPLOYMENT.md`](docs/operator/DEPLOYMENT.md) | Docker deployment model |
-| [`PROTOCOLS.md`](docs/parity/PROTOCOLS.md) | API and protocol contracts |
+Start here:
+- [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md)
+- [`docs/AGENT-ORCHESTRATION.md`](docs/AGENT-ORCHESTRATION.md)
+- [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md)
+- [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md)
 
 ## License
 
