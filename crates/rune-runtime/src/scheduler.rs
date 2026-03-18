@@ -8,7 +8,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use cron::Schedule as CronSchedule;
-use rune_core::JobId;
+use rune_core::{JobId, SchedulerDeliveryMode, SchedulerPayloadKind, SchedulerRunTrigger};
 use rune_store::{
     JobRepo, JobRunRepo, StoreError,
     models::{JobRow, JobRunRow, NewJob, NewJobRun},
@@ -69,6 +69,7 @@ pub struct Job {
     pub name: Option<String>,
     pub schedule: Schedule,
     pub payload: JobPayload,
+    pub delivery_mode: SchedulerDeliveryMode,
     pub session_target: SessionTarget,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
@@ -83,8 +84,24 @@ pub struct JobRun {
     pub job_id: JobId,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
+    pub trigger_kind: SchedulerRunTrigger,
     pub status: JobRunStatus,
     pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct StoredJobRecord {
+    pub name: Option<String>,
+    pub payload: JobPayload,
+    #[serde(default = "default_scheduler_delivery_mode")]
+    pub delivery_mode: SchedulerDeliveryMode,
+    pub session_target: SessionTarget,
+    #[serde(default)]
+    pub run_count: u64,
+}
+
+const fn default_scheduler_delivery_mode() -> SchedulerDeliveryMode {
+    SchedulerDeliveryMode::None
 }
 
 /// Status of a job run.
@@ -95,6 +112,15 @@ pub enum JobRunStatus {
     Completed,
     Failed,
     Skipped,
+}
+
+impl JobPayload {
+    fn kind(&self) -> SchedulerPayloadKind {
+        match self {
+            Self::SystemEvent { .. } => SchedulerPayloadKind::SystemEvent,
+            Self::AgentTurn { .. } => SchedulerPayloadKind::AgentTurn,
+        }
+    }
 }
 
 /// The scheduler manages jobs and their execution lifecycle.
@@ -154,13 +180,15 @@ impl Scheduler {
             SchedulerBackend::Repo { jobs: repo, .. } => {
                 let now = job.created_at;
                 let schedule_json = serde_json::to_string(&job.schedule).ok();
-                let payload = serde_json::to_value(&job).unwrap_or_else(|_| serde_json::json!({}));
+                let payload = stored_job_payload(&job);
                 let new_job = NewJob {
                     id: Uuid::from(job.id),
                     job_type: "cron".to_string(),
                     schedule: schedule_json,
                     due_at: job.next_run_at,
                     enabled: job.enabled,
+                    payload_kind: job.payload.kind().as_str().to_string(),
+                    delivery_mode: job.delivery_mode.as_str().to_string(),
                     payload,
                     created_at: now,
                     updated_at: now,
@@ -236,6 +264,9 @@ impl Scheduler {
                 if let Some(payload) = update.payload {
                     job.payload = payload;
                 }
+                if let Some(delivery_mode) = update.delivery_mode {
+                    job.delivery_mode = delivery_mode;
+                }
 
                 Some(job.clone())
             }
@@ -253,12 +284,17 @@ impl Scheduler {
                 if let Some(payload) = update.payload {
                     job.payload = payload;
                 }
+                if let Some(delivery_mode) = update.delivery_mode {
+                    job.delivery_mode = delivery_mode;
+                }
                 let updated_at = Utc::now();
-                let payload = serde_json::to_value(&job).ok()?;
+                let payload = stored_job_payload(&job);
                 repo.update_job(
                     Uuid::from(*id),
                     job.enabled,
                     job.next_run_at,
+                    job.payload.kind().as_str(),
+                    job.delivery_mode.as_str(),
                     payload,
                     updated_at,
                     job.last_run_at,
@@ -303,11 +339,12 @@ impl Scheduler {
     }
 
     /// Record a job run starting.
-    pub async fn start_run(&self, job_id: JobId) -> JobRun {
+    pub async fn start_run(&self, job_id: JobId, trigger_kind: SchedulerRunTrigger) -> JobRun {
         let run = JobRun {
             job_id,
             started_at: Utc::now(),
             finished_at: None,
+            trigger_kind,
             status: JobRunStatus::Running,
             output: None,
         };
@@ -325,13 +362,14 @@ impl Scheduler {
                 if let Some(mut job) = self.get_job(&job_id).await {
                     job.last_run_at = Some(run.started_at);
                     job.run_count += 1;
-                    let payload =
-                        serde_json::to_value(&job).unwrap_or_else(|_| serde_json::json!({}));
+                    let payload = stored_job_payload(&job);
                     if let Err(error) = repo
                         .update_job(
                             Uuid::from(job_id),
                             job.enabled,
                             job.next_run_at,
+                            job.payload.kind().as_str(),
+                            job.delivery_mode.as_str(),
                             payload,
                             run.started_at,
                             job.last_run_at,
@@ -349,6 +387,7 @@ impl Scheduler {
                         job_id: Uuid::from(job_id),
                         started_at: run.started_at,
                         finished_at: None,
+                        trigger_kind: run.trigger_kind.as_str().to_string(),
                         status: job_run_status_str(&run.status).to_string(),
                         output: None,
                         created_at: run.started_at,
@@ -519,13 +558,14 @@ impl Scheduler {
                             }
                         }
                     }
-                    let payload =
-                        serde_json::to_value(&job).unwrap_or_else(|_| serde_json::json!({}));
+                    let payload = stored_job_payload(&job);
                     if let Err(error) = repo
                         .update_job(
                             Uuid::from(*id),
                             job.enabled,
                             job.next_run_at,
+                            job.payload.kind().as_str(),
+                            job.delivery_mode.as_str(),
                             payload,
                             now,
                             job.last_run_at,
@@ -611,6 +651,7 @@ pub struct JobUpdate {
     pub enabled: Option<bool>,
     pub schedule: Option<Schedule>,
     pub payload: Option<JobPayload>,
+    pub delivery_mode: Option<SchedulerDeliveryMode>,
 }
 
 // ── Reminders ─────────────────────────────────────────────────────────────────
@@ -702,6 +743,8 @@ impl ReminderStore {
                     schedule: None,
                     due_at: Some(reminder.fire_at),
                     enabled: !reminder.delivered,
+                    payload_kind: SchedulerPayloadKind::Reminder.as_str().to_string(),
+                    delivery_mode: SchedulerDeliveryMode::Announce.as_str().to_string(),
                     payload,
                     created_at: now,
                     updated_at: now,
@@ -826,6 +869,8 @@ impl ReminderStore {
                         Uuid::from(*id),
                         false,
                         Some(reminder.fire_at),
+                        SchedulerPayloadKind::Reminder.as_str(),
+                        SchedulerDeliveryMode::Announce.as_str(),
                         payload,
                         updated_at,
                         reminder.delivered_at,
@@ -851,14 +896,30 @@ impl Default for ReminderStore {
 }
 
 fn row_to_job(row: JobRow) -> Result<Job, StoreError> {
-    let mut job: Job = serde_json::from_value(row.payload.clone())
+    let stored: StoredJobRecord = serde_json::from_value(row.payload.clone())
         .map_err(|error| StoreError::Serialization(error.to_string()))?;
-    job.id = JobId::from(row.id);
-    job.enabled = row.enabled;
-    job.created_at = row.created_at;
-    job.last_run_at = row.last_run_at;
-    job.next_run_at = row.next_run_at.or(row.due_at).or(job.next_run_at);
-    Ok(job)
+    let schedule = row
+        .schedule
+        .as_deref()
+        .ok_or_else(|| StoreError::Serialization("job row missing schedule".to_string()))
+        .and_then(|value| {
+            serde_json::from_str::<Schedule>(value)
+                .map_err(|error| StoreError::Serialization(error.to_string()))
+        })?;
+
+    Ok(Job {
+        id: JobId::from(row.id),
+        name: stored.name,
+        schedule,
+        payload: stored.payload,
+        delivery_mode: row.delivery_mode.parse().unwrap_or(stored.delivery_mode),
+        session_target: stored.session_target,
+        enabled: row.enabled,
+        created_at: row.created_at,
+        last_run_at: row.last_run_at,
+        next_run_at: row.next_run_at.or(row.due_at),
+        run_count: stored.run_count,
+    })
 }
 
 fn row_to_reminder(row: rune_store::models::JobRow) -> Result<Reminder, StoreError> {
@@ -875,9 +936,21 @@ fn row_to_job_run(row: JobRunRow) -> JobRun {
         job_id: JobId::from(row.job_id),
         started_at: row.started_at,
         finished_at: row.finished_at,
+        trigger_kind: row.trigger_kind.parse().unwrap_or(SchedulerRunTrigger::Due),
         status: parse_job_run_status(&row.status),
         output: row.output,
     }
+}
+
+fn stored_job_payload(job: &Job) -> serde_json::Value {
+    serde_json::to_value(StoredJobRecord {
+        name: job.name.clone(),
+        payload: job.payload.clone(),
+        delivery_mode: job.delivery_mode,
+        session_target: job.session_target,
+        run_count: job.run_count,
+    })
+    .unwrap_or_else(|_| serde_json::json!({}))
 }
 
 fn job_run_status_str(status: &JobRunStatus) -> &'static str {
@@ -914,6 +987,7 @@ mod tests {
             payload: JobPayload::SystemEvent {
                 text: "test event".into(),
             },
+            delivery_mode: SchedulerDeliveryMode::None,
             session_target: SessionTarget::Main,
             enabled: true,
             created_at: Utc::now(),
@@ -981,8 +1055,9 @@ mod tests {
         let job = make_job("runnable");
         let id = scheduler.add_job(job).await;
 
-        let run = scheduler.start_run(id).await;
+        let run = scheduler.start_run(id, SchedulerRunTrigger::Due).await;
         assert_eq!(run.status, JobRunStatus::Running);
+        assert_eq!(run.trigger_kind, SchedulerRunTrigger::Due);
 
         scheduler
             .complete_run(id, JobRunStatus::Completed, Some("done".into()))
@@ -991,6 +1066,7 @@ mod tests {
         let runs = scheduler.get_runs(&id, None).await;
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, JobRunStatus::Completed);
+        assert_eq!(runs[0].trigger_kind, SchedulerRunTrigger::Due);
         assert_eq!(runs[0].output.as_deref(), Some("done"));
 
         // Job metadata updated

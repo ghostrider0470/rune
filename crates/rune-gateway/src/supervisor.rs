@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::{debug, error, info};
 
-use rune_core::SessionKind;
+use rune_core::{SchedulerRunTrigger, SessionKind, TriggerKind};
 use rune_runtime::heartbeat::HeartbeatRunner;
 use rune_runtime::scheduler::{Job, JobPayload, ReminderStore, Scheduler, SessionTarget};
 use rune_runtime::{SessionEngine, TurnExecutor};
@@ -86,9 +86,10 @@ pub(crate) async fn run_job_lifecycle(
     deps: &SupervisorDeps,
     job: &Job,
     advance_next_run: bool,
+    run_trigger: SchedulerRunTrigger,
 ) -> (rune_runtime::scheduler::JobRunStatus, String) {
     let job_id = job.id;
-    deps.scheduler.start_run(job_id).await;
+    deps.scheduler.start_run(job_id, run_trigger).await;
 
     let result = execute_job(deps, job).await;
 
@@ -161,7 +162,7 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
         for job in due_jobs {
             let job_id = job.id;
             debug!(job_id = %job_id, name = ?job.name, "executing due job");
-            let _ = run_job_lifecycle(&deps, &job, true).await;
+            let _ = run_job_lifecycle(&deps, &job, true, SchedulerRunTrigger::Due).await;
         }
 
         // --- Reminders ---
@@ -197,7 +198,10 @@ async fn run_heartbeat(
     deps.session_engine.mark_ready(session.id).await?;
     deps.session_engine.mark_running(session.id).await?;
 
-    let (_turn, _usage) = deps.turn_executor.execute(session.id, prompt, None).await?;
+    let (_turn, _usage) = deps
+        .turn_executor
+        .execute_triggered(session.id, prompt, None, TriggerKind::Heartbeat)
+        .await?;
 
     // Read the last assistant message from transcript
     let items = deps
@@ -232,7 +236,7 @@ async fn run_system_event(
     text: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let session = get_or_create_main_scheduled_session(deps).await?;
-    execute_in_session(deps, &session, text, None, false).await
+    execute_in_session(deps, &session, text, None, false, TriggerKind::CronJob).await
 }
 
 /// Execute an agent turn in an isolated or main session.
@@ -245,7 +249,7 @@ async fn run_agent_turn(
     match target {
         SessionTarget::Main => {
             let session = get_or_create_main_scheduled_session(deps).await?;
-            execute_in_session(deps, &session, message, model, false).await
+            execute_in_session(deps, &session, message, model, false, TriggerKind::CronJob).await
         }
         SessionTarget::Isolated => {
             let parent = get_or_create_main_scheduled_session(deps).await?;
@@ -258,7 +262,7 @@ async fn run_agent_turn(
                     None,
                 )
                 .await?;
-            execute_in_session(deps, &session, message, model, true).await
+            execute_in_session(deps, &session, message, model, true, TriggerKind::CronJob).await
         }
     }
 }
@@ -269,7 +273,7 @@ async fn run_reminder(
     message: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let session = get_or_create_main_scheduled_session(deps).await?;
-    execute_in_session(deps, &session, message, None, false).await
+    execute_in_session(deps, &session, message, None, false, TriggerKind::Reminder).await
 }
 
 async fn get_or_create_main_scheduled_session(
@@ -304,6 +308,7 @@ async fn execute_in_session(
     message: &str,
     model: Option<&str>,
     complete_when_done: bool,
+    trigger_kind: TriggerKind,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     if session.status == "created" {
         deps.session_engine.mark_ready(session.id).await?;
@@ -314,7 +319,7 @@ async fn execute_in_session(
 
     let (_turn, _usage) = deps
         .turn_executor
-        .execute(session.id, message, model)
+        .execute_triggered(session.id, message, model, trigger_kind)
         .await?;
 
     let items = deps

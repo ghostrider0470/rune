@@ -3953,6 +3953,7 @@ async fn cron_run_executes_and_records_run_history() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["status"], "completed");
     assert_eq!(items[0]["job_id"], job_id);
+    assert_eq!(items[0]["trigger_kind"], "manual");
     assert_eq!(items[0]["output"], "Hello from fake model!");
 
     let response = app

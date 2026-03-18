@@ -134,6 +134,8 @@ pub trait JobRepo: Send + Sync {
         id: Uuid,
         enabled: bool,
         due_at: Option<chrono::DateTime<chrono::Utc>>,
+        payload_kind: &str,
+        delivery_mode: &str,
         payload: serde_json::Value,
         updated_at: chrono::DateTime<chrono::Utc>,
         last_run_at: Option<chrono::DateTime<chrono::Utc>>,

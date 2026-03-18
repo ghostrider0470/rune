@@ -155,9 +155,11 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRow> {
         enabled: row.get::<_, i32>(4)? != 0,
         last_run_at: parse_dt_opt(row.get(5)?),
         next_run_at: parse_dt_opt(row.get(6)?),
-        payload: parse_json(&row.get::<_, String>(7)?),
-        created_at: parse_dt(&row.get::<_, String>(8)?),
-        updated_at: parse_dt(&row.get::<_, String>(9)?),
+        payload_kind: row.get(7)?,
+        delivery_mode: row.get(8)?,
+        payload: parse_json(&row.get::<_, String>(9)?),
+        created_at: parse_dt(&row.get::<_, String>(10)?),
+        updated_at: parse_dt(&row.get::<_, String>(11)?),
     })
 }
 
@@ -167,9 +169,10 @@ fn row_to_job_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRunRow> {
         job_id: parse_uuid(&row.get::<_, String>(1)?),
         started_at: parse_dt(&row.get::<_, String>(2)?),
         finished_at: parse_dt_opt(row.get(3)?),
-        status: row.get(4)?,
-        output: row.get(5)?,
-        created_at: parse_dt(&row.get::<_, String>(6)?),
+        trigger_kind: row.get(4)?,
+        status: row.get(5)?,
+        output: row.get(6)?,
+        created_at: parse_dt(&row.get::<_, String>(7)?),
     })
 }
 
@@ -252,11 +255,13 @@ fn row_to_pairing_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PairingRe
 const SESSION_COLS: &str = "id, kind, status, workspace_root, channel_ref, requester_session_id, latest_turn_id, metadata, created_at, updated_at, last_activity_at";
 const TURN_COLS: &str = "id, session_id, trigger_kind, status, model_ref, started_at, ended_at, usage_prompt_tokens, usage_completion_tokens";
 const TRANSCRIPT_COLS: &str = "id, session_id, turn_id, seq, kind, payload, created_at";
-const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload, created_at, updated_at";
-const JOB_RUN_COLS: &str = "id, job_id, started_at, finished_at, status, output, created_at";
+const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload_kind, delivery_mode, payload, created_at, updated_at";
+const JOB_RUN_COLS: &str =
+    "id, job_id, started_at, finished_at, trigger_kind, status, output, created_at";
 const APPROVAL_COLS: &str = "id, subject_type, subject_id, reason, decision, decided_by, decided_at, presented_payload, created_at";
 const TOOL_EXEC_COLS: &str = "id, tool_call_id, session_id, turn_id, tool_name, arguments, status, result_summary, error_summary, started_at, ended_at, approval_id, execution_mode";
-const PROCESS_HANDLE_COLS: &str = "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at";
+const PROCESS_HANDLE_COLS: &str =
+    "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at";
 const PAIRED_DEVICE_COLS: &str = "id, name, public_key, role, scopes, token_hash, token_expires_at, paired_at, last_seen_at, created_at";
 const PAIRING_REQUEST_COLS: &str = "id, device_name, public_key, challenge, created_at, expires_at";
 
@@ -352,10 +357,9 @@ impl SessionRepo for SqliteSessionRepo {
         updated_at: DateTime<Utc>,
     ) -> Result<SessionRow, StoreError> {
         // Parse and validate target status before entering the DB closure.
-        let target: rune_core::SessionStatus =
-            status.parse().map_err(|e: rune_core::CoreError| {
-                StoreError::InvalidTransition(e.to_string())
-            })?;
+        let target: rune_core::SessionStatus = status
+            .parse()
+            .map_err(|e: rune_core::CoreError| StoreError::InvalidTransition(e.to_string()))?;
         let id_s = id.to_string();
         let status = status.to_string();
         self.conn.call(move |conn| {
@@ -617,7 +621,7 @@ impl JobRepo for SqliteJobRepo {
             .call(move |conn| {
                 conn.execute(
                     &format!(
-                        "INSERT INTO jobs ({JOB_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+                        "INSERT INTO jobs ({JOB_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
                     ),
                     rusqlite::params![
                         j.id.to_string(),
@@ -627,6 +631,8 @@ impl JobRepo for SqliteJobRepo {
                         j.enabled as i32,
                         Option::<String>::None,
                         Option::<String>::None,
+                        j.payload_kind,
+                        j.delivery_mode,
                         serde_json::to_string(&j.payload).unwrap_or_default(),
                         to_rfc3339(&j.created_at),
                         to_rfc3339(&j.updated_at),
@@ -684,17 +690,22 @@ impl JobRepo for SqliteJobRepo {
         id: Uuid,
         enabled: bool,
         due_at: Option<DateTime<Utc>>,
+        payload_kind: &str,
+        delivery_mode: &str,
         payload: serde_json::Value,
         updated_at: DateTime<Utc>,
         last_run_at: Option<DateTime<Utc>>,
         next_run_at: Option<DateTime<Utc>>,
     ) -> Result<JobRow, StoreError> {
         let id_s = id.to_string();
+        let payload_kind = payload_kind.to_string();
+        let delivery_mode = delivery_mode.to_string();
         self.conn.call(move |conn| {
             require_affected(conn.execute(
-                "UPDATE jobs SET enabled=?1, due_at=?2, payload=?3, updated_at=?4, last_run_at=?5, next_run_at=?6 WHERE id=?7",
+                "UPDATE jobs SET enabled=?1, due_at=?2, payload_kind=?3, delivery_mode=?4, payload=?5, updated_at=?6, last_run_at=?7, next_run_at=?8 WHERE id=?9",
                 rusqlite::params![
                     enabled as i32, due_at.as_ref().map(to_rfc3339),
+                    payload_kind, delivery_mode,
                     serde_json::to_string(&payload).unwrap_or_default(),
                     to_rfc3339(&updated_at), last_run_at.as_ref().map(to_rfc3339),
                     next_run_at.as_ref().map(to_rfc3339), &id_s,
@@ -759,12 +770,15 @@ impl JobRunRepo for SqliteJobRunRepo {
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    &format!("INSERT INTO job_runs ({JOB_RUN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7)"),
+                    &format!(
+                        "INSERT INTO job_runs ({JOB_RUN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"
+                    ),
                     rusqlite::params![
                         r.id.to_string(),
                         r.job_id.to_string(),
                         to_rfc3339(&r.started_at),
                         r.finished_at.as_ref().map(to_rfc3339),
+                        r.trigger_kind,
                         r.status,
                         r.output,
                         to_rfc3339(&r.created_at),
@@ -1178,10 +1192,7 @@ impl ProcessHandleRepo for SqliteProcessHandleRepo {
             .map_err(|e| map_err(e, "process_handle", &process_id.to_string()))
     }
 
-    async fn list_by_session(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<ProcessHandleRow>, StoreError> {
         let sid = session_id.to_string();
         self.conn
             .call(move |conn| {

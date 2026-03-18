@@ -1,0 +1,8 @@
+ALTER TABLE job_runs
+DROP COLUMN IF EXISTS trigger_kind;
+
+ALTER TABLE jobs
+DROP COLUMN IF EXISTS delivery_mode;
+
+ALTER TABLE jobs
+DROP COLUMN IF EXISTS payload_kind;
