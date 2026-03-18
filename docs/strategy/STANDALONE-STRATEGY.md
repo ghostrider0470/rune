@@ -27,6 +27,12 @@ Use this doc as the strategy entrypoint for:
 - understanding Rune's standalone-first posture today
 - navigating from high-level product-shape questions into the deeper rationale and ADR references
 
+## Read next
+
+- use [`../../rune-plan.md`](../../rune-plan.md) when the question is really about overall product direction and delivery map
+- use [`../adr/ADR-0002-standalone-first-product-shape.md`](../adr/ADR-0002-standalone-first-product-shape.md) when you need the durable architectural rationale behind the product-shape choice
+- use [`AZURE-DATA-OPTIONS.md`](AZURE-DATA-OPTIONS.md) and [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md) for adjacent strategic tradeoff context
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

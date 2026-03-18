@@ -25,6 +25,12 @@ Use this doc as the health/diagnostics entrypoint for:
 - where health/status expectations live now
 - how to navigate to deployment, database, and parity contract troubleshooting references
 
+## Read next
+
+- use [`DEPLOYMENT.md`](DEPLOYMENT.md) and [`DATABASES.md`](DATABASES.md) when the issue looks like runtime/storage layout or persistence health
+- use [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when you need deeper runtime invariants behind a failing behavior
+- use [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md) when the question is operational guardrails rather than runtime failure analysis
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

@@ -24,6 +24,12 @@ Use this doc as the channel entrypoint for:
 - understanding where channel coverage and behavior docs live
 - navigating from adapter questions into parity and protocol references
 
+## Read next
+
+- use [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) when you need the broad parity/docs navigation view by surface
+- use [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) when you need command/surface coverage detail
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need deeper inbound/outbound runtime semantics
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

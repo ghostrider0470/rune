@@ -17,6 +17,12 @@ Use this doc as the API entrypoint for:
 - understanding where the current HTTP/dashboard/control-plane contract picture lives
 - navigating from API questions into parity contracts and coverage docs
 
+## Read next
+
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need entity/protocol structure behind an API question
+- use [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when you need behavioral invariants and response expectations
+- use [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) when you need the broad docs/parity navigation view by surface
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

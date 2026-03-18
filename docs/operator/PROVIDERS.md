@@ -24,6 +24,12 @@ Use this doc as the provider entrypoint for:
 - where provider setup and Azure-oriented expectations live
 - how to navigate from high-level provider questions into the deeper compatibility/runtime docs
 
+## Read next
+
+- use [`../AZURE-COMPATIBILITY.md`](../AZURE-COMPATIBILITY.md) when you need provider/platform compatibility detail
+- use [`../../rune-plan.md`](../../rune-plan.md) when the question is really about strategic provider direction
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need runtime semantics behind model/provider behavior
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

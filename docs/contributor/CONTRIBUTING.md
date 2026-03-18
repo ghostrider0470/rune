@@ -27,6 +27,12 @@ Use this doc as the contributor entrypoint for:
 - understanding how docs, issues, PRs, and ADRs relate today
 - navigating to the right development, testing, and workflow references first
 
+## Read next
+
+- use [`DEVELOPMENT.md`](DEVELOPMENT.md) for local setup and build/run flow
+- use [`TESTING.md`](TESTING.md) when you need validation guidance
+- use [`WORKFLOW.md`](WORKFLOW.md) and [`EXECUTION-SPEED-POLICY.md`](EXECUTION-SPEED-POLICY.md) when you need the accepted execution model and merge discipline
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

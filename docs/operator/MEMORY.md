@@ -34,6 +34,12 @@ Use this doc as the memory entrypoint for:
 - understanding the current file-oriented memory model
 - locating the privacy-boundary and retrieval-surface references that already exist
 
+## Read next
+
+- use [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) when you need the memory/tool surface inventory view
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) and [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when you need runtime semantics behind retrieval behavior
+- use [`../FUNCTIONALITY-CHECKLIST.md`](../FUNCTIONALITY-CHECKLIST.md) when you need implementation/evidence-oriented detail
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:
