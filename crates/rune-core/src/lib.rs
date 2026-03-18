@@ -278,6 +278,23 @@ pub struct TransitionError {
 }
 
 impl SessionStatus {
+    /// Convert to the canonical snake_case string stored in the database.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Ready => "ready",
+            Self::Running => "running",
+            Self::WaitingForTool => "waiting_for_tool",
+            Self::WaitingForApproval => "waiting_for_approval",
+            Self::WaitingForSubagent => "waiting_for_subagent",
+            Self::Suspended => "suspended",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
     /// Check whether transitioning from `self` to `target` is allowed.
     #[must_use]
     pub fn can_transition_to(&self, target: &SessionStatus) -> bool {
@@ -298,6 +315,16 @@ impl SessionStatus {
             | (Self::WaitingForTool, Self::Running)
             | (Self::WaitingForApproval, Self::Running)
             | (Self::WaitingForSubagent, Self::Running)
+            // Waiting → terminal (session cancelled/failed while waiting)
+            | (Self::WaitingForTool, Self::Completed)
+            | (Self::WaitingForTool, Self::Failed)
+            | (Self::WaitingForTool, Self::Cancelled)
+            | (Self::WaitingForApproval, Self::Completed)
+            | (Self::WaitingForApproval, Self::Failed)
+            | (Self::WaitingForApproval, Self::Cancelled)
+            | (Self::WaitingForSubagent, Self::Completed)
+            | (Self::WaitingForSubagent, Self::Failed)
+            | (Self::WaitingForSubagent, Self::Cancelled)
             // Suspended ↔ any non-terminal
             | (Self::Suspended, Self::Ready)
             | (_, Self::Suspended)
@@ -313,6 +340,34 @@ impl SessionStatus {
                 from: self,
                 to: target,
             })
+        }
+    }
+}
+
+impl fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SessionStatus {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "created" => Ok(Self::Created),
+            "ready" => Ok(Self::Ready),
+            "running" => Ok(Self::Running),
+            "waiting_for_tool" => Ok(Self::WaitingForTool),
+            "waiting_for_approval" => Ok(Self::WaitingForApproval),
+            "waiting_for_subagent" => Ok(Self::WaitingForSubagent),
+            "suspended" => Ok(Self::Suspended),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            other => Err(CoreError::Validation {
+                message: format!("unknown session status: {other}"),
+            }),
         }
     }
 }
@@ -558,6 +613,19 @@ mod tests {
             SessionStatus::WaitingForSubagent,
         ] {
             assert!(from.can_transition_to(&SessionStatus::Running));
+        }
+    }
+
+    #[test]
+    fn fsm_waiting_to_terminal() {
+        for from in [
+            SessionStatus::WaitingForTool,
+            SessionStatus::WaitingForApproval,
+            SessionStatus::WaitingForSubagent,
+        ] {
+            assert!(from.can_transition_to(&SessionStatus::Completed));
+            assert!(from.can_transition_to(&SessionStatus::Failed));
+            assert!(from.can_transition_to(&SessionStatus::Cancelled));
         }
     }
 
