@@ -182,9 +182,10 @@ docs/
     strategy/AZURE-DATA-OPTIONS.md
 
   adr/
-    ADR-0001-source-of-truth-model.md
+    ADR-0001-execution-workflow-and-speed.md
     ADR-0002-standalone-first-product-shape.md
-    ADR-0003-project-2-execution-model.md
+    ADR-0003-source-of-truth-model.md
+    ADR-0004-project-2-execution-model.md
 
   specs/
     phases-01-07.md
@@ -419,8 +420,10 @@ This lane should be verification-gated.
 
 ### Under Architecture decision trail
 - Story: add ADR scaffold
-- Story: record source-of-truth model ADR
+- Story: record execution workflow ADR
 - Story: record standalone-first product-shape ADR
+- Story: record source-of-truth model ADR
+- Story: record Project 2 execution-model ADR
 
 ---
 

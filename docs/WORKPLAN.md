@@ -10,7 +10,8 @@ The original overnight planning package described here has already been complete
 - runnable gateway/CLI binaries
 - PostgreSQL-backed store wiring with embedded PostgreSQL fallback
 - initial runtime/tool/scheduler implementations
-- the current execution authority in `docs/AGENT-ORCHESTRATION.md`
+- the current implementation context in `docs/AGENT-ORCHESTRATION.md`
+- the current branch/PR workflow authority in `docs/contributor/WORKFLOW.md`, `docs/contributor/EXECUTION-SPEED-POLICY.md`, and ADRs `ADR-0001` / `ADR-0004`
 
 ## Current interpretation
 

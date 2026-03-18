@@ -18,7 +18,7 @@ This document is the master instruction set for AI agents building this project 
 
 - **15+ design docs** in `docs/` define architecture, parity contracts, protocols, and phasing
 - **A runnable implementation baseline already exists** — the Cargo workspace, crate graph, gateway/CLI binaries, PostgreSQL store wiring, embedded PostgreSQL fallback, runtime skeleton, and a growing parity-oriented test surface are already in the repo
-- **Treat this document as sequencing and acceptance authority** — not as a literal snapshot of an empty repository or planning-only state
+- **Treat this document as implementation context, not workflow authority** — use it for subsystem direction and repo-state reality, but use the accepted batch-branch workflow docs/ADRs for current branch/PR execution rules
 - **Crate prefix is `rune-`** — all crate names use `rune-*` (e.g., `rune-core`, `rune-runtime`)
 
 ### Current implementation reality (keep this in sync with code)
@@ -70,9 +70,17 @@ apps/cli            (thin binary)
 
 ---
 
-## Wave execution model
+## Historical wave execution model
 
-Work is organized into **waves**. All agents within a wave run in parallel. A wave cannot start until the previous wave's outputs are committed and compiling.
+The wave model below is historical planning context, not the current default workflow authority.
+
+Current default execution is the accepted batch-branch model:
+- one active coding branch
+- one active PR
+- one coherent milestone batch
+- no git worktrees by default
+
+Use this section to understand older crate sequencing intent, not to override the current contributor workflow or ADR-backed execution rules.
 
 ### Wave 0 — Workspace bootstrap
 **Status:** completed baseline
@@ -89,6 +97,12 @@ Work is organized into **waves**. All agents within a wave run in parallel. A wa
 **Output gate:** `cargo check` succeeds. All 10 crates + 2 app binaries exist.
 
 **Current repo status:** satisfied. Treat Wave 0 as complete and build forward from the existing workspace unless a regression requires repair.
+
+For current branch/PR execution rules, see:
+- [`contributor/WORKFLOW.md`](contributor/WORKFLOW.md)
+- [`contributor/EXECUTION-SPEED-POLICY.md`](contributor/EXECUTION-SPEED-POLICY.md)
+- [`adr/ADR-0001-execution-workflow-and-speed.md`](adr/ADR-0001-execution-workflow-and-speed.md)
+- [`adr/ADR-0004-project-2-execution-model.md`](adr/ADR-0004-project-2-execution-model.md)
 
 ---
 

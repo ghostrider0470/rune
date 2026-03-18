@@ -1,6 +1,6 @@
 # Crate Layout Draft — OpenClaw Rust Rewrite
 
-> **Note:** The wave model in `AGENT-ORCHESTRATION.md` is the execution authority for crate ordering and implementation sequence. Phase mappings below are from an earlier planning draft and may not match the wave model. Crates listed as "later" or "split when justified" are speculative and not yet in the workspace.
+> **Note:** The wave model in `AGENT-ORCHESTRATION.md` is historical implementation context for crate ordering and sequencing intent, not the current branch/PR workflow authority. Phase mappings below are from an earlier planning draft and may not match the accepted batch-branch execution model. Crates listed as "later" or "split when justified" are speculative and not yet in the workspace.
 
 ## Goal
 
