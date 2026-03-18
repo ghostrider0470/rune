@@ -126,7 +126,26 @@ impl SessionRepo for PgSessionRepo {
         status: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<SessionRow, StoreError> {
+        let target: rune_core::SessionStatus =
+            status.parse().map_err(|e: rune_core::CoreError| {
+                StoreError::InvalidTransition(e.to_string())
+            })?;
+
         let mut conn = self.pool.get().await.map_err(pool_err)?;
+
+        // Read current status and validate the FSM transition.
+        let current_str: String = sessions::table
+            .find(id)
+            .select(sessions::status)
+            .first(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "session", id))?;
+        if let Ok(current) = current_str.parse::<rune_core::SessionStatus>() {
+            current
+                .transition(target)
+                .map_err(|e| StoreError::InvalidTransition(e.to_string()))?;
+        }
+
         diesel::update(sessions::table.find(id))
             .set((
                 sessions::status.eq(status),

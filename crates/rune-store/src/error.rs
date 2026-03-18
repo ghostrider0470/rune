@@ -28,6 +28,10 @@ pub enum StoreError {
     /// Serialization/deserialization of stored JSON payloads.
     #[error("serialization error: {0}")]
     Serialization(String),
+
+    /// An invalid state transition was attempted.
+    #[error("invalid transition: {0}")]
+    InvalidTransition(String),
 }
 
 impl From<serde_json::Error> for StoreError {

@@ -199,6 +199,22 @@ fn row_to_tool_execution(row: &rusqlite::Row<'_>) -> rusqlite::Result<ToolExecut
         error_summary: row.get(8)?,
         started_at: parse_dt(&row.get::<_, String>(9)?),
         ended_at: parse_dt_opt(row.get(10)?),
+        approval_id: parse_uuid_opt(row.get(11)?),
+        execution_mode: row.get(12)?,
+    })
+}
+
+fn row_to_process_handle(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessHandleRow> {
+    Ok(ProcessHandleRow {
+        process_id: parse_uuid(&row.get::<_, String>(0)?),
+        tool_call_id: parse_uuid(&row.get::<_, String>(1)?),
+        session_id: parse_uuid(&row.get::<_, String>(2)?),
+        command: row.get(3)?,
+        cwd: row.get(4)?,
+        status: row.get(5)?,
+        exit_code: row.get(6)?,
+        started_at: parse_dt(&row.get::<_, String>(7)?),
+        ended_at: parse_dt_opt(row.get(8)?),
     })
 }
 
@@ -238,7 +254,8 @@ const TRANSCRIPT_COLS: &str = "id, session_id, turn_id, seq, kind, payload, crea
 const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload, created_at, updated_at";
 const JOB_RUN_COLS: &str = "id, job_id, started_at, finished_at, status, output, created_at";
 const APPROVAL_COLS: &str = "id, subject_type, subject_id, reason, decision, decided_by, decided_at, presented_payload, created_at";
-const TOOL_EXEC_COLS: &str = "id, tool_call_id, session_id, turn_id, tool_name, arguments, status, result_summary, error_summary, started_at, ended_at";
+const TOOL_EXEC_COLS: &str = "id, tool_call_id, session_id, turn_id, tool_name, arguments, status, result_summary, error_summary, started_at, ended_at, approval_id, execution_mode";
+const PROCESS_HANDLE_COLS: &str = "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at";
 const PAIRED_DEVICE_COLS: &str = "id, name, public_key, role, scopes, token_hash, token_expires_at, paired_at, last_seen_at, created_at";
 const PAIRING_REQUEST_COLS: &str = "id, device_name, public_key, challenge, created_at, expires_at";
 
@@ -332,16 +349,39 @@ impl SessionRepo for SqliteSessionRepo {
         status: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<SessionRow, StoreError> {
+        // Parse and validate target status before entering the DB closure.
+        let target: rune_core::SessionStatus =
+            status.parse().map_err(|e: rune_core::CoreError| {
+                StoreError::InvalidTransition(e.to_string())
+            })?;
         let id_s = id.to_string();
         let status = status.to_string();
         self.conn.call(move |conn| {
+            // Read current status and validate the FSM transition.
+            let current_str: String = conn
+                .prepare("SELECT status FROM sessions WHERE id = ?1")?
+                .query_row([&id_s], |row| row.get(0))?;
+            if let Ok(current) = current_str.parse::<rune_core::SessionStatus>() {
+                if let Err(e) = current.transition(target) {
+                    return Err(rusqlite::Error::InvalidParameterName(e.to_string()));
+                }
+            }
+
             require_affected(conn.execute(
                 "UPDATE sessions SET status = ?1, updated_at = ?2, last_activity_at = ?2 WHERE id = ?3",
                 rusqlite::params![status, to_rfc3339(&updated_at), &id_s],
             )?)?;
             conn.prepare(&format!("SELECT {SESSION_COLS} FROM sessions WHERE id = ?1"))?
                 .query_row([&id_s], row_to_session)
-        }).await.map_err(|e| map_err(e, "session", &id.to_string()))
+        }).await.map_err(|e| {
+            // Surface FSM violations as InvalidTransition, not generic DB errors.
+            match &e {
+                tokio_rusqlite::Error::Rusqlite(rusqlite::Error::InvalidParameterName(msg)) => {
+                    StoreError::InvalidTransition(msg.clone())
+                }
+                _ => map_err(e, "session", &id.to_string()),
+            }
+        })
     }
 
     async fn update_metadata(
@@ -983,13 +1023,14 @@ impl ToolExecutionRepo for SqliteToolExecutionRepo {
     async fn create(&self, e: NewToolExecution) -> Result<ToolExecutionRow, StoreError> {
         self.conn.call(move |conn| {
             conn.execute(
-                &format!("INSERT INTO tool_executions ({TOOL_EXEC_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+                &format!("INSERT INTO tool_executions ({TOOL_EXEC_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"),
                 rusqlite::params![
                     e.id.to_string(), e.tool_call_id.to_string(), e.session_id.to_string(),
                     e.turn_id.to_string(), e.tool_name,
                     serde_json::to_string(&e.arguments).unwrap_or_default(),
                     e.status, Option::<String>::None, Option::<String>::None,
                     to_rfc3339(&e.started_at), Option::<String>::None,
+                    e.approval_id.map(|id| id.to_string()), e.execution_mode,
                 ],
             )?;
             conn.prepare(&format!("SELECT {TOOL_EXEC_COLS} FROM tool_executions WHERE id = ?1"))?
@@ -1043,6 +1084,108 @@ impl ToolExecutionRepo for SqliteToolExecutionRepo {
             conn.prepare(&format!("SELECT {TOOL_EXEC_COLS} FROM tool_executions WHERE id = ?1"))?
                 .query_row([&id_s], row_to_tool_execution)
         }).await.map_err(|e| map_err(e, "tool_execution", &id.to_string()))
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// SqliteProcessHandleRepo
+// ══════════════════════════════════════════════════════════════════════
+
+#[derive(Clone)]
+pub struct SqliteProcessHandleRepo {
+    conn: Arc<tokio_rusqlite::Connection>,
+}
+
+impl SqliteProcessHandleRepo {
+    pub fn new(conn: Arc<tokio_rusqlite::Connection>) -> Self {
+        Self { conn }
+    }
+}
+
+#[async_trait]
+impl ProcessHandleRepo for SqliteProcessHandleRepo {
+    async fn create(&self, h: NewProcessHandle) -> Result<ProcessHandleRow, StoreError> {
+        self.conn.call(move |conn| {
+            conn.execute(
+                &format!("INSERT INTO process_handles ({PROCESS_HANDLE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+                rusqlite::params![
+                    h.process_id.to_string(), h.tool_call_id.to_string(),
+                    h.session_id.to_string(), h.command, h.cwd,
+                    h.status, Option::<i32>::None,
+                    to_rfc3339(&h.started_at), Option::<String>::None,
+                ],
+            )?;
+            conn.prepare(&format!("SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"))?
+                .query_row([h.process_id.to_string()], row_to_process_handle)
+        }).await.map_err(StoreError::from)
+    }
+
+    async fn find_by_id(&self, process_id: Uuid) -> Result<ProcessHandleRow, StoreError> {
+        let id_s = process_id.to_string();
+        self.conn
+            .call(move |conn| {
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"
+                ))?
+                .query_row([&id_s], row_to_process_handle)
+            })
+            .await
+            .map_err(|e| map_err(e, "process_handle", &process_id.to_string()))
+    }
+
+    async fn update_status(
+        &self,
+        process_id: Uuid,
+        status: &str,
+        exit_code: Option<i32>,
+        ended_at: Option<DateTime<Utc>>,
+    ) -> Result<ProcessHandleRow, StoreError> {
+        let id_s = process_id.to_string();
+        let status = status.to_string();
+        let ended_at_s = ended_at.map(|dt| to_rfc3339(&dt));
+        self.conn
+            .call(move |conn| {
+                require_affected(conn.execute(
+                    "UPDATE process_handles SET status=?1, exit_code=?2, ended_at=?3 WHERE process_id=?4",
+                    rusqlite::params![status, exit_code, ended_at_s, &id_s],
+                )?)?;
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"
+                ))?
+                .query_row([&id_s], row_to_process_handle)
+            })
+            .await
+            .map_err(|e| map_err(e, "process_handle", &process_id.to_string()))
+    }
+
+    async fn list_by_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        let sid = session_id.to_string();
+        self.conn
+            .call(move |conn| {
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE session_id = ?1 ORDER BY started_at DESC"
+                ))?
+                .query_map([&sid], row_to_process_handle)?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        self.conn
+            .call(move |conn| {
+                conn.prepare(
+                    "SELECT process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at FROM process_handles WHERE status IN ('running', 'backgrounded') ORDER BY started_at DESC"
+                )?
+                .query_map([], row_to_process_handle)?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
     }
 }
 
