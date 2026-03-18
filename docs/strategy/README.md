@@ -1,8 +1,8 @@
 # Strategy Docs
 
-This folder holds long-form product/design rationale and supporting strategy material.
+This folder is the strategy hub for product rationale, standalone-first positioning, and longer-horizon design tradeoffs.
 
-Current canonical entrypoints remain:
+Start here:
 - [`../INDEX.md`](../INDEX.md)
 - [`../../rune-plan.md`](../../rune-plan.md)
 - [`STANDALONE-STRATEGY.md`](STANDALONE-STRATEGY.md)

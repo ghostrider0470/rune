@@ -79,12 +79,15 @@ That means local-first is the default experience, not a throwaway dev-only mode.
 ## Documentation
 
 - [`docs/INDEX.md`](docs/INDEX.md) — docs front door by audience and concern
+- [`docs/getting-started/README.md`](docs/getting-started/README.md) — local bring-up path
+- [`docs/operator/README.md`](docs/operator/README.md) — operator-facing hub
+- [`docs/contributor/README.md`](docs/contributor/README.md) — contributor-facing hub
+- [`docs/reference/README.md`](docs/reference/README.md) — stable technical reference hub
+- [`docs/parity/README.md`](docs/parity/README.md) — parity contracts and execution sequencing hub
+- [`docs/strategy/README.md`](docs/strategy/README.md) — product rationale and positioning hub
+- [`docs/adr/README.md`](docs/adr/README.md) — durable architecture decision trail
 - [`rune-plan.md`](rune-plan.md) — canonical product strategy and planning summary
 - [`docs/OPENCLAW-COVERAGE-MAP.md`](docs/OPENCLAW-COVERAGE-MAP.md) — OpenClaw-surface parity navigation
-- [`docs/operator/DEPLOYMENT.md`](docs/operator/DEPLOYMENT.md) — deployment model
-- [`docs/operator/DATABASES.md`](docs/operator/DATABASES.md) — storage model and database choices
-- [`docs/parity/PROTOCOLS.md`](docs/parity/PROTOCOLS.md) — runtime and protocol contracts
-- [`docs/adr/README.md`](docs/adr/README.md) — durable architecture decision trail
 
 ## For contributors
 

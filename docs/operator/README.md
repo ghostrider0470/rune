@@ -1,8 +1,8 @@
 # Operator Docs
 
-This folder is reserved for deployment, configuration, runtime health, and operational guidance during the docs structure cleanup transition.
+This folder is the operator-facing hub for running, configuring, inspecting, and troubleshooting Rune.
 
-Current canonical entrypoints remain:
+Start here:
 - [`../INDEX.md`](../INDEX.md)
 - [`CONFIGURATION.md`](CONFIGURATION.md)
 - [`PROVIDERS.md`](PROVIDERS.md)

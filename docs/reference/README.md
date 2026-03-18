@@ -1,8 +1,8 @@
 # Reference Docs
 
-This folder is reserved for stable technical reference material during the docs structure cleanup transition.
+This folder is the stable technical reference hub for Rune architecture, APIs, CLI shape, and subsystem facts.
 
-Current canonical entrypoints remain:
+Start here:
 - [`../INDEX.md`](../INDEX.md)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - [`API.md`](API.md)
