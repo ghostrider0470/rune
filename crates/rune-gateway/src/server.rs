@@ -315,6 +315,25 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             "/config",
             get(routes::get_config).put(routes::update_config),
         )
+        // Turn routes
+        .route("/api/turns", get(routes::list_turns))
+        .route("/api/turns/{id}", get(routes::get_turn))
+        // Tool routes
+        .route("/api/tools", get(routes::list_tools))
+        .route("/api/tools/{id}", get(routes::get_tool_execution))
+        // Auth routes
+        .route("/api/auth", get(routes::auth_token_info))
+        // Channel routes
+        .route("/api/channels", get(routes::list_channels))
+        .route("/api/channels/status", get(routes::channels_status))
+        // Memory routes
+        .route("/api/memory/status", get(routes::memory_status))
+        .route("/api/memory/search", get(routes::memory_search))
+        // Log routes
+        .route("/api/logs", get(routes::query_logs))
+        // Doctor routes
+        .route("/api/doctor/run", post(routes::doctor_run))
+        .route("/api/doctor/results", get(routes::doctor_results))
         .layer(middleware::from_fn(move |req, next| {
             bearer_auth(req, next, auth_token.clone(), device_registry.clone())
         }))

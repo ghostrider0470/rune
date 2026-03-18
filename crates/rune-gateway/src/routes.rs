@@ -2842,3 +2842,402 @@ pub async fn update_config(
         serde_json::to_value(&redacted).map_err(|e| GatewayError::Internal(e.to_string()))?;
     Ok(Json(value))
 }
+
+// ── Turns ───────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct TurnsListQuery {
+    pub session_id: Option<Uuid>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct TurnResponse {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub trigger_kind: String,
+    pub status: String,
+    pub model_ref: Option<String>,
+    pub usage_prompt_tokens: Option<i32>,
+    pub usage_completion_tokens: Option<i32>,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+}
+
+/// `GET /api/turns` — list turns, optionally filtered by session_id.
+pub async fn list_turns(
+    State(state): State<AppState>,
+    Query(query): Query<TurnsListQuery>,
+) -> Result<Json<Vec<TurnResponse>>, GatewayError> {
+    let session_id = query
+        .session_id
+        .ok_or_else(|| GatewayError::BadRequest("session_id query parameter is required".into()))?;
+
+    let rows = state
+        .turn_repo
+        .list_by_session(session_id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let limit = query.limit.unwrap_or(100).min(500) as usize;
+    let offset = query.offset.unwrap_or(0).max(0) as usize;
+
+    let items: Vec<TurnResponse> = rows
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(turn_to_response)
+        .collect();
+
+    Ok(Json(items))
+}
+
+/// `GET /api/turns/{id}` — get a single turn by ID.
+pub async fn get_turn(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<TurnResponse>, GatewayError> {
+    let row = state
+        .turn_repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| GatewayError::BadRequest(format!("turn not found: {e}")))?;
+
+    Ok(Json(turn_to_response(row)))
+}
+
+fn turn_to_response(row: TurnRow) -> TurnResponse {
+    TurnResponse {
+        id: row.id,
+        session_id: row.session_id,
+        trigger_kind: row.trigger_kind,
+        status: row.status,
+        model_ref: row.model_ref,
+        usage_prompt_tokens: row.usage_prompt_tokens,
+        usage_completion_tokens: row.usage_completion_tokens,
+        started_at: row.started_at.to_rfc3339(),
+        ended_at: row.ended_at.map(|t| t.to_rfc3339()),
+    }
+}
+
+// ── Tools ───────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct ToolRegistryItem {
+    pub name: String,
+    pub description: String,
+    pub category: String,
+}
+
+/// `GET /api/tools` — list registered tools from the skill registry.
+pub async fn list_tools(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ToolRegistryItem>>, GatewayError> {
+    let skills = state.skill_registry.list().await;
+    let items: Vec<ToolRegistryItem> = skills
+        .into_iter()
+        .map(|s| ToolRegistryItem {
+            name: s.name.clone(),
+            description: s.description.clone(),
+            category: if s.enabled {
+                "enabled".to_string()
+            } else {
+                "disabled".to_string()
+            },
+        })
+        .collect();
+
+    Ok(Json(items))
+}
+
+/// `GET /api/tools/{id}` — get a tool execution by ID (stub).
+pub async fn get_tool_execution(Path(id): Path<String>) -> Result<Json<Value>, GatewayError> {
+    Err(GatewayError::BadRequest(format!(
+        "tool execution lookup not yet implemented: {id}"
+    )))
+}
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct AuthTokenInfo {
+    pub authenticated: bool,
+    pub auth_enabled: bool,
+    pub device_count: usize,
+}
+
+/// `GET /api/auth` — return token / auth status information.
+pub async fn auth_token_info(
+    State(state): State<AppState>,
+) -> Result<Json<AuthTokenInfo>, GatewayError> {
+    let config = state.config.read().await;
+    let auth_enabled = config.gateway.auth_token.is_some();
+    drop(config);
+
+    let devices = state
+        .device_repo
+        .list_devices()
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(AuthTokenInfo {
+        authenticated: true,
+        auth_enabled,
+        device_count: devices.len(),
+    }))
+}
+
+// ── Channels ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct ChannelItem {
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct ChannelStatusResponse {
+    pub configured: Vec<ChannelItem>,
+    pub active_sessions: usize,
+}
+
+/// `GET /api/channels` — list configured channel adapters.
+pub async fn list_channels(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ChannelItem>>, GatewayError> {
+    let config = state.config.read().await;
+    let channels = configured_channels(&config);
+    let items: Vec<ChannelItem> = channels
+        .into_iter()
+        .map(|name| ChannelItem {
+            kind: name.clone(),
+            name,
+            enabled: true,
+        })
+        .collect();
+    Ok(Json(items))
+}
+
+/// `GET /api/channels/status` — channel subsystem status.
+pub async fn channels_status(
+    State(state): State<AppState>,
+) -> Result<Json<ChannelStatusResponse>, GatewayError> {
+    let config = state.config.read().await;
+    let channels = configured_channels(&config);
+    drop(config);
+
+    let rows = state
+        .session_repo
+        .list(i64::MAX / 4, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let active_sessions = rows.iter().filter(|r| r.channel_ref.is_some()).count();
+
+    let items: Vec<ChannelItem> = channels
+        .into_iter()
+        .map(|name| ChannelItem {
+            kind: name.clone(),
+            name,
+            enabled: true,
+        })
+        .collect();
+
+    Ok(Json(ChannelStatusResponse {
+        configured: items,
+        active_sessions,
+    }))
+}
+
+// ── Memory ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct MemoryStatusResponse {
+    pub memory_mode: String,
+    pub memory_dir: String,
+    pub pgvector: bool,
+}
+
+#[derive(Deserialize)]
+pub struct MemorySearchQuery {
+    pub q: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct MemorySearchResponse {
+    pub query: String,
+    pub results: Vec<Value>,
+    pub message: String,
+}
+
+/// `GET /api/memory/status` — memory subsystem status.
+pub async fn memory_status(
+    State(state): State<AppState>,
+) -> Result<Json<MemoryStatusResponse>, GatewayError> {
+    let config = state.config.read().await;
+    Ok(Json(MemoryStatusResponse {
+        memory_mode: state.capabilities.memory_mode.clone(),
+        memory_dir: config.paths.memory_dir.display().to_string(),
+        pgvector: state.capabilities.pgvector,
+    }))
+}
+
+/// `GET /api/memory/search` — search memory (stub; backend integration pending).
+pub async fn memory_search(
+    Query(query): Query<MemorySearchQuery>,
+) -> Result<Json<MemorySearchResponse>, GatewayError> {
+    let q = query.q.unwrap_or_default();
+    if q.is_empty() {
+        return Err(GatewayError::BadRequest(
+            "q query parameter is required".into(),
+        ));
+    }
+
+    Ok(Json(MemorySearchResponse {
+        query: q,
+        results: vec![],
+        message: "memory search not yet wired to gateway-level index".to_string(),
+    }))
+}
+
+// ── Logs ────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LogsQuery {
+    pub level: Option<String>,
+    pub source: Option<String>,
+    pub limit: Option<usize>,
+    pub since: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct LogsQueryResponse {
+    pub entries: Vec<Value>,
+    pub message: String,
+}
+
+/// `GET /api/logs` — query structured logs (stub; log aggregation pending).
+pub async fn query_logs(
+    State(state): State<AppState>,
+    Query(_query): Query<LogsQuery>,
+) -> Result<Json<LogsQueryResponse>, GatewayError> {
+    let config = state.config.read().await;
+    let logs_dir = config.paths.logs_dir.display().to_string();
+    drop(config);
+
+    Ok(Json(LogsQueryResponse {
+        entries: vec![],
+        message: format!("structured log query not yet aggregated; logs directory: {logs_dir}"),
+    }))
+}
+
+// ── Doctor ───────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct DoctorCheck {
+    pub name: String,
+    pub status: &'static str,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct DoctorReport {
+    pub overall: &'static str,
+    pub checks: Vec<DoctorCheck>,
+    pub run_at: String,
+}
+
+/// `POST /api/doctor/run` — execute diagnostic checks.
+pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorReport>, GatewayError> {
+    let mut checks = Vec::new();
+
+    let config = state.config.read().await;
+    let provider_ok = !config.models.providers.is_empty();
+    checks.push(DoctorCheck {
+        name: "model_providers".to_string(),
+        status: if provider_ok { "pass" } else { "warn" },
+        message: if provider_ok {
+            format!("{} provider(s) configured", config.models.providers.len())
+        } else {
+            "no model providers configured; using demo echo backend".to_string()
+        },
+    });
+
+    let auth_ok = config.gateway.auth_token.is_some();
+    checks.push(DoctorCheck {
+        name: "auth".to_string(),
+        status: if auth_ok { "pass" } else { "warn" },
+        message: if auth_ok {
+            "bearer auth enabled".to_string()
+        } else {
+            "no auth token configured; gateway is unauthenticated".to_string()
+        },
+    });
+    drop(config);
+
+    let session_check = state.session_repo.list(1, 0).await;
+    checks.push(DoctorCheck {
+        name: "session_store".to_string(),
+        status: if session_check.is_ok() {
+            "pass"
+        } else {
+            "fail"
+        },
+        message: if session_check.is_ok() {
+            "session store reachable".to_string()
+        } else {
+            format!("session store error: {}", session_check.unwrap_err())
+        },
+    });
+
+    checks.push(DoctorCheck {
+        name: "tts".to_string(),
+        status: if state.tts_engine.is_some() {
+            "pass"
+        } else {
+            "info"
+        },
+        message: if state.tts_engine.is_some() {
+            "TTS engine configured".to_string()
+        } else {
+            "TTS engine not configured".to_string()
+        },
+    });
+
+    checks.push(DoctorCheck {
+        name: "stt".to_string(),
+        status: if state.stt_engine.is_some() {
+            "pass"
+        } else {
+            "info"
+        },
+        message: if state.stt_engine.is_some() {
+            "STT engine configured".to_string()
+        } else {
+            "STT engine not configured".to_string()
+        },
+    });
+
+    let overall = if checks.iter().any(|c| c.status == "fail") {
+        "unhealthy"
+    } else if checks.iter().any(|c| c.status == "warn") {
+        "degraded"
+    } else {
+        "healthy"
+    };
+
+    Ok(Json(DoctorReport {
+        overall,
+        checks,
+        run_at: Utc::now().to_rfc3339(),
+    }))
+}
+
+/// `GET /api/doctor/results` — return the most recent doctor report (stub).
+pub async fn doctor_results(
+    State(state): State<AppState>,
+) -> Result<Json<DoctorReport>, GatewayError> {
+    doctor_run(State(state)).await
+}
