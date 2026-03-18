@@ -9,5 +9,6 @@ Current canonical entrypoints remain:
 - [`CHANNELS.md`](CHANNELS.md)
 - [`DEPLOYMENT.md`](DEPLOYMENT.md)
 - [`DATABASES.md`](DATABASES.md)
+- [`MEMORY.md`](MEMORY.md)
 - [`HEALTH-AND-DOCTOR.md`](HEALTH-AND-DOCTOR.md)
 - [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md)
