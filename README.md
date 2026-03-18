@@ -40,7 +40,11 @@ cp config.example.toml config.toml
 
 Then open `http://127.0.0.1:8787/dashboard`.
 
-For fuller development setup and service-style local operation, see [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md).
+Next docs from there:
+- [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)
+- [`docs/getting-started/INSTALL.md`](docs/getting-started/INSTALL.md)
+- [`docs/operator/README.md`](docs/operator/README.md)
+- [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md)
 
 ## What Rune does
 
