@@ -194,7 +194,10 @@ async fn build_services(
     );
 
     let model_provider: Arc<dyn ModelProvider> = build_model_provider(&config);
-    let scheduler = Arc::new(Scheduler::new_with_repos(job_repo.clone(), job_run_repo));
+    let scheduler = Arc::new(Scheduler::new_with_repos(
+        job_repo.clone(),
+        job_run_repo.clone(),
+    ));
 
     let process_audit_store: Arc<dyn ProcessAuditStore> =
         Arc::new(DbProcessAuditStore::new(tool_execution_repo));
@@ -216,7 +219,10 @@ async fn build_services(
         workspace_root.clone(),
         heartbeat_state_file,
     ));
-    let reminder_store = Arc::new(ReminderStore::new_with_repo(job_repo));
+    let reminder_store = Arc::new(ReminderStore::new_with_repos(
+        job_repo,
+        job_run_repo.clone(),
+    ));
     let mut registry = ToolRegistry::new();
     let browse = build_browse_tool_executor(&config).await;
     register_real_tool_definitions(&mut registry, browse.is_some());

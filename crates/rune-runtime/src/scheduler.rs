@@ -656,6 +656,23 @@ pub struct JobUpdate {
 
 // ── Reminders ─────────────────────────────────────────────────────────────────
 
+/// Reminder lifecycle outcome.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderStatus {
+    #[default]
+    Pending,
+    Delivered,
+    Cancelled,
+    Missed,
+}
+
+impl ReminderStatus {
+    fn is_terminal(&self) -> bool {
+        !matches!(self, Self::Pending)
+    }
+}
+
 /// A one-shot reminder: fire-at timestamp, message, and target.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Reminder {
@@ -671,6 +688,13 @@ pub struct Reminder {
     pub created_at: DateTime<Utc>,
     /// When the reminder was delivered (if at all).
     pub delivered_at: Option<DateTime<Utc>>,
+    /// Reminder lifecycle outcome.
+    #[serde(default)]
+    pub status: ReminderStatus,
+    /// When the reminder reached a terminal outcome.
+    pub outcome_at: Option<DateTime<Utc>>,
+    /// Last recorded terminal error, if any.
+    pub last_error: Option<String>,
 }
 
 impl Reminder {
@@ -688,18 +712,51 @@ impl Reminder {
             delivered: false,
             created_at: Utc::now(),
             delivered_at: None,
+            status: ReminderStatus::Pending,
+            outcome_at: None,
+            last_error: None,
         }
     }
 
     /// Check whether this reminder is due.
     pub fn is_due(&self) -> bool {
-        !self.delivered && self.fire_at <= Utc::now()
+        matches!(self.status, ReminderStatus::Pending) && self.fire_at <= Utc::now()
     }
+
+    fn mark_delivered(&mut self, at: DateTime<Utc>) {
+        self.delivered = true;
+        self.delivered_at = Some(at);
+        self.status = ReminderStatus::Delivered;
+        self.outcome_at = Some(at);
+        self.last_error = None;
+    }
+
+    fn mark_cancelled(&mut self, at: DateTime<Utc>) {
+        self.delivered = false;
+        self.status = ReminderStatus::Cancelled;
+        self.outcome_at = Some(at);
+    }
+
+    fn mark_missed(&mut self, at: DateTime<Utc>, error: String) {
+        self.delivered = false;
+        self.status = ReminderStatus::Missed;
+        self.outcome_at = Some(at);
+        self.last_error = Some(error);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ReminderDeliveryAttempt {
+    run_id: Option<Uuid>,
+    started_at: DateTime<Utc>,
 }
 
 enum ReminderStoreBackend {
     Memory(Arc<Mutex<Vec<Reminder>>>),
-    Repo(Arc<dyn JobRepo>),
+    Repo {
+        jobs: Arc<dyn JobRepo>,
+        runs: Option<Arc<dyn JobRunRepo>>,
+    },
 }
 
 /// Reminder store managed by the scheduler.
@@ -721,7 +778,20 @@ impl ReminderStore {
     /// Create a reminder store backed by the durable job repository.
     pub fn new_with_repo(job_repo: Arc<dyn JobRepo>) -> Self {
         Self {
-            backend: ReminderStoreBackend::Repo(job_repo),
+            backend: ReminderStoreBackend::Repo {
+                jobs: job_repo,
+                runs: None,
+            },
+        }
+    }
+
+    /// Create a reminder store backed by durable job and job-run repositories.
+    pub fn new_with_repos(job_repo: Arc<dyn JobRepo>, job_run_repo: Arc<dyn JobRunRepo>) -> Self {
+        Self {
+            backend: ReminderStoreBackend::Repo {
+                jobs: job_repo,
+                runs: Some(job_run_repo),
+            },
         }
     }
 
@@ -733,7 +803,7 @@ impl ReminderStore {
             ReminderStoreBackend::Memory(reminders) => {
                 reminders.lock().await.push(reminder);
             }
-            ReminderStoreBackend::Repo(repo) => {
+            ReminderStoreBackend::Repo { jobs: repo, .. } => {
                 let now = reminder.created_at;
                 let payload = serde_json::to_value(&reminder)
                     .expect("Reminder serialization should not fail");
@@ -765,26 +835,32 @@ impl ReminderStore {
                 let mut result: Vec<Reminder> = if include_delivered {
                     reminders.clone()
                 } else {
-                    reminders.iter().filter(|r| !r.delivered).cloned().collect()
+                    reminders
+                        .iter()
+                        .filter(|r| !r.status.is_terminal())
+                        .cloned()
+                        .collect()
                 };
                 result.sort_by_key(|r| r.fire_at);
                 result
             }
-            ReminderStoreBackend::Repo(repo) => match repo.list_by_type("reminder", true).await {
-                Ok(rows) => {
-                    let mut reminders: Vec<Reminder> = rows
-                        .into_iter()
-                        .filter_map(|row| row_to_reminder(row).ok())
-                        .filter(|reminder| include_delivered || !reminder.delivered)
-                        .collect();
-                    reminders.sort_by_key(|r| r.fire_at);
-                    reminders
+            ReminderStoreBackend::Repo { jobs: repo, .. } => {
+                match repo.list_by_type("reminder", true).await {
+                    Ok(rows) => {
+                        let mut reminders: Vec<Reminder> = rows
+                            .into_iter()
+                            .filter_map(|row| row_to_reminder(row).ok())
+                            .filter(|reminder| include_delivered || !reminder.status.is_terminal())
+                            .collect();
+                        reminders.sort_by_key(|r| r.fire_at);
+                        reminders
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "failed to list persisted reminders");
+                        Vec::new()
+                    }
                 }
-                Err(error) => {
-                    warn!(error = %error, "failed to list persisted reminders");
-                    Vec::new()
-                }
-            },
+            }
         }
     }
 
@@ -794,7 +870,7 @@ impl ReminderStore {
             ReminderStoreBackend::Memory(reminders) => {
                 reminders.lock().await.iter().find(|r| r.id == *id).cloned()
             }
-            ReminderStoreBackend::Repo(repo) => repo
+            ReminderStoreBackend::Repo { jobs: repo, .. } => repo
                 .find_by_id(Uuid::from(*id))
                 .await
                 .ok()
@@ -802,28 +878,39 @@ impl ReminderStore {
         }
     }
 
-    /// Cancel (remove) a reminder. Returns the removed reminder if found.
+    /// Cancel a reminder. Returns the updated reminder if found.
     pub async fn cancel(&self, id: &JobId) -> Option<Reminder> {
         match &self.backend {
             ReminderStoreBackend::Memory(reminders) => {
                 let mut reminders = reminders.lock().await;
-                if let Some(pos) = reminders.iter().position(|r| r.id == *id) {
+                if let Some(reminder) = reminders
+                    .iter_mut()
+                    .find(|reminder| reminder.id == *id && !reminder.status.is_terminal())
+                {
                     info!(reminder_id = %id, "cancelling reminder");
-                    Some(reminders.remove(pos))
+                    reminder.mark_cancelled(Utc::now());
+                    Some(reminder.clone())
                 } else {
                     None
                 }
             }
-            ReminderStoreBackend::Repo(repo) => {
-                let existing = self.get(id).await?;
-                match repo.delete(Uuid::from(*id)).await {
-                    Ok(true) => Some(existing),
-                    Ok(false) => None,
-                    Err(error) => {
-                        warn!(reminder_id = %id, error = %error, "failed to cancel persisted reminder");
-                        None
-                    }
+            ReminderStoreBackend::Repo { .. } => {
+                let mut reminder = self.get(id).await?;
+                if reminder.status.is_terminal() {
+                    return None;
                 }
+
+                let cancelled_at = Utc::now();
+                reminder.mark_cancelled(cancelled_at);
+                self.persist_terminal_reminder(
+                    &reminder,
+                    cancelled_at,
+                    None,
+                    JobRunStatus::Skipped,
+                    None,
+                    None,
+                )
+                .await
             }
         }
     }
@@ -835,7 +922,7 @@ impl ReminderStore {
                 let reminders = reminders.lock().await;
                 reminders.iter().filter(|r| r.is_due()).cloned().collect()
             }
-            ReminderStoreBackend::Repo(_) => self
+            ReminderStoreBackend::Repo { .. } => self
                 .list(false)
                 .await
                 .into_iter()
@@ -844,48 +931,157 @@ impl ReminderStore {
         }
     }
 
+    /// Record a reminder delivery attempt starting.
+    pub async fn start_delivery_attempt(&self, id: &JobId) -> ReminderDeliveryAttempt {
+        let started_at = Utc::now();
+        let run_id = match &self.backend {
+            ReminderStoreBackend::Memory(_) => None,
+            ReminderStoreBackend::Repo {
+                runs: Some(run_repo),
+                ..
+            } => {
+                let durable = NewJobRun {
+                    id: Uuid::now_v7(),
+                    job_id: Uuid::from(*id),
+                    started_at,
+                    finished_at: None,
+                    trigger_kind: SchedulerRunTrigger::Due.as_str().to_string(),
+                    status: job_run_status_str(&JobRunStatus::Running).to_string(),
+                    output: None,
+                    created_at: started_at,
+                };
+                match run_repo.create(durable).await {
+                    Ok(row) => Some(row.id),
+                    Err(error) => {
+                        warn!(reminder_id = %id, error = %error, "failed to persist reminder run start");
+                        None
+                    }
+                }
+            }
+            ReminderStoreBackend::Repo { runs: None, .. } => None,
+        };
+
+        ReminderDeliveryAttempt { run_id, started_at }
+    }
+
     /// Mark a reminder as delivered.
-    pub async fn mark_delivered(&self, id: &JobId) -> Option<Reminder> {
+    pub async fn mark_delivered(
+        &self,
+        id: &JobId,
+        attempt: &ReminderDeliveryAttempt,
+        output: Option<String>,
+    ) -> Option<Reminder> {
         match &self.backend {
             ReminderStoreBackend::Memory(reminders) => {
                 let mut reminders = reminders.lock().await;
                 if let Some(reminder) = reminders.iter_mut().find(|r| r.id == *id) {
-                    reminder.delivered = true;
-                    reminder.delivered_at = Some(Utc::now());
+                    reminder.mark_delivered(Utc::now());
                     Some(reminder.clone())
                 } else {
                     None
                 }
             }
-            ReminderStoreBackend::Repo(repo) => {
+            ReminderStoreBackend::Repo { .. } => {
                 let mut reminder = self.get(id).await?;
-                reminder.delivered = true;
-                reminder.delivered_at = Some(Utc::now());
-                let updated_at = reminder.delivered_at.unwrap_or_else(Utc::now);
-                let payload = serde_json::to_value(&reminder)
-                    .expect("Reminder serialization should not fail");
-                match repo
-                    .update_job(
-                        Uuid::from(*id),
-                        false,
-                        Some(reminder.fire_at),
-                        SchedulerPayloadKind::Reminder.as_str(),
-                        SchedulerDeliveryMode::Announce.as_str(),
-                        payload,
-                        updated_at,
-                        reminder.delivered_at,
-                        None,
-                    )
-                    .await
-                {
-                    Ok(row) => row_to_reminder(row).ok(),
-                    Err(error) => {
-                        warn!(reminder_id = %id, error = %error, "failed to mark persisted reminder delivered");
-                        None
-                    }
-                }
+                reminder.mark_delivered(Utc::now());
+                self.persist_terminal_reminder(
+                    &reminder,
+                    reminder.outcome_at.unwrap_or_else(Utc::now),
+                    Some(attempt.started_at),
+                    JobRunStatus::Completed,
+                    attempt.run_id,
+                    output,
+                )
+                .await
             }
         }
+    }
+
+    /// Mark a reminder as missed after a failed one-shot delivery attempt.
+    pub async fn mark_missed(
+        &self,
+        id: &JobId,
+        attempt: &ReminderDeliveryAttempt,
+        error: impl Into<String>,
+    ) -> Option<Reminder> {
+        let error = error.into();
+        match &self.backend {
+            ReminderStoreBackend::Memory(reminders) => {
+                let mut reminders = reminders.lock().await;
+                if let Some(reminder) = reminders.iter_mut().find(|r| r.id == *id) {
+                    reminder.mark_missed(Utc::now(), error);
+                    Some(reminder.clone())
+                } else {
+                    None
+                }
+            }
+            ReminderStoreBackend::Repo { .. } => {
+                let mut reminder = self.get(id).await?;
+                reminder.mark_missed(Utc::now(), error.clone());
+                self.persist_terminal_reminder(
+                    &reminder,
+                    reminder.outcome_at.unwrap_or_else(Utc::now),
+                    Some(attempt.started_at),
+                    JobRunStatus::Failed,
+                    attempt.run_id,
+                    Some(error),
+                )
+                .await
+            }
+        }
+    }
+
+    async fn persist_terminal_reminder(
+        &self,
+        reminder: &Reminder,
+        updated_at: DateTime<Utc>,
+        last_run_at: Option<DateTime<Utc>>,
+        run_status: JobRunStatus,
+        run_id: Option<Uuid>,
+        output: Option<String>,
+    ) -> Option<Reminder> {
+        let ReminderStoreBackend::Repo { jobs, runs } = &self.backend else {
+            return None;
+        };
+
+        let payload =
+            serde_json::to_value(reminder).expect("Reminder serialization should not fail");
+        let persisted = match jobs
+            .update_job(
+                Uuid::from(reminder.id),
+                false,
+                Some(reminder.fire_at),
+                SchedulerPayloadKind::Reminder.as_str(),
+                SchedulerDeliveryMode::Announce.as_str(),
+                payload,
+                updated_at,
+                last_run_at,
+                None,
+            )
+            .await
+        {
+            Ok(row) => row_to_reminder(row).ok(),
+            Err(error) => {
+                warn!(reminder_id = %reminder.id, error = %error, "failed to persist reminder outcome");
+                None
+            }
+        };
+
+        if let (Some(run_repo), Some(run_id)) = (runs, run_id) {
+            if let Err(error) = run_repo
+                .complete(
+                    run_id,
+                    job_run_status_str(&run_status),
+                    output.as_deref(),
+                    updated_at,
+                )
+                .await
+            {
+                warn!(reminder_id = %reminder.id, error = %error, "failed to persist reminder run completion");
+            }
+        }
+
+        persisted
     }
 }
 
@@ -927,7 +1123,22 @@ fn row_to_reminder(row: rune_store::models::JobRow) -> Result<Reminder, StoreErr
         .map_err(|error| StoreError::Serialization(error.to_string()))?;
     reminder.id = JobId::from(row.id);
     reminder.fire_at = row.due_at.unwrap_or(reminder.fire_at);
-    reminder.delivered = !row.enabled || reminder.delivered;
+    if matches!(reminder.status, ReminderStatus::Pending)
+        && (reminder.delivered || reminder.delivered_at.is_some() || !row.enabled)
+    {
+        reminder.status = ReminderStatus::Delivered;
+    }
+    reminder.delivered = matches!(reminder.status, ReminderStatus::Delivered);
+    if reminder.delivered && reminder.delivered_at.is_none() {
+        reminder.delivered_at = row.last_run_at;
+    }
+    if reminder.outcome_at.is_none() {
+        reminder.outcome_at = match reminder.status {
+            ReminderStatus::Pending => None,
+            ReminderStatus::Delivered => reminder.delivered_at.or(row.last_run_at),
+            ReminderStatus::Cancelled | ReminderStatus::Missed => Some(row.updated_at),
+        };
+    }
     Ok(reminder)
 }
 
@@ -1230,7 +1441,11 @@ mod tests {
 
         let cancelled = store.cancel(&id).await;
         assert!(cancelled.is_some());
+        let cancelled = cancelled.unwrap();
+        assert_eq!(cancelled.status, ReminderStatus::Cancelled);
+        assert!(cancelled.outcome_at.is_some());
         assert_eq!(store.list(false).await.len(), 0);
+        assert_eq!(store.list(true).await.len(), 1);
     }
 
     #[tokio::test]
@@ -1269,10 +1484,17 @@ mod tests {
             Utc::now() - chrono::Duration::seconds(10),
         );
         let id = store.add(reminder).await;
+        let attempt = store.start_delivery_attempt(&id).await;
 
-        let delivered = store.mark_delivered(&id).await.unwrap();
+        let delivered = store
+            .mark_delivered(&id, &attempt, Some("done".into()))
+            .await
+            .unwrap();
         assert!(delivered.delivered);
         assert!(delivered.delivered_at.is_some());
+        assert_eq!(delivered.status, ReminderStatus::Delivered);
+        assert!(delivered.outcome_at.is_some());
+        assert!(delivered.last_error.is_none());
 
         // Should not appear in non-delivered list
         assert_eq!(store.list(false).await.len(), 0);
@@ -1281,11 +1503,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reminder_is_due_checks_delivered() {
+    async fn reminder_mark_missed() {
+        let store = ReminderStore::new();
+        let reminder = Reminder::new("Miss me", "main", Utc::now() - chrono::Duration::seconds(5));
+        let id = store.add(reminder).await;
+        let attempt = store.start_delivery_attempt(&id).await;
+
+        let missed = store
+            .mark_missed(&id, &attempt, "session unavailable")
+            .await
+            .unwrap();
+
+        assert_eq!(missed.status, ReminderStatus::Missed);
+        assert!(!missed.delivered);
+        assert_eq!(missed.last_error.as_deref(), Some("session unavailable"));
+        assert_eq!(store.list(false).await.len(), 0);
+        assert_eq!(store.list(true).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reminder_is_due_checks_status() {
         let mut reminder =
             Reminder::new("Done", "main", Utc::now() - chrono::Duration::seconds(10));
         assert!(reminder.is_due());
-        reminder.delivered = true;
+        reminder.status = ReminderStatus::Delivered;
         assert!(!reminder.is_due());
     }
 

@@ -449,6 +449,62 @@ async fn job_create_find_list_record_run() {
 }
 
 #[tokio::test]
+async fn job_update_persists_terminal_reminder_payload() {
+    let Some((pool, _pgvector)) = setup().await else {
+        return;
+    };
+    let repo = PgJobRepo::new(pool);
+    let now = Utc::now();
+
+    let id = Uuid::now_v7();
+    repo.create(NewJob {
+        id,
+        job_type: "reminder".to_string(),
+        schedule: None,
+        due_at: Some(now),
+        enabled: true,
+        payload_kind: "reminder".to_string(),
+        delivery_mode: "announce".to_string(),
+        payload: serde_json::json!({"message": "standup"}),
+        created_at: now,
+        updated_at: now,
+    })
+    .await
+    .unwrap();
+
+    let terminal_payload = serde_json::json!({
+        "message": "standup",
+        "status": "missed",
+        "last_error": "session unavailable"
+    });
+    let updated = repo
+        .update_job(
+            id,
+            false,
+            Some(now),
+            "reminder",
+            "announce",
+            terminal_payload.clone(),
+            now,
+            Some(now),
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert!(!updated.enabled);
+    assert_eq!(updated.payload_kind, "reminder");
+    assert_eq!(updated.delivery_mode, "announce");
+    assert_eq!(updated.payload, terminal_payload);
+
+    let active = repo.list_by_type("reminder", false).await.unwrap();
+    assert!(!active.iter().any(|job| job.id == id));
+
+    let all = repo.list_by_type("reminder", true).await.unwrap();
+    assert!(all.iter().any(|job| job.id == id && !job.enabled));
+}
+
+#[tokio::test]
 async fn job_run_create_complete_and_list() {
     let Some((pool, _pgvector)) = setup().await else {
         return;
