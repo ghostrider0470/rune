@@ -33,9 +33,9 @@ Use this doc as the strategy entrypoint for:
 - use [`../adr/ADR-0002-standalone-first-product-shape.md`](../adr/ADR-0002-standalone-first-product-shape.md) when you need the durable architectural rationale behind the product-shape choice
 - use [`AZURE-DATA-OPTIONS.md`](AZURE-DATA-OPTIONS.md) and [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md) for adjacent strategic tradeoff context
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - standalone-first rationale
 - local-first vs server-grade positioning
 - deployment-shape tradeoffs

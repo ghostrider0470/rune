@@ -40,9 +40,9 @@ Use this doc as the memory entrypoint for:
 - use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) and [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when you need runtime semantics behind retrieval behavior
 - use [`../FUNCTIONALITY-CHECKLIST.md`](../FUNCTIONALITY-CHECKLIST.md) when you need implementation/evidence-oriented detail
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - memory storage conventions
 - privacy-boundary explanation
 - operator inspection/troubleshooting of memory retrieval

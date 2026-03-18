@@ -36,9 +36,9 @@ Use this doc as the testing entrypoint for:
 - use [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) and [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when the test question is really about runtime invariants
 - use [`EXECUTION-SPEED-POLICY.md`](EXECUTION-SPEED-POLICY.md) when you need focused-vs-broad validation expectations during active work
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - test layers and expectations
 - parity-oriented acceptance pointers
 - focused vs broad validation guidance

@@ -30,9 +30,9 @@ Use this doc as the channel entrypoint for:
 - use [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) when you need command/surface coverage detail
 - use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need deeper inbound/outbound runtime semantics
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - channel setup/navigation
 - provider-specific channel docs
 - runtime channel expectations

@@ -23,9 +23,9 @@ Use this doc as the API entrypoint for:
 - use [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when you need behavioral invariants and response expectations
 - use [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) when you need the broad docs/parity navigation view by surface
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - core HTTP route families
 - auth expectations
 - dashboard/API shape pointers
