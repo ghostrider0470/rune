@@ -85,13 +85,20 @@ impl TurnEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolEvent {
-    Requested {
+    Invoked {
         session_id: Uuid,
         turn_id: Uuid,
         tool_call_id: Uuid,
         tool_name: String,
     },
-    Executing {
+    ApprovalRequired {
+        session_id: Uuid,
+        turn_id: Uuid,
+        tool_call_id: Uuid,
+        tool_name: String,
+        approval_id: Uuid,
+    },
+    Running {
         session_id: Uuid,
         turn_id: Uuid,
         tool_call_id: Uuid,
@@ -102,31 +109,44 @@ pub enum ToolEvent {
         turn_id: Uuid,
         tool_call_id: Uuid,
         tool_name: String,
-        is_error: bool,
+    },
+    Failed {
+        session_id: Uuid,
+        turn_id: Uuid,
+        tool_call_id: Uuid,
+        tool_name: String,
+        error: String,
     },
 }
 
 impl ToolEvent {
     pub fn event_kind(&self) -> &'static str {
         match self {
-            Self::Requested { .. } => "tool.requested",
-            Self::Executing { .. } => "tool.executing",
+            Self::Invoked { .. } => "tool.invoked",
+            Self::ApprovalRequired { .. } => "tool.approval_required",
+            Self::Running { .. } => "tool.running",
             Self::Completed { .. } => "tool.completed",
+            Self::Failed { .. } => "tool.failed",
         }
     }
 
     pub fn session_id(&self) -> Uuid {
         match self {
-            Self::Requested { session_id, .. }
-            | Self::Executing { session_id, .. }
-            | Self::Completed { session_id, .. } => *session_id,
+            Self::Invoked { session_id, .. }
+            | Self::ApprovalRequired { session_id, .. }
+            | Self::Running { session_id, .. }
+            | Self::Completed { session_id, .. }
+            | Self::Failed { session_id, .. } => *session_id,
         }
     }
 
     pub fn state_changed(&self) -> bool {
         match self {
-            Self::Requested { .. } | Self::Completed { .. } => true,
-            Self::Executing { .. } => false,
+            Self::Invoked { .. }
+            | Self::ApprovalRequired { .. }
+            | Self::Completed { .. }
+            | Self::Failed { .. } => true,
+            Self::Running { .. } => false,
         }
     }
 }
@@ -137,7 +157,7 @@ impl ToolEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApprovalEvent {
-    Requested {
+    Created {
         session_id: Uuid,
         approval_id: Uuid,
         summary: String,
@@ -147,24 +167,31 @@ pub enum ApprovalEvent {
         approval_id: Uuid,
         decision: String,
     },
+    Expired {
+        session_id: Uuid,
+        approval_id: Uuid,
+    },
 }
 
 impl ApprovalEvent {
     pub fn event_kind(&self) -> &'static str {
         match self {
-            Self::Requested { .. } => "approval.requested",
+            Self::Created { .. } => "approval.created",
             Self::Resolved { .. } => "approval.resolved",
+            Self::Expired { .. } => "approval.expired",
         }
     }
 
     pub fn session_id(&self) -> Uuid {
         match self {
-            Self::Requested { session_id, .. } | Self::Resolved { session_id, .. } => *session_id,
+            Self::Created { session_id, .. }
+            | Self::Resolved { session_id, .. }
+            | Self::Expired { session_id, .. } => *session_id,
         }
     }
 
     pub fn state_changed(&self) -> bool {
-        // Both requesting and resolving an approval change visible state.
+        // All approval lifecycle transitions change visible state.
         true
     }
 }
@@ -186,6 +213,10 @@ pub enum ProcessEvent {
         stream: String,
         data: String,
     },
+    Backgrounded {
+        session_id: Uuid,
+        process_id: String,
+    },
     Exited {
         session_id: Uuid,
         process_id: String,
@@ -199,6 +230,7 @@ impl ProcessEvent {
         match self {
             Self::Started { .. } => "process.started",
             Self::Output { .. } => "process.output",
+            Self::Backgrounded { .. } => "process.backgrounded",
             Self::Exited { .. } => "process.exited",
         }
     }
@@ -207,13 +239,14 @@ impl ProcessEvent {
         match self {
             Self::Started { session_id, .. }
             | Self::Output { session_id, .. }
+            | Self::Backgrounded { session_id, .. }
             | Self::Exited { session_id, .. } => *session_id,
         }
     }
 
     pub fn state_changed(&self) -> bool {
         match self {
-            Self::Started { .. } | Self::Exited { .. } => true,
+            Self::Started { .. } | Self::Backgrounded { .. } | Self::Exited { .. } => true,
             Self::Output { .. } => false,
         }
     }
@@ -440,24 +473,35 @@ mod tests {
     #[test]
     fn tool_event_kinds_are_dotted() {
         assert_eq!(
-            ToolEvent::Requested {
+            ToolEvent::Invoked {
                 session_id: sample_session_id(),
                 turn_id: sample_turn_id(),
                 tool_call_id: sample_tool_call_id(),
                 tool_name: "read".to_string(),
             }
             .event_kind(),
-            "tool.requested"
+            "tool.invoked"
         );
         assert_eq!(
-            ToolEvent::Executing {
+            ToolEvent::ApprovalRequired {
+                session_id: sample_session_id(),
+                turn_id: sample_turn_id(),
+                tool_call_id: sample_tool_call_id(),
+                tool_name: "bash".to_string(),
+                approval_id: sample_approval_id(),
+            }
+            .event_kind(),
+            "tool.approval_required"
+        );
+        assert_eq!(
+            ToolEvent::Running {
                 session_id: sample_session_id(),
                 turn_id: sample_turn_id(),
                 tool_call_id: sample_tool_call_id(),
                 tool_name: "read".to_string(),
             }
             .event_kind(),
-            "tool.executing"
+            "tool.running"
         );
         assert_eq!(
             ToolEvent::Completed {
@@ -465,24 +509,34 @@ mod tests {
                 turn_id: sample_turn_id(),
                 tool_call_id: sample_tool_call_id(),
                 tool_name: "read".to_string(),
-                is_error: false,
             }
             .event_kind(),
             "tool.completed"
         );
+        assert_eq!(
+            ToolEvent::Failed {
+                session_id: sample_session_id(),
+                turn_id: sample_turn_id(),
+                tool_call_id: sample_tool_call_id(),
+                tool_name: "bash".to_string(),
+                error: "permission denied".to_string(),
+            }
+            .event_kind(),
+            "tool.failed"
+        );
     }
 
     #[test]
-    fn tool_completed_serialises_is_error() {
-        let event = ToolEvent::Completed {
+    fn tool_failed_serialises_error() {
+        let event = ToolEvent::Failed {
             session_id: sample_session_id(),
             turn_id: sample_turn_id(),
             tool_call_id: sample_tool_call_id(),
             tool_name: "bash".to_string(),
-            is_error: true,
+            error: "command failed".to_string(),
         };
         let val = serde_json::to_value(&event).unwrap();
-        assert_eq!(val["is_error"], true);
+        assert_eq!(val["error"], "command failed");
         assert_eq!(val["tool_name"], "bash");
     }
 
@@ -491,13 +545,13 @@ mod tests {
     #[test]
     fn approval_event_kinds_are_dotted() {
         assert_eq!(
-            ApprovalEvent::Requested {
+            ApprovalEvent::Created {
                 session_id: sample_session_id(),
                 approval_id: sample_approval_id(),
                 summary: "run rm -rf /".to_string(),
             }
             .event_kind(),
-            "approval.requested"
+            "approval.created"
         );
         assert_eq!(
             ApprovalEvent::Resolved {
@@ -508,11 +562,19 @@ mod tests {
             .event_kind(),
             "approval.resolved"
         );
+        assert_eq!(
+            ApprovalEvent::Expired {
+                session_id: sample_session_id(),
+                approval_id: sample_approval_id(),
+            }
+            .event_kind(),
+            "approval.expired"
+        );
     }
 
     #[test]
     fn approval_events_always_change_state() {
-        assert!(ApprovalEvent::Requested {
+        assert!(ApprovalEvent::Created {
             session_id: sample_session_id(),
             approval_id: sample_approval_id(),
             summary: "test".to_string(),
@@ -523,6 +585,12 @@ mod tests {
             session_id: sample_session_id(),
             approval_id: sample_approval_id(),
             decision: "deny".to_string(),
+        }
+        .state_changed());
+
+        assert!(ApprovalEvent::Expired {
+            session_id: sample_session_id(),
+            approval_id: sample_approval_id(),
         }
         .state_changed());
     }
@@ -549,6 +617,14 @@ mod tests {
             }
             .event_kind(),
             "process.output"
+        );
+        assert_eq!(
+            ProcessEvent::Backgrounded {
+                session_id: sample_session_id(),
+                process_id: "p-1".to_string(),
+            }
+            .event_kind(),
+            "process.backgrounded"
         );
         assert_eq!(
             ProcessEvent::Exited {
@@ -599,7 +675,7 @@ mod tests {
     #[test]
     fn runtime_event_delegates_session_id() {
         let sid = sample_session_id();
-        let event = RuntimeEvent::Tool(ToolEvent::Requested {
+        let event = RuntimeEvent::Tool(ToolEvent::Invoked {
             session_id: sid,
             turn_id: sample_turn_id(),
             tool_call_id: sample_tool_call_id(),
@@ -628,14 +704,14 @@ mod tests {
 
     #[test]
     fn runtime_event_payload_is_inner_event_only() {
-        let event = RuntimeEvent::Approval(ApprovalEvent::Requested {
+        let event = RuntimeEvent::Approval(ApprovalEvent::Created {
             session_id: sample_session_id(),
             approval_id: sample_approval_id(),
             summary: "execute dangerous command".to_string(),
         });
         let payload = event.to_payload();
         // Payload should be the inner ApprovalEvent, not wrapped in RuntimeEvent.
-        assert_eq!(payload["kind"], "requested");
+        assert_eq!(payload["kind"], "created");
         assert_eq!(payload["summary"], "execute dangerous command");
         assert!(payload.get("family").is_none());
     }
@@ -683,7 +759,7 @@ mod tests {
                 turn_id: sample_turn_id(),
                 status: "model_calling".to_string(),
             }),
-            RuntimeEvent::Tool(ToolEvent::Executing {
+            RuntimeEvent::Tool(ToolEvent::Running {
                 session_id: sample_session_id(),
                 turn_id: sample_turn_id(),
                 tool_call_id: sample_tool_call_id(),
