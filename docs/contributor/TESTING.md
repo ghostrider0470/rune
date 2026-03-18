@@ -24,9 +24,15 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```
 
-## What belongs here over time
+## Current contributor use
 
-This file should become the stable contributor entry for:
+Use this doc as the testing entrypoint for:
+- understanding the current validation posture
+- navigating from general testing questions into parity and development references
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - test layers and expectations
 - parity-oriented acceptance pointers
 - focused vs broad validation guidance

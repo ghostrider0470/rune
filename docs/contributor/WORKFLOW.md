@@ -18,9 +18,16 @@ Rune currently uses a batch-branch workflow model:
 - [`../AGENT-ORCHESTRATION.md`](../AGENT-ORCHESTRATION.md)
 - [`../INDEX.md`](../INDEX.md)
 
-## What belongs here over time
+## Current contributor use
 
-This file should become the stable contributor entry for:
+Use this doc as the workflow entrypoint for:
+- the accepted batch-branch / single-PR model
+- where execution authority lives now
+- how contributor flow relates to issues, PRs, and Project 2
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - branch/PR workflow expectations
 - issue/PR/project-board relationship
 - merge discipline
