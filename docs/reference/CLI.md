@@ -11,9 +11,15 @@ Use these docs for the current contract picture:
 - [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) — parity-navigation front door
 - [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) — resource/state concepts behind CLI operations
 
-## What belongs here over time
+## Current reference use
 
-This file should become the stable reference entry for:
+Use this doc as the CLI entrypoint for:
+- understanding where current command-family coverage lives
+- navigating from CLI questions into parity inventory and protocol references
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - top-level command families
 - operator mental model
 - lifecycle/status/config/doctor command pointers

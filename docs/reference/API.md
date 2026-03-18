@@ -11,9 +11,15 @@ Use these docs for the current contract picture:
 - [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) — behavioral expectations and invariants
 - [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) — where to find parity coverage by surface
 
-## What belongs here over time
+## Current reference use
 
-This file should become the stable reference entry for:
+Use this doc as the API entrypoint for:
+- understanding where the current HTTP/dashboard/control-plane contract picture lives
+- navigating from API questions into parity contracts and coverage docs
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - core HTTP route families
 - auth expectations
 - dashboard/API shape pointers
