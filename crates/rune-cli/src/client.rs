@@ -11,11 +11,11 @@ use toml_edit::{DocumentMut, Item, Table, Value};
 use crate::output::{
     ActionResult, ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
-    ConfigValidationResult, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DoctorCheck, DoctorReport, GatewayCallResponse, GatewayDiscoverResponse,
-    GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
-    ReminderSummary, RemindersListResponse, SessionDetailResponse, SessionListResponse,
-    SessionStatusCard, SessionSummary, StatusResponse,
+    ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
+    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport,
+    GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
+    HealthResponse, HeartbeatStatusResponse, ReminderSummary, RemindersListResponse,
+    SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -472,33 +472,33 @@ impl GatewayClient {
         let resp = self
             .http
             .get(self.url("/cron"))
-            .query(&[("includeDisabled", include_disabled)])
+            .query(&[("include_disabled", include_disabled)])
             .send()
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            let items: serde_json::Value = resp.json().await.context("invalid JSON from /cron")?;
-            let jobs = items
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .map(|job| CronJobSummary {
-                    id: job["id"].as_str().unwrap_or("?").to_string(),
-                    name: job["name"].as_str().map(String::from),
-                    enabled: job["enabled"].as_bool().unwrap_or(false),
-                    session_target: job["session_target"]
-                        .as_str()
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    schedule_kind: job["schedule"]["kind"]
-                        .as_str()
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    next_run_at: job["next_run_at"].as_str().map(String::from),
-                    run_count: job["run_count"].as_u64().unwrap_or(0),
-                })
-                .collect();
+            let jobs = resp
+                .json::<Vec<CronJobSummary>>()
+                .await
+                .context("invalid JSON from /cron")?;
             Ok(CronListResponse { jobs })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /cron/{id}`
+    pub async fn cron_get(&self, id: &str) -> Result<CronJobDetailResponse> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/cron/{id}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            resp.json()
+                .await
+                .context("invalid JSON from GET /cron/{id}")
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -511,6 +511,7 @@ impl GatewayClient {
         text: &str,
         at: DateTime<Utc>,
         session_target: &str,
+        delivery_mode: &str,
     ) -> Result<ActionResult> {
         let resp = self
             .http
@@ -519,7 +520,8 @@ impl GatewayClient {
                 "name": name,
                 "schedule": { "kind": "at", "at": at.to_rfc3339() },
                 "payload": { "kind": "system_event", "text": text },
-                "sessionTarget": session_target,
+                "session_target": session_target,
+                "delivery_mode": delivery_mode,
                 "enabled": true
             }))
             .send()
@@ -541,8 +543,20 @@ impl GatewayClient {
     }
 
     /// `POST /cron/{id}`
-    pub async fn cron_edit_name(&self, id: &str, name: &str) -> Result<ActionResult> {
-        self.cron_patch(id, json!({ "name": name }), "Cron job updated")
+    pub async fn cron_update(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        delivery_mode: Option<&str>,
+    ) -> Result<ActionResult> {
+        let mut payload = serde_json::Map::new();
+        if let Some(name) = name {
+            payload.insert("name".to_string(), json!(name));
+        }
+        if let Some(delivery_mode) = delivery_mode {
+            payload.insert("delivery_mode".to_string(), json!(delivery_mode));
+        }
+        self.cron_patch(id, serde_json::Value::Object(payload), "Cron job updated")
             .await
     }
 
@@ -659,7 +673,7 @@ impl GatewayClient {
             .json(&json!({
                 "text": text,
                 "mode": mode,
-                "contextMessages": context_messages,
+                "context_messages": context_messages,
             }))
             .send()
             .await
@@ -1244,7 +1258,7 @@ pub fn show_config() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -1370,13 +1384,19 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/cron"))
+            .and(query_param("include_disabled", "false"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([
                 {
                     "id": "job-1",
                     "name": "test",
+                    "schedule": { "kind": "at", "at": "2026-03-18T10:00:00Z" },
+                    "payload": { "kind": "system_event", "text": "ping" },
+                    "delivery_mode": "announce",
                     "enabled": true,
                     "session_target": "main",
-                    "schedule": { "kind": "at" },
+                    "created_at": "2026-03-18T09:00:00Z",
+                    "last_run_at": null,
+                    "next_run_at": "2026-03-18T10:00:00Z",
                     "run_count": 0
                 }
             ])))
@@ -1386,6 +1406,120 @@ mod tests {
         let resp = client.cron_list(false).await.unwrap();
         assert_eq!(resp.jobs.len(), 1);
         assert_eq!(resp.jobs[0].id, "job-1");
+        assert_eq!(resp.jobs[0].delivery_mode, "announce");
+        assert_eq!(resp.jobs[0].payload.kind(), "system_event");
+    }
+
+    #[tokio::test]
+    async fn cron_get_parses_detail() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/cron/job-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "job-1",
+                "name": "test",
+                "schedule": { "kind": "cron", "expr": "0 * * * * *", "tz": "UTC" },
+                "payload": { "kind": "system_event", "text": "ping" },
+                "delivery_mode": "webhook",
+                "enabled": true,
+                "session_target": "main",
+                "created_at": "2026-03-18T09:00:00Z",
+                "last_run_at": "2026-03-18T09:30:00Z",
+                "next_run_at": "2026-03-18T10:00:00Z",
+                "run_count": 2
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.cron_get("job-1").await.unwrap();
+        assert_eq!(resp.job.id, "job-1");
+        assert_eq!(resp.job.delivery_mode, "webhook");
+        assert_eq!(resp.job.schedule.kind(), "cron");
+    }
+
+    #[tokio::test]
+    async fn cron_add_uses_snake_case_surface() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/cron"))
+            .and(body_json(json!({
+                "name": "daily",
+                "schedule": { "kind": "at", "at": "2026-03-18T10:00:00+00:00" },
+                "payload": { "kind": "system_event", "text": "ping" },
+                "session_target": "main",
+                "delivery_mode": "announce",
+                "enabled": true
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "success": true,
+                "job_id": "job-1",
+                "message": "cron job created"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .cron_add_system_event(
+                Some("daily"),
+                "ping",
+                DateTime::parse_from_rfc3339("2026-03-18T10:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                "main",
+                "announce",
+            )
+            .await
+            .unwrap();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn cron_update_sends_selected_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/cron/job-1"))
+            .and(body_json(json!({
+                "name": "renamed",
+                "delivery_mode": "webhook"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "job_id": "job-1",
+                "message": "cron job updated"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .cron_update("job-1", Some("renamed"), Some("webhook"))
+            .await
+            .unwrap();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn cron_wake_uses_snake_case_context_messages() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/cron/wake"))
+            .and(body_json(json!({
+                "text": "wake up",
+                "mode": "now",
+                "context_messages": 3
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "wake event queued for now"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.cron_wake("wake up", "now", Some(3)).await.unwrap();
+        assert!(resp.success);
     }
 
     #[tokio::test]

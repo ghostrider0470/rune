@@ -1,6 +1,6 @@
 //! Clap-based CLI definition with all subcommands.
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 
 /// Rune — the operator CLI for managing the Rune AI runtime.
 #[derive(Debug, Parser)]
@@ -177,14 +177,31 @@ pub enum CronAction {
         /// Session target (`main` or `isolated`). Defaults to `main`.
         #[arg(long, default_value = "main")]
         session_target: String,
+        /// Delivery mode for the scheduled work (`none`, `announce`, or `webhook`).
+        #[arg(long, value_enum, default_value_t = CronDeliveryMode::None)]
+        delivery_mode: CronDeliveryMode,
     },
-    /// Update a job's display name.
+    /// Inspect a job.
+    Show {
+        /// Job ID.
+        id: String,
+    },
+    /// Update a job's display name or delivery mode.
+    #[command(group(
+        ArgGroup::new("cron_edit_changes")
+            .required(true)
+            .multiple(true)
+            .args(["name", "delivery_mode"])
+    ))]
     Edit {
         /// Job ID.
         id: String,
         /// New name.
         #[arg(long)]
-        name: String,
+        name: Option<String>,
+        /// New delivery mode.
+        #[arg(long, value_enum)]
+        delivery_mode: Option<CronDeliveryMode>,
     },
     /// Enable a job.
     Enable {
@@ -217,8 +234,8 @@ pub enum CronAction {
         #[arg(long)]
         text: String,
         /// Delivery timing mode (`next-heartbeat` or `now`).
-        #[arg(long, default_value = "next-heartbeat")]
-        mode: String,
+        #[arg(long, value_enum, default_value_t = WakeMode::NextHeartbeat)]
+        mode: WakeMode,
         /// Optional number of recent context messages to attach.
         #[arg(long = "context-messages")]
         context_messages: Option<u64>,
@@ -323,8 +340,8 @@ pub enum SystemAction {
         #[arg(long)]
         text: String,
         /// Delivery timing mode (`next-heartbeat` or `now`).
-        #[arg(long, default_value = "next-heartbeat")]
-        mode: String,
+        #[arg(long, value_enum, default_value_t = WakeMode::NextHeartbeat)]
+        mode: WakeMode,
         /// Optional number of recent context messages to attach.
         #[arg(long = "context-messages")]
         context_messages: Option<u64>,
@@ -393,6 +410,40 @@ pub enum CompletionShell {
     Fish,
     PowerShell,
     Zsh,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CronDeliveryMode {
+    None,
+    Announce,
+    Webhook,
+}
+
+impl CronDeliveryMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Announce => "announce",
+            Self::Webhook => "webhook",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WakeMode {
+    NextHeartbeat,
+    Now,
+}
+
+impl WakeMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NextHeartbeat => "next-heartbeat",
+            Self::Now => "now",
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -834,7 +885,7 @@ mod tests {
                     },
             } => {
                 assert_eq!(text, "Reminder: check Rune");
-                assert_eq!(mode, "now");
+                assert_eq!(mode, WakeMode::Now);
                 assert_eq!(context_messages, Some(2));
             }
             other => panic!("unexpected command: {other:?}"),
@@ -943,6 +994,8 @@ mod tests {
             "hello",
             "--at",
             "2026-03-13T13:00:00Z",
+            "--delivery-mode",
+            "announce",
         ])
         .unwrap();
         match cli.command {
@@ -952,27 +1005,55 @@ mod tests {
                         text,
                         at,
                         session_target,
+                        delivery_mode,
                         ..
                     },
             } => {
                 assert_eq!(text, "hello");
                 assert_eq!(at, "2026-03-13T13:00:00Z");
                 assert_eq!(session_target, "main");
+                assert_eq!(delivery_mode, CronDeliveryMode::Announce);
             }
             other => panic!("unexpected command: {other:?}"),
         }
     }
 
     #[test]
-    fn parse_cron_edit() {
-        let cli =
-            Cli::try_parse_from(["rune", "cron", "edit", "job-1", "--name", "renamed"]).unwrap();
+    fn parse_cron_show() {
+        let cli = Cli::try_parse_from(["rune", "cron", "show", "job-1"]).unwrap();
         match cli.command {
             Command::Cron {
-                action: CronAction::Edit { id, name },
+                action: CronAction::Show { id },
+            } => assert_eq!(id, "job-1"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cron_edit() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "cron",
+            "edit",
+            "job-1",
+            "--name",
+            "renamed",
+            "--delivery-mode",
+            "webhook",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Cron {
+                action:
+                    CronAction::Edit {
+                        id,
+                        name,
+                        delivery_mode,
+                    },
             } => {
                 assert_eq!(id, "job-1");
-                assert_eq!(name, "renamed");
+                assert_eq!(name.as_deref(), Some("renamed"));
+                assert_eq!(delivery_mode, Some(CronDeliveryMode::Webhook));
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -1048,7 +1129,7 @@ mod tests {
                     },
             } => {
                 assert_eq!(text, "Reminder: check Rune");
-                assert_eq!(mode, "now");
+                assert_eq!(mode, WakeMode::Now);
                 assert_eq!(context_messages, Some(3));
             }
             other => panic!("unexpected command: {other:?}"),

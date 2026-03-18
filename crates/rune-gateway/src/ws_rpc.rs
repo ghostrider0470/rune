@@ -91,6 +91,7 @@ impl RpcDispatcher {
             "a2ui.form_submit" => self.a2ui_form_submit(params).await,
             "a2ui.action" => self.a2ui_action(params).await,
             "cron.list" => self.cron_list(params).await,
+            "cron.get" => self.cron_get(params).await,
             "cron.status" => self.cron_status(params).await,
             "runtime.lanes" => self.runtime_lanes().await,
             "skills.list" => self.skills_list().await,
@@ -512,6 +513,7 @@ impl RpcDispatcher {
     async fn cron_list(&self, params: Value) -> Result<Value, RpcError> {
         let include_disabled = params
             .get("include_disabled")
+            .or_else(|| params.get("includeDisabled"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
@@ -523,6 +525,10 @@ impl RpcDispatcher {
                 json!({
                     "id": job.id.to_string(),
                     "name": job.name,
+                    "schedule": job.schedule,
+                    "payload": job.payload,
+                    "delivery_mode": job.delivery_mode,
+                    "session_target": job.session_target,
                     "enabled": job.enabled,
                     "created_at": job.created_at.to_rfc3339(),
                     "last_run_at": job.last_run_at.map(|dt| dt.to_rfc3339()),
@@ -533,6 +539,39 @@ impl RpcDispatcher {
             .collect();
 
         Ok(json!(items))
+    }
+
+    /// Inspect a single cron job. Params: `id` or `job_id` (required UUID).
+    async fn cron_get(&self, params: Value) -> Result<Value, RpcError> {
+        let job_id = params
+            .get("id")
+            .or_else(|| params.get("job_id"))
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| RpcError::bad_request("missing required field: id"))?;
+        let job_id = Uuid::parse_str(job_id)
+            .map_err(|err| RpcError::bad_request(format!("invalid job id: {err}")))?;
+        let job_id = rune_core::JobId::from(job_id);
+
+        let job = self
+            .state
+            .scheduler
+            .get_job(&job_id)
+            .await
+            .ok_or_else(|| RpcError::not_found(format!("job not found: {job_id}")))?;
+
+        Ok(json!({
+            "id": job.id.to_string(),
+            "name": job.name,
+            "schedule": job.schedule,
+            "payload": job.payload,
+            "delivery_mode": job.delivery_mode,
+            "session_target": job.session_target,
+            "enabled": job.enabled,
+            "created_at": job.created_at.to_rfc3339(),
+            "last_run_at": job.last_run_at.map(|dt| dt.to_rfc3339()),
+            "next_run_at": job.next_run_at.map(|dt| dt.to_rfc3339()),
+            "run_count": job.run_count,
+        }))
     }
 
     /// Cron scheduler status summary.

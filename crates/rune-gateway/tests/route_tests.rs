@@ -1309,6 +1309,113 @@ async fn ws_rpc_health_reports_session_count() {
 }
 
 #[tokio::test]
+async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let now = chrono::Utc::now();
+    let job_id = scheduler
+        .add_job(rune_runtime::scheduler::Job {
+            id: rune_core::JobId::new(),
+            name: Some("daily-check".into()),
+            schedule: rune_runtime::scheduler::Schedule::Cron {
+                expr: "0 0 9 * * *".into(),
+                tz: Some("UTC".into()),
+            },
+            payload: rune_runtime::scheduler::JobPayload::SystemEvent {
+                text: "run daily check".into(),
+            },
+            delivery_mode: rune_core::SchedulerDeliveryMode::Announce,
+            session_target: rune_runtime::scheduler::SessionTarget::Main,
+            enabled: true,
+            created_at: now,
+            last_run_at: None,
+            next_run_at: Some(now),
+            run_count: 0,
+        })
+        .await;
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        event_tx,
+        tts_engine: None,
+        stt_engine: None,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let list = dispatcher
+        .dispatch("cron.list", serde_json::json!({ "includeDisabled": true }))
+        .await
+        .unwrap();
+    let items = list.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["delivery_mode"], "announce");
+    assert_eq!(items[0]["schedule"]["kind"], "cron");
+    assert_eq!(items[0]["payload"]["kind"], "system_event");
+
+    let detail = dispatcher
+        .dispatch("cron.get", serde_json::json!({ "id": job_id.to_string() }))
+        .await
+        .unwrap();
+    assert_eq!(detail["id"], job_id.to_string());
+    assert_eq!(detail["delivery_mode"], "announce");
+    assert_eq!(detail["session_target"], "main");
+}
+
+#[tokio::test]
 async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
     use rune_gateway::ws_rpc::RpcDispatcher;
 
@@ -3900,6 +4007,116 @@ async fn cron_add_respects_interval_anchor_for_first_run() {
     let next_run_at = items[0]["next_run_at"].as_str().unwrap();
     let parsed = chrono::DateTime::parse_from_rfc3339(next_run_at).unwrap();
     assert_eq!(parsed.timestamp_millis(), anchor);
+}
+
+#[tokio::test]
+async fn cron_get_and_update_delivery_mode() {
+    let app = build_test_app(None);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/cron")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "name":"daily-check",
+                        "schedule":{"kind":"at","at":"2026-03-18T10:00:00Z"},
+                        "payload":{"kind":"system_event","text":"run daily check"},
+                        "session_target":"main",
+                        "delivery_mode":"announce",
+                        "enabled":true
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let job_id = created["job_id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let job = body_json(response).await;
+    assert_eq!(job["delivery_mode"], "announce");
+    assert_eq!(job["payload"]["kind"], "system_event");
+    assert_eq!(job["schedule"]["kind"], "at");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/cron/{job_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{ "delivery_mode":"webhook" }"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let job = body_json(response).await;
+    assert_eq!(job["delivery_mode"], "webhook");
+}
+
+#[tokio::test]
+async fn cron_wake_accepts_snake_case_and_normalizes_mode() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::post("/cron/wake")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "text":"wake up",
+                        "mode":"next_heartbeat",
+                        "context_messages":2
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["mode"], "next-heartbeat");
+    assert_eq!(body["context_messages"], 2);
+}
+
+#[tokio::test]
+async fn cron_wake_rejects_unknown_mode() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::post("/cron/wake")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "text":"wake up",
+                        "mode":"later"
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

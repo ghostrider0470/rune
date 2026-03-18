@@ -468,7 +468,7 @@ pub async fn gateway_restart() -> Json<ActionResponse> {
 
 #[derive(Deserialize)]
 pub struct CronListQuery {
-    #[serde(rename = "includeDisabled")]
+    #[serde(rename = "includeDisabled", alias = "include_disabled")]
     pub include_disabled: Option<bool>,
 }
 
@@ -484,7 +484,7 @@ pub struct SessionsListQuery {
 pub struct CronWakeRequest {
     pub text: String,
     pub mode: Option<String>,
-    #[serde(rename = "contextMessages")]
+    #[serde(rename = "contextMessages", alias = "context_messages")]
     pub context_messages: Option<u64>,
 }
 
@@ -493,8 +493,10 @@ pub struct CronJobRequest {
     pub name: Option<String>,
     pub schedule: CronScheduleRequest,
     pub payload: CronPayloadRequest,
-    #[serde(rename = "sessionTarget")]
+    #[serde(rename = "sessionTarget", alias = "session_target")]
     pub session_target: String,
+    #[serde(default, rename = "deliveryMode", alias = "delivery_mode")]
+    pub delivery_mode: Option<SchedulerDeliveryMode>,
     pub enabled: Option<bool>,
 }
 
@@ -533,6 +535,8 @@ pub struct CronUpdateRequest {
     pub enabled: Option<bool>,
     pub schedule: Option<CronScheduleRequest>,
     pub payload: Option<CronPayloadRequest>,
+    #[serde(default, rename = "deliveryMode", alias = "delivery_mode")]
+    pub delivery_mode: Option<SchedulerDeliveryMode>,
 }
 
 #[derive(Serialize)]
@@ -548,6 +552,7 @@ pub struct CronJobResponse {
     pub name: Option<String>,
     pub schedule: Schedule,
     pub payload: JobPayload,
+    pub delivery_mode: SchedulerDeliveryMode,
     pub session_target: SessionTarget,
     pub enabled: bool,
     pub created_at: String,
@@ -603,6 +608,19 @@ pub async fn cron_list(
     Ok(Json(jobs.into_iter().map(job_to_response).collect()))
 }
 
+pub async fn cron_get(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<CronJobResponse>, GatewayError> {
+    let job_id = JobId::from(id);
+    let job = state
+        .scheduler
+        .get_job(&job_id)
+        .await
+        .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
+    Ok(Json(job_to_response(job)))
+}
+
 pub async fn cron_add(
     State(state): State<AppState>,
     Json(body): Json<CronJobRequest>,
@@ -620,7 +638,7 @@ pub async fn cron_add(
         name: body.name,
         schedule,
         payload,
-        delivery_mode: SchedulerDeliveryMode::None,
+        delivery_mode: body.delivery_mode.unwrap_or(SchedulerDeliveryMode::None),
         session_target,
         enabled: body.enabled.unwrap_or(true),
         created_at: now,
@@ -669,7 +687,7 @@ pub async fn cron_update(
         enabled: body.enabled,
         schedule: new_schedule,
         payload: new_payload,
-        delivery_mode: None,
+        delivery_mode: body.delivery_mode,
     };
 
     state
@@ -771,7 +789,7 @@ pub async fn cron_wake(
     State(state): State<AppState>,
     Json(body): Json<CronWakeRequest>,
 ) -> Result<Json<CronWakeResponse>, GatewayError> {
-    let mode = body.mode.unwrap_or_else(|| "next-heartbeat".to_string());
+    let mode = normalize_wake_mode(body.mode.as_deref())?;
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: "system".to_string(),
@@ -779,6 +797,7 @@ pub async fn cron_wake(
         payload: json!({
             "text": body.text,
             "mode": mode,
+            "context_messages": body.context_messages,
             "contextMessages": body.context_messages,
         }),
         state_changed: false,
@@ -1364,6 +1383,21 @@ fn parse_session_target(s: &str) -> Result<SessionTarget, GatewayError> {
     }
 }
 
+fn normalize_wake_mode(mode: Option<&str>) -> Result<String, GatewayError> {
+    match mode
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .as_deref()
+    {
+        None => Ok("next-heartbeat".to_string()),
+        Some("next-heartbeat") | Some("next_heartbeat") => Ok("next-heartbeat".to_string()),
+        Some("now") => Ok("now".to_string()),
+        Some(other) => Err(GatewayError::BadRequest(format!(
+            "unknown wake mode: {other}"
+        ))),
+    }
+}
+
 fn convert_schedule(request: CronScheduleRequest) -> Schedule {
     match request {
         CronScheduleRequest::At { at } => Schedule::At { at },
@@ -1472,6 +1506,7 @@ fn job_to_response(job: Job) -> CronJobResponse {
         name: job.name,
         schedule: job.schedule,
         payload: job.payload,
+        delivery_mode: job.delivery_mode,
         session_target: job.session_target,
         enabled: job.enabled,
         created_at: job.created_at.to_rfc3339(),
