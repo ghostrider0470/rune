@@ -5,4 +5,5 @@ This folder is reserved for development workflow, contributor guidance, and test
 Current canonical entrypoints remain:
 - [`../INDEX.md`](../INDEX.md)
 - [`../AGENT-ORCHESTRATION.md`](../AGENT-ORCHESTRATION.md)
-- [`../CRATE-LAYOUT.md`](../CRATE-LAYOUT.md)
+- [`../reference/CRATE-LAYOUT.md`](../reference/CRATE-LAYOUT.md)
+- [`EXECUTION-SPEED-POLICY.md`](EXECUTION-SPEED-POLICY.md)
