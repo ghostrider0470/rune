@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use rune_core::{
     ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, ToolCallId, TranscriptItem,
-    TurnId, TurnStatus,
+    TriggerKind, TurnId, TurnStatus,
 };
 use rune_models::{CompletionRequest, ModelProvider};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
@@ -151,13 +151,18 @@ impl TurnExecutor {
             None
         };
 
-        // 1. Create turn in Started state
+        // 1. Transition session Ready → Running
+        self.session_repo
+            .update_status(session_id, "running", Utc::now())
+            .await?;
+
+        // 2. Create turn in Started state
         let turn = self
             .turn_repo
             .create(NewTurn {
                 id: turn_id.into_uuid(),
                 session_id,
-                trigger_kind: "user_message".to_string(),
+                trigger_kind: TriggerKind::UserMessage.as_str().to_string(),
                 status: status_str(TurnStatus::Started).to_string(),
                 model_ref: effective_model.clone(),
                 started_at: now,
@@ -169,14 +174,14 @@ impl TurnExecutor {
 
         debug!(turn_id = %turn_id, "turn created");
 
-        // 2. Persist user message to transcript
+        // 3. Persist user message to transcript
         let user_item = TranscriptItem::UserMessage {
             message: NormalizedMessage::new("user", user_message),
         };
         self.append_transcript(session_id, Some(turn_id.into_uuid()), &user_item)
             .await?;
 
-        // 3. Run the model/tool loop
+        // 4. Run the model/tool loop
         let mut usage = UsageAccumulator::new();
         let result = self
             .run_turn_loop(session_id, turn_id, effective_model.as_deref(), &mut usage)
@@ -190,7 +195,7 @@ impl TurnExecutor {
             .update_usage(turn.id, prompt_tokens, completion_tokens)
             .await?;
 
-        // 4. Finalize turn status
+        // 5. Finalize turn status
         let (final_status, ended_at) = match &result {
             Ok(TurnLoopOutcome::Completed) => (TurnStatus::Completed, Some(Utc::now())),
             Ok(TurnLoopOutcome::WaitingForApproval) => (TurnStatus::ToolExecuting, None),
@@ -201,6 +206,14 @@ impl TurnExecutor {
             .turn_repo
             .update_status(turn.id, status_str(final_status), ended_at)
             .await?;
+
+        // Update latest_turn_id on the session for quick access.
+        if matches!(final_status, TurnStatus::Completed | TurnStatus::Failed) {
+            let _ = self
+                .session_repo
+                .update_latest_turn(session_id, turn.id, Utc::now())
+                .await;
+        }
 
         // If the loop failed, propagate the error
         result?;

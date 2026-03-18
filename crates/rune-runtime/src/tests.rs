@@ -236,6 +236,7 @@ impl SessionRepo for MemSessionRepo {
             workspace_root: s.workspace_root,
             channel_ref: s.channel_ref,
             requester_session_id: s.requester_session_id,
+            latest_turn_id: s.latest_turn_id,
             metadata: s.metadata,
             created_at: s.created_at,
             updated_at: s.updated_at,
@@ -319,6 +320,26 @@ impl SessionRepo for MemSessionRepo {
                 id: id.to_string(),
             })?;
         session.metadata = metadata;
+        session.updated_at = updated_at;
+        session.last_activity_at = updated_at;
+        Ok(session.clone())
+    }
+
+    async fn update_latest_turn(
+        &self,
+        id: Uuid,
+        turn_id: Uuid,
+        updated_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<SessionRow, StoreError> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "session",
+                id: id.to_string(),
+            })?;
+        session.latest_turn_id = Some(turn_id);
         session.updated_at = updated_at;
         session.last_activity_at = updated_at;
         Ok(session.clone())
