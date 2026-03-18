@@ -68,4 +68,11 @@ Legacy planning files still exist during the docs cleanup transition:
 - [`WORKPLAN.md`](WORKPLAN.md)
 
 Treat those as provenance and historical context unless a file explicitly says otherwise.
+ transition:
+
+- [`PLAN.md`](PLAN.md)
+- [`STACK.md`](STACK.md)
+- [`WORKPLAN.md`](WORKPLAN.md)
+
+Treat those as provenance and historical context unless a file explicitly says otherwise.
  provenance and historical context unless a file explicitly says otherwise.
