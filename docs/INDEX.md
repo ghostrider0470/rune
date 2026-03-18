@@ -55,7 +55,9 @@ These folders are now valid first-stop entrypoints rather than placeholder-only 
 3. [`rune-plan.md`](../rune-plan.md)
 4. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md)
 5. [`PROTOCOLS.md`](parity/PROTOCOLS.md)
-6. [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md)
+6. [`reference/README.md`](reference/README.md)
+7. [`reference/ARCHITECTURE.md`](reference/ARCHITECTURE.md)
+8. [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md)
 
 ## Transitional note
 
@@ -66,3 +68,4 @@ Legacy planning files still exist during the docs cleanup transition:
 - [`WORKPLAN.md`](WORKPLAN.md)
 
 Treat those as provenance and historical context unless a file explicitly says otherwise.
+ provenance and historical context unless a file explicitly says otherwise.
