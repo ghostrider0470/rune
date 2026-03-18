@@ -49,7 +49,6 @@ After Rune starts, check:
 ## If you want more than local bring-up
 
 Use these next:
-- [`../operator/DEPLOYMENT.md`](../operator/DEPLOYMENT.md)
-- [`../operator/DATABASES.md`](../operator/DATABASES.md)
-- [`../contributor/DEVELOPMENT.md`](../contributor/DEVELOPMENT.md)
-- [`../INDEX.md`](../INDEX.md)
+- use [`../operator/DEPLOYMENT.md`](../operator/DEPLOYMENT.md) and [`../operator/DATABASES.md`](../operator/DATABASES.md) when the next question is deployment/storage shape
+- use [`../contributor/DEVELOPMENT.md`](../contributor/DEVELOPMENT.md) when the next step is active development rather than local trial use
+- use [`../INDEX.md`](../INDEX.md) if you need the wider docs front door

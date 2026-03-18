@@ -73,8 +73,6 @@ This file can still grow into deeper reference for:
 
 ## Reference entrypoints
 
-- [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md)
-- [`SUBSYSTEMS.md`](SUBSYSTEMS.md)
-- [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md)
-- [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md)
-- [`../INDEX.md`](../INDEX.md)
+- use [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md) and [`SUBSYSTEMS.md`](SUBSYSTEMS.md) when the architecture question turns into implementation-structure detail
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) and [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when the architecture question turns into runtime semantics or invariants
+- use [`../INDEX.md`](../INDEX.md) if you need the wider docs front door

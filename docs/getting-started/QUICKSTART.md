@@ -42,7 +42,7 @@ This path is meant for a quick local bring-up of:
 
 ## Next docs
 
-- [`INSTALL.md`](INSTALL.md) — slightly fuller setup path
-- [`../operator/DEPLOYMENT.md`](../operator/DEPLOYMENT.md) — deployment model
-- [`../contributor/DEVELOPMENT.md`](../contributor/DEVELOPMENT.md) — contributor/dev workflow
-- [`../INDEX.md`](../INDEX.md) — docs front door
+- use [`INSTALL.md`](INSTALL.md) if the quick path is not enough and you want the fuller local setup path
+- use [`../operator/README.md`](../operator/README.md) if you are now thinking like an operator rather than just trying the runtime once
+- use [`../contributor/DEVELOPMENT.md`](../contributor/DEVELOPMENT.md) if you are moving from trying Rune into building or changing it
+- use [`../INDEX.md`](../INDEX.md) if you need the wider docs front door
