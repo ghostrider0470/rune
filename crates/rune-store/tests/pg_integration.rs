@@ -173,6 +173,12 @@ async fn session_list_and_update_status() {
     assert_eq!(page.len(), 2);
 
     let first = &all[0];
+    // FSM requires Created → Ready → Running
+    let ready = repo
+        .update_status(first.id, "ready", Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(ready.status, "ready");
     let updated = repo
         .update_status(first.id, "running", Utc::now())
         .await
