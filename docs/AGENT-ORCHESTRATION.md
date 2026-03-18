@@ -387,8 +387,8 @@ If you need to change a public type or trait that another crate depends on:
 - One commit per logical unit of work (not per file)
 - Message format: `rune-{crate}: {what changed}`
 - Examples: `rune-core: add session and turn domain types`, `rune-store: initial Diesel schema and migrations`
-- Agents working in parallel should work on **separate branches**: `wave-{n}/{crate-name}`
-- Merge to `main` only after wave gate passes
+- Historical wave work used separate per-wave branches; current default contributor workflow is the accepted batch-branch model documented in `docs/contributor/WORKFLOW.md` and ADRs `ADR-0001` / `ADR-0004`
+- Merge to `main` only after the current batch/PR gate passes
 
 ### File organization within crates
 

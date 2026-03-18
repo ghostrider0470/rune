@@ -12,43 +12,20 @@ Build a single Rust binary that does everything OpenClaw does — messaging-firs
 
 The result: a self-hosted AI agent that is more capable, more secure (Rust, no 430K-line JS attack surface, no 9 CVEs), more durable (PostgreSQL, not JSONL), more observable (full admin UI), and smarter at complex multi-step work than anything else available.
 
-## How to Start
+## Historical implementation prompt
 
-Give your AI agent this prompt:
+This preserved prompt reflects an earlier planning-stage execution style.
+It is kept for provenance, not as the current branch/PR workflow authority.
 
-```
-Read ROADMAP.md in full. Then:
-
-0. Run `git status` and `cargo build`. If there are uncommitted changes, read them and understand
-   what's in progress before touching anything. If the build is broken, fix it first. Do not
-   discard or overwrite uncommitted work — it may be partially completed phase work from a
-   previous session. If unsure, ask.
-1. Read the Current State Audit table to find the first phase whose pillar is ❌ or ⚠️.
-2. Check GitHub issues: `gh issue list --label "rune-phase"`. If no issue exists for this phase,
-   create one: `gh issue create --title "Phase N — <name>" --label "rune-phase" --body "<phase summary>"`.
-   Assign yourself to it.
-3. Read that phase's detailed spec in docs/specs/phases-*.md.
-4. Read the existing code it depends on (the files listed under "Modify" in the phase).
-5. Implement the phase. Write real code, not stubs. Every public function needs at least one test.
-6. Run `cargo build` and `cargo test` — fix until both pass.
-7. Commit your work with a clear message referencing the phase number.
-8. Update ROADMAP.md: change the audit table status to ✅ with today's date and a one-line
-   summary of what you built.
-9. Close the GitHub issue with a comment summarizing what was built:
-   `gh issue close <number> --comment "Completed: <summary>. Commit: <hash>"`
-10. Move to the next phase. Repeat from step 1.
-
-If a phase's spec is missing or incomplete, write the spec first, then implement.
-If you find a bug in the existing code while implementing, fix it and note what you fixed in the roadmap.
-If a phase depends on a previous phase that isn't done, do the dependency first.
-Do one phase at a time. Don't skip ahead.
-Do NOT use git worktrees during development. Work directly on the main branch. Worktree isolation
-is a product feature (Phase 23) for Rune's end users, not a development workflow for building Rune.
-```
+At minimum, interpret it through the current accepted model:
+- do **not** implement directly on `main`
+- do **not** use git worktrees by default
+- use one active coding branch and one active PR per coherent batch
+- use GitHub Project 2, linked issues, and PRs as the live execution control plane
 
 ## Instructions for AI Agents
 
-**This document is your source of truth. You are expected to edit it.**
+**This document is historical planning context, not the current execution authority.**
 
 - Before starting a phase, read its spec in `docs/specs/` and this roadmap. If anything is unclear, ambiguous, or wrong — fix it here before writing code.
 - After completing a phase, update the **Current State Audit** table (change ❌ to ✅, update notes with what was built and the date).
@@ -60,7 +37,7 @@ is a product feature (Phase 23) for Rune's end users, not a development workflow
 
 ### GitHub Issue Tracking
 
-All phase work MUST be tracked via GitHub issues. This is how the project owner monitors progress.
+All current execution work should be tracked via GitHub Project 2, linked issues, and PRs. This section is retained as historical planning guidance rather than the primary live control plane.
 
 - **Label:** Every phase issue gets the `rune-phase` label. Create it if it doesn't exist: `gh label create rune-phase --color 0E8A16 --description "Rune roadmap phase work"`
 - **Creating issues:** Before starting a phase, check if an issue exists (`gh issue list --label rune-phase`). If not, create one with the title format `Phase N — <Phase Name>` and a body that includes: phase summary, key deliverables as a checklist, and files to create/modify.
@@ -789,5 +766,14 @@ Personal productivity automation — the “personal assistant” side of OpenCl
 
 ```bash
 # Full build: UI + Gateway
+cd ui && npm run build && cd .. && cargo build --release --bin rune-gateway && systemctl --user restart rune-gateway
+```
+ Verification
+
+```bash
+# Full build: UI + Gateway
+cd ui && npm run build && cd .. && cargo build --release --bin rune-gateway && systemctl --user restart rune-gateway
+```
++ Gateway
 cd ui && npm run build && cd .. && cargo build --release --bin rune-gateway && systemctl --user restart rune-gateway
 ```
