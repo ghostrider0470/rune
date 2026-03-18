@@ -1,7 +1,7 @@
 # Phases 1-7: Implementation Specifications
 
 > **Generated**: 2026-03-15
-> **Source of truth**: `ROADMAP.md` phases 1-7
+> **Source of truth**: `docs/IMPLEMENTATION-PHASES.md` for phase sequencing, plus this spec file for exact phase-1-7 implementation detail.
 > **Codebase edition**: Rust 2024, workspace resolver v2
 
 ---
