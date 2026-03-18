@@ -15,10 +15,11 @@ struct Migration {
 }
 
 /// All SQLite schema migrations, applied in order.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial_schema",
-    sql: r#"
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial_schema",
+        sql: r#"
 -- Sessions
 CREATE TABLE IF NOT EXISTS sessions (
     id                   TEXT PRIMARY KEY,
@@ -192,10 +193,11 @@ CREATE TRIGGER IF NOT EXISTS memory_embeddings_au AFTER UPDATE ON memory_embeddi
     INSERT INTO memory_embeddings_fts(rowid, chunk_text) VALUES (new.rowid, new.chunk_text);
 END;
 "#,
-}, Migration {
-    version: 2,
-    name: "add_process_handles",
-    sql: r#"
+    },
+    Migration {
+        version: 2,
+        name: "add_process_handles",
+        sql: r#"
 -- Process handles: durable background process metadata.
 CREATE TABLE IF NOT EXISTS process_handles (
     process_id   TEXT PRIMARY KEY,
@@ -218,7 +220,31 @@ ALTER TABLE sessions ADD COLUMN latest_turn_id TEXT;
 ALTER TABLE tool_executions ADD COLUMN approval_id TEXT;
 ALTER TABLE tool_executions ADD COLUMN execution_mode TEXT;
 "#,
-}];
+    },
+    Migration {
+        version: 3,
+        name: "add_scheduler_semantics",
+        sql: r#"
+ALTER TABLE jobs ADD COLUMN payload_kind TEXT NOT NULL DEFAULT 'system_event';
+ALTER TABLE jobs ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE job_runs ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'due';
+
+UPDATE jobs
+SET payload_kind = CASE
+    WHEN job_type = 'reminder' THEN 'reminder'
+    WHEN json_extract(payload, '$.payload.kind') IS NOT NULL THEN json_extract(payload, '$.payload.kind')
+    WHEN json_extract(payload, '$.kind') IS NOT NULL THEN json_extract(payload, '$.kind')
+    ELSE payload_kind
+END;
+
+UPDATE jobs
+SET delivery_mode = CASE
+    WHEN job_type = 'reminder' THEN 'announce'
+    ELSE delivery_mode
+END;
+"#,
+    },
+];
 
 /// Run all pending migrations on the given connection.
 pub fn run_migrations(conn: &Connection) -> Result<(), StoreError> {

@@ -126,10 +126,9 @@ impl SessionRepo for PgSessionRepo {
         status: &str,
         updated_at: DateTime<Utc>,
     ) -> Result<SessionRow, StoreError> {
-        let target: rune_core::SessionStatus =
-            status.parse().map_err(|e: rune_core::CoreError| {
-                StoreError::InvalidTransition(e.to_string())
-            })?;
+        let target: rune_core::SessionStatus = status
+            .parse()
+            .map_err(|e: rune_core::CoreError| StoreError::InvalidTransition(e.to_string()))?;
 
         let mut conn = self.pool.get().await.map_err(pool_err)?;
 
@@ -423,6 +422,8 @@ impl JobRepo for PgJobRepo {
         id: Uuid,
         enabled: bool,
         due_at: Option<DateTime<Utc>>,
+        payload_kind: &str,
+        delivery_mode: &str,
         payload: serde_json::Value,
         updated_at: DateTime<Utc>,
         last_run_at: Option<DateTime<Utc>>,
@@ -433,6 +434,8 @@ impl JobRepo for PgJobRepo {
             .set((
                 jobs::enabled.eq(enabled),
                 jobs::due_at.eq(due_at),
+                jobs::payload_kind.eq(payload_kind),
+                jobs::delivery_mode.eq(delivery_mode),
                 jobs::payload.eq(payload),
                 jobs::updated_at.eq(updated_at),
                 jobs::last_run_at.eq(last_run_at),
@@ -890,10 +893,7 @@ impl ProcessHandleRepo for PgProcessHandleRepo {
             .map_err(|e| not_found_or(e, "process_handle", process_id))
     }
 
-    async fn list_by_session(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<ProcessHandleRow>, StoreError> {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
         process_handles::table
             .filter(process_handles::session_id.eq(session_id))

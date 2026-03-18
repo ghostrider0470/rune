@@ -129,6 +129,23 @@ impl TurnExecutor {
         user_message: &str,
         model_ref: Option<&str>,
     ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        self.execute_triggered(
+            session_id,
+            user_message,
+            model_ref,
+            TriggerKind::UserMessage,
+        )
+        .await
+    }
+
+    /// Execute a turn for the given session using an explicit trigger kind.
+    pub async fn execute_triggered(
+        &self,
+        session_id: Uuid,
+        user_message: &str,
+        model_ref: Option<&str>,
+        trigger_kind: TriggerKind,
+    ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
         let turn_id = TurnId::new();
         let now = Utc::now();
         let session = self.session_repo.find_by_id(session_id).await?;
@@ -162,7 +179,7 @@ impl TurnExecutor {
             .create(NewTurn {
                 id: turn_id.into_uuid(),
                 session_id,
-                trigger_kind: TriggerKind::UserMessage.as_str().to_string(),
+                trigger_kind: trigger_kind.as_str().to_string(),
                 status: status_str(TurnStatus::Started).to_string(),
                 model_ref: effective_model.clone(),
                 started_at: now,

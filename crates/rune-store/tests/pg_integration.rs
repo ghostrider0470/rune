@@ -424,6 +424,8 @@ async fn job_create_find_list_record_run() {
             schedule: Some("0 9 * * *".to_string()),
             due_at: None,
             enabled: true,
+            payload_kind: "reminder".to_string(),
+            delivery_mode: "announce".to_string(),
             payload: serde_json::json!({"text": "standup"}),
             created_at: now,
             updated_at: now,
@@ -431,6 +433,8 @@ async fn job_create_find_list_record_run() {
         .await
         .unwrap();
     assert_eq!(job.job_type, "reminder");
+    assert_eq!(job.payload_kind, "reminder");
+    assert_eq!(job.delivery_mode, "announce");
 
     let found = repo.find_by_id(id).await.unwrap();
     assert_eq!(found.id, id);
@@ -461,6 +465,8 @@ async fn job_run_create_complete_and_list() {
             schedule: Some("0 9 * * *".to_string()),
             due_at: Some(now),
             enabled: true,
+            payload_kind: "system_event".to_string(),
+            delivery_mode: "none".to_string(),
             payload: serde_json::json!({"text": "run me"}),
             created_at: now,
             updated_at: now,
@@ -475,6 +481,7 @@ async fn job_run_create_complete_and_list() {
             job_id,
             started_at: now,
             finished_at: None,
+            trigger_kind: "manual".to_string(),
             status: "running".to_string(),
             output: None,
             created_at: now,
@@ -482,6 +489,7 @@ async fn job_run_create_complete_and_list() {
         .await
         .unwrap();
     assert_eq!(created.id, run_id);
+    assert_eq!(created.trigger_kind, "manual");
     assert_eq!(created.status, "running");
 
     let completed = run_repo

@@ -269,6 +269,126 @@ impl FromStr for TriggerKind {
     }
 }
 
+/// Semantic payload kind for durable scheduler jobs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchedulerPayloadKind {
+    SystemEvent,
+    AgentTurn,
+    Reminder,
+}
+
+impl SchedulerPayloadKind {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SystemEvent => "system_event",
+            Self::AgentTurn => "agent_turn",
+            Self::Reminder => "reminder",
+        }
+    }
+}
+
+impl fmt::Display for SchedulerPayloadKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SchedulerPayloadKind {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "system_event" => Ok(Self::SystemEvent),
+            "agent_turn" => Ok(Self::AgentTurn),
+            "reminder" => Ok(Self::Reminder),
+            other => Err(CoreError::Validation {
+                message: format!("unknown scheduler payload kind: {other}"),
+            }),
+        }
+    }
+}
+
+/// Delivery mode for scheduled work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchedulerDeliveryMode {
+    None,
+    Announce,
+    Webhook,
+}
+
+impl SchedulerDeliveryMode {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Announce => "announce",
+            Self::Webhook => "webhook",
+        }
+    }
+}
+
+impl fmt::Display for SchedulerDeliveryMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SchedulerDeliveryMode {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "none" => Ok(Self::None),
+            "announce" => Ok(Self::Announce),
+            "webhook" => Ok(Self::Webhook),
+            other => Err(CoreError::Validation {
+                message: format!("unknown scheduler delivery mode: {other}"),
+            }),
+        }
+    }
+}
+
+/// How a scheduled job run was triggered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchedulerRunTrigger {
+    Due,
+    Manual,
+}
+
+impl SchedulerRunTrigger {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Due => "due",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+impl fmt::Display for SchedulerRunTrigger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SchedulerRunTrigger {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "due" => Ok(Self::Due),
+            "manual" => Ok(Self::Manual),
+            other => Err(CoreError::Validation {
+                message: format!("unknown scheduler run trigger: {other}"),
+            }),
+        }
+    }
+}
+
 /// Error returned when a session status transition is invalid.
 #[derive(Debug, Error)]
 #[error("invalid session transition: {from:?} -> {to:?}")]
@@ -575,7 +695,11 @@ mod tests {
     #[test]
     fn fsm_created_to_ready() {
         assert!(SessionStatus::Created.can_transition_to(&SessionStatus::Ready));
-        assert!(SessionStatus::Created.transition(SessionStatus::Ready).is_ok());
+        assert!(
+            SessionStatus::Created
+                .transition(SessionStatus::Ready)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -655,7 +779,11 @@ mod tests {
         assert!(!SessionStatus::Created.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Completed.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Ready.can_transition_to(&SessionStatus::Completed));
-        assert!(SessionStatus::Created.transition(SessionStatus::Running).is_err());
+        assert!(
+            SessionStatus::Created
+                .transition(SessionStatus::Running)
+                .is_err()
+        );
     }
 
     // ── TriggerKind ──────────────────────────────────────────────
@@ -689,5 +817,46 @@ mod tests {
     #[test]
     fn trigger_kind_rejects_unknown() {
         assert!("unknown_trigger".parse::<TriggerKind>().is_err());
+    }
+
+    #[test]
+    fn scheduler_payload_kind_roundtrips_via_str() {
+        for (s, expected) in [
+            ("system_event", SchedulerPayloadKind::SystemEvent),
+            ("agent_turn", SchedulerPayloadKind::AgentTurn),
+            ("reminder", SchedulerPayloadKind::Reminder),
+        ] {
+            let parsed: SchedulerPayloadKind = s.parse().unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.as_str(), s);
+            assert_eq!(parsed.to_string(), s);
+        }
+    }
+
+    #[test]
+    fn scheduler_delivery_mode_roundtrips_via_str() {
+        for (s, expected) in [
+            ("none", SchedulerDeliveryMode::None),
+            ("announce", SchedulerDeliveryMode::Announce),
+            ("webhook", SchedulerDeliveryMode::Webhook),
+        ] {
+            let parsed: SchedulerDeliveryMode = s.parse().unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.as_str(), s);
+            assert_eq!(parsed.to_string(), s);
+        }
+    }
+
+    #[test]
+    fn scheduler_run_trigger_roundtrips_via_str() {
+        for (s, expected) in [
+            ("due", SchedulerRunTrigger::Due),
+            ("manual", SchedulerRunTrigger::Manual),
+        ] {
+            let parsed: SchedulerRunTrigger = s.parse().unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.as_str(), s);
+            assert_eq!(parsed.to_string(), s);
+        }
     }
 }

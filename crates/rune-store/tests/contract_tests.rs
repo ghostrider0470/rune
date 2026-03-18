@@ -66,6 +66,8 @@ fn new_job() -> NewJob {
         schedule: Some("0 * * * *".into()),
         due_at: None,
         enabled: true,
+        payload_kind: "reminder".into(),
+        delivery_mode: "announce".into(),
         payload: json!({"msg": "test"}),
         created_at: now(),
         updated_at: now(),
@@ -78,6 +80,7 @@ fn new_job_run(job_id: Uuid) -> NewJobRun {
         job_id,
         started_at: now(),
         finished_at: None,
+        trigger_kind: "due".into(),
         status: "running".into(),
         output: None,
         created_at: now(),
@@ -267,6 +270,8 @@ async fn test_job_crud(repo: &dyn JobRepo) {
             jid,
             false,
             None,
+            "reminder",
+            "announce",
             json!({"updated": true}),
             now(),
             None,
@@ -291,6 +296,7 @@ async fn test_job_run_crud(job_repo: &dyn JobRepo, run_repo: &dyn JobRunRepo) {
     let rid = r.id;
     let created = run_repo.create(r).await.unwrap();
     assert_eq!(created.id, rid);
+    assert_eq!(created.trigger_kind, "due");
     assert_eq!(created.status, "running");
 
     let completed = run_repo

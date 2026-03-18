@@ -13,7 +13,7 @@ use serde_json::json;
 use tracing::info;
 use uuid::Uuid;
 
-use rune_core::{JobId, SessionKind};
+use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
 use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, Schedule, SessionTarget,
@@ -560,6 +560,7 @@ pub struct CronRunResponse {
     pub job_id: String,
     pub started_at: String,
     pub finished_at: Option<String>,
+    pub trigger_kind: String,
     pub status: JobRunStatus,
     pub output: Option<String>,
 }
@@ -618,6 +619,7 @@ pub async fn cron_add(
         name: body.name,
         schedule,
         payload,
+        delivery_mode: SchedulerDeliveryMode::None,
         session_target,
         enabled: body.enabled.unwrap_or(true),
         created_at: now,
@@ -666,6 +668,7 @@ pub async fn cron_update(
         enabled: body.enabled,
         schedule: new_schedule,
         payload: new_payload,
+        delivery_mode: None,
     };
 
     state
@@ -728,7 +731,7 @@ pub async fn cron_run(
     };
 
     let started_at = Utc::now();
-    let (status, output) = run_job_lifecycle(&deps, &job, true).await;
+    let (status, output) = run_job_lifecycle(&deps, &job, true, SchedulerRunTrigger::Manual).await;
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: job_id.to_string(),
@@ -1482,6 +1485,7 @@ fn run_to_response(run: JobRun) -> CronRunResponse {
         job_id: run.job_id.to_string(),
         started_at: run.started_at.to_rfc3339(),
         finished_at: run.finished_at.map(|dt| dt.to_rfc3339()),
+        trigger_kind: run.trigger_kind.to_string(),
         status: run.status,
         output: run.output,
     }
