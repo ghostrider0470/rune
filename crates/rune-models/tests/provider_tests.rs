@@ -1,4 +1,4 @@
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
@@ -9,6 +9,12 @@ use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+fn lock_env() -> MutexGuard<'static, ()> {
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn simple_request() -> CompletionRequest {
     CompletionRequest {
@@ -254,6 +260,7 @@ async fn parses_tool_calls() {
 
 #[test]
 fn selects_azure_provider() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_AZURE_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "azure".into(),
@@ -274,7 +281,7 @@ fn selects_azure_provider() {
 
 #[test]
 fn selects_openai_provider() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_OAI_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "openai".into(),
@@ -294,6 +301,7 @@ fn selects_openai_provider() {
 
 #[test]
 fn selects_google_provider() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_GOOGLE_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "google".into(),
@@ -313,6 +321,7 @@ fn selects_google_provider() {
 
 #[test]
 fn selects_azure_foundry_provider_via_primary_kind() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_FOUNDRY_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "foundry".into(),
@@ -332,6 +341,7 @@ fn selects_azure_foundry_provider_via_primary_kind() {
 
 #[test]
 fn selects_azure_foundry_provider_via_alias_kind() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_FOUNDRY_ALIAS_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "azure-ai".into(),
@@ -351,6 +361,7 @@ fn selects_azure_foundry_provider_via_alias_kind() {
 
 #[test]
 fn selects_anthropic_provider_via_azure_alias_kind() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_ANTHROPIC_AZURE_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "anthropic-azure".into(),
@@ -387,6 +398,7 @@ fn selects_ollama_provider_without_api_key() {
 
 #[test]
 fn selects_groq_provider() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_GROQ_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "groq".into(),
@@ -406,6 +418,7 @@ fn selects_groq_provider() {
 
 #[test]
 fn selects_deepseek_provider() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_DEEPSEEK_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "deepseek".into(),
@@ -425,6 +438,7 @@ fn selects_deepseek_provider() {
 
 #[test]
 fn selects_mistral_provider() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_MISTRAL_KEY_SEL", "fake") };
     let cfg = ModelProviderConfig {
         name: "mistral".into(),
@@ -461,6 +475,7 @@ fn selects_bedrock_provider_with_inline_credentials() {
 
 #[test]
 fn selects_bedrock_provider_with_env_credentials_pair() {
+    let _guard = lock_env();
     unsafe {
         std::env::set_var("TEST_BEDROCK_KEY_SEL", "ENV_AKIA:ENV_SECRET");
         std::env::remove_var("AWS_ACCESS_KEY_ID");
@@ -503,6 +518,7 @@ fn selects_bedrock_provider_via_aws_bedrock_alias() {
 
 #[test]
 fn selects_bedrock_provider_with_standard_aws_env_vars() {
+    let _guard = lock_env();
     unsafe {
         std::env::remove_var("TEST_BEDROCK_STD_ENV");
         std::env::set_var("AWS_ACCESS_KEY_ID", "ENV_AWS_ACCESS");
@@ -534,7 +550,7 @@ fn selects_bedrock_provider_with_standard_aws_env_vars() {
 
 #[test]
 fn selects_bedrock_provider_with_aws_default_region_fallback() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = lock_env();
     unsafe {
         std::env::remove_var("TEST_BEDROCK_DEFAULT_REGION_ENV");
         std::env::remove_var("AWS_REGION");
@@ -572,7 +588,7 @@ fn selects_bedrock_provider_with_aws_default_region_fallback() {
 
 #[test]
 fn selects_bedrock_provider_with_default_region_when_no_region_is_configured() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = lock_env();
     unsafe {
         std::env::remove_var("TEST_BEDROCK_DEFAULT_REGION_NONE");
         std::env::remove_var("AWS_REGION");
@@ -609,6 +625,7 @@ fn selects_bedrock_provider_with_default_region_when_no_region_is_configured() {
 
 #[test]
 fn falls_back_to_openai_for_unknown_provider_kind() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_FALLBACK_OAI_KEY", "fallback-key") };
     let cfg = ModelProviderConfig {
         name: "custom".into(),
@@ -630,6 +647,7 @@ fn falls_back_to_openai_for_unknown_provider_kind() {
 
 #[test]
 fn empty_kind_uses_provider_name_for_google_selection() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_EMPTY_KIND_GOOGLE", "google-key") };
     let cfg = ModelProviderConfig {
         name: "google".into(),
@@ -650,6 +668,10 @@ fn empty_kind_uses_provider_name_for_google_selection() {
 
 #[test]
 fn missing_api_key_uses_openai_api_key_env_by_default() {
+    let _guard = lock_env();
+    unsafe {
+        std::env::remove_var("OPENAI_API_KEY");
+    }
     let cfg = ModelProviderConfig {
         name: "openai".into(),
         kind: "openai".into(),
@@ -670,9 +692,12 @@ fn missing_api_key_uses_openai_api_key_env_by_default() {
 
 #[test]
 fn bedrock_requires_credentials() {
+    let _guard = lock_env();
     unsafe {
         std::env::remove_var("AWS_ACCESS_KEY_ID");
         std::env::remove_var("AWS_SECRET_ACCESS_KEY");
+        std::env::remove_var("AWS_REGION");
+        std::env::remove_var("AWS_DEFAULT_REGION");
     }
     let cfg = ModelProviderConfig {
         name: "bedrock".into(),
@@ -691,6 +716,7 @@ fn bedrock_requires_credentials() {
 
 #[test]
 fn azure_requires_deployment_name() {
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_AZURE_KEY_DEP", "fake") };
     let cfg = ModelProviderConfig {
         name: "azure".into(),
@@ -710,7 +736,7 @@ fn azure_requires_deployment_name() {
 
 #[test]
 fn azure_requires_api_version() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = lock_env();
     unsafe { std::env::set_var("TEST_AZURE_KEY_VER", "fake") };
     let cfg = ModelProviderConfig {
         name: "azure".into(),
@@ -747,6 +773,7 @@ fn missing_api_key_env_returns_auth_error() {
 
 #[tokio::test]
 async fn routed_provider_dispatches_by_provider_model_id_and_strips_prefix() {
+    let _guard = lock_env();
     let openai_server = MockServer::start().await;
     let codex_server = MockServer::start().await;
 
