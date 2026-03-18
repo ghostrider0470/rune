@@ -241,7 +241,9 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/cron/wake", post(routes::cron_wake))
         .route(
             "/cron/{id}",
-            post(routes::cron_update).delete(routes::cron_remove),
+            get(routes::cron_get)
+                .post(routes::cron_update)
+                .delete(routes::cron_remove),
         )
         .route("/cron/{id}/run", post(routes::cron_run))
         .route("/cron/{id}/runs", get(routes::cron_runs))

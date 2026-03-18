@@ -1259,12 +1259,114 @@ impl fmt::Display for CronStatusResponse {
 
 /// A cron job summary/detail item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CronScheduleSummary {
+    At {
+        at: String,
+    },
+    Every {
+        every_ms: u64,
+        #[serde(default)]
+        anchor_ms: Option<u64>,
+    },
+    Cron {
+        expr: String,
+        #[serde(default)]
+        tz: Option<String>,
+    },
+}
+
+impl CronScheduleSummary {
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::At { .. } => "at",
+            Self::Every { .. } => "every",
+            Self::Cron { .. } => "cron",
+        }
+    }
+
+    fn render_human(&self) -> String {
+        match self {
+            Self::At { at } => format!("at {at}"),
+            Self::Every {
+                every_ms,
+                anchor_ms,
+            } => {
+                let mut summary = format!("every {every_ms}ms");
+                if let Some(anchor_ms) = anchor_ms {
+                    summary.push_str(&format!(" anchor={anchor_ms}"));
+                }
+                summary
+            }
+            Self::Cron { expr, tz } => match tz {
+                Some(tz) => format!("cron {expr} tz={tz}"),
+                None => format!("cron {expr}"),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CronPayloadSummary {
+    SystemEvent {
+        text: String,
+    },
+    AgentTurn {
+        message: String,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        timeout_seconds: Option<u64>,
+    },
+}
+
+impl CronPayloadSummary {
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::SystemEvent { .. } => "system_event",
+            Self::AgentTurn { .. } => "agent_turn",
+        }
+    }
+
+    fn render_human(&self) -> String {
+        match self {
+            Self::SystemEvent { text } => format!("system_event text={}", quoted(text)),
+            Self::AgentTurn {
+                message,
+                model,
+                timeout_seconds,
+            } => {
+                let mut summary = format!("agent_turn message={}", quoted(message));
+                if let Some(model) = model {
+                    summary.push_str(&format!(" model={model}"));
+                }
+                if let Some(timeout_seconds) = timeout_seconds {
+                    summary.push_str(&format!(" timeout={}s", timeout_seconds));
+                }
+                summary
+            }
+        }
+    }
+}
+
+fn quoted(value: &str) -> String {
+    format!("{value:?}")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronJobSummary {
     pub id: String,
     pub name: Option<String>,
+    pub schedule: CronScheduleSummary,
+    pub payload: CronPayloadSummary,
+    pub delivery_mode: String,
     pub enabled: bool,
     pub session_target: String,
-    pub schedule_kind: String,
+    pub created_at: String,
+    pub last_run_at: Option<String>,
     pub next_run_at: Option<String>,
     pub run_count: u64,
 }
@@ -1280,10 +1382,53 @@ impl fmt::Display for CronJobSummary {
             self.session_target,
             self.run_count
         )?;
+        write!(
+            f,
+            " delivery={} payload={} schedule={}",
+            self.delivery_mode,
+            self.payload.kind(),
+            self.schedule.kind()
+        )?;
         if let Some(next) = &self.next_run_at {
             write!(f, " next={next}")?;
         }
         Ok(())
+    }
+}
+
+/// Detailed cron job inspection response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronJobDetailResponse {
+    #[serde(flatten)]
+    pub job: CronJobSummary,
+}
+
+impl fmt::Display for CronJobDetailResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Cron job")?;
+        writeln!(f, "  Id:             {}", self.job.id)?;
+        writeln!(
+            f,
+            "  Name:           {}",
+            self.job.name.as_deref().unwrap_or("(unnamed)")
+        )?;
+        writeln!(f, "  Enabled:        {}", self.job.enabled)?;
+        writeln!(f, "  Session target: {}", self.job.session_target)?;
+        writeln!(f, "  Delivery mode:  {}", self.job.delivery_mode)?;
+        writeln!(f, "  Schedule:       {}", self.job.schedule.render_human())?;
+        writeln!(f, "  Payload:        {}", self.job.payload.render_human())?;
+        writeln!(f, "  Created:        {}", self.job.created_at)?;
+        writeln!(
+            f,
+            "  Last run:       {}",
+            self.job.last_run_at.as_deref().unwrap_or("(never)")
+        )?;
+        writeln!(
+            f,
+            "  Next run:       {}",
+            self.job.next_run_at.as_deref().unwrap_or("(none)")
+        )?;
+        write!(f, "  Runs:           {}", self.job.run_count)
     }
 }
 
@@ -1575,6 +1720,69 @@ mod tests {
     fn render_cron_list_empty() {
         let l = CronListResponse { jobs: vec![] };
         assert_eq!(render(&l, OutputFormat::Human), "No cron jobs.");
+    }
+
+    #[test]
+    fn render_cron_list_item_includes_delivery_and_kinds() {
+        let response = CronListResponse {
+            jobs: vec![CronJobSummary {
+                id: "job-1".into(),
+                name: Some("daily-check".into()),
+                schedule: CronScheduleSummary::Cron {
+                    expr: "0 0 9 * * *".into(),
+                    tz: Some("Europe/Sarajevo".into()),
+                },
+                payload: CronPayloadSummary::SystemEvent {
+                    text: "run daily check".into(),
+                },
+                delivery_mode: "announce".into(),
+                enabled: true,
+                session_target: "main".into(),
+                created_at: "2026-03-18T09:00:00Z".into(),
+                last_run_at: None,
+                next_run_at: Some("2026-03-18T10:00:00Z".into()),
+                run_count: 3,
+            }],
+        };
+
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("delivery=announce"));
+        assert!(out.contains("payload=system_event"));
+        assert!(out.contains("schedule=cron"));
+    }
+
+    #[test]
+    fn render_cron_job_detail() {
+        let response = CronJobDetailResponse {
+            job: CronJobSummary {
+                id: "job-1".into(),
+                name: Some("daily-check".into()),
+                schedule: CronScheduleSummary::Every {
+                    every_ms: 60000,
+                    anchor_ms: Some(12345),
+                },
+                payload: CronPayloadSummary::AgentTurn {
+                    message: "check queue".into(),
+                    model: Some("gpt-5.4".into()),
+                    timeout_seconds: Some(30),
+                },
+                delivery_mode: "webhook".into(),
+                enabled: false,
+                session_target: "isolated".into(),
+                created_at: "2026-03-18T09:00:00Z".into(),
+                last_run_at: Some("2026-03-18T09:30:00Z".into()),
+                next_run_at: None,
+                run_count: 2,
+            },
+        };
+
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Delivery mode:  webhook"));
+        assert!(out.contains("Schedule:       every 60000ms anchor=12345"));
+        assert!(out.contains(
+            "Payload:        agent_turn message=\"check queue\" model=gpt-5.4 timeout=30s"
+        ));
+        assert!(out.contains("Next run:       (none)"));
     }
 
     #[test]

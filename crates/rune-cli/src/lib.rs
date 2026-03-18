@@ -24,8 +24,8 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 pub use cli::Cli;
 use cli::{
     ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell, ConfigAction,
-    CronAction, GatewayAction, MemoryAction, ModelsAction, RemindersAction, SessionsAction,
-    SystemAction, SystemHeartbeatAction,
+    CronAction, CronDeliveryMode, GatewayAction, MemoryAction, ModelsAction, RemindersAction,
+    SessionsAction, SystemAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -745,17 +745,38 @@ pub async fn run(cli: Cli) -> Result<()> {
                 text,
                 at,
                 session_target,
+                delivery_mode,
             } => {
                 let at = DateTime::parse_from_rfc3339(&at)
                     .with_context(|| format!("invalid --at timestamp: {at}"))?
                     .with_timezone(&Utc);
                 let result = client
-                    .cron_add_system_event(name.as_deref(), &text, at, &session_target)
+                    .cron_add_system_event(
+                        name.as_deref(),
+                        &text,
+                        at,
+                        &session_target,
+                        delivery_mode.as_str(),
+                    )
                     .await?;
                 println!("{}", render(&result, format));
             }
-            CronAction::Edit { id, name } => {
-                let result = client.cron_edit_name(&id, &name).await?;
+            CronAction::Show { id } => {
+                let result = client.cron_get(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            CronAction::Edit {
+                id,
+                name,
+                delivery_mode,
+            } => {
+                let result = client
+                    .cron_update(
+                        &id,
+                        name.as_deref(),
+                        delivery_mode.map(CronDeliveryMode::as_str),
+                    )
+                    .await?;
                 println!("{}", render(&result, format));
             }
             CronAction::Enable { id } => {
@@ -783,7 +804,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                 mode,
                 context_messages,
             } => {
-                let result = client.cron_wake(&text, &mode, context_messages).await?;
+                let result = client
+                    .cron_wake(&text, mode.as_str(), context_messages)
+                    .await?;
                 println!("{}", render(&result, format));
             }
         },
@@ -892,7 +915,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                 mode,
                 context_messages,
             } => {
-                let result = client.cron_wake(&text, &mode, context_messages).await?;
+                let result = client
+                    .cron_wake(&text, mode.as_str(), context_messages)
+                    .await?;
                 println!("{}", render(&result, format));
             }
             SystemAction::Heartbeat { action } => match action {
