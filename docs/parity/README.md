@@ -1,8 +1,8 @@
 # Parity Docs
 
-This folder holds the parity-oriented contract, inventory, and sequencing material for Rune.
+This folder is the parity hub for coverage inventory, release rules, protocol contracts, and execution sequencing.
 
-Current canonical entrypoints remain:
+Start here:
 - [`../INDEX.md`](../INDEX.md)
 - [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md)
 - [`PARITY-INVENTORY.md`](PARITY-INVENTORY.md)

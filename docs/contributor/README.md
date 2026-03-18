@@ -1,8 +1,8 @@
 # Contributor Docs
 
-This folder is reserved for development workflow, contributor guidance, and testing-oriented docs during the docs structure cleanup transition.
+This folder is the contributor-facing hub for building, validating, and shipping changes to Rune.
 
-Current canonical entrypoints remain:
+Start here:
 - [`../INDEX.md`](../INDEX.md)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`DEVELOPMENT.md`](DEVELOPMENT.md)

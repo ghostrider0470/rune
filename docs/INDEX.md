@@ -19,9 +19,9 @@ Use it to find the right source of truth by audience and concern.
 | Contributor/reference docs | [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md), [`reference/SUBSYSTEMS.md`](reference/SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |
 | Long-form strategy / rationale | [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md), [`strategy/AZURE-DATA-OPTIONS.md`](strategy/AZURE-DATA-OPTIONS.md), [`DOCS-README-PLAN-REORG.md`](DOCS-README-PLAN-REORG.md) | design rationale and planning context |
 
-## Transitional structure scaffold
+## Audience-based docs hubs
 
-The approved audience-based folder layout now exists in scaffold form:
+The audience-based docs layout is now real and navigable:
 
 - [`getting-started/`](getting-started/README.md)
 - [`operator/`](operator/README.md)
@@ -31,7 +31,7 @@ The approved audience-based folder layout now exists in scaffold form:
 - [`strategy/`](strategy/README.md)
 - [`adr/`](adr/README.md)
 
-Docs remain authoritative at their current locations until content is intentionally moved.
+These folders are now valid first-stop entrypoints rather than placeholder-only scaffolding.
 
 ## Recommended reading paths
 
