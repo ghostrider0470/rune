@@ -96,12 +96,10 @@ That means local-first is the default experience, not a throwaway dev-only mode.
 ## For contributors
 
 Start here:
-- [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md)
-- [`docs/AGENT-ORCHESTRATION.md`](docs/AGENT-ORCHESTRATION.md)
-- [`docs/reference/README.md`](docs/reference/README.md)
-- [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md)
-- [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md)
-- [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md)
+- use [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md) for local setup and day-to-day build/run flow
+- use [`docs/contributor/README.md`](docs/contributor/README.md) for the contributor docs hub and related execution references
+- use [`docs/AGENT-ORCHESTRATION.md`](docs/AGENT-ORCHESTRATION.md) for deeper runtime/repo execution context
+- use [`docs/reference/README.md`](docs/reference/README.md), [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md), [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md), and [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md) for technical reference material
 
 ## License
 
