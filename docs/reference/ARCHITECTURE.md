@@ -51,6 +51,20 @@ Responsible for:
 - reply/reaction/media semantics
 - adapter-specific integration behavior
 
+## Current reference use
+
+Use this doc as the architecture entrypoint for:
+- understanding Rune's current runtime shape and subsystem boundaries
+- navigating from high-level architecture questions into deeper protocol, crate-layout, and subsystem references
+
+## Next depth to add
+
+This file can still grow into deeper reference for:
+- cross-cutting runtime flows and boundaries
+- storage/provider/channel relationship details
+- architecture-level invariants and tradeoffs
+- diagrams or richer deployment/control-plane context if that becomes useful
+
 ## Reference entrypoints
 
 - [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md)
