@@ -61,14 +61,11 @@ impl SessionEngine {
                 .as_str()
                 .unwrap()
                 .to_string(),
-            status: serde_json::to_value(SessionStatus::Created)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string(),
+            status: SessionStatus::Created.as_str().to_string(),
             workspace_root,
             channel_ref,
             requester_session_id,
+            latest_turn_id: None,
             metadata: serde_json::json!({}),
             created_at: now,
             updated_at: now,
@@ -76,6 +73,11 @@ impl SessionEngine {
         };
 
         let row = self.session_repo.create(new_session).await?;
+        // Immediately transition Created → Ready so the session is usable.
+        let row = self
+            .session_repo
+            .update_status(row.id, SessionStatus::Ready.as_str(), Utc::now())
+            .await?;
         Ok(row)
     }
 

@@ -20,6 +20,7 @@ pub struct RepoSet {
     pub memory_embedding_repo: Arc<dyn MemoryEmbeddingRepo>,
     pub tool_execution_repo: Arc<dyn ToolExecutionRepo>,
     pub device_repo: Arc<dyn DeviceRepo>,
+    pub process_handle_repo: Arc<dyn ProcessHandleRepo>,
 }
 
 /// Metadata about the active storage backend.
@@ -155,7 +156,8 @@ async fn build_sqlite_repos(config: &AppConfig) -> Result<(RepoSet, StorageInfo)
         tool_approval_repo: Arc::new(SqliteToolApprovalPolicyRepo::new(conn.clone())),
         memory_embedding_repo: Arc::new(SqliteMemoryEmbeddingRepo::new(conn.clone())),
         tool_execution_repo: Arc::new(SqliteToolExecutionRepo::new(conn.clone())),
-        device_repo: Arc::new(SqliteDeviceRepo::new(conn)),
+        device_repo: Arc::new(SqliteDeviceRepo::new(conn.clone())),
+        process_handle_repo: Arc::new(SqliteProcessHandleRepo::new(conn)),
     };
 
     let info = StorageInfo {
@@ -221,7 +223,8 @@ async fn build_pg_repos(
         tool_approval_repo: Arc::new(PgToolApprovalPolicyRepo::new(pool.clone())),
         memory_embedding_repo: Arc::new(PgMemoryEmbeddingRepo::new(pool.clone())),
         tool_execution_repo: Arc::new(PgToolExecutionRepo::new(pool.clone())),
-        device_repo: Arc::new(PgDeviceRepo::new(pool)),
+        device_repo: Arc::new(PgDeviceRepo::new(pool.clone())),
+        process_handle_repo: Arc::new(PgProcessHandleRepo::new(pool)),
     };
 
     let info = StorageInfo {

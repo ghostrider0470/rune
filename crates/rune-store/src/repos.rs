@@ -47,6 +47,14 @@ pub trait SessionRepo: Send + Sync {
         updated_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<SessionRow, StoreError>;
 
+    /// Update the latest_turn_id pointer on a session.
+    async fn update_latest_turn(
+        &self,
+        id: Uuid,
+        turn_id: Uuid,
+        updated_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<SessionRow, StoreError>;
+
     /// Delete a session by ID. Returns true if a row was removed.
     async fn delete(&self, id: Uuid) -> Result<bool, StoreError>;
 }
@@ -366,4 +374,31 @@ pub trait DeviceRepo: Send + Sync {
 
     /// Delete expired pairing requests. Returns count removed.
     async fn prune_expired_requests(&self) -> Result<usize, StoreError>;
+}
+
+// ── Process handle repository ─────────────────────────────────────────────
+
+/// Persistence contract for durable background process handles.
+#[async_trait]
+pub trait ProcessHandleRepo: Send + Sync {
+    /// Insert a new process handle.
+    async fn create(&self, handle: NewProcessHandle) -> Result<ProcessHandleRow, StoreError>;
+
+    /// Find a process handle by process ID.
+    async fn find_by_id(&self, process_id: Uuid) -> Result<ProcessHandleRow, StoreError>;
+
+    /// Update status, exit code, and ended_at.
+    async fn update_status(
+        &self,
+        process_id: Uuid,
+        status: &str,
+        exit_code: Option<i32>,
+        ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<ProcessHandleRow, StoreError>;
+
+    /// List process handles for a session, newest first.
+    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<ProcessHandleRow>, StoreError>;
+
+    /// List all active (running/backgrounded) process handles.
+    async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError>;
 }

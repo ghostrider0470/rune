@@ -22,11 +22,11 @@ pub use factory::{RepoSet, StorageInfo, build_repos};
 #[cfg(feature = "postgres")]
 pub use pg::{
     PgApprovalRepo, PgDeviceRepo, PgJobRepo, PgJobRunRepo, PgMemoryEmbeddingRepo,
-    PgToolApprovalPolicyRepo, PgToolExecutionRepo,
+    PgProcessHandleRepo, PgToolApprovalPolicyRepo, PgToolExecutionRepo,
 };
 #[cfg(feature = "postgres")]
 pub use pool::PgVectorStatus;
 pub use repos::{
-    ApprovalRepo, DeviceRepo, JobRepo, JobRunRepo, MemoryEmbeddingRepo, ToolApprovalPolicy,
-    ToolExecutionRepo,
+    ApprovalRepo, DeviceRepo, JobRepo, JobRunRepo, MemoryEmbeddingRepo, ProcessHandleRepo,
+    ToolApprovalPolicy, ToolExecutionRepo,
 };

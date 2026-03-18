@@ -192,6 +192,32 @@ CREATE TRIGGER IF NOT EXISTS memory_embeddings_au AFTER UPDATE ON memory_embeddi
     INSERT INTO memory_embeddings_fts(rowid, chunk_text) VALUES (new.rowid, new.chunk_text);
 END;
 "#,
+}, Migration {
+    version: 2,
+    name: "add_process_handles",
+    sql: r#"
+-- Process handles: durable background process metadata.
+CREATE TABLE IF NOT EXISTS process_handles (
+    process_id   TEXT PRIMARY KEY,
+    tool_call_id TEXT NOT NULL,
+    session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    command      TEXT NOT NULL,
+    cwd          TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    exit_code    INTEGER,
+    started_at   TEXT NOT NULL,
+    ended_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_process_handles_session_id ON process_handles (session_id);
+CREATE INDEX IF NOT EXISTS idx_process_handles_status ON process_handles (status);
+
+-- Add latest_turn_id to sessions for quick access to the most recent turn.
+ALTER TABLE sessions ADD COLUMN latest_turn_id TEXT;
+
+-- Add approval linkage and execution mode to tool_executions.
+ALTER TABLE tool_executions ADD COLUMN approval_id TEXT;
+ALTER TABLE tool_executions ADD COLUMN execution_mode TEXT;
+"#,
 }];
 
 /// Run all pending migrations on the given connection.

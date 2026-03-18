@@ -112,10 +112,11 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         workspace_root: row.get(3)?,
         channel_ref: row.get(4)?,
         requester_session_id: parse_uuid_opt(row.get(5)?),
-        metadata: parse_json(&row.get::<_, String>(6)?),
-        created_at: parse_dt(&row.get::<_, String>(7)?),
-        updated_at: parse_dt(&row.get::<_, String>(8)?),
-        last_activity_at: parse_dt(&row.get::<_, String>(9)?),
+        latest_turn_id: parse_uuid_opt(row.get(6)?),
+        metadata: parse_json(&row.get::<_, String>(7)?),
+        created_at: parse_dt(&row.get::<_, String>(8)?),
+        updated_at: parse_dt(&row.get::<_, String>(9)?),
+        last_activity_at: parse_dt(&row.get::<_, String>(10)?),
     })
 }
 
@@ -248,7 +249,7 @@ fn row_to_pairing_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PairingRe
 // Column lists
 // ══════════════════════════════════════════════════════════════════════
 
-const SESSION_COLS: &str = "id, kind, status, workspace_root, channel_ref, requester_session_id, metadata, created_at, updated_at, last_activity_at";
+const SESSION_COLS: &str = "id, kind, status, workspace_root, channel_ref, requester_session_id, latest_turn_id, metadata, created_at, updated_at, last_activity_at";
 const TURN_COLS: &str = "id, session_id, trigger_kind, status, model_ref, started_at, ended_at, usage_prompt_tokens, usage_completion_tokens";
 const TRANSCRIPT_COLS: &str = "id, session_id, turn_id, seq, kind, payload, created_at";
 const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload, created_at, updated_at";
@@ -288,10 +289,11 @@ impl SessionRepo for SqliteSessionRepo {
     async fn create(&self, s: NewSession) -> Result<SessionRow, StoreError> {
         self.conn.call(move |conn| {
             conn.execute(
-                &format!("INSERT INTO sessions ({SESSION_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
+                &format!("INSERT INTO sessions ({SESSION_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
                 rusqlite::params![
                     s.id.to_string(), s.kind, s.status, s.workspace_root, s.channel_ref,
                     s.requester_session_id.map(|u| u.to_string()),
+                    s.latest_turn_id.map(|u| u.to_string()),
                     serde_json::to_string(&s.metadata).unwrap_or_default(),
                     to_rfc3339(&s.created_at), to_rfc3339(&s.updated_at), to_rfc3339(&s.last_activity_at),
                 ],
@@ -376,7 +378,7 @@ impl SessionRepo for SqliteSessionRepo {
         }).await.map_err(|e| {
             // Surface FSM violations as InvalidTransition, not generic DB errors.
             match &e {
-                tokio_rusqlite::Error::Rusqlite(rusqlite::Error::InvalidParameterName(msg)) => {
+                tokio_rusqlite::Error::Error(rusqlite::Error::InvalidParameterName(msg)) => {
                     StoreError::InvalidTransition(msg.clone())
                 }
                 _ => map_err(e, "session", &id.to_string()),
@@ -398,6 +400,24 @@ impl SessionRepo for SqliteSessionRepo {
                     serde_json::to_string(&metadata).unwrap_or_default(),
                     to_rfc3339(&updated_at), &id_s,
                 ],
+            )?)?;
+            conn.prepare(&format!("SELECT {SESSION_COLS} FROM sessions WHERE id = ?1"))?
+                .query_row([&id_s], row_to_session)
+        }).await.map_err(|e| map_err(e, "session", &id.to_string()))
+    }
+
+    async fn update_latest_turn(
+        &self,
+        id: Uuid,
+        turn_id: Uuid,
+        updated_at: DateTime<Utc>,
+    ) -> Result<SessionRow, StoreError> {
+        let id_s = id.to_string();
+        let turn_s = turn_id.to_string();
+        self.conn.call(move |conn| {
+            require_affected(conn.execute(
+                "UPDATE sessions SET latest_turn_id = ?1, updated_at = ?2, last_activity_at = ?2 WHERE id = ?3",
+                rusqlite::params![turn_s, to_rfc3339(&updated_at), &id_s],
             )?)?;
             conn.prepare(&format!("SELECT {SESSION_COLS} FROM sessions WHERE id = ?1"))?
                 .query_row([&id_s], row_to_session)
@@ -1188,110 +1208,6 @@ impl ProcessHandleRepo for SqliteProcessHandleRepo {
             .map_err(StoreError::from)
     }
 }
-
-// ══════════════════════════════════════════════════════════════════════
-// SqliteProcessHandleRepo
-// ══════════════════════════════════════════════════════════════════════
-
-#[derive(Clone)]
-pub struct SqliteProcessHandleRepo {
-    conn: Arc<tokio_rusqlite::Connection>,
-}
-
-impl SqliteProcessHandleRepo {
-    pub fn new(conn: Arc<tokio_rusqlite::Connection>) -> Self {
-        Self { conn }
-    }
-}
-
-#[async_trait]
-impl ProcessHandleRepo for SqliteProcessHandleRepo {
-    async fn create(&self, h: NewProcessHandle) -> Result<ProcessHandleRow, StoreError> {
-        self.conn.call(move |conn| {
-            conn.execute(
-                &format!("INSERT INTO process_handles ({PROCESS_HANDLE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
-                rusqlite::params![
-                    h.process_id.to_string(), h.tool_call_id.to_string(),
-                    h.session_id.to_string(), h.command, h.cwd,
-                    h.status, Option::<i32>::None,
-                    to_rfc3339(&h.started_at), Option::<String>::None,
-                ],
-            )?;
-            conn.prepare(&format!("SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"))?
-                .query_row([h.process_id.to_string()], row_to_process_handle)
-        }).await.map_err(StoreError::from)
-    }
-
-    async fn find_by_id(&self, process_id: Uuid) -> Result<ProcessHandleRow, StoreError> {
-        let id_s = process_id.to_string();
-        self.conn
-            .call(move |conn| {
-                conn.prepare(&format!(
-                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"
-                ))?
-                .query_row([&id_s], row_to_process_handle)
-            })
-            .await
-            .map_err(|e| map_err(e, "process_handle", &process_id.to_string()))
-    }
-
-    async fn update_status(
-        &self,
-        process_id: Uuid,
-        status: &str,
-        exit_code: Option<i32>,
-        ended_at: Option<DateTime<Utc>>,
-    ) -> Result<ProcessHandleRow, StoreError> {
-        let id_s = process_id.to_string();
-        let status = status.to_string();
-        let ended_at_s = ended_at.map(|dt| to_rfc3339(&dt));
-        self.conn
-            .call(move |conn| {
-                require_affected(conn.execute(
-                    "UPDATE process_handles SET status=?1, exit_code=?2, ended_at=?3 WHERE process_id=?4",
-                    rusqlite::params![status, exit_code, ended_at_s, &id_s],
-                )?)?;
-                conn.prepare(&format!(
-                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"
-                ))?
-                .query_row([&id_s], row_to_process_handle)
-            })
-            .await
-            .map_err(|e| map_err(e, "process_handle", &process_id.to_string()))
-    }
-
-    async fn list_by_session(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
-        let sid = session_id.to_string();
-        self.conn
-            .call(move |conn| {
-                conn.prepare(&format!(
-                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE session_id = ?1 ORDER BY started_at DESC"
-                ))?
-                .query_map([&sid], row_to_process_handle)?
-                .collect::<Result<Vec<_>, _>>()
-            })
-            .await
-            .map_err(StoreError::from)
-    }
-
-    async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError> {
-        self.conn
-            .call(move |conn| {
-                conn.prepare(
-                    "SELECT process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at \
-                     FROM process_handles WHERE status IN ('running', 'backgrounded') ORDER BY started_at DESC"
-                )?
-                .query_map([], row_to_process_handle)?
-                .collect::<Result<Vec<_>, _>>()
-            })
-            .await
-            .map_err(StoreError::from)
-    }
-}
-
 
 // ══════════════════════════════════════════════════════════════════════
 // SqliteMemoryEmbeddingRepo

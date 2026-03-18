@@ -177,6 +177,25 @@ impl SessionRepo for PgSessionRepo {
             .map_err(|e| not_found_or(e, "session", id))
     }
 
+    async fn update_latest_turn(
+        &self,
+        id: Uuid,
+        turn_id: Uuid,
+        updated_at: DateTime<Utc>,
+    ) -> Result<SessionRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(sessions::table.find(id))
+            .set((
+                sessions::latest_turn_id.eq(Some(turn_id)),
+                sessions::updated_at.eq(updated_at),
+                sessions::last_activity_at.eq(updated_at),
+            ))
+            .returning(SessionRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "session", id))
+    }
+
     async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
         let affected = diesel::delete(sessions::table.find(id))
@@ -811,6 +830,90 @@ impl ToolExecutionRepo for PgToolExecutionRepo {
             .get_result(&mut conn)
             .await
             .map_err(|e| not_found_or(e, "tool_execution", id))
+    }
+}
+
+// ── PgProcessHandleRepo ──────────────────────────────────────────────
+
+/// PostgreSQL-backed process handle repository.
+#[derive(Clone)]
+pub struct PgProcessHandleRepo {
+    pool: PgPool,
+}
+
+impl PgProcessHandleRepo {
+    /// Create a new repository backed by the given connection pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl ProcessHandleRepo for PgProcessHandleRepo {
+    async fn create(&self, handle: NewProcessHandle) -> Result<ProcessHandleRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::insert_into(process_handles::table)
+            .values(&handle)
+            .returning(ProcessHandleRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_by_id(&self, process_id: Uuid) -> Result<ProcessHandleRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        process_handles::table
+            .find(process_id)
+            .select(ProcessHandleRow::as_select())
+            .first(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "process_handle", process_id))
+    }
+
+    async fn update_status(
+        &self,
+        process_id: Uuid,
+        status: &str,
+        exit_code: Option<i32>,
+        ended_at: Option<DateTime<Utc>>,
+    ) -> Result<ProcessHandleRow, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(process_handles::table.find(process_id))
+            .set((
+                process_handles::status.eq(status),
+                process_handles::exit_code.eq(exit_code),
+                process_handles::ended_at.eq(ended_at),
+            ))
+            .returning(ProcessHandleRow::as_returning())
+            .get_result(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "process_handle", process_id))
+    }
+
+    async fn list_by_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        process_handles::table
+            .filter(process_handles::session_id.eq(session_id))
+            .select(ProcessHandleRow::as_select())
+            .order(process_handles::started_at.desc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let active = vec!["running", "backgrounded"];
+        process_handles::table
+            .filter(process_handles::status.eq_any(active))
+            .select(ProcessHandleRow::as_select())
+            .order(process_handles::started_at.desc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
     }
 }
 

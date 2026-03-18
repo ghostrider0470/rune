@@ -25,6 +25,7 @@ fn new_session() -> NewSession {
         workspace_root: Some("/tmp/test".into()),
         channel_ref: None,
         requester_session_id: None,
+        latest_turn_id: None,
         metadata: json!({"key": "value"}),
         created_at: now(),
         updated_at: now(),
@@ -104,6 +105,8 @@ fn new_tool_execution(session_id: Uuid, turn_id: Uuid) -> NewToolExecution {
         arguments: json!({"path": "/tmp"}),
         status: "running".into(),
         started_at: now(),
+        approval_id: None,
+        execution_mode: None,
     }
 }
 

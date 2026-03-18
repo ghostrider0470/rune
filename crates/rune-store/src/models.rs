@@ -29,6 +29,7 @@ pub struct SessionRow {
     pub workspace_root: Option<String>,
     pub channel_ref: Option<String>,
     pub requester_session_id: Option<Uuid>,
+    pub latest_turn_id: Option<Uuid>,
     pub metadata: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -46,6 +47,7 @@ pub struct NewSession {
     pub workspace_root: Option<String>,
     pub channel_ref: Option<String>,
     pub requester_session_id: Option<Uuid>,
+    pub latest_turn_id: Option<Uuid>,
     pub metadata: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -235,6 +237,8 @@ pub struct ToolExecutionRow {
     pub error_summary: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+    pub approval_id: Option<Uuid>,
+    pub execution_mode: Option<String>,
 }
 
 /// Insert payload for a new tool execution.
@@ -250,6 +254,8 @@ pub struct NewToolExecution {
     pub arguments: serde_json::Value,
     pub status: String,
     pub started_at: DateTime<Utc>,
+    pub approval_id: Option<Uuid>,
+    pub execution_mode: Option<String>,
 }
 
 // ── Device pairing ───────────────────────────────────────────────────────────
@@ -418,4 +424,37 @@ pub struct NewChannelDelivery {
     pub message_kind: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
+}
+
+// ── Process handles ─────────────────────────────────────────────────────
+
+/// A durable process handle row as returned by queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
+#[cfg_attr(feature = "postgres", diesel(table_name = process_handles))]
+#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
+pub struct ProcessHandleRow {
+    pub process_id: Uuid,
+    pub tool_call_id: Uuid,
+    pub session_id: Uuid,
+    pub command: String,
+    pub cwd: String,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+}
+
+/// Insert payload for a new process handle.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "postgres", derive(Insertable))]
+#[cfg_attr(feature = "postgres", diesel(table_name = process_handles))]
+pub struct NewProcessHandle {
+    pub process_id: Uuid,
+    pub tool_call_id: Uuid,
+    pub session_id: Uuid,
+    pub command: String,
+    pub cwd: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
 }
