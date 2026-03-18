@@ -21,9 +21,15 @@ Use repo docs to understand the system.
 Use GitHub Project 2, issues, and PRs to understand active execution.
 Use ADRs for durable decisions.
 
-## What belongs here over time
+## Current contributor use
 
-This file should become the stable contributor entry for:
+Use this doc as the contributor entrypoint for:
+- understanding how docs, issues, PRs, and ADRs relate today
+- navigating to the right development, testing, and workflow references first
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - contribution expectations
 - doc/issue/PR relationship
 - review hygiene
