@@ -16,7 +16,8 @@ use uuid::Uuid;
 use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
 use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
-    Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, Schedule, SessionTarget,
+    Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
+    SessionTarget,
 };
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
@@ -2003,9 +2004,12 @@ pub struct ReminderResponse {
     pub message: String,
     pub target: String,
     pub fire_at: String,
+    pub status: ReminderStatus,
     pub delivered: bool,
     pub created_at: String,
     pub delivered_at: Option<String>,
+    pub outcome_at: Option<String>,
+    pub last_error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -2061,9 +2065,12 @@ fn reminder_to_response(r: Reminder) -> ReminderResponse {
         message: r.message,
         target: r.target,
         fire_at: r.fire_at.to_rfc3339(),
+        status: r.status,
         delivered: r.delivered,
         created_at: r.created_at.to_rfc3339(),
         delivered_at: r.delivered_at.map(|dt| dt.to_rfc3339()),
+        outcome_at: r.outcome_at.map(|dt| dt.to_rfc3339()),
+        last_error: r.last_error,
     }
 }
 

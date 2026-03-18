@@ -11,6 +11,7 @@ use tracing::{debug, info, warn};
 
 /// Persisted heartbeat configuration state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HeartbeatState {
     /// Whether the heartbeat runner is enabled.
     pub enabled: bool,
@@ -22,6 +23,12 @@ pub struct HeartbeatState {
     pub run_count: u64,
     /// Number of suppressed HEARTBEAT_OK responses.
     pub suppressed_count: u64,
+    /// Number of suppressed duplicate notifications.
+    pub duplicate_suppressed_count: u64,
+    /// Fingerprint of the last non-noop notification that was allowed through.
+    pub last_notified_fingerprint: Option<String>,
+    /// When the last non-noop notification was allowed through.
+    pub last_notified_at: Option<DateTime<Utc>>,
 }
 
 impl Default for HeartbeatState {
@@ -32,8 +39,20 @@ impl Default for HeartbeatState {
             last_run_at: None,
             run_count: 0,
             suppressed_count: 0,
+            duplicate_suppressed_count: 0,
+            last_notified_fingerprint: None,
+            last_notified_at: None,
         }
     }
+}
+
+/// What to do with a completed heartbeat response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeartbeatResponseAction {
+    Deliver,
+    SuppressNoop,
+    SuppressDuplicate,
 }
 
 /// Result of a single heartbeat tick.
@@ -190,6 +209,34 @@ impl HeartbeatRunner {
         self.persist_state(&state);
     }
 
+    /// Persist heartbeat anti-spam state and decide whether the response
+    /// should be delivered to the operator.
+    pub async fn record_response(&self, response: &str) -> HeartbeatResponseAction {
+        let now = Utc::now();
+        let normalized = normalize_response(response);
+        let mut state = self.state.lock().await;
+
+        if Self::should_suppress(response) {
+            state.suppressed_count += 1;
+            state.last_notified_fingerprint = None;
+            state.last_notified_at = None;
+            self.persist_state(&state);
+            return HeartbeatResponseAction::SuppressNoop;
+        }
+
+        let fingerprint = response_fingerprint(&normalized);
+        if state.last_notified_fingerprint.as_deref() == Some(fingerprint.as_str()) {
+            state.duplicate_suppressed_count += 1;
+            self.persist_state(&state);
+            return HeartbeatResponseAction::SuppressDuplicate;
+        }
+
+        state.last_notified_fingerprint = Some(fingerprint);
+        state.last_notified_at = Some(now);
+        self.persist_state(&state);
+        HeartbeatResponseAction::Deliver
+    }
+
     fn persist_state(&self, state: &HeartbeatState) {
         let Some(path) = &self.state_file else {
             return;
@@ -218,6 +265,19 @@ impl HeartbeatRunner {
 fn load_state_file(path: &PathBuf) -> Option<HeartbeatState> {
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice::<HeartbeatState>(&bytes).ok()
+}
+
+fn normalize_response(response: &str) -> String {
+    response.trim().to_string()
+}
+
+fn response_fingerprint(response: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in response.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 #[cfg(test)]
@@ -278,6 +338,9 @@ mod tests {
             last_run_at: Some(Utc::now()),
             run_count: 1,
             suppressed_count: 0,
+            duplicate_suppressed_count: 0,
+            last_notified_fingerprint: None,
+            last_notified_at: None,
         };
         let runner = HeartbeatRunner::with_state(tmp.path(), state);
 
@@ -294,6 +357,9 @@ mod tests {
             last_run_at: Some(Utc::now() - chrono::Duration::seconds(120)),
             run_count: 1,
             suppressed_count: 0,
+            duplicate_suppressed_count: 0,
+            last_notified_fingerprint: None,
+            last_notified_at: None,
         };
         let runner = HeartbeatRunner::with_state(tmp.path(), state);
 
@@ -373,6 +439,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn record_response_suppresses_duplicate_notifications() {
+        let tmp = TempDir::new().unwrap();
+        let runner = HeartbeatRunner::new(tmp.path());
+
+        assert_eq!(
+            runner.record_response("Check disk pressure").await,
+            HeartbeatResponseAction::Deliver
+        );
+        assert_eq!(
+            runner.record_response(" Check disk pressure ").await,
+            HeartbeatResponseAction::SuppressDuplicate
+        );
+
+        let status = runner.status().await;
+        assert_eq!(status.suppressed_count, 0);
+        assert_eq!(status.duplicate_suppressed_count, 1);
+        assert!(status.last_notified_fingerprint.is_some());
+        assert!(status.last_notified_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn record_response_clears_duplicate_baseline_after_noop() {
+        let tmp = TempDir::new().unwrap();
+        let runner = HeartbeatRunner::new(tmp.path());
+
+        assert_eq!(
+            runner.record_response("Check disk pressure").await,
+            HeartbeatResponseAction::Deliver
+        );
+        assert_eq!(
+            runner.record_response("HEARTBEAT_OK").await,
+            HeartbeatResponseAction::SuppressNoop
+        );
+        assert_eq!(
+            runner.record_response("Check disk pressure").await,
+            HeartbeatResponseAction::Deliver
+        );
+
+        let status = runner.status().await;
+        assert_eq!(status.suppressed_count, 1);
+        assert_eq!(status.duplicate_suppressed_count, 0);
+        assert!(status.last_notified_fingerprint.is_some());
+    }
+
+    #[tokio::test]
     async fn with_state_restores() {
         let tmp = TempDir::new().unwrap();
         let state = HeartbeatState {
@@ -381,6 +492,9 @@ mod tests {
             last_run_at: Some(Utc::now()),
             run_count: 42,
             suppressed_count: 7,
+            duplicate_suppressed_count: 3,
+            last_notified_fingerprint: Some("abc123".to_string()),
+            last_notified_at: Some(Utc::now()),
         };
         let runner = HeartbeatRunner::with_state(tmp.path(), state.clone());
         let restored = runner.status().await;
@@ -388,6 +502,15 @@ mod tests {
         assert_eq!(restored.interval_secs, state.interval_secs);
         assert_eq!(restored.run_count, state.run_count);
         assert_eq!(restored.suppressed_count, state.suppressed_count);
+        assert_eq!(
+            restored.duplicate_suppressed_count,
+            state.duplicate_suppressed_count
+        );
+        assert_eq!(
+            restored.last_notified_fingerprint,
+            state.last_notified_fingerprint
+        );
+        assert_eq!(restored.last_notified_at, state.last_notified_at);
     }
 
     #[tokio::test]
@@ -399,6 +522,14 @@ mod tests {
         runner.enable().await;
         runner.set_interval(900).await;
         runner.record_suppression().await;
+        assert_eq!(
+            runner.record_response("Check disk pressure").await,
+            HeartbeatResponseAction::Deliver
+        );
+        assert_eq!(
+            runner.record_response("Check disk pressure").await,
+            HeartbeatResponseAction::SuppressDuplicate
+        );
         let tick = runner.tick().await;
         assert!(!tick.fired);
 
@@ -408,6 +539,15 @@ mod tests {
         assert_eq!(restored.interval_secs, 900);
         assert_eq!(restored.run_count, 1);
         assert_eq!(restored.suppressed_count, 1);
+        assert_eq!(restored.duplicate_suppressed_count, 1);
         assert!(restored.last_run_at.is_some());
+        assert!(restored.last_notified_fingerprint.is_some());
+        assert!(restored.last_notified_at.is_some());
+
+        assert_eq!(
+            reloaded.record_response("Check disk pressure").await,
+            HeartbeatResponseAction::SuppressDuplicate
+        );
+        assert_eq!(reloaded.status().await.duplicate_suppressed_count, 2);
     }
 }

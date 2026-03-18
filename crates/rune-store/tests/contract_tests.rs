@@ -265,6 +265,11 @@ async fn test_job_crud(repo: &dyn JobRepo) {
     let by_type = repo.list_by_type("reminder", false).await.unwrap();
     assert!(by_type.iter().any(|j| j.id == jid));
 
+    let terminal_payload = json!({
+        "message": "test",
+        "status": "missed",
+        "last_error": "session unavailable"
+    });
     let updated = repo
         .update_job(
             jid,
@@ -272,7 +277,7 @@ async fn test_job_crud(repo: &dyn JobRepo) {
             None,
             "reminder",
             "announce",
-            json!({"updated": true}),
+            terminal_payload.clone(),
             now(),
             None,
             None,
@@ -280,6 +285,15 @@ async fn test_job_crud(repo: &dyn JobRepo) {
         .await
         .unwrap();
     assert!(!updated.enabled);
+    assert_eq!(updated.payload_kind, "reminder");
+    assert_eq!(updated.delivery_mode, "announce");
+    assert_eq!(updated.payload, terminal_payload);
+
+    let active = repo.list_by_type("reminder", false).await.unwrap();
+    assert!(!active.iter().any(|j| j.id == jid));
+
+    let all = repo.list_by_type("reminder", true).await.unwrap();
+    assert!(all.iter().any(|j| j.id == jid && !j.enabled));
 
     let recorded = repo.record_run(jid, now(), Some(now())).await.unwrap();
     assert!(recorded.last_run_at.is_some());

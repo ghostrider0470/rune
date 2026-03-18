@@ -5,10 +5,10 @@
 use std::sync::Arc;
 
 use tokio::sync::watch;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use rune_core::{SchedulerRunTrigger, SessionKind, TriggerKind};
-use rune_runtime::heartbeat::HeartbeatRunner;
+use rune_runtime::heartbeat::{HeartbeatResponseAction, HeartbeatRunner};
 use rune_runtime::scheduler::{Job, JobPayload, ReminderStore, Scheduler, SessionTarget};
 use rune_runtime::{SessionEngine, TurnExecutor};
 use rune_store::models::SessionRow;
@@ -136,13 +136,18 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
             if let Some(prompt) = tick_result.prompt {
                 match run_heartbeat(&deps, &prompt).await {
                     Ok(response) => {
-                        if HeartbeatRunner::should_suppress(&response) {
-                            debug!("heartbeat response suppressed (HEARTBEAT_OK)");
-                            deps.heartbeat.record_suppression().await;
-                        } else {
-                            info!(len = response.len(), "heartbeat produced output");
-                            // Non-suppressed heartbeat output is already persisted in the
-                            // session transcript by TurnExecutor; nothing else to deliver.
+                        match deps.heartbeat.record_response(&response).await {
+                            HeartbeatResponseAction::SuppressNoop => {
+                                debug!("heartbeat response suppressed (HEARTBEAT_OK)");
+                            }
+                            HeartbeatResponseAction::SuppressDuplicate => {
+                                debug!("heartbeat response suppressed (duplicate)");
+                            }
+                            HeartbeatResponseAction::Deliver => {
+                                info!(len = response.len(), "heartbeat produced output");
+                                // Non-suppressed heartbeat output is already persisted in the
+                                // session transcript by TurnExecutor; nothing else to deliver.
+                            }
                         }
                     }
                     Err(e) => {
@@ -169,15 +174,37 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
         let due_reminders = deps.reminder_store.get_due().await;
         for reminder in due_reminders {
             info!(reminder_id = %reminder.id, target = %reminder.target, "delivering reminder");
+            let attempt = deps
+                .reminder_store
+                .start_delivery_attempt(&reminder.id)
+                .await;
 
-            // Deliver reminder by executing it as a turn in an isolated session
+            // Deliver reminder by executing it as a turn in the stable scheduled session.
             match run_reminder(&deps, &reminder.message).await {
-                Ok(_) => {
-                    deps.reminder_store.mark_delivered(&reminder.id).await;
-                    info!(reminder_id = %reminder.id, "reminder delivered");
+                Ok(output) => {
+                    if deps
+                        .reminder_store
+                        .mark_delivered(&reminder.id, &attempt, Some(output))
+                        .await
+                        .is_some()
+                    {
+                        info!(reminder_id = %reminder.id, "reminder delivered");
+                    } else {
+                        warn!(reminder_id = %reminder.id, "reminder delivered but outcome persistence failed");
+                    }
                 }
                 Err(e) => {
-                    error!(reminder_id = %reminder.id, error = %e, "reminder delivery failed");
+                    let error_text = e.to_string();
+                    if deps
+                        .reminder_store
+                        .mark_missed(&reminder.id, &attempt, error_text.clone())
+                        .await
+                        .is_some()
+                    {
+                        error!(reminder_id = %reminder.id, error = %error_text, "reminder delivery missed");
+                    } else {
+                        error!(reminder_id = %reminder.id, error = %error_text, "reminder delivery failed and outcome persistence failed");
+                    }
                 }
             }
         }
