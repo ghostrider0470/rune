@@ -30,7 +30,7 @@ Use this doc as the testing entrypoint for:
 - understanding the current validation posture
 - navigating from general testing questions into parity and development references
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - test layers and expectations

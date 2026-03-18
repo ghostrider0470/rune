@@ -24,7 +24,7 @@ Use this doc as the channel entrypoint for:
 - understanding where channel coverage and behavior docs live
 - navigating from adapter questions into parity and protocol references
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - channel setup/navigation

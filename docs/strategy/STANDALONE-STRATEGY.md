@@ -27,7 +27,7 @@ Use this doc as the strategy entrypoint for:
 - understanding Rune's standalone-first posture today
 - navigating from high-level product-shape questions into the deeper rationale and ADR references
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - standalone-first rationale

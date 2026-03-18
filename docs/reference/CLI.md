@@ -17,7 +17,7 @@ Use this doc as the CLI entrypoint for:
 - understanding where current command-family coverage lives
 - navigating from CLI questions into parity inventory and protocol references
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - top-level command families

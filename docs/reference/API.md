@@ -17,7 +17,7 @@ Use this doc as the API entrypoint for:
 - understanding where the current HTTP/dashboard/control-plane contract picture lives
 - navigating from API questions into parity contracts and coverage docs
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - core HTTP route families

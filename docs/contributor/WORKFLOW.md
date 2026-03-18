@@ -25,7 +25,7 @@ Use this doc as the workflow entrypoint for:
 - where execution authority lives now
 - how contributor flow relates to issues, PRs, and Project 2
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - branch/PR workflow expectations
