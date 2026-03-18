@@ -29,7 +29,7 @@
 | Sessions / turns / transcripts | [`PROTOCOLS.md`](parity/PROTOCOLS.md), [`PARITY-CONTRACTS.md`](parity/PARITY-CONTRACTS.md) | state model and behavioral invariants |
 | Tools / approvals / process execution | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`PARITY-CONTRACTS.md`](parity/PARITY-CONTRACTS.md) | tool-surface coverage and gating behavior |
 | Scheduler / reminders / heartbeat | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) | automation semantics and sequencing |
-| Memory / retrieval | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md), GitHub Project 2 Phase 20 lanes | memory surface and active implementation state |
+| Memory / retrieval | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md), [`operator/MEMORY.md`](operator/MEMORY.md) | memory surface and active implementation state |
 | Channels / adapters / messaging | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`PROTOCOLS.md`](parity/PROTOCOLS.md), crate-level channel tests | adapter behavior and inbound/outbound semantics |
 | Media / browser / OCR / TTS / STT | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) | adjacent parity surfaces and phase placement |
 | Config / secrets / precedence | [`PROTOCOLS.md`](parity/PROTOCOLS.md), [`PARITY-CONTRACTS.md`](parity/PARITY-CONTRACTS.md), operator docs | runtime config behavior and operator-facing expectations |
