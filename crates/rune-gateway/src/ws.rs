@@ -115,6 +115,12 @@ impl ConnState {
         self.subscribe_all
             || self.subscribed_sessions.contains(&event.session_id)
             || self.subscribed_events.contains(&event.kind)
+            || self.subscribed_events.iter().any(|sub| {
+                // Family-prefix match: subscribing to "turn" matches "turn.started" etc.
+                !sub.contains('.')
+                    && event.kind.starts_with(sub.as_str())
+                    && event.kind.as_bytes().get(sub.len()) == Some(&b'.')
+            })
     }
 }
 
@@ -486,6 +492,43 @@ mod tests {
         conn.subscribed_sessions.clear();
         conn.subscribed_events.insert("turn_completed".to_string());
         assert!(conn.subscribes_to(&event));
+    }
+
+    #[test]
+    fn conn_state_family_prefix_matches_dotted_event_kinds() {
+        let mut conn = ConnState::new();
+        conn.subscribed_events.insert("turn".to_string());
+
+        let started = SessionEvent {
+            session_id: "sess-1".to_string(),
+            kind: "turn.started".to_string(),
+            payload: json!({}),
+            state_changed: true,
+        };
+        let completed = SessionEvent {
+            session_id: "sess-1".to_string(),
+            kind: "turn.completed".to_string(),
+            payload: json!({}),
+            state_changed: true,
+        };
+        let tool_event = SessionEvent {
+            session_id: "sess-1".to_string(),
+            kind: "tool.requested".to_string(),
+            payload: json!({}),
+            state_changed: true,
+        };
+        let turnstile_event = SessionEvent {
+            session_id: "sess-1".to_string(),
+            kind: "turnstile".to_string(),
+            payload: json!({}),
+            state_changed: false,
+        };
+
+        assert!(conn.subscribes_to(&started));
+        assert!(conn.subscribes_to(&completed));
+        assert!(!conn.subscribes_to(&tool_event));
+        // "turn" should NOT match "turnstile" (no dot separator).
+        assert!(!conn.subscribes_to(&turnstile_event));
     }
 
     #[tokio::test]
