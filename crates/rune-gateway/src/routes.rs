@@ -3062,7 +3062,8 @@ pub struct MemoryStatusResponse {
 #[derive(Deserialize)]
 pub struct MemorySearchQuery {
     pub q: Option<String>,
-    pub limit: Option<usize>,
+    #[serde(rename = "limit")]
+    pub _limit: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -3106,10 +3107,14 @@ pub async fn memory_search(
 
 #[derive(Deserialize)]
 pub struct LogsQuery {
-    pub level: Option<String>,
-    pub source: Option<String>,
-    pub limit: Option<usize>,
-    pub since: Option<String>,
+    #[serde(rename = "level")]
+    pub _level: Option<String>,
+    #[serde(rename = "source")]
+    pub _source: Option<String>,
+    #[serde(rename = "limit")]
+    pub _limit: Option<usize>,
+    #[serde(rename = "since")]
+    pub _since: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -3178,18 +3183,14 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     drop(config);
 
     let session_check = state.session_repo.list(1, 0).await;
+    let (session_store_status, session_store_message) = match session_check {
+        Ok(_) => ("pass", "session store reachable".to_string()),
+        Err(error) => ("fail", format!("session store error: {error}")),
+    };
     checks.push(DoctorCheck {
         name: "session_store".to_string(),
-        status: if session_check.is_ok() {
-            "pass"
-        } else {
-            "fail"
-        },
-        message: if session_check.is_ok() {
-            "session store reachable".to_string()
-        } else {
-            format!("session store error: {}", session_check.unwrap_err())
-        },
+        status: session_store_status,
+        message: session_store_message,
     });
 
     checks.push(DoctorCheck {
