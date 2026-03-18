@@ -20,9 +20,16 @@ Use these docs for the current contract picture:
 - [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) — config-related runtime/state concepts
 - [`../INDEX.md`](../INDEX.md) — docs front door
 
-## What belongs here over time
+## Current operator use
 
-This file should become the stable operator reference entry for:
+Use this doc as the configuration entrypoint for:
+- where config concerns live
+- which deeper docs cover deployment/storage/runtime config semantics
+- how config relates to provider, channel, and auth behavior
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - config file shape and precedence
 - secrets and env override guidance
 - gateway/auth/runtime configuration pointers

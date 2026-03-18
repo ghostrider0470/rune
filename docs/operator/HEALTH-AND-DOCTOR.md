@@ -19,9 +19,15 @@ Use these docs for the current contract picture:
 - [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md)
 - [`../INDEX.md`](../INDEX.md)
 
-## What belongs here over time
+## Current operator use
 
-This file should become the stable operator entry for:
+Use this doc as the health/diagnostics entrypoint for:
+- where health/status expectations live now
+- how to navigate to deployment, database, and parity contract troubleshooting references
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - health/status endpoint pointers
 - doctor command/navigation
 - common failure-mode triage

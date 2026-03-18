@@ -18,9 +18,15 @@ Use these docs for the current contract picture:
 - [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md)
 - [`../INDEX.md`](../INDEX.md)
 
-## What belongs here over time
+## Current operator use
 
-This file should become the stable operator entry for:
+Use this doc as the channel entrypoint for:
+- understanding where channel coverage and behavior docs live
+- navigating from adapter questions into parity and protocol references
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - channel setup/navigation
 - provider-specific channel docs
 - runtime channel expectations

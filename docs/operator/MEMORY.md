@@ -28,9 +28,15 @@ The current operator CLI already exposes a read-only memory surface with:
 
 The runtime also enforces the curated-memory privacy boundary: `MEMORY.md` is main-session-only, while non-direct contexts use the daily/raw memory surfaces without loading curated long-term memory.
 
-## What belongs here over time
+## Current operator use
 
-This file should become the stable operator entry for:
+Use this doc as the memory entrypoint for:
+- understanding the current file-oriented memory model
+- locating the privacy-boundary and retrieval-surface references that already exist
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - memory storage conventions
 - privacy-boundary explanation
 - operator inspection/troubleshooting of memory retrieval
