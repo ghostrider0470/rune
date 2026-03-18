@@ -75,6 +75,7 @@ impl SessionRepo for MemSessionRepo {
             workspace_root: s.workspace_root,
             channel_ref: s.channel_ref,
             requester_session_id: s.requester_session_id,
+            latest_turn_id: s.latest_turn_id,
             metadata: s.metadata,
             created_at: s.created_at,
             updated_at: s.updated_at,
@@ -153,6 +154,25 @@ impl SessionRepo for MemSessionRepo {
                 id: id.to_string(),
             })?;
         session.metadata = metadata;
+        session.updated_at = updated_at;
+        Ok(session.clone())
+    }
+
+    async fn update_latest_turn(
+        &self,
+        id: Uuid,
+        turn_id: Uuid,
+        updated_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<SessionRow, StoreError> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or(StoreError::NotFound {
+                entity: "session",
+                id: id.to_string(),
+            })?;
+        session.latest_turn_id = Some(turn_id);
         session.updated_at = updated_at;
         Ok(session.clone())
     }
@@ -3320,7 +3340,8 @@ async fn create_session_returns_201() {
     let json = body_json(response).await;
     assert!(json["id"].is_string());
     assert_eq!(json["kind"], "direct");
-    assert_eq!(json["status"], "created");
+    // SessionEngine auto-transitions created → ready.
+    assert_eq!(json["status"], "ready");
 }
 
 #[tokio::test]
@@ -3509,7 +3530,8 @@ async fn get_session_status_returns_parity_card_fields() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["session_id"], session_id);
-    assert_eq!(json["status"], "created");
+    // Session transitions: created → ready (auto) → running (on message).
+    assert_eq!(json["status"], "running");
     assert_eq!(json["current_model"], "fake-model");
     assert_eq!(json["prompt_tokens"], 10);
     assert_eq!(json["completion_tokens"], 5);

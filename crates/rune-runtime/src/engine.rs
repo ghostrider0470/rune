@@ -81,8 +81,12 @@ impl SessionEngine {
         Ok(row)
     }
 
-    /// Transition a session to Ready status.
+    /// Transition a session to Ready status. Idempotent: if already ready, returns Ok.
     pub async fn mark_ready(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
+        let row = self.session_repo.find_by_id(session_id).await?;
+        if row.status == "ready" {
+            return Ok(row);
+        }
         self.transition_session(session_id, "created", "ready")
             .await
     }

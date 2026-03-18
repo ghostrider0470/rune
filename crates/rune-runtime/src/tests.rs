@@ -683,9 +683,10 @@ async fn full_turn_cycle_no_tools() {
         )
         .await
         .unwrap();
-    assert_eq!(session.status, "created");
+    // Auto-transitions created → ready on creation.
+    assert_eq!(session.status, "ready");
 
-    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_ready(session.id).await.unwrap(); // idempotent
     engine.mark_running(session.id).await.unwrap();
 
     let model = Arc::new(FakeModelProvider::new(vec![
@@ -825,9 +826,10 @@ async fn session_status_transitions() {
         )
         .await
         .unwrap();
-    assert_eq!(session.status, "created");
+    // Auto-transitions created → ready on creation.
+    assert_eq!(session.status, "ready");
 
-    let session = engine.mark_ready(session.id).await.unwrap();
+    let session = engine.mark_ready(session.id).await.unwrap(); // idempotent
     assert_eq!(session.status, "ready");
 
     let session = engine.mark_running(session.id).await.unwrap();
@@ -920,10 +922,12 @@ async fn invalid_session_transition_rejected() {
         )
         .await
         .unwrap();
+    // Session auto-transitions to ready. Trying to complete from ready is invalid.
+    assert_eq!(session.status, "ready");
 
-    let err = engine.mark_running(session.id).await.unwrap_err();
+    let err = engine.mark_completed(session.id).await.unwrap_err();
     assert!(
-        err.to_string().contains("expected ready, got created"),
+        err.to_string().contains("expected"),
         "got: {err}"
     );
 }

@@ -915,6 +915,8 @@ impl ProcessAuditStore for DbProcessAuditStore {
                 arguments: spawn.arguments,
                 status: "running".to_string(),
                 started_at: spawn.started_at,
+                approval_id: None,
+                execution_mode: None,
             })
             .await
             .map_err(|e| e.to_string())?;
@@ -2364,6 +2366,7 @@ mod tests {
                 workspace_root: session.workspace_root,
                 channel_ref: session.channel_ref,
                 requester_session_id: session.requester_session_id,
+                latest_turn_id: session.latest_turn_id,
                 metadata: session.metadata,
                 created_at: session.created_at,
                 updated_at: session.updated_at,
@@ -2442,6 +2445,25 @@ mod tests {
                     id: id.to_string(),
                 })?;
             row.metadata = metadata;
+            row.updated_at = updated_at;
+            Ok(row.clone())
+        }
+
+        async fn update_latest_turn(
+            &self,
+            id: Uuid,
+            turn_id: Uuid,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<SessionRow, StoreError> {
+            let mut rows = self.sessions.lock().await;
+            let row = rows
+                .iter_mut()
+                .find(|row| row.id == id)
+                .ok_or(StoreError::NotFound {
+                    entity: "session",
+                    id: id.to_string(),
+                })?;
+            row.latest_turn_id = Some(turn_id);
             row.updated_at = updated_at;
             Ok(row.clone())
         }
