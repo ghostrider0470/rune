@@ -23,9 +23,9 @@ Use this doc as the CLI entrypoint for:
 - use [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) when you need broader docs navigation by OpenClaw surface
 - use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need the runtime/state model behind a CLI behavior
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - top-level command families
 - operator mental model
 - lifecycle/status/config/doctor command pointers

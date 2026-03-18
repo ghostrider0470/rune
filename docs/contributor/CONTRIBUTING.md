@@ -33,9 +33,9 @@ Use this doc as the contributor entrypoint for:
 - use [`TESTING.md`](TESTING.md) when you need validation guidance
 - use [`WORKFLOW.md`](WORKFLOW.md) and [`EXECUTION-SPEED-POLICY.md`](EXECUTION-SPEED-POLICY.md) when you need the accepted execution model and merge discipline
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - contribution expectations
 - doc/issue/PR relationship
 - review hygiene

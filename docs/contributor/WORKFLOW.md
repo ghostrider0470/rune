@@ -31,9 +31,9 @@ Use this doc as the workflow entrypoint for:
 - use [`../adr/ADR-0001-execution-workflow-and-speed.md`](../adr/ADR-0001-execution-workflow-and-speed.md) and [`../adr/ADR-0004-project-2-execution-model.md`](../adr/ADR-0004-project-2-execution-model.md) when you need the durable rationale behind the current model
 - use [`../AGENT-ORCHESTRATION.md`](../AGENT-ORCHESTRATION.md) when you need deeper execution context for the repo/runtime itself
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - branch/PR workflow expectations
 - issue/PR/project-board relationship
 - merge discipline

@@ -33,9 +33,9 @@ Use this doc as the configuration entrypoint for:
 - use [`PROVIDERS.md`](PROVIDERS.md) and [`CHANNELS.md`](CHANNELS.md) when configuration questions are really about model or channel setup
 - use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need deeper runtime semantics behind config behavior
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - config file shape and precedence
 - secrets and env override guidance
 - gateway/auth/runtime configuration pointers

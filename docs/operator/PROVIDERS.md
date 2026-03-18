@@ -30,9 +30,9 @@ Use this doc as the provider entrypoint for:
 - use [`../../rune-plan.md`](../../rune-plan.md) when the question is really about strategic provider direction
 - use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need runtime semantics behind model/provider behavior
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - provider kinds and configuration expectations
 - Azure-specific setup notes
 - model routing/operator mental model

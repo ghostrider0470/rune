@@ -31,9 +31,9 @@ Use this doc as the health/diagnostics entrypoint for:
 - use [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when you need deeper runtime invariants behind a failing behavior
 - use [`OPERATOR-POLICY.md`](OPERATOR-POLICY.md) when the question is operational guardrails rather than runtime failure analysis
 
-## Next depth to add
+## Further detail still missing
 
-This file can still grow into deeper reference for:
+Deeper follow-up documentation is still useful for:
 - health/status endpoint pointers
 - doctor command/navigation
 - common failure-mode triage
