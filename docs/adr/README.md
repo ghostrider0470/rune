@@ -6,6 +6,7 @@ This folder holds durable decisions that should not be rediscovered in chat or b
 
 - [`ADR-0001-execution-workflow-and-speed.md`](ADR-0001-execution-workflow-and-speed.md)
 - [`ADR-0002-standalone-first-product-shape.md`](ADR-0002-standalone-first-product-shape.md)
+- [`ADR-0003-source-of-truth-model.md`](ADR-0003-source-of-truth-model.md)
 
 ## Related execution docs
 

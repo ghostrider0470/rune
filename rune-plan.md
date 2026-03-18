@@ -124,7 +124,7 @@ Deployment direction:
 
 ## High-level delivery map
 
-This summary exists to keep the strategic shape visible. The execution source of truth remains `docs/IMPLEMENTATION-PHASES.md`.
+This summary exists to keep the strategic shape visible. The parity phase-definition source of truth remains `docs/IMPLEMENTATION-PHASES.md`, while live execution state remains in GitHub Project 2.
 
 1. Phase 0: freeze parity inventory, protocols, contracts, and open questions.
 2. Phase 1: stand up the daemon, CLI control plane, health surfaces, and durable stores.
