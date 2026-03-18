@@ -3,9 +3,9 @@
 This folder is the stable technical reference hub for Rune architecture, APIs, CLI shape, and subsystem facts.
 
 Start here:
-- [`../INDEX.md`](../INDEX.md)
-- [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- [`API.md`](API.md)
-- [`CLI.md`](CLI.md)
-- [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md)
-- [`SUBSYSTEMS.md`](SUBSYSTEMS.md)
+- use [`ARCHITECTURE.md`](ARCHITECTURE.md) for runtime shape and subsystem boundary questions
+- use [`API.md`](API.md) for HTTP/dashboard/control-plane contract navigation
+- use [`CLI.md`](CLI.md) for command-surface navigation
+- use [`SUBSYSTEMS.md`](SUBSYSTEMS.md) and [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md) for implementation-structure details
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) if you need deeper runtime behavior semantics
+- use [`../INDEX.md`](../INDEX.md) if you need the wider docs front door
