@@ -98,6 +98,8 @@ That means local-first is the default experience, not a throwaway dev-only mode.
 Start here:
 - [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md)
 - [`docs/AGENT-ORCHESTRATION.md`](docs/AGENT-ORCHESTRATION.md)
+- [`docs/reference/README.md`](docs/reference/README.md)
+- [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md)
 - [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md)
 - [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md)
 
