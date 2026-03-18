@@ -82,16 +82,16 @@ That means local-first is the default experience, not a throwaway dev-only mode.
 
 ## Documentation
 
-- [`docs/INDEX.md`](docs/INDEX.md) — docs front door by audience and concern
-- [`docs/getting-started/README.md`](docs/getting-started/README.md) — local bring-up path
-- [`docs/operator/README.md`](docs/operator/README.md) — operator-facing hub
-- [`docs/contributor/README.md`](docs/contributor/README.md) — contributor-facing hub
-- [`docs/reference/README.md`](docs/reference/README.md) — stable technical reference hub
-- [`docs/parity/README.md`](docs/parity/README.md) — parity contracts and execution sequencing hub
-- [`docs/strategy/README.md`](docs/strategy/README.md) — product rationale and positioning hub
-- [`docs/adr/README.md`](docs/adr/README.md) — durable architecture decision trail
-- [`rune-plan.md`](rune-plan.md) — canonical product strategy and planning summary
-- [`docs/OPENCLAW-COVERAGE-MAP.md`](docs/OPENCLAW-COVERAGE-MAP.md) — OpenClaw-surface parity navigation
+- use [`docs/INDEX.md`](docs/INDEX.md) if you want the docs front door by audience and concern
+- use [`docs/getting-started/README.md`](docs/getting-started/README.md) for local bring-up guidance
+- use [`docs/operator/README.md`](docs/operator/README.md) for operator-facing runtime/deployment/navigation questions
+- use [`docs/contributor/README.md`](docs/contributor/README.md) for contributor workflow and implementation-entry guidance
+- use [`docs/reference/README.md`](docs/reference/README.md) for architecture/API/CLI/subsystem reference navigation
+- use [`docs/parity/README.md`](docs/parity/README.md) for parity contracts, coverage, and sequencing navigation
+- use [`docs/strategy/README.md`](docs/strategy/README.md) for product rationale and positioning
+- use [`docs/adr/README.md`](docs/adr/README.md) for durable architecture decisions
+- use [`rune-plan.md`](rune-plan.md) for the canonical product strategy and planning summary
+- use [`docs/OPENCLAW-COVERAGE-MAP.md`](docs/OPENCLAW-COVERAGE-MAP.md) if you need the OpenClaw-surface parity front door
 
 ## For contributors
 
