@@ -218,6 +218,105 @@ pub enum TranscriptItem {
     },
 }
 
+/// What triggered a turn within a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerKind {
+    UserMessage,
+    CronJob,
+    Heartbeat,
+    SystemWake,
+    SubagentRequest,
+    Reminder,
+}
+
+impl TriggerKind {
+    /// Convert to the canonical snake_case string stored in the database.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::UserMessage => "user_message",
+            Self::CronJob => "cron_job",
+            Self::Heartbeat => "heartbeat",
+            Self::SystemWake => "system_wake",
+            Self::SubagentRequest => "subagent_request",
+            Self::Reminder => "reminder",
+        }
+    }
+}
+
+impl fmt::Display for TriggerKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for TriggerKind {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "user_message" => Ok(Self::UserMessage),
+            "cron_job" => Ok(Self::CronJob),
+            "heartbeat" => Ok(Self::Heartbeat),
+            "system_wake" => Ok(Self::SystemWake),
+            "subagent_request" => Ok(Self::SubagentRequest),
+            "reminder" => Ok(Self::Reminder),
+            other => Err(CoreError::Validation {
+                message: format!("unknown trigger kind: {other}"),
+            }),
+        }
+    }
+}
+
+/// Error returned when a session status transition is invalid.
+#[derive(Debug, Error)]
+#[error("invalid session transition: {from:?} -> {to:?}")]
+pub struct TransitionError {
+    pub from: SessionStatus,
+    pub to: SessionStatus,
+}
+
+impl SessionStatus {
+    /// Check whether transitioning from `self` to `target` is allowed.
+    #[must_use]
+    pub fn can_transition_to(&self, target: &SessionStatus) -> bool {
+        matches!(
+            (self, target),
+            // Bootstrap
+            (Self::Created, Self::Ready)
+            // Ready → Running
+            | (Self::Ready, Self::Running)
+            // Running → terminal or waiting
+            | (Self::Running, Self::WaitingForTool)
+            | (Self::Running, Self::WaitingForApproval)
+            | (Self::Running, Self::WaitingForSubagent)
+            | (Self::Running, Self::Completed)
+            | (Self::Running, Self::Failed)
+            | (Self::Running, Self::Cancelled)
+            // Waiting → back to running
+            | (Self::WaitingForTool, Self::Running)
+            | (Self::WaitingForApproval, Self::Running)
+            | (Self::WaitingForSubagent, Self::Running)
+            // Suspended ↔ any non-terminal
+            | (Self::Suspended, Self::Ready)
+            | (_, Self::Suspended)
+        )
+    }
+
+    /// Attempt the transition, returning the new status or an error.
+    pub fn transition(self, target: SessionStatus) -> Result<SessionStatus, TransitionError> {
+        if self.can_transition_to(&target) {
+            Ok(target)
+        } else {
+            Err(TransitionError {
+                from: self,
+                to: target,
+            })
+        }
+    }
+}
+
 /// Typed core-domain failures that should remain transport-agnostic.
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -414,5 +513,113 @@ mod tests {
         };
 
         assert_eq!(err.to_string(), "invalid identifier for session: bad-id");
+    }
+
+    // ── SessionStatus FSM ──────────────────────────────────────────
+
+    #[test]
+    fn fsm_created_to_ready() {
+        assert!(SessionStatus::Created.can_transition_to(&SessionStatus::Ready));
+        assert!(SessionStatus::Created.transition(SessionStatus::Ready).is_ok());
+    }
+
+    #[test]
+    fn fsm_ready_to_running() {
+        assert!(SessionStatus::Ready.can_transition_to(&SessionStatus::Running));
+    }
+
+    #[test]
+    fn fsm_running_to_waiting_variants() {
+        for target in [
+            SessionStatus::WaitingForTool,
+            SessionStatus::WaitingForApproval,
+            SessionStatus::WaitingForSubagent,
+        ] {
+            assert!(SessionStatus::Running.can_transition_to(&target));
+        }
+    }
+
+    #[test]
+    fn fsm_running_to_terminal() {
+        for target in [
+            SessionStatus::Completed,
+            SessionStatus::Failed,
+            SessionStatus::Cancelled,
+        ] {
+            assert!(SessionStatus::Running.can_transition_to(&target));
+        }
+    }
+
+    #[test]
+    fn fsm_waiting_back_to_running() {
+        for from in [
+            SessionStatus::WaitingForTool,
+            SessionStatus::WaitingForApproval,
+            SessionStatus::WaitingForSubagent,
+        ] {
+            assert!(from.can_transition_to(&SessionStatus::Running));
+        }
+    }
+
+    #[test]
+    fn fsm_any_to_suspended() {
+        for from in [
+            SessionStatus::Created,
+            SessionStatus::Ready,
+            SessionStatus::Running,
+            SessionStatus::WaitingForTool,
+            SessionStatus::WaitingForApproval,
+            SessionStatus::WaitingForSubagent,
+            SessionStatus::Completed,
+            SessionStatus::Failed,
+        ] {
+            assert!(from.can_transition_to(&SessionStatus::Suspended));
+        }
+    }
+
+    #[test]
+    fn fsm_suspended_to_ready() {
+        assert!(SessionStatus::Suspended.can_transition_to(&SessionStatus::Ready));
+    }
+
+    #[test]
+    fn fsm_rejects_invalid_transitions() {
+        assert!(!SessionStatus::Created.can_transition_to(&SessionStatus::Running));
+        assert!(!SessionStatus::Completed.can_transition_to(&SessionStatus::Running));
+        assert!(!SessionStatus::Ready.can_transition_to(&SessionStatus::Completed));
+        assert!(SessionStatus::Created.transition(SessionStatus::Running).is_err());
+    }
+
+    // ── TriggerKind ──────────────────────────────────────────────
+
+    #[test]
+    fn trigger_kind_roundtrips_via_str() {
+        for (s, expected) in [
+            ("user_message", TriggerKind::UserMessage),
+            ("cron_job", TriggerKind::CronJob),
+            ("heartbeat", TriggerKind::Heartbeat),
+            ("system_wake", TriggerKind::SystemWake),
+            ("subagent_request", TriggerKind::SubagentRequest),
+            ("reminder", TriggerKind::Reminder),
+        ] {
+            let parsed: TriggerKind = s.parse().unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.as_str(), s);
+            assert_eq!(parsed.to_string(), s);
+        }
+    }
+
+    #[test]
+    fn trigger_kind_serde_roundtrip() {
+        let kind = TriggerKind::CronJob;
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(json, "\"cron_job\"");
+        let back: TriggerKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, kind);
+    }
+
+    #[test]
+    fn trigger_kind_rejects_unknown() {
+        assert!("unknown_trigger".parse::<TriggerKind>().is_err());
     }
 }
