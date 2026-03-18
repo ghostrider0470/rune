@@ -1,9 +1,10 @@
 # Strategy Docs
 
-This folder is reserved for long-form design rationale and supporting strategy documents during the docs structure cleanup transition.
+This folder holds long-form product/design rationale and supporting strategy material.
 
 Current canonical entrypoints remain:
 - [`../INDEX.md`](../INDEX.md)
 - [`../../rune-plan.md`](../../rune-plan.md)
+- [`STANDALONE-STRATEGY.md`](STANDALONE-STRATEGY.md)
 - [`COMPETITIVE-RESEARCH.md`](COMPETITIVE-RESEARCH.md)
 - [`AZURE-DATA-OPTIONS.md`](AZURE-DATA-OPTIONS.md)

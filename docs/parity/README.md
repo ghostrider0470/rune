@@ -1,6 +1,6 @@
 # Parity Docs
 
-This folder is reserved for parity-oriented reference material during the docs structure cleanup transition.
+This folder holds the parity-oriented contract, inventory, and sequencing material for Rune.
 
 Current canonical entrypoints remain:
 - [`../INDEX.md`](../INDEX.md)
@@ -9,3 +9,4 @@ Current canonical entrypoints remain:
 - [`PARITY-SPEC.md`](PARITY-SPEC.md)
 - [`PARITY-CONTRACTS.md`](PARITY-CONTRACTS.md)
 - [`PROTOCOLS.md`](PROTOCOLS.md)
+- [`../IMPLEMENTATION-PHASES.md`](../IMPLEMENTATION-PHASES.md)
