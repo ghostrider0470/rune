@@ -7,6 +7,7 @@ This folder holds durable decisions that should not be rediscovered in chat or b
 - [`ADR-0001-execution-workflow-and-speed.md`](ADR-0001-execution-workflow-and-speed.md)
 - [`ADR-0002-standalone-first-product-shape.md`](ADR-0002-standalone-first-product-shape.md)
 - [`ADR-0003-source-of-truth-model.md`](ADR-0003-source-of-truth-model.md)
+- [`ADR-0004-project-2-execution-model.md`](ADR-0004-project-2-execution-model.md)
 
 ## Related execution docs
 
@@ -14,7 +15,6 @@ This folder holds durable decisions that should not be rediscovered in chat or b
 
 ## Planned next ADRs
 
-- source-of-truth model
 - multi-database storage architecture
 - Project 2 execution model
 
