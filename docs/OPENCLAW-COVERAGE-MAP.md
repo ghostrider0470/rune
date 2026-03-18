@@ -34,7 +34,7 @@
 | Media / browser / OCR / TTS / STT | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) | adjacent parity surfaces and phase placement |
 | Config / secrets / precedence | [`PROTOCOLS.md`](parity/PROTOCOLS.md), [`PARITY-CONTRACTS.md`](parity/PARITY-CONTRACTS.md), operator docs | runtime config behavior and operator-facing expectations |
 | Deployment / Docker / persistence | [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md), [`operator/DATABASES.md`](operator/DATABASES.md), [`PARITY-SPEC.md`](parity/PARITY-SPEC.md) | persistent storage model and deployment contract |
-| Admin UI / operator visibility | [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md), relevant feature issues/PRs | visibility, diagnostics, and UI-facing evidence |
+| Admin UI / operator visibility | [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md), [`operator/README.md`](operator/README.md), [`reference/ARCHITECTURE.md`](reference/ARCHITECTURE.md) | visibility, diagnostics, and UI-facing evidence |
 
 ## How to use this file
 
