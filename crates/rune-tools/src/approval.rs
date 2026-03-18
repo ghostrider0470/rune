@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rune_store::repos::ToolApprovalPolicyRepo;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
@@ -134,6 +135,8 @@ pub struct PolicyBasedApproval {
     approved_tools: Arc<Mutex<HashSet<String>>>,
     /// Exact-call approvals keyed by canonicalized payload.
     approved_once: Arc<Mutex<HashMap<String, u32>>>,
+    /// Optional durable policy store for persisted allow-always decisions.
+    policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
 }
 
 impl PolicyBasedApproval {
@@ -143,12 +146,19 @@ impl PolicyBasedApproval {
             always_allow,
             approved_tools: Arc::new(Mutex::new(HashSet::new())),
             approved_once: Arc::new(Mutex::new(HashMap::new())),
+            policy_repo: None,
         }
     }
 
     /// Create with all tools allowed (elevated mode).
     pub fn elevated() -> Self {
         Self::new(HashSet::new())
+    }
+
+    /// Attach a durable policy store for persisted allow-always enforcement.
+    pub fn with_policy_repo(mut self, repo: Arc<dyn ToolApprovalPolicyRepo>) -> Self {
+        self.policy_repo = Some(repo);
+        self
     }
 
     /// Record that a tool has been approved for all future calls.
@@ -165,10 +175,28 @@ impl PolicyBasedApproval {
         *approved_once.entry(request.exact_call_key()).or_insert(0) += 1;
     }
 
-    /// Check if a tool has been globally approved.
+    /// Check if a tool has been globally approved (in-memory or durable store).
     pub async fn is_tool_approved(&self, tool_name: &str) -> bool {
-        self.always_allow.contains(tool_name)
-            || self.approved_tools.lock().await.contains(tool_name)
+        if self.always_allow.contains(tool_name) {
+            return true;
+        }
+        if self.approved_tools.lock().await.contains(tool_name) {
+            return true;
+        }
+        // Check the durable policy store for a persisted allow-always decision.
+        if let Some(ref repo) = self.policy_repo {
+            if let Ok(Some(policy)) = repo.get_policy(tool_name).await {
+                if policy.decision == "allow_always" {
+                    // Cache in-memory so subsequent checks skip the store.
+                    self.approved_tools
+                        .lock()
+                        .await
+                        .insert(tool_name.to_string());
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     async fn consume_once_if_present(&self, request: &ApprovalRequest) -> bool {
