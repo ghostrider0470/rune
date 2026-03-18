@@ -657,19 +657,14 @@ pub struct JobUpdate {
 // ── Reminders ─────────────────────────────────────────────────────────────────
 
 /// Reminder lifecycle outcome.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReminderStatus {
+    #[default]
     Pending,
     Delivered,
     Cancelled,
     Missed,
-}
-
-impl Default for ReminderStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 impl ReminderStatus {
@@ -1128,12 +1123,10 @@ fn row_to_reminder(row: rune_store::models::JobRow) -> Result<Reminder, StoreErr
         .map_err(|error| StoreError::Serialization(error.to_string()))?;
     reminder.id = JobId::from(row.id);
     reminder.fire_at = row.due_at.unwrap_or(reminder.fire_at);
-    if matches!(reminder.status, ReminderStatus::Pending) {
-        if reminder.delivered || reminder.delivered_at.is_some() {
-            reminder.status = ReminderStatus::Delivered;
-        } else if !row.enabled {
-            reminder.status = ReminderStatus::Delivered;
-        }
+    if matches!(reminder.status, ReminderStatus::Pending)
+        && (reminder.delivered || reminder.delivered_at.is_some() || !row.enabled)
+    {
+        reminder.status = ReminderStatus::Delivered;
     }
     reminder.delivered = matches!(reminder.status, ReminderStatus::Delivered);
     if reminder.delivered && reminder.delivered_at.is_none() {
