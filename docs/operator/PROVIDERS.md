@@ -18,9 +18,15 @@ Use these docs for the current contract picture:
 - [`../INDEX.md`](../INDEX.md)
 - [`../../rune-plan.md`](../../rune-plan.md)
 
-## What belongs here over time
+## Current operator use
 
-This file should become the stable operator entry for:
+Use this doc as the provider entrypoint for:
+- where provider setup and Azure-oriented expectations live
+- how to navigate from high-level provider questions into the deeper compatibility/runtime docs
+
+## Coverage still expected later
+
+This file can still grow into deeper reference for:
 - provider kinds and configuration expectations
 - Azure-specific setup notes
 - model routing/operator mental model
