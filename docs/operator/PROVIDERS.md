@@ -24,7 +24,7 @@ Use this doc as the provider entrypoint for:
 - where provider setup and Azure-oriented expectations live
 - how to navigate from high-level provider questions into the deeper compatibility/runtime docs
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - provider kinds and configuration expectations

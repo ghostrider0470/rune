@@ -25,7 +25,7 @@ Use this doc as the health/diagnostics entrypoint for:
 - where health/status expectations live now
 - how to navigate to deployment, database, and parity contract troubleshooting references
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - health/status endpoint pointers

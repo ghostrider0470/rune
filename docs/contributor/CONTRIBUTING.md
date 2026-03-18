@@ -27,7 +27,7 @@ Use this doc as the contributor entrypoint for:
 - understanding how docs, issues, PRs, and ADRs relate today
 - navigating to the right development, testing, and workflow references first
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - contribution expectations

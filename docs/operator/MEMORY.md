@@ -34,7 +34,7 @@ Use this doc as the memory entrypoint for:
 - understanding the current file-oriented memory model
 - locating the privacy-boundary and retrieval-surface references that already exist
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - memory storage conventions

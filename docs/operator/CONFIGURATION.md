@@ -27,7 +27,7 @@ Use this doc as the configuration entrypoint for:
 - which deeper docs cover deployment/storage/runtime config semantics
 - how config relates to provider, channel, and auth behavior
 
-## Coverage still expected later
+## Next depth to add
 
 This file can still grow into deeper reference for:
 - config file shape and precedence
