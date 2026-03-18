@@ -30,6 +30,12 @@ Use this doc as the testing entrypoint for:
 - understanding the current validation posture
 - navigating from general testing questions into parity and development references
 
+## Read next
+
+- use [`DEVELOPMENT.md`](DEVELOPMENT.md) when the testing question is really about local build/run setup
+- use [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) and [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when the test question is really about runtime invariants
+- use [`EXECUTION-SPEED-POLICY.md`](EXECUTION-SPEED-POLICY.md) when you need focused-vs-broad validation expectations during active work
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

@@ -17,6 +17,12 @@ Use this doc as the CLI entrypoint for:
 - understanding where current command-family coverage lives
 - navigating from CLI questions into parity inventory and protocol references
 
+## Read next
+
+- use [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) when you need the full command/surface census
+- use [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) when you need broader docs navigation by OpenClaw surface
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need the runtime/state model behind a CLI behavior
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

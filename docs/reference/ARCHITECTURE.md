@@ -57,6 +57,12 @@ Use this doc as the architecture entrypoint for:
 - understanding Rune's current runtime shape and subsystem boundaries
 - navigating from high-level architecture questions into deeper protocol, crate-layout, and subsystem references
 
+## Read next
+
+- use [`CRATE-LAYOUT.md`](CRATE-LAYOUT.md) and [`SUBSYSTEMS.md`](SUBSYSTEMS.md) when you need implementation-structure detail
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) and [`../parity/PARITY-CONTRACTS.md`](../parity/PARITY-CONTRACTS.md) when the question is really about runtime semantics and invariants
+- use [`../INDEX.md`](../INDEX.md) when you need to jump back out to the wider docs front door
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:

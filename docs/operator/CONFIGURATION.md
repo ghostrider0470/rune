@@ -27,6 +27,12 @@ Use this doc as the configuration entrypoint for:
 - which deeper docs cover deployment/storage/runtime config semantics
 - how config relates to provider, channel, and auth behavior
 
+## Read next
+
+- use [`DEPLOYMENT.md`](DEPLOYMENT.md) and [`DATABASES.md`](DATABASES.md) when configuration questions are really about runtime/storage layout
+- use [`PROVIDERS.md`](PROVIDERS.md) and [`CHANNELS.md`](CHANNELS.md) when configuration questions are really about model or channel setup
+- use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) when you need deeper runtime semantics behind config behavior
+
 ## Next depth to add
 
 This file can still grow into deeper reference for:
