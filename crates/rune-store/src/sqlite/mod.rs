@@ -1190,6 +1190,110 @@ impl ProcessHandleRepo for SqliteProcessHandleRepo {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// SqliteProcessHandleRepo
+// ══════════════════════════════════════════════════════════════════════
+
+#[derive(Clone)]
+pub struct SqliteProcessHandleRepo {
+    conn: Arc<tokio_rusqlite::Connection>,
+}
+
+impl SqliteProcessHandleRepo {
+    pub fn new(conn: Arc<tokio_rusqlite::Connection>) -> Self {
+        Self { conn }
+    }
+}
+
+#[async_trait]
+impl ProcessHandleRepo for SqliteProcessHandleRepo {
+    async fn create(&self, h: NewProcessHandle) -> Result<ProcessHandleRow, StoreError> {
+        self.conn.call(move |conn| {
+            conn.execute(
+                &format!("INSERT INTO process_handles ({PROCESS_HANDLE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+                rusqlite::params![
+                    h.process_id.to_string(), h.tool_call_id.to_string(),
+                    h.session_id.to_string(), h.command, h.cwd,
+                    h.status, Option::<i32>::None,
+                    to_rfc3339(&h.started_at), Option::<String>::None,
+                ],
+            )?;
+            conn.prepare(&format!("SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"))?
+                .query_row([h.process_id.to_string()], row_to_process_handle)
+        }).await.map_err(StoreError::from)
+    }
+
+    async fn find_by_id(&self, process_id: Uuid) -> Result<ProcessHandleRow, StoreError> {
+        let id_s = process_id.to_string();
+        self.conn
+            .call(move |conn| {
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"
+                ))?
+                .query_row([&id_s], row_to_process_handle)
+            })
+            .await
+            .map_err(|e| map_err(e, "process_handle", &process_id.to_string()))
+    }
+
+    async fn update_status(
+        &self,
+        process_id: Uuid,
+        status: &str,
+        exit_code: Option<i32>,
+        ended_at: Option<DateTime<Utc>>,
+    ) -> Result<ProcessHandleRow, StoreError> {
+        let id_s = process_id.to_string();
+        let status = status.to_string();
+        let ended_at_s = ended_at.map(|dt| to_rfc3339(&dt));
+        self.conn
+            .call(move |conn| {
+                require_affected(conn.execute(
+                    "UPDATE process_handles SET status=?1, exit_code=?2, ended_at=?3 WHERE process_id=?4",
+                    rusqlite::params![status, exit_code, ended_at_s, &id_s],
+                )?)?;
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"
+                ))?
+                .query_row([&id_s], row_to_process_handle)
+            })
+            .await
+            .map_err(|e| map_err(e, "process_handle", &process_id.to_string()))
+    }
+
+    async fn list_by_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        let sid = session_id.to_string();
+        self.conn
+            .call(move |conn| {
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE session_id = ?1 ORDER BY started_at DESC"
+                ))?
+                .query_map([&sid], row_to_process_handle)?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        self.conn
+            .call(move |conn| {
+                conn.prepare(
+                    "SELECT process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at \
+                     FROM process_handles WHERE status IN ('running', 'backgrounded') ORDER BY started_at DESC"
+                )?
+                .query_map([], row_to_process_handle)?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
 // SqliteMemoryEmbeddingRepo
 // ══════════════════════════════════════════════════════════════════════
 

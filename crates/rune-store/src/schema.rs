@@ -16,6 +16,7 @@ table! {
         workspace_root -> Nullable<Text>,
         channel_ref -> Nullable<Text>,
         requester_session_id -> Nullable<Uuid>,
+        latest_turn_id -> Nullable<Uuid>,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -96,6 +97,23 @@ table! {
         error_summary -> Nullable<Text>,
         started_at -> Timestamptz,
         ended_at -> Nullable<Timestamptz>,
+        approval_id -> Nullable<Uuid>,
+        execution_mode -> Nullable<Text>,
+    }
+}
+
+table! {
+    /// Durable background process metadata.
+    process_handles (process_id) {
+        process_id -> Uuid,
+        tool_call_id -> Uuid,
+        session_id -> Uuid,
+        command -> Text,
+        cwd -> Text,
+        status -> Text,
+        exit_code -> Nullable<Int4>,
+        started_at -> Timestamptz,
+        ended_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -171,6 +189,7 @@ diesel::joinable!(turns -> sessions (session_id));
 diesel::joinable!(transcript_items -> sessions (session_id));
 diesel::joinable!(tool_executions -> sessions (session_id));
 diesel::joinable!(job_runs -> jobs (job_id));
+diesel::joinable!(process_handles -> sessions (session_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     sessions,
@@ -184,4 +203,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     paired_devices,
     pairing_requests,
     memory_embeddings,
+    process_handles,
 );
