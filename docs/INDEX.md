@@ -42,17 +42,19 @@ Docs remain authoritative at their current locations until content is intentiona
 4. [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md)
 
 ### If you are operating Rune
-1. [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md)
-2. [`operator/DATABASES.md`](operator/DATABASES.md)
-3. [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md)
-4. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) for parity-phase context
+1. [`operator/README.md`](operator/README.md)
+2. [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md)
+3. [`operator/DATABASES.md`](operator/DATABASES.md)
+4. [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md)
+5. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) for parity-phase context
 
 ### If you are building Rune
-1. [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md)
-2. [`rune-plan.md`](../rune-plan.md)
-3. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md)
-4. [`PROTOCOLS.md`](parity/PROTOCOLS.md)
-5. [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md)
+1. [`contributor/README.md`](contributor/README.md)
+2. [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md)
+3. [`rune-plan.md`](../rune-plan.md)
+4. [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md)
+5. [`PROTOCOLS.md`](parity/PROTOCOLS.md)
+6. [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md)
 
 ## Transitional note
 
