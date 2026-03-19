@@ -92,6 +92,7 @@ mod tests {
         assert!(!ModelError::ContextLengthExceeded("too long".into()).is_retriable());
         assert!(!ModelError::ContentFiltered("blocked".into()).is_retriable());
         assert!(!ModelError::DeploymentNotFound("404".into()).is_retriable());
+        assert!(!ModelError::UnsupportedApiVersion("bad version".into()).is_retriable());
         assert!(!ModelError::Provider("unknown".into()).is_retriable());
     }
 }

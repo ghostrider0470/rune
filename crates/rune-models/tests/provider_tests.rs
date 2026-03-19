@@ -222,6 +222,71 @@ async fn maps_context_length_error() {
     assert!(matches!(err, ModelError::ContextLengthExceeded(_)));
 }
 
+// --- Azure-specific error mapping ---
+
+#[tokio::test]
+async fn maps_azure_unsupported_api_version_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": {
+                "code": "InvalidApiVersionIdentifier",
+                "message": "The api-version '9999-01-01' is invalid."
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "dep", "9999-01-01", "k");
+    let err = p.complete(&simple_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::UnsupportedApiVersion(_)),
+        "expected UnsupportedApiVersion, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn maps_azure_unsupported_api_version_from_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": {
+                "code": "BadRequest",
+                "message": "The API version '0000-01-01' is not supported by this resource."
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "dep", "0000-01-01", "k");
+    let err = p.complete(&simple_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::UnsupportedApiVersion(_)),
+        "expected UnsupportedApiVersion, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn maps_azure_deployment_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "error": {
+                "code": "DeploymentNotFound",
+                "message": "The API deployment for this resource does not exist."
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "bad-dep", "2024-06-01", "k");
+    let err = p.complete(&simple_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::DeploymentNotFound(_)),
+        "expected DeploymentNotFound, got {err:?}"
+    );
+}
+
 // --- Tool calls in response ---
 
 #[tokio::test]
