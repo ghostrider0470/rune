@@ -1,7 +1,7 @@
 #![doc = "Layered application configuration for Rune."]
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use figment::{
     Figment,
@@ -88,6 +88,11 @@ impl AppConfig {
     ///
     /// Per DOCKER-DEPLOYMENT.md §9.1 the runtime must fail fast on
     /// missing or unwritable parity-critical paths.
+    ///
+    /// Writability is verified via an actual write probe (create + delete a
+    /// temporary file) rather than `Permissions::readonly()`, which only
+    /// inspects the owner write bit and misses bind-mount, UID-mismatch,
+    /// and filesystem-level read-only scenarios.
     pub fn validate_paths(&self) -> Result<(), Vec<ConfigError>> {
         let required = [
             ("db_dir", &self.paths.db_dir),
@@ -103,14 +108,10 @@ impl AppConfig {
                     path: path.display().to_string(),
                     reason: format!("{name} does not exist"),
                 });
-            } else if path
-                .metadata()
-                .map(|m| m.permissions().readonly())
-                .unwrap_or(true)
-            {
+            } else if !probe_dir_writable(path) {
                 errors.push(ConfigError::PathValidation {
                     path: path.display().to_string(),
-                    reason: format!("{name} is not writable"),
+                    reason: format!("{name} is not writable (write probe failed)"),
                 });
             }
         }
@@ -151,6 +152,23 @@ fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+}
+
+/// Attempt to create and remove a probe file to verify actual writability.
+///
+/// Returns `true` when the directory is writable from the perspective of
+/// the current process.  Compared to checking `Permissions::readonly()`,
+/// this catches bind-mount read-only, UID-mismatch, SELinux/AppArmor
+/// denials, and filesystem-level read-only mounts.
+fn probe_dir_writable(dir: &Path) -> bool {
+    let probe = dir.join(".rune_write_probe");
+    match std::fs::write(&probe, b"probe") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// Consolidated runtime capabilities detected from config and environment.
@@ -1137,6 +1155,31 @@ semantic_search_enabled = true
         config.paths.media_dir = tmp.clone();
         config.paths.logs_dir = tmp;
         assert!(config.validate_paths().is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_paths_detects_unwritable_dir_via_probe() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ro = tmp.path().join("readonly");
+        std::fs::create_dir(&ro).unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Guard: skip if running as root (root bypasses permission checks).
+        let actually_readonly = std::fs::write(ro.join(".test_guard"), b"x").is_err();
+        if actually_readonly {
+            let mut config = AppConfig::default();
+            config.paths.db_dir = ro.clone();
+            config.paths.sessions_dir = std::env::temp_dir();
+            config.paths.memory_dir = std::env::temp_dir();
+            config.paths.media_dir = std::env::temp_dir();
+            config.paths.logs_dir = std::env::temp_dir();
+            let errors = config.validate_paths().unwrap_err();
+            assert!(errors[0].to_string().contains("write probe failed"));
+        }
+
+        let _ = std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755));
     }
 
     #[test]

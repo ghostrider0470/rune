@@ -14,7 +14,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rune_config::AppConfig;
+use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
 
 /// Result of a single diagnostic check.
@@ -99,6 +99,7 @@ fn config_load_result(config: &Result<AppConfig, String>, path: Option<&Path>) -
 }
 
 async fn check_paths(config: &AppConfig) -> Vec<CheckResult> {
+    let resolved_mode = config.mode.resolve(config);
     let mut results = Vec::new();
 
     for (name, path, required_persistent) in [
@@ -112,14 +113,19 @@ async fn check_paths(config: &AppConfig) -> Vec<CheckResult> {
         ("paths.config_dir", &config.paths.config_dir, true),
         ("paths.secrets_dir", &config.paths.secrets_dir, true),
     ] {
-        results.push(check_single_path(name, path, required_persistent));
+        results.push(check_single_path(name, path, required_persistent, &resolved_mode));
     }
 
     results.push(check_docker_path_layout(config));
     results
 }
 
-fn check_single_path(name: &str, path: &Path, required_persistent: bool) -> CheckResult {
+fn check_single_path(
+    name: &str,
+    path: &Path,
+    required_persistent: bool,
+    mode: &RuntimeMode,
+) -> CheckResult {
     let category = "paths".to_string();
 
     if !path.exists() {
@@ -132,7 +138,18 @@ fn check_single_path(name: &str, path: &Path, required_persistent: bool) -> Chec
                 CheckStatus::Skip
             },
             message: format!("{} is missing", path.display()),
-            hint: Some("Create/mount this path before production use".into()),
+            hint: Some(match mode {
+                RuntimeMode::Standalone => {
+                    format!("Run: mkdir -p {}", path.display())
+                }
+                _ => {
+                    format!(
+                        "Mount a writable volume at {} (e.g. -v /host/path:{})",
+                        path.display(),
+                        path.display()
+                    )
+                }
+            }),
         };
     }
 
@@ -142,24 +159,31 @@ fn check_single_path(name: &str, path: &Path, required_persistent: bool) -> Chec
             category,
             status: CheckStatus::Fail,
             message: format!("{} exists but is not a directory", path.display()),
-            hint: Some("Replace it with a writable directory".into()),
+            hint: Some(format!(
+                "Remove the non-directory entry and recreate: rm {} && mkdir -p {}",
+                path.display(),
+                path.display()
+            )),
         };
     }
 
-    let readonly = path
-        .metadata()
-        .map(|m| m.permissions().readonly())
-        .unwrap_or(true);
-
-    if readonly {
+    if !probe_writable(path) {
         return CheckResult {
             name: name.into(),
             category,
-            status: CheckStatus::Warn,
-            message: format!("{} is present but appears read-only", path.display()),
-            hint: Some(
-                "Doctor expects writable persistent mounts for parity-critical paths".into(),
-            ),
+            status: CheckStatus::Fail,
+            message: format!("{} is not writable (write probe failed)", path.display()),
+            hint: Some(match mode {
+                RuntimeMode::Standalone => {
+                    format!("Fix permissions: chmod u+w {}", path.display())
+                }
+                _ => {
+                    format!(
+                        "Ensure the volume at {} is writable; check mount flags and container user UID",
+                        path.display()
+                    )
+                }
+            }),
         };
     }
 
@@ -169,6 +193,22 @@ fn check_single_path(name: &str, path: &Path, required_persistent: bool) -> Chec
         status: CheckStatus::Pass,
         message: format!("{} is present and writable", path.display()),
         hint: None,
+    }
+}
+
+/// Attempt to write and remove a probe file to verify actual writability.
+///
+/// `std::fs::Permissions::readonly()` only checks the owner write bit on Unix,
+/// which is unreliable for bind-mounts, different-user ownership, and
+/// filesystem-level read-only mounts.  A write probe catches all of these.
+fn probe_writable(dir: &Path) -> bool {
+    let probe = dir.join(".rune_doctor_probe");
+    match std::fs::write(&probe, b"probe") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
     }
 }
 
@@ -1117,5 +1157,134 @@ mod tests {
         assert!(out.contains("1 passed"));
         assert!(out.contains("1 failed"));
         assert!(out.contains("fix it"));
+    }
+
+    // ── Write-probe and mode-aware hint tests ────────────────────────────
+
+    #[test]
+    fn probe_writable_passes_for_writable_dir() {
+        let tmp = TempDir::new().unwrap();
+        assert!(probe_writable(tmp.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_writable_detects_readonly_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let ro = tmp.path().join("readonly");
+        std::fs::create_dir(&ro).unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // If the current process can still write (e.g. running as root),
+        // the probe correctly returns true — skip the assertion.
+        let actually_readonly = std::fs::write(ro.join(".test_guard"), b"x").is_err();
+        if actually_readonly {
+            assert!(!probe_writable(&ro), "probe should fail on read-only dir");
+        }
+
+        // Restore permissions for cleanup.
+        let _ = std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755));
+    }
+
+    #[test]
+    fn missing_path_hint_standalone_suggests_mkdir() {
+        let nonexistent = PathBuf::from("/tmp/rune-test-nonexistent-path-xyz");
+        let result = check_single_path(
+            "paths.db_dir",
+            &nonexistent,
+            true,
+            &rune_config::RuntimeMode::Standalone,
+        );
+        assert_eq!(result.status, CheckStatus::Warn);
+        let hint = result.hint.unwrap();
+        assert!(
+            hint.contains("mkdir -p"),
+            "standalone hint should suggest mkdir, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn missing_path_hint_server_suggests_volume_mount() {
+        let nonexistent = PathBuf::from("/data/db");
+        let result = check_single_path(
+            "paths.db_dir",
+            &nonexistent,
+            true,
+            &rune_config::RuntimeMode::Server,
+        );
+        assert_eq!(result.status, CheckStatus::Warn);
+        let hint = result.hint.unwrap();
+        assert!(
+            hint.contains("-v") && hint.contains("volume"),
+            "server hint should suggest volume mount, got: {hint}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unwritable_path_returns_fail_with_mode_hint() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let ro = tmp.path().join("readonly");
+        std::fs::create_dir(&ro).unwrap();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let actually_readonly = std::fs::write(ro.join(".test_guard"), b"x").is_err();
+        if actually_readonly {
+            // Standalone mode — hint should suggest chmod.
+            let standalone = check_single_path(
+                "paths.db_dir",
+                &ro,
+                true,
+                &rune_config::RuntimeMode::Standalone,
+            );
+            assert_eq!(standalone.status, CheckStatus::Fail);
+            assert!(standalone.message.contains("write probe failed"));
+            let hint = standalone.hint.unwrap();
+            assert!(
+                hint.contains("chmod"),
+                "standalone unwritable hint should suggest chmod, got: {hint}"
+            );
+
+            // Server mode — hint should reference mount flags / UID.
+            let server = check_single_path(
+                "paths.db_dir",
+                &ro,
+                true,
+                &rune_config::RuntimeMode::Server,
+            );
+            assert_eq!(server.status, CheckStatus::Fail);
+            let hint = server.hint.unwrap();
+            assert!(
+                hint.contains("mount flags") || hint.contains("UID"),
+                "server unwritable hint should reference mount/UID, got: {hint}"
+            );
+        }
+
+        let _ = std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755));
+    }
+
+    #[test]
+    fn not_a_directory_gives_rm_and_mkdir_hint() {
+        let tmp = TempDir::new().unwrap();
+        let file_path = tmp.path().join("not_a_dir");
+        std::fs::write(&file_path, b"oops").unwrap();
+
+        let result = check_single_path(
+            "paths.db_dir",
+            &file_path,
+            true,
+            &rune_config::RuntimeMode::Standalone,
+        );
+        assert_eq!(result.status, CheckStatus::Fail);
+        assert!(result.message.contains("not a directory"));
+        let hint = result.hint.unwrap();
+        assert!(
+            hint.contains("mkdir -p"),
+            "not-a-dir hint should suggest mkdir, got: {hint}"
+        );
     }
 }

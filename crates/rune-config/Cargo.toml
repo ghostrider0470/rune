@@ -16,3 +16,4 @@ figment = { version = "0.10", features = ["env", "toml"] }
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile.workspace = true
