@@ -113,6 +113,11 @@ pub enum Command {
         #[command(subcommand)]
         action: RemindersAction,
     },
+    /// Send and manage messages across channel adapters.
+    Message {
+        #[command(subcommand)]
+        action: MessageAction,
+    },
     /// Generate shell completion scripts.
     Completion {
         #[command(subcommand)]
@@ -459,6 +464,25 @@ pub enum RemindersAction {
     Cancel {
         /// Reminder ID to cancel.
         id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MessageAction {
+    /// Send a message through a channel adapter.
+    Send {
+        /// Target channel adapter (e.g. "telegram", "discord", "slack").
+        #[arg(long)]
+        channel: String,
+        /// Message body text.
+        #[arg(long)]
+        text: String,
+        /// Optional session ID to associate the message with.
+        #[arg(long)]
+        session: Option<String>,
+        /// Optional thread/reply-to ID for threaded messaging.
+        #[arg(long)]
+        thread: Option<String>,
     },
 }
 
@@ -1877,5 +1901,87 @@ mod tests {
         // clap global flags can appear before or after the subcommand.
         let cli = Cli::try_parse_from(["rune", "gateway", "status", "--yolo"]).unwrap();
         assert!(cli.yolo);
+    }
+
+    // ── Message family (#74) ─────────────────────────────────────────
+
+    #[test]
+    fn parse_message_send() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "send",
+            "--channel",
+            "telegram",
+            "--text",
+            "Hello from Rune",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Send {
+                        channel,
+                        text,
+                        session,
+                        thread,
+                    },
+            } => {
+                assert_eq!(channel, "telegram");
+                assert_eq!(text, "Hello from Rune");
+                assert!(session.is_none());
+                assert!(thread.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_send_with_session_and_thread() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "send",
+            "--channel",
+            "discord",
+            "--text",
+            "threaded reply",
+            "--session",
+            "sess-42",
+            "--thread",
+            "thread-99",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Send {
+                        channel,
+                        text,
+                        session,
+                        thread,
+                    },
+            } => {
+                assert_eq!(channel, "discord");
+                assert_eq!(text, "threaded reply");
+                assert_eq!(session.as_deref(), Some("sess-42"));
+                assert_eq!(thread.as_deref(), Some("thread-99"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_send_requires_channel_and_text() {
+        // Missing --text
+        assert!(
+            Cli::try_parse_from(["rune", "message", "send", "--channel", "telegram"]).is_err()
+        );
+        // Missing --channel
+        assert!(
+            Cli::try_parse_from(["rune", "message", "send", "--text", "hello"]).is_err()
+        );
+        // Missing both
+        assert!(Cli::try_parse_from(["rune", "message", "send"]).is_err());
     }
 }
