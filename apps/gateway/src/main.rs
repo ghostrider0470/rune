@@ -2011,7 +2011,11 @@ async fn build_model_provider(
             if let Some(ref model) = auto_model {
                 info!(model = %model, "auto-selected default Ollama model");
             } else {
-                warn!("Ollama is running but no models are pulled — run `ollama pull <model>` to get started");
+                // Surface prominent, actionable guidance so zero-config
+                // users know exactly what to do next (issue #61).
+                let guidance = provider.empty_model_guidance();
+                warn!("Ollama is running but has no models pulled");
+                eprintln!("{guidance}");
             }
 
             (Arc::new(provider), auto_model)
