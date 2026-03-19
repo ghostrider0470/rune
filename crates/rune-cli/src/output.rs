@@ -1822,6 +1822,32 @@ impl fmt::Display for MessageBroadcastResponse {
     }
 }
 
+/// Response for `message react`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageReactResponse {
+    pub success: bool,
+    pub message_id: String,
+    pub emoji: String,
+    pub removed: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageReactResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        let verb = if self.removed { "removed" } else { "added" };
+        write!(
+            f,
+            "{icon} {verb} {} on message {}",
+            self.emoji, self.message_id,
+        )?;
+        if !self.detail.is_empty() {
+            write!(f, ": {}", self.detail)?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -2878,5 +2904,84 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("1/1 channel succeeded"));
         assert!(!out.contains("channels"));
+    }
+
+    #[test]
+    fn render_message_react_add_success() {
+        let r = MessageReactResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            emoji: "👍".into(),
+            removed: false,
+            detail: "Reaction added".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("added"));
+        assert!(out.contains("👍"));
+        assert!(out.contains("msg-42"));
+    }
+
+    #[test]
+    fn render_message_react_remove_success() {
+        let r = MessageReactResponse {
+            success: true,
+            message_id: "msg-99".into(),
+            emoji: "heart".into(),
+            removed: true,
+            detail: "Reaction removed".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("removed"));
+        assert!(out.contains("heart"));
+        assert!(out.contains("msg-99"));
+    }
+
+    #[test]
+    fn render_message_react_failure() {
+        let r = MessageReactResponse {
+            success: false,
+            message_id: "msg-1".into(),
+            emoji: "👎".into(),
+            removed: false,
+            detail: "Gateway returned HTTP 404: Message not found".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✗"));
+        assert!(out.contains("added"));
+        assert!(out.contains("404"));
+    }
+
+    #[test]
+    fn render_message_react_json() {
+        let r = MessageReactResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            emoji: "👍".into(),
+            removed: false,
+            detail: "Reaction added".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["success"].as_bool().unwrap());
+        assert_eq!(v["message_id"], "msg-42");
+        assert_eq!(v["emoji"], "👍");
+        assert!(!v["removed"].as_bool().unwrap());
+        assert_eq!(v["detail"], "Reaction added");
+    }
+
+    #[test]
+    fn render_message_react_empty_detail() {
+        let r = MessageReactResponse {
+            success: true,
+            message_id: "msg-1".into(),
+            emoji: "fire".into(),
+            removed: false,
+            detail: String::new(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓ added fire on message msg-1"));
+        assert!(!out.contains(":"));
     }
 }

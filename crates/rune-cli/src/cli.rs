@@ -510,6 +510,24 @@ pub enum MessageAction {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Add or remove an emoji reaction on a message.
+    React {
+        /// ID of the message to react to.
+        #[arg(long)]
+        message_id: String,
+        /// Emoji to add (e.g. "👍", ":thumbsup:", "heart").
+        #[arg(long)]
+        emoji: String,
+        /// Remove the reaction instead of adding it.
+        #[arg(long)]
+        remove: bool,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2159,5 +2177,97 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_message_react() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "react",
+            "--message-id",
+            "msg-42",
+            "--emoji",
+            "👍",
+            "--channel",
+            "telegram",
+            "--session",
+            "sess-7",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::React {
+                        message_id,
+                        emoji,
+                        remove,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-42");
+                assert_eq!(emoji, "👍");
+                assert!(!remove);
+                assert_eq!(channel.as_deref(), Some("telegram"));
+                assert_eq!(session.as_deref(), Some("sess-7"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_react_remove() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "react",
+            "--message-id",
+            "msg-99",
+            "--emoji",
+            "heart",
+            "--remove",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::React {
+                        message_id,
+                        emoji,
+                        remove,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-99");
+                assert_eq!(emoji, "heart");
+                assert!(remove);
+                assert!(channel.is_none());
+                assert!(session.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_react_requires_message_id_and_emoji() {
+        assert!(Cli::try_parse_from(["rune", "message", "react"]).is_err());
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "react",
+            "--message-id",
+            "msg-1",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "react",
+            "--emoji",
+            "👍",
+        ])
+        .is_err());
     }
 }

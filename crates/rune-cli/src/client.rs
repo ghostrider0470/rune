@@ -1009,6 +1009,72 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /messages/react`
+    pub async fn message_react(
+        &self,
+        message_id: &str,
+        emoji: &str,
+        remove: bool,
+        channel: Option<&str>,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageReactResponse> {
+        use crate::output::MessageReactResponse;
+
+        let mut body = json!({
+            "message_id": message_id,
+            "emoji": emoji,
+        });
+        if remove {
+            body["remove"] = json!(true);
+        }
+        if let Some(ch) = channel {
+            body["channel"] = json!(ch);
+        }
+        if let Some(s) = session {
+            body["session"] = json!(s);
+        }
+        let resp = self
+            .http
+            .post(self.url("/messages/react"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /messages/react")?;
+            Ok(MessageReactResponse {
+                success: true,
+                message_id: v["message_id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                emoji: v["emoji"].as_str().unwrap_or(emoji).to_string(),
+                removed: v["removed"].as_bool().unwrap_or(remove),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or(if remove {
+                        "Reaction removed"
+                    } else {
+                        "Reaction added"
+                    })
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageReactResponse {
+                success: false,
+                message_id: message_id.to_string(),
+                emoji: emoji.to_string(),
+                removed: remove,
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(
         &self,
@@ -2221,5 +2287,112 @@ mod tests {
             .unwrap();
         assert_eq!(resp.total, 0);
         assert_eq!(resp.succeeded, 0);
+    }
+
+    #[tokio::test]
+    async fn message_react_add() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/react"))
+            .and(body_json(json!({
+                "message_id": "msg-42",
+                "emoji": "👍"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message_id": "msg-42",
+                "emoji": "👍",
+                "removed": false,
+                "detail": "Reaction added"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_react("msg-42", "👍", false, None, None)
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message_id, "msg-42");
+        assert_eq!(resp.emoji, "👍");
+        assert!(!resp.removed);
+        assert_eq!(resp.detail, "Reaction added");
+    }
+
+    #[tokio::test]
+    async fn message_react_remove() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/react"))
+            .and(body_json(json!({
+                "message_id": "msg-99",
+                "emoji": "heart",
+                "remove": true,
+                "channel": "discord"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message_id": "msg-99",
+                "emoji": "heart",
+                "removed": true,
+                "detail": "Reaction removed"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_react("msg-99", "heart", true, Some("discord"), None)
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert!(resp.removed);
+        assert_eq!(resp.detail, "Reaction removed");
+    }
+
+    #[tokio::test]
+    async fn message_react_with_session() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/react"))
+            .and(body_json(json!({
+                "message_id": "msg-5",
+                "emoji": ":thumbsup:",
+                "session": "sess-7"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message_id": "msg-5",
+                "emoji": ":thumbsup:",
+                "removed": false,
+                "detail": "Reaction added"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_react("msg-5", ":thumbsup:", false, None, Some("sess-7"))
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.emoji, ":thumbsup:");
+    }
+
+    #[tokio::test]
+    async fn message_react_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/react"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Message not found"))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_react("msg-missing", "👍", false, None, None)
+            .await
+            .unwrap();
+        assert!(!resp.success);
+        assert!(resp.detail.contains("404"));
+        assert!(resp.detail.contains("Message not found"));
     }
 }
