@@ -50,3 +50,48 @@ pub enum ModelError {
     #[error("provider error: {0}")]
     Provider(String),
 }
+
+impl ModelError {
+    /// Whether this error class is safe to retry with a fallback provider.
+    ///
+    /// Retriable errors indicate transient or capacity problems with the
+    /// current provider — a different provider may succeed.  Non-retriable
+    /// errors (auth misconfiguration, content policy, context overflow) are
+    /// unlikely to resolve by switching providers.
+    #[must_use]
+    pub fn is_retriable(&self) -> bool {
+        matches!(
+            self,
+            ModelError::RateLimited { .. }
+                | ModelError::Transient(_)
+                | ModelError::QuotaExhausted(_)
+                | ModelError::Http(_)
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retriable_errors() {
+        assert!(ModelError::RateLimited {
+            message: "slow down".into(),
+            retry_after_secs: Some(30),
+        }
+        .is_retriable());
+        assert!(ModelError::Transient("500".into()).is_retriable());
+        assert!(ModelError::QuotaExhausted("done".into()).is_retriable());
+    }
+
+    #[test]
+    fn non_retriable_errors() {
+        assert!(!ModelError::Auth("bad key".into()).is_retriable());
+        assert!(!ModelError::Configuration("missing field".into()).is_retriable());
+        assert!(!ModelError::ContextLengthExceeded("too long".into()).is_retriable());
+        assert!(!ModelError::ContentFiltered("blocked".into()).is_retriable());
+        assert!(!ModelError::DeploymentNotFound("404".into()).is_retriable());
+        assert!(!ModelError::Provider("unknown".into()).is_retriable());
+    }
+}

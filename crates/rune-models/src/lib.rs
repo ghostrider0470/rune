@@ -25,6 +25,7 @@ use rune_config::ModelProviderConfig;
 use rune_config::{ModelResolutionError, ModelsConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::warn;
 
 /// Build a `Box<dyn ModelProvider>` from a [`ModelProviderConfig`].
 ///
@@ -222,6 +223,57 @@ impl ModelProvider for RoutedModelProvider {
             ));
         };
 
+        // Try the primary model first.
+        let primary_result = self.dispatch_single(model_ref, request).await;
+
+        // On retriable failure, walk the fallback chain (if one is configured).
+        let primary_err = match primary_result {
+            Ok(resp) => return Ok(resp),
+            Err(e) if !e.is_retriable() => return Err(e),
+            Err(e) => e,
+        };
+
+        let Some(fallbacks) = self.models.fallback_chain_for(model_ref) else {
+            return Err(primary_err);
+        };
+
+        warn!(
+            primary = model_ref,
+            error = %primary_err,
+            fallback_count = fallbacks.len(),
+            "primary provider failed with retriable error, trying fallback chain"
+        );
+
+        let mut last_err = primary_err;
+        for fallback_ref in fallbacks {
+            match self.dispatch_single(fallback_ref, request).await {
+                Ok(resp) => return Ok(resp),
+                Err(e) if e.is_retriable() => {
+                    warn!(
+                        fallback = fallback_ref.as_str(),
+                        error = %e,
+                        "fallback provider also failed, continuing chain"
+                    );
+                    last_err = e;
+                }
+                Err(e) => {
+                    // Non-retriable error from a fallback — stop the chain.
+                    return Err(e);
+                }
+            }
+        }
+
+        Err(last_err)
+    }
+}
+
+impl RoutedModelProvider {
+    /// Resolve and dispatch a single `model_ref` to its provider.
+    async fn dispatch_single(
+        &self,
+        model_ref: &str,
+        request: &CompletionRequest,
+    ) -> Result<CompletionResponse, ModelError> {
         let resolved = self
             .models
             .resolve_model(model_ref)
