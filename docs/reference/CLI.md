@@ -19,6 +19,32 @@ Use this doc as the CLI entrypoint for:
 
 ---
 
+## `message` command family
+
+Operator surface for channel-targeted outbound messaging and message-level actions.
+
+### Shipped subcommands
+
+| Subcommand | Purpose | Status |
+|---|---|---|
+| `rune message send --channel <adapter> --text <body> [--session <id>] [--thread <id>]` | Send a message through a configured channel adapter | Shipped |
+| `rune message read --message-id <id> --channel <adapter> [--session <id>]` | Read/fetch a specific message by provider id | Shipped |
+| `rune message edit --message-id <id> --channel <adapter> --text <body> [--session <id>]` | Edit a sent message where supported | Shipped |
+| `rune message delete --message-id <id> --channel <adapter> [--session <id>]` | Delete a message where supported | Shipped |
+| `rune message react --message-id <id> --emoji <emoji> [--remove] [--channel <adapter>] [--session <id>]` | Add/remove a reaction | Shipped |
+| `rune message pin --message-id <id> [--unpin] [--channel <adapter>] [--session <id>]` | Pin or unpin a message | Shipped |
+| `rune message search <query> [--channel <adapter>] [--session <id>] [--limit <n>]` | Search message history | Shipped |
+| `rune message broadcast --text <body> [--channels a,b,c] [--session <id>]` | Broadcast to multiple channel adapters | Shipped |
+| `rune message thread list --thread-id <id> [...]` / `reply --thread-id <id> ...` | List/reply in a thread | Shipped |
+| `rune message voice send --text <body> --channel <adapter> [--voice <voice>] [--model <model>] [--output <file>]` | TTS-assisted voice message generation/send flow | Shipped |
+| `rune message voice status` | Inspect TTS/provider readiness for voice messaging | Shipped |
+
+### Deferred / not-yet-shipped breadth
+
+The broader `message` family still has explicit gaps tracked in `docs/parity/CLI-MATRIX.md`, including `reactions`, `poll`, `channel`, `event`, `member/role`, `emoji`, `permissions`, `sticker`, and moderation actions.
+
+---
+
 ## `models` command family
 
 Operator surface for provider inventory, model selection, fallback chains, and provider scanning.
