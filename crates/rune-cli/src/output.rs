@@ -1869,6 +1869,26 @@ impl fmt::Display for MessagePinResponse {
     }
 }
 
+/// Result of deleting a message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageDeleteResponse {
+    pub success: bool,
+    pub message_id: String,
+    pub channel: String,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageDeleteResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(
+            f,
+            "{icon} message {} on {}: {}",
+            self.message_id, self.channel, self.detail,
+        )
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -3074,5 +3094,52 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓ pinned message msg-1"));
         assert!(!out.contains(":"));
+    }
+
+    // ── MessageDeleteResponse ───────────────────────────────────────
+
+    #[test]
+    fn render_message_delete_success() {
+        let r = MessageDeleteResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            channel: "telegram".into(),
+            detail: "Message deleted".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("msg-42"));
+        assert!(out.contains("telegram"));
+        assert!(out.contains("Message deleted"));
+    }
+
+    #[test]
+    fn render_message_delete_failure() {
+        let r = MessageDeleteResponse {
+            success: false,
+            message_id: "msg-99".into(),
+            channel: "discord".into(),
+            detail: "Gateway returned HTTP 404: Message not found".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✗"));
+        assert!(out.contains("msg-99"));
+        assert!(out.contains("404"));
+    }
+
+    #[test]
+    fn render_message_delete_json() {
+        let r = MessageDeleteResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            channel: "telegram".into(),
+            detail: "Message deleted".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["success"].as_bool().unwrap());
+        assert_eq!(v["message_id"], "msg-42");
+        assert_eq!(v["channel"], "telegram");
+        assert_eq!(v["detail"], "Message deleted");
     }
 }

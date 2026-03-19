@@ -1137,6 +1137,55 @@ impl GatewayClient {
         }
     }
 
+    /// `DELETE /messages/{id}`
+    pub async fn message_delete(
+        &self,
+        message_id: &str,
+        channel: &str,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageDeleteResponse> {
+        use crate::output::MessageDeleteResponse;
+
+        let mut params: Vec<(&str, &str)> = vec![("channel", channel)];
+        if let Some(s) = session {
+            params.push(("session", s));
+        }
+        let resp = self
+            .http
+            .delete(self.url(&format!("/messages/{message_id}")))
+            .query(&params)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from DELETE /messages/{id}")?;
+            Ok(MessageDeleteResponse {
+                success: true,
+                message_id: v["id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                channel: channel.to_string(),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("Message deleted")
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageDeleteResponse {
+                success: false,
+                message_id: message_id.to_string(),
+                channel: channel.to_string(),
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(
         &self,
@@ -2550,6 +2599,73 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let resp = client
             .message_pin("msg-missing", false, None, None)
+            .await
+            .unwrap();
+        assert!(!resp.success);
+        assert!(resp.detail.contains("404"));
+        assert!(resp.detail.contains("Message not found"));
+    }
+
+    #[tokio::test]
+    async fn message_delete_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/messages/msg-42"))
+            .and(query_param("channel", "telegram"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg-42",
+                "detail": "Message deleted"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_delete("msg-42", "telegram", None)
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message_id, "msg-42");
+        assert_eq!(resp.channel, "telegram");
+        assert_eq!(resp.detail, "Message deleted");
+    }
+
+    #[tokio::test]
+    async fn message_delete_with_session() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/messages/msg-99"))
+            .and(query_param("channel", "discord"))
+            .and(query_param("session", "sess-7"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg-99",
+                "detail": "Message deleted"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_delete("msg-99", "discord", Some("sess-7"))
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message_id, "msg-99");
+        assert_eq!(resp.channel, "discord");
+    }
+
+    #[tokio::test]
+    async fn message_delete_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/messages/msg-missing"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Message not found"))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_delete("msg-missing", "telegram", None)
             .await
             .unwrap();
         assert!(!resp.success);
