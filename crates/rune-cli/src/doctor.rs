@@ -56,6 +56,7 @@ pub async fn run_all_checks(
         results.extend(check_channels_config(config).await);
         results.extend(check_memory_config(config).await);
         results.extend(check_scheduler_config(config).await);
+        results.extend(check_approval_security(config));
     }
 
     if let Some(ws) = workspace_root {
@@ -718,6 +719,68 @@ async fn check_scheduler_config(config: &AppConfig) -> Vec<CheckResult> {
     }]
 }
 
+fn check_approval_security(config: &AppConfig) -> Vec<CheckResult> {
+    let approval_mode = config.approval.mode;
+    let security = &config.security;
+    let posture = security.posture();
+
+    let mut results = Vec::new();
+
+    // ── Approval mode ────────────────────────────────────────────────
+    let is_yolo = approval_mode.is_yolo();
+    results.push(CheckResult {
+        name: "approval.mode".into(),
+        category: "security".into(),
+        status: if is_yolo {
+            CheckStatus::Warn
+        } else {
+            CheckStatus::Pass
+        },
+        message: format!("Approval mode: {}", approval_mode.as_str()),
+        hint: if is_yolo {
+            Some("Yolo mode auto-approves all tool calls — appropriate for trusted local dev only".into())
+        } else {
+            None
+        },
+    });
+
+    // ── Security posture ─────────────────────────────────────────────
+    let sandbox_off = !security.sandbox;
+    results.push(CheckResult {
+        name: "security.posture".into(),
+        category: "security".into(),
+        status: if sandbox_off {
+            CheckStatus::Warn
+        } else {
+            CheckStatus::Pass
+        },
+        message: format!(
+            "Security posture: {} (sandbox={}, trust_spells={})",
+            posture, security.sandbox, security.trust_spells
+        ),
+        hint: if sandbox_off {
+            Some("Sandbox is disabled — workspace boundary enforcement is off".into())
+        } else {
+            None
+        },
+    });
+
+    // ── Combined yolo+no-sandbox warning ─────────────────────────────
+    if is_yolo && sandbox_off {
+        results.push(CheckResult {
+            name: "security.unrestricted".into(),
+            category: "security".into(),
+            status: CheckStatus::Warn,
+            message: "Running in fully unrestricted mode (yolo + no sandbox)".into(),
+            hint: Some(
+                "All permissions auto-approved and sandbox disabled — use only in trusted environments".into(),
+            ),
+        });
+    }
+
+    results
+}
+
 async fn check_workspace(root: &Path) -> Vec<CheckResult> {
     let category = "workspace";
     let required_files = [
@@ -1285,6 +1348,66 @@ mod tests {
         assert!(
             hint.contains("mkdir -p"),
             "not-a-dir hint should suggest mkdir, got: {hint}"
+        );
+    }
+
+    // ── Approval / security doctor check tests ───────────────────────
+
+    #[test]
+    fn approval_default_passes() {
+        let config = AppConfig::default();
+        let results = check_approval_security(&config);
+        assert!(results.iter().any(|r| {
+            r.name == "approval.mode"
+                && r.status == CheckStatus::Pass
+                && r.message.contains("prompt")
+        }));
+        assert!(results.iter().any(|r| {
+            r.name == "security.posture"
+                && r.status == CheckStatus::Pass
+                && r.message.contains("standard")
+        }));
+        assert!(
+            !results.iter().any(|r| r.name == "security.unrestricted"),
+            "no unrestricted warning for default config"
+        );
+    }
+
+    #[test]
+    fn approval_yolo_warns() {
+        let mut config = AppConfig::default();
+        config.approval.mode = rune_config::ApprovalMode::Yolo;
+        let results = check_approval_security(&config);
+        assert!(results.iter().any(|r| {
+            r.name == "approval.mode"
+                && r.status == CheckStatus::Warn
+                && r.message.contains("yolo")
+        }));
+    }
+
+    #[test]
+    fn security_no_sandbox_warns() {
+        let mut config = AppConfig::default();
+        config.security.sandbox = false;
+        let results = check_approval_security(&config);
+        assert!(results.iter().any(|r| {
+            r.name == "security.posture"
+                && r.status == CheckStatus::Warn
+                && r.message.contains("no-sandbox")
+        }));
+    }
+
+    #[test]
+    fn yolo_plus_no_sandbox_emits_unrestricted_warning() {
+        let mut config = AppConfig::default();
+        config.approval.mode = rune_config::ApprovalMode::Yolo;
+        config.security.sandbox = false;
+        let results = check_approval_security(&config);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "security.unrestricted" && r.status == CheckStatus::Warn),
+            "expected unrestricted warning for yolo + no-sandbox"
         );
     }
 }

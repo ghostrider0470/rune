@@ -36,6 +36,10 @@ pub struct AppConfig {
     pub media: MediaConfig,
     pub logging: LoggingConfig,
     pub paths: PathsConfig,
+    #[serde(default)]
+    pub approval: ApprovalConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 impl AppConfig {
@@ -219,6 +223,8 @@ pub struct Capabilities {
     pub stt: bool,
     pub tool_count: usize,
     pub channels: Vec<String>,
+    pub approval_mode: String,
+    pub security_posture: String,
 }
 
 impl Capabilities {
@@ -257,6 +263,8 @@ impl Capabilities {
             stt,
             tool_count,
             channels,
+            approval_mode: config.approval.mode.as_str().to_string(),
+            security_posture: config.security.posture().to_string(),
         }
     }
 }
@@ -1000,6 +1008,87 @@ impl AgentModelSelection {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructuredAgentModelSelection {
     pub primary: String,
+}
+
+/// Tool-approval bypass policy.
+///
+/// Controls whether tool calls require operator confirmation.
+/// See issue #64 and PROTOCOLS.md §10.3.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApprovalMode {
+    /// Default: prompt for every tool call that lacks a durable allow-always policy.
+    #[default]
+    Prompt,
+    /// Auto-approve file operations; prompt for exec/network.
+    #[serde(rename = "auto-file")]
+    AutoFile,
+    /// Auto-approve exec operations; prompt for others.
+    #[serde(rename = "auto-exec")]
+    AutoExec,
+    /// Auto-approve everything — maximum trust, zero friction.
+    Yolo,
+}
+
+impl ApprovalMode {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Prompt => "prompt",
+            Self::AutoFile => "auto-file",
+            Self::AutoExec => "auto-exec",
+            Self::Yolo => "yolo",
+        }
+    }
+
+    /// Whether this mode auto-approves all tool calls.
+    #[must_use]
+    pub fn is_yolo(self) -> bool {
+        matches!(self, Self::Yolo)
+    }
+}
+
+/// Approval configuration section.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalConfig {
+    #[serde(default)]
+    pub mode: ApprovalMode,
+}
+
+/// Security boundary configuration.
+///
+/// Controls sandbox enforcement and spell trust.
+/// See issue #64 and PROTOCOLS.md §10.3.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    /// Enable filesystem sandboxing / workspace boundary enforcement.
+    #[serde(default = "default_true")]
+    pub sandbox: bool,
+    /// Trust all installed spells without capability validation.
+    #[serde(default)]
+    pub trust_spells: bool,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            sandbox: true,
+            trust_spells: false,
+        }
+    }
+}
+
+impl SecurityConfig {
+    /// Summarise the effective security posture as a human-readable label.
+    #[must_use]
+    pub fn posture(&self) -> &'static str {
+        match (self.sandbox, self.trust_spells) {
+            (true, false) => "standard",
+            (true, true) => "trust-spells",
+            (false, false) => "no-sandbox",
+            (false, true) => "unrestricted",
+        }
+    }
 }
 
 /// Configuration loading and validation failures.
@@ -2124,5 +2213,155 @@ models = ["gpt-5.4", "gpt-image-1"]
         config
             .validate_paths()
             .expect("validate_paths should pass after ensure_dirs");
+    }
+
+    // ── Approval / security config tests ─────────────────────────────
+
+    #[test]
+    fn default_approval_mode_is_prompt() {
+        let config = AppConfig::default();
+        assert_eq!(config.approval.mode, ApprovalMode::Prompt);
+        assert_eq!(config.approval.mode.as_str(), "prompt");
+        assert!(!config.approval.mode.is_yolo());
+    }
+
+    #[test]
+    fn default_security_config_is_sandboxed() {
+        let config = AppConfig::default();
+        assert!(config.security.sandbox);
+        assert!(!config.security.trust_spells);
+        assert_eq!(config.security.posture(), "standard");
+    }
+
+    #[test]
+    fn approval_mode_loads_from_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("approval-mode");
+        fs::write(
+            &path,
+            r#"
+[approval]
+mode = "yolo"
+
+[security]
+sandbox = false
+trust_spells = true
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(config.approval.mode, ApprovalMode::Yolo);
+        assert!(config.approval.mode.is_yolo());
+        assert!(!config.security.sandbox);
+        assert!(config.security.trust_spells);
+        assert_eq!(config.security.posture(), "unrestricted");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn approval_mode_loads_auto_file_variant() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("approval-auto-file");
+        fs::write(
+            &path,
+            r#"
+[approval]
+mode = "auto-file"
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(config.approval.mode, ApprovalMode::AutoFile);
+        assert_eq!(config.approval.mode.as_str(), "auto-file");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn approval_mode_loads_auto_exec_variant() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("approval-auto-exec");
+        fs::write(
+            &path,
+            r#"
+[approval]
+mode = "auto-exec"
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(config.approval.mode, ApprovalMode::AutoExec);
+        assert_eq!(config.approval.mode.as_str(), "auto-exec");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn approval_mode_env_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("RUNE_APPROVAL__MODE", "yolo");
+        }
+        let config = AppConfig::load(None::<&std::path::Path>).unwrap();
+        assert_eq!(config.approval.mode, ApprovalMode::Yolo);
+        unsafe {
+            std::env::remove_var("RUNE_APPROVAL__MODE");
+        }
+    }
+
+    #[test]
+    fn security_config_env_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("RUNE_SECURITY__SANDBOX", "false");
+            std::env::set_var("RUNE_SECURITY__TRUST_SPELLS", "true");
+        }
+        let config = AppConfig::load(None::<&std::path::Path>).unwrap();
+        assert!(!config.security.sandbox);
+        assert!(config.security.trust_spells);
+        unsafe {
+            std::env::remove_var("RUNE_SECURITY__SANDBOX");
+            std::env::remove_var("RUNE_SECURITY__TRUST_SPELLS");
+        }
+    }
+
+    #[test]
+    fn security_posture_labels() {
+        let standard = SecurityConfig { sandbox: true, trust_spells: false };
+        assert_eq!(standard.posture(), "standard");
+
+        let trust = SecurityConfig { sandbox: true, trust_spells: true };
+        assert_eq!(trust.posture(), "trust-spells");
+
+        let no_sandbox = SecurityConfig { sandbox: false, trust_spells: false };
+        assert_eq!(no_sandbox.posture(), "no-sandbox");
+
+        let unrestricted = SecurityConfig { sandbox: false, trust_spells: true };
+        assert_eq!(unrestricted.posture(), "unrestricted");
+    }
+
+    #[test]
+    fn capabilities_detect_includes_approval_and_security() {
+        let config = AppConfig::default();
+        let caps =
+            Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 5);
+        assert_eq!(caps.approval_mode, "prompt");
+        assert_eq!(caps.security_posture, "standard");
+    }
+
+    #[test]
+    fn capabilities_detect_yolo_mode() {
+        let mut config = AppConfig::default();
+        config.approval.mode = ApprovalMode::Yolo;
+        config.security.sandbox = false;
+        config.security.trust_spells = true;
+        let caps =
+            Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 0);
+        assert_eq!(caps.approval_mode, "yolo");
+        assert_eq!(caps.security_posture, "unrestricted");
     }
 }
