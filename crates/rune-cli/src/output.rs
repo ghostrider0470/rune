@@ -1889,6 +1889,70 @@ impl fmt::Display for MessageDeleteResponse {
     }
 }
 
+/// A single message within a thread listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadMessage {
+    pub id: String,
+    pub sender: Option<String>,
+    pub text: String,
+    pub timestamp: Option<String>,
+}
+
+impl fmt::Display for ThreadMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sender = self.sender.as_deref().unwrap_or("unknown");
+        let ts = self.timestamp.as_deref().unwrap_or("?");
+        write!(f, "{ts} {sender}: {}", self.text)
+    }
+}
+
+/// Response for `message thread list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageThreadListResponse {
+    pub thread_id: String,
+    pub total: usize,
+    pub messages: Vec<ThreadMessage>,
+}
+
+impl fmt::Display for MessageThreadListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.messages.is_empty() {
+            return write!(f, "No messages in thread {}", self.thread_id);
+        }
+        writeln!(
+            f,
+            "Thread {}: {} message{}",
+            self.thread_id,
+            self.total,
+            if self.total == 1 { "" } else { "s" },
+        )?;
+        for msg in &self.messages {
+            writeln!(f, "  {msg}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `message thread reply`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageThreadReplyResponse {
+    pub success: bool,
+    pub thread_id: String,
+    pub message_id: Option<String>,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageThreadReplyResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} thread {}: {}", self.thread_id, self.detail)?;
+        if let Some(ref id) = self.message_id {
+            write!(f, " (id={id})")?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -3141,5 +3205,130 @@ mod tests {
         assert_eq!(v["message_id"], "msg-42");
         assert_eq!(v["channel"], "telegram");
         assert_eq!(v["detail"], "Message deleted");
+    }
+
+    // ── MessageThreadListResponse ──────────────────────────────────
+
+    #[test]
+    fn render_message_thread_list_empty() {
+        let r = MessageThreadListResponse {
+            thread_id: "thr-1".into(),
+            total: 0,
+            messages: vec![],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert_eq!(out, "No messages in thread thr-1");
+    }
+
+    #[test]
+    fn render_message_thread_list_with_messages() {
+        let r = MessageThreadListResponse {
+            thread_id: "thr-42".into(),
+            total: 2,
+            messages: vec![
+                ThreadMessage {
+                    id: "msg-1".into(),
+                    sender: Some("hamza".into()),
+                    text: "initial message".into(),
+                    timestamp: Some("2026-03-19T10:00:00Z".into()),
+                },
+                ThreadMessage {
+                    id: "msg-2".into(),
+                    sender: None,
+                    text: "follow-up".into(),
+                    timestamp: None,
+                },
+            ],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Thread thr-42: 2 messages"));
+        assert!(out.contains("2026-03-19T10:00:00Z hamza: initial message"));
+        assert!(out.contains("? unknown: follow-up"));
+    }
+
+    #[test]
+    fn render_message_thread_list_single_grammar() {
+        let r = MessageThreadListResponse {
+            thread_id: "thr-99".into(),
+            total: 1,
+            messages: vec![ThreadMessage {
+                id: "msg-1".into(),
+                sender: Some("bot".into()),
+                text: "only one".into(),
+                timestamp: Some("2026-03-19T12:00:00Z".into()),
+            }],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("1 message"));
+        assert!(!out.contains("messages"));
+    }
+
+    #[test]
+    fn render_message_thread_list_json() {
+        let r = MessageThreadListResponse {
+            thread_id: "thr-42".into(),
+            total: 1,
+            messages: vec![ThreadMessage {
+                id: "msg-1".into(),
+                sender: Some("hamza".into()),
+                text: "hello thread".into(),
+                timestamp: Some("2026-03-19T10:00:00Z".into()),
+            }],
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["thread_id"], "thr-42");
+        assert_eq!(v["total"], 1);
+        assert_eq!(v["messages"][0]["id"], "msg-1");
+        assert_eq!(v["messages"][0]["sender"], "hamza");
+        assert_eq!(v["messages"][0]["text"], "hello thread");
+    }
+
+    // ── MessageThreadReplyResponse ─────────────────────────────────
+
+    #[test]
+    fn render_message_thread_reply_success() {
+        let r = MessageThreadReplyResponse {
+            success: true,
+            thread_id: "thr-42".into(),
+            message_id: Some("msg-new-1".into()),
+            detail: "Reply sent".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.starts_with('✓'));
+        assert!(out.contains("thread thr-42"));
+        assert!(out.contains("Reply sent"));
+        assert!(out.contains("(id=msg-new-1)"));
+    }
+
+    #[test]
+    fn render_message_thread_reply_failure() {
+        let r = MessageThreadReplyResponse {
+            success: false,
+            thread_id: "thr-99".into(),
+            message_id: None,
+            detail: "Gateway returned HTTP 404: Thread not found".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.starts_with('✗'));
+        assert!(out.contains("thr-99"));
+        assert!(out.contains("404"));
+        assert!(!out.contains("(id="));
+    }
+
+    #[test]
+    fn render_message_thread_reply_json() {
+        let r = MessageThreadReplyResponse {
+            success: true,
+            thread_id: "thr-42".into(),
+            message_id: Some("msg-new-1".into()),
+            detail: "Reply sent".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["thread_id"], "thr-42");
+        assert_eq!(v["message_id"], "msg-new-1");
+        assert_eq!(v["detail"], "Reply sent");
     }
 }

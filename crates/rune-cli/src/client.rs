@@ -1186,6 +1186,113 @@ impl GatewayClient {
         }
     }
 
+    /// `GET /messages/threads/{id}`
+    pub async fn message_thread_list(
+        &self,
+        thread_id: &str,
+        channel: Option<&str>,
+        session: Option<&str>,
+        limit: u64,
+    ) -> Result<crate::output::MessageThreadListResponse> {
+        use crate::output::{MessageThreadListResponse, ThreadMessage};
+
+        let mut params: Vec<(&str, String)> = vec![("limit", limit.to_string())];
+        if let Some(ch) = channel {
+            params.push(("channel", ch.to_string()));
+        }
+        if let Some(s) = session {
+            params.push(("session", s.to_string()));
+        }
+        let resp = self
+            .http
+            .get(self.url(&format!("/messages/threads/{thread_id}")))
+            .query(&params)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /messages/threads/{id}")?;
+            let messages = body["messages"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|m| ThreadMessage {
+                            id: m["id"].as_str().unwrap_or("").to_string(),
+                            sender: m["sender"].as_str().map(ToString::to_string),
+                            text: m["text"].as_str().unwrap_or("").to_string(),
+                            timestamp: m["timestamp"].as_str().map(ToString::to_string),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let total = body["total"]
+                .as_u64()
+                .unwrap_or(messages.len() as u64) as usize;
+            Ok(MessageThreadListResponse {
+                thread_id: thread_id.to_string(),
+                total,
+                messages,
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GET /messages/threads/{thread_id} returned HTTP {status}: {body_text}");
+        }
+    }
+
+    /// `POST /messages/threads/{id}/reply`
+    pub async fn message_thread_reply(
+        &self,
+        thread_id: &str,
+        channel: &str,
+        text: &str,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageThreadReplyResponse> {
+        use crate::output::MessageThreadReplyResponse;
+
+        let mut body = json!({
+            "channel": channel,
+            "text": text,
+        });
+        if let Some(s) = session {
+            body["session"] = json!(s);
+        }
+        let resp = self
+            .http
+            .post(self.url(&format!("/messages/threads/{thread_id}/reply")))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /messages/threads/{id}/reply")?;
+            Ok(MessageThreadReplyResponse {
+                success: true,
+                thread_id: thread_id.to_string(),
+                message_id: v["id"].as_str().map(ToString::to_string),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("Reply sent")
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageThreadReplyResponse {
+                success: false,
+                thread_id: thread_id.to_string(),
+                message_id: None,
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(
         &self,
@@ -2671,5 +2778,139 @@ mod tests {
         assert!(!resp.success);
         assert!(resp.detail.contains("404"));
         assert!(resp.detail.contains("Message not found"));
+    }
+
+    #[tokio::test]
+    async fn message_thread_list_parses_results() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/messages/threads/thr-42"))
+            .and(query_param("limit", "10"))
+            .and(query_param("channel", "telegram"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "total": 2,
+                "messages": [
+                    {
+                        "id": "msg-1",
+                        "sender": "hamza",
+                        "text": "initial message",
+                        "timestamp": "2026-03-19T10:00:00Z"
+                    },
+                    {
+                        "id": "msg-2",
+                        "sender": "bot",
+                        "text": "follow-up reply",
+                        "timestamp": "2026-03-19T10:05:00Z"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_thread_list("thr-42", Some("telegram"), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(resp.thread_id, "thr-42");
+        assert_eq!(resp.total, 2);
+        assert_eq!(resp.messages.len(), 2);
+        assert_eq!(resp.messages[0].id, "msg-1");
+        assert_eq!(resp.messages[0].sender.as_deref(), Some("hamza"));
+        assert_eq!(resp.messages[1].text, "follow-up reply");
+    }
+
+    #[tokio::test]
+    async fn message_thread_list_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/messages/threads/thr-empty"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "total": 0,
+                "messages": []
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_thread_list("thr-empty", None, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(resp.total, 0);
+        assert!(resp.messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn message_thread_reply_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/threads/thr-42/reply"))
+            .and(body_json(json!({
+                "channel": "telegram",
+                "text": "Thanks!"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg-new-1",
+                "detail": "Reply sent"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_thread_reply("thr-42", "telegram", "Thanks!", None)
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.thread_id, "thr-42");
+        assert_eq!(resp.message_id.as_deref(), Some("msg-new-1"));
+        assert_eq!(resp.detail, "Reply sent");
+    }
+
+    #[tokio::test]
+    async fn message_thread_reply_with_session() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/threads/thr-99/reply"))
+            .and(body_json(json!({
+                "channel": "discord",
+                "text": "noted",
+                "session": "sess-7"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg-new-2",
+                "detail": "Reply sent"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_thread_reply("thr-99", "discord", "noted", Some("sess-7"))
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.thread_id, "thr-99");
+        assert_eq!(resp.message_id.as_deref(), Some("msg-new-2"));
+    }
+
+    #[tokio::test]
+    async fn message_thread_reply_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/threads/thr-missing/reply"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Thread not found"))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_thread_reply("thr-missing", "telegram", "hello", None)
+            .await
+            .unwrap();
+        assert!(!resp.success);
+        assert!(resp.detail.contains("404"));
+        assert!(resp.detail.contains("Thread not found"));
     }
 }

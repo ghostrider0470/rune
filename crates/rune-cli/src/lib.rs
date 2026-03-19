@@ -24,8 +24,9 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 pub use cli::Cli;
 use cli::{
     ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell, ConfigAction,
-    CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction, ModelsAction,
-    RemindersAction, SessionsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
+    CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
+    MessageThreadAction, ModelsAction, RemindersAction, SessionsAction, SystemAction,
+    SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -1283,6 +1284,40 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::Thread { action } => match action {
+                MessageThreadAction::List {
+                    thread_id,
+                    channel,
+                    session,
+                    limit,
+                } => {
+                    let result = client
+                        .message_thread_list(
+                            &thread_id,
+                            channel.as_deref(),
+                            session.as_deref(),
+                            limit,
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                MessageThreadAction::Reply {
+                    thread_id,
+                    channel,
+                    text,
+                    session,
+                } => {
+                    let result = client
+                        .message_thread_reply(
+                            &thread_id,
+                            &channel,
+                            &text,
+                            session.as_deref(),
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+            },
         },
         Command::Reminders { action } => match action {
             RemindersAction::Add {
