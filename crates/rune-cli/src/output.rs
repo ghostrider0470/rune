@@ -772,6 +772,78 @@ impl fmt::Display for ModelSetResponse {
     }
 }
 
+/// Result of updating the default image model in local config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSetImageResponse {
+    pub changed: bool,
+    pub config_path: String,
+    pub previous_image_model: Option<String>,
+    pub default_image_model: String,
+    pub note: String,
+}
+
+impl fmt::Display for ModelSetImageResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Default image model set to {} in {}",
+            self.default_image_model, self.config_path
+        )?;
+        if let Some(previous) = &self.previous_image_model {
+            write!(f, "\nPrevious: {previous}")?;
+        }
+        if !self.note.is_empty() {
+            write!(f, "\nNote: {}", self.note)?;
+        }
+        Ok(())
+    }
+}
+
+/// A single named fallback chain entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelFallbackChainDetail {
+    pub name: String,
+    pub kind: String,
+    pub chain: Vec<String>,
+}
+
+impl fmt::Display for ModelFallbackChainDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} [{}]: {}", self.name, self.kind, self.chain.join(" -> "))
+    }
+}
+
+/// Response for `models fallbacks`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelFallbacksResponse {
+    pub text_chains: Vec<ModelFallbackChainDetail>,
+    pub image_chains: Vec<ModelFallbackChainDetail>,
+}
+
+impl fmt::Display for ModelFallbacksResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.text_chains.is_empty() && self.image_chains.is_empty() {
+            return write!(f, "No fallback chains configured.");
+        }
+        if !self.text_chains.is_empty() {
+            writeln!(f, "Text fallback chains:")?;
+            for chain in &self.text_chains {
+                writeln!(f, "  {chain}")?;
+            }
+        }
+        if !self.image_chains.is_empty() {
+            if !self.text_chains.is_empty() {
+                writeln!(f)?;
+            }
+            writeln!(f, "Image fallback chains:")?;
+            for chain in &self.image_chains {
+                writeln!(f, "  {chain}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for ModelStatusResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Models")?;
@@ -1965,6 +2037,74 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Default model set to hamza-eastus2/grok-4-fast-reasoning"));
         assert!(out.contains("Previous: oc-01-openai/gpt-5.4"));
+    }
+
+    #[test]
+    fn render_model_set_image_response() {
+        let response = ModelSetImageResponse {
+            changed: true,
+            config_path: "config.toml".into(),
+            previous_image_model: Some("oc-01-openai/dall-e-3".into()),
+            default_image_model: "hamza-eastus2/dall-e-4".into(),
+            note: "Local config updated; restart gateway to apply new default image model.".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Default image model set to hamza-eastus2/dall-e-4"));
+        assert!(out.contains("Previous: oc-01-openai/dall-e-3"));
+    }
+
+    #[test]
+    fn render_model_fallbacks_empty() {
+        let response = ModelFallbacksResponse {
+            text_chains: vec![],
+            image_chains: vec![],
+        };
+        assert_eq!(
+            render(&response, OutputFormat::Human),
+            "No fallback chains configured."
+        );
+    }
+
+    #[test]
+    fn render_model_fallbacks_with_chains() {
+        let response = ModelFallbacksResponse {
+            text_chains: vec![ModelFallbackChainDetail {
+                name: "primary-text".into(),
+                kind: "text".into(),
+                chain: vec![
+                    "azure/gpt-5.4".into(),
+                    "openai/gpt-5.4".into(),
+                    "groq/llama-4".into(),
+                ],
+            }],
+            image_chains: vec![ModelFallbackChainDetail {
+                name: "primary-image".into(),
+                kind: "image".into(),
+                chain: vec!["openai/dall-e-4".into(), "azure/dall-e-3".into()],
+            }],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Text fallback chains:"));
+        assert!(out.contains("azure/gpt-5.4 -> openai/gpt-5.4 -> groq/llama-4"));
+        assert!(out.contains("Image fallback chains:"));
+        assert!(out.contains("openai/dall-e-4 -> azure/dall-e-3"));
+    }
+
+    #[test]
+    fn render_model_fallbacks_json() {
+        let response = ModelFallbacksResponse {
+            text_chains: vec![ModelFallbackChainDetail {
+                name: "default".into(),
+                kind: "text".into(),
+                chain: vec!["a/m1".into(), "b/m2".into()],
+            }],
+            image_chains: vec![],
+        };
+        let out = render(&response, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["text_chains"][0]["name"], "default");
+        assert_eq!(v["text_chains"][0]["chain"][0], "a/m1");
+        assert!(v["image_chains"].as_array().unwrap().is_empty());
     }
 
     #[test]
