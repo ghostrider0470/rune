@@ -99,6 +99,8 @@ pub struct CapabilitiesResponse {
     pub tts: bool,
     pub stt: bool,
     pub channels: Vec<String>,
+    pub approval_mode: String,
+    pub security_posture: String,
 }
 
 #[derive(Serialize)]
@@ -176,6 +178,8 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             tts: state.capabilities.tts,
             stt: state.capabilities.stt,
             channels: state.capabilities.channels.clone(),
+            approval_mode: state.capabilities.approval_mode.clone(),
+            security_posture: state.capabilities.security_posture.clone(),
         },
     }))
 }
@@ -3287,6 +3291,23 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         } else {
             "STT engine not configured".to_string()
         },
+    });
+
+    // ── Approval / security mode visibility (#64) ────────────────────
+    let approval_mode = &state.capabilities.approval_mode;
+    let security_posture = &state.capabilities.security_posture;
+    let is_yolo = approval_mode == "yolo";
+    let is_no_sandbox = security_posture == "no-sandbox" || security_posture == "unrestricted";
+
+    checks.push(DoctorCheck {
+        name: "approval_mode".to_string(),
+        status: if is_yolo { "warn" } else { "pass" },
+        message: format!("approval mode: {approval_mode}"),
+    });
+    checks.push(DoctorCheck {
+        name: "security_posture".to_string(),
+        status: if is_no_sandbox { "warn" } else { "pass" },
+        message: format!("security posture: {security_posture}"),
     });
 
     let overall = if checks.iter().any(|c| c.status == "fail") {
