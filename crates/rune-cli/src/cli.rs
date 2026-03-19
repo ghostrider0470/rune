@@ -1375,7 +1375,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_completion_generate() {
+    fn parse_completion_generate_bash() {
         let cli = Cli::try_parse_from(["rune", "completion", "generate", "bash"]).unwrap();
         match cli.command {
             Command::Completion {
@@ -1385,6 +1385,51 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_completion_generate_zsh() {
+        let cli = Cli::try_parse_from(["rune", "completion", "generate", "zsh"]).unwrap();
+        match cli.command {
+            Command::Completion {
+                action: CompletionAction::Generate { shell },
+            } => assert_eq!(shell, CompletionShell::Zsh),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_completion_generate_fish() {
+        let cli = Cli::try_parse_from(["rune", "completion", "generate", "fish"]).unwrap();
+        match cli.command {
+            Command::Completion {
+                action: CompletionAction::Generate { shell },
+            } => assert_eq!(shell, CompletionShell::Fish),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_completion_generate_all_shells() {
+        for shell_name in ["bash", "zsh", "fish", "elvish", "power-shell"] {
+            let cli =
+                Cli::try_parse_from(["rune", "completion", "generate", shell_name]).unwrap();
+            assert!(
+                matches!(
+                    cli.command,
+                    Command::Completion {
+                        action: CompletionAction::Generate { .. }
+                    }
+                ),
+                "failed to parse completion generate for {shell_name}",
+            );
+        }
+    }
+
+    #[test]
+    fn completion_generate_rejects_unknown_shell() {
+        let result = Cli::try_parse_from(["rune", "completion", "generate", "nushell"]);
+        assert!(result.is_err());
     }
 
     #[test]
