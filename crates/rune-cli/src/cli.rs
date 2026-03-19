@@ -484,6 +484,20 @@ pub enum MessageAction {
         #[arg(long)]
         thread: Option<String>,
     },
+    /// Search message history across channels.
+    Search {
+        /// Query text to search for in message content.
+        query: String,
+        /// Restrict results to a specific channel adapter.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Restrict results to a specific session ID.
+        #[arg(long)]
+        session: Option<String>,
+        /// Maximum number of results to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1983,5 +1997,67 @@ mod tests {
         );
         // Missing both
         assert!(Cli::try_parse_from(["rune", "message", "send"]).is_err());
+    }
+
+    #[test]
+    fn parse_message_search() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "search",
+            "deploy failed",
+            "--channel",
+            "telegram",
+            "--session",
+            "sess-1",
+            "--limit",
+            "10",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Search {
+                        query,
+                        channel,
+                        session,
+                        limit,
+                    },
+            } => {
+                assert_eq!(query, "deploy failed");
+                assert_eq!(channel.as_deref(), Some("telegram"));
+                assert_eq!(session.as_deref(), Some("sess-1"));
+                assert_eq!(limit, 10);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_search_defaults() {
+        let cli =
+            Cli::try_parse_from(["rune", "message", "search", "hello world"]).unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Search {
+                        query,
+                        channel,
+                        session,
+                        limit,
+                    },
+            } => {
+                assert_eq!(query, "hello world");
+                assert!(channel.is_none());
+                assert!(session.is_none());
+                assert_eq!(limit, 25);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_search_requires_query() {
+        assert!(Cli::try_parse_from(["rune", "message", "search"]).is_err());
     }
 }

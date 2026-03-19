@@ -1213,6 +1213,22 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::Search {
+                query,
+                channel,
+                session,
+                limit,
+            } => {
+                let result = client
+                    .message_search(
+                        &query,
+                        channel.as_deref(),
+                        session.as_deref(),
+                        limit,
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Reminders { action } => match action {
             RemindersAction::Add {

@@ -15,7 +15,7 @@ use crate::output::{
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport, SystemEventListResponse,
     GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
     HealthResponse, HeartbeatStatusResponse, ModelScanProviderResult, ModelScanResponse,
-    MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
+    MessageSearchHit, MessageSearchResponse, MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
     SessionListResponse, SessionStatusCard, SessionSummary, StatusResponse,
 };
 
@@ -891,6 +891,63 @@ impl GatewayClient {
                 message_id: None,
                 detail: format!("Gateway returned HTTP {status}: {body_text}"),
             })
+        }
+    }
+
+    /// `GET /messages/search`
+    pub async fn message_search(
+        &self,
+        query: &str,
+        channel: Option<&str>,
+        session: Option<&str>,
+        limit: u64,
+    ) -> Result<MessageSearchResponse> {
+        let mut params: Vec<(&str, String)> = vec![
+            ("q", query.to_string()),
+            ("limit", limit.to_string()),
+        ];
+        if let Some(ch) = channel {
+            params.push(("channel", ch.to_string()));
+        }
+        if let Some(sess) = session {
+            params.push(("session", sess.to_string()));
+        }
+        let resp = self
+            .http
+            .get(self.url("/messages/search"))
+            .query(&params)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /messages/search")?;
+            let hits = body["hits"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|hit| MessageSearchHit {
+                    id: hit["id"].as_str().unwrap_or("?").to_string(),
+                    channel: hit["channel"].as_str().map(String::from),
+                    session: hit["session"].as_str().map(String::from),
+                    sender: hit["sender"].as_str().map(String::from),
+                    text: hit["text"].as_str().unwrap_or("").to_string(),
+                    timestamp: hit["timestamp"].as_str().map(String::from),
+                    score: hit["score"].as_f64(),
+                })
+                .collect::<Vec<_>>();
+            let total = body["total"].as_u64().unwrap_or(hits.len() as u64) as usize;
+            Ok(MessageSearchResponse {
+                query: query.to_string(),
+                total,
+                hits,
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
         }
     }
 
@@ -1928,5 +1985,78 @@ mod tests {
         assert_eq!(resp.events[0].payload.kind(), "system_event");
         assert_eq!(resp.events[1].id, "job-3");
         assert_eq!(resp.events[1].payload.kind(), "system_event");
+    }
+
+    #[tokio::test]
+    async fn message_search_parses_results() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/messages/search"))
+            .and(query_param("q", "deploy"))
+            .and(query_param("limit", "10"))
+            .and(query_param("channel", "telegram"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "total": 2,
+                "hits": [
+                    {
+                        "id": "msg-1",
+                        "channel": "telegram",
+                        "session": "sess-1",
+                        "sender": "hamza",
+                        "text": "deploy to staging",
+                        "timestamp": "2026-03-19T10:00:00Z",
+                        "score": 0.95
+                    },
+                    {
+                        "id": "msg-2",
+                        "channel": "telegram",
+                        "session": null,
+                        "sender": null,
+                        "text": "deploy rollback",
+                        "timestamp": "2026-03-19T11:00:00Z",
+                        "score": 0.82
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_search("deploy", Some("telegram"), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(resp.query, "deploy");
+        assert_eq!(resp.total, 2);
+        assert_eq!(resp.hits.len(), 2);
+        assert_eq!(resp.hits[0].id, "msg-1");
+        assert_eq!(resp.hits[0].channel.as_deref(), Some("telegram"));
+        assert_eq!(resp.hits[0].sender.as_deref(), Some("hamza"));
+        assert_eq!(resp.hits[0].text, "deploy to staging");
+        assert!(resp.hits[0].score.unwrap() > 0.9);
+        assert_eq!(resp.hits[1].id, "msg-2");
+        assert!(resp.hits[1].sender.is_none());
+    }
+
+    #[tokio::test]
+    async fn message_search_empty_results() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/messages/search"))
+            .and(query_param("q", "nonexistent"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "total": 0,
+                "hits": []
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_search("nonexistent", None, None, 25)
+            .await
+            .unwrap();
+        assert_eq!(resp.total, 0);
+        assert!(resp.hits.is_empty());
     }
 }

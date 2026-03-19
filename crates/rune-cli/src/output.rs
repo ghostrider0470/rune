@@ -1725,6 +1725,58 @@ impl fmt::Display for MessageSendResponse {
     }
 }
 
+/// A single hit returned by `message search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageSearchHit {
+    pub id: String,
+    pub channel: Option<String>,
+    pub session: Option<String>,
+    pub sender: Option<String>,
+    pub text: String,
+    pub timestamp: Option<String>,
+    pub score: Option<f64>,
+}
+
+impl fmt::Display for MessageSearchHit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ch = self.channel.as_deref().unwrap_or("?");
+        let ts = self.timestamp.as_deref().unwrap_or("?");
+        let sender = self.sender.as_deref().unwrap_or("unknown");
+        write!(f, "[{ch}] {ts} {sender}: {}", self.text)?;
+        if let Some(score) = self.score {
+            write!(f, " (score={score:.2})")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `message search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageSearchResponse {
+    pub query: String,
+    pub total: usize,
+    pub hits: Vec<MessageSearchHit>,
+}
+
+impl fmt::Display for MessageSearchResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.hits.is_empty() {
+            return write!(f, "No messages found for query: {}", self.query);
+        }
+        writeln!(
+            f,
+            "Message search: {} result{} for \"{}\"",
+            self.total,
+            if self.total == 1 { "" } else { "s" },
+            self.query,
+        )?;
+        for hit in &self.hits {
+            writeln!(f, "  {hit}")?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -2574,6 +2626,96 @@ mod tests {
         assert_eq!(v["success"], true);
         assert_eq!(v["channel"], "slack");
         assert_eq!(v["message_id"], "msg-99");
+    }
+
+    #[test]
+    fn render_message_search_empty() {
+        let r = MessageSearchResponse {
+            query: "nonexistent".into(),
+            total: 0,
+            hits: vec![],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert_eq!(out, "No messages found for query: nonexistent");
+    }
+
+    #[test]
+    fn render_message_search_with_results() {
+        let r = MessageSearchResponse {
+            query: "deploy".into(),
+            total: 2,
+            hits: vec![
+                MessageSearchHit {
+                    id: "msg-1".into(),
+                    channel: Some("telegram".into()),
+                    session: Some("sess-1".into()),
+                    sender: Some("hamza".into()),
+                    text: "deploy to staging".into(),
+                    timestamp: Some("2026-03-19T10:00:00Z".into()),
+                    score: Some(0.95),
+                },
+                MessageSearchHit {
+                    id: "msg-2".into(),
+                    channel: Some("discord".into()),
+                    session: None,
+                    sender: None,
+                    text: "deploy rollback".into(),
+                    timestamp: None,
+                    score: None,
+                },
+            ],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Message search: 2 results for \"deploy\""));
+        assert!(out.contains("[telegram] 2026-03-19T10:00:00Z hamza: deploy to staging"));
+        assert!(out.contains("(score=0.95)"));
+        assert!(out.contains("[discord] ? unknown: deploy rollback"));
+    }
+
+    #[test]
+    fn render_message_search_json() {
+        let r = MessageSearchResponse {
+            query: "test".into(),
+            total: 1,
+            hits: vec![MessageSearchHit {
+                id: "msg-3".into(),
+                channel: Some("slack".into()),
+                session: Some("sess-2".into()),
+                sender: Some("bot".into()),
+                text: "test passed".into(),
+                timestamp: Some("2026-03-19T12:00:00Z".into()),
+                score: Some(0.88),
+            }],
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["query"], "test");
+        assert_eq!(v["total"], 1);
+        assert_eq!(v["hits"][0]["id"], "msg-3");
+        assert_eq!(v["hits"][0]["channel"], "slack");
+        assert_eq!(v["hits"][0]["session"], "sess-2");
+        assert_eq!(v["hits"][0]["text"], "test passed");
+        assert!(v["hits"][0]["score"].as_f64().unwrap() > 0.87);
+    }
+
+    #[test]
+    fn render_message_search_single_result_grammar() {
+        let r = MessageSearchResponse {
+            query: "one".into(),
+            total: 1,
+            hits: vec![MessageSearchHit {
+                id: "msg-4".into(),
+                channel: None,
+                session: None,
+                sender: None,
+                text: "one match".into(),
+                timestamp: None,
+                score: None,
+            }],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("1 result for"));
+        assert!(!out.contains("results for"));
     }
 
     #[test]
