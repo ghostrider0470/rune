@@ -371,6 +371,18 @@ impl Default for LaneQueueConfig {
 pub struct ModelsConfig {
     #[serde(default)]
     pub default_model: Option<String>,
+    /// Optional default image-generation model, separate from the chat/text default.
+    #[serde(default, alias = "image_model")]
+    pub default_image_model: Option<String>,
+    /// Ordered text/model fallback chains reserved for later routing and CLI lanes.
+    #[serde(default)]
+    pub fallbacks: Vec<ModelFallbackChainConfig>,
+    /// Ordered image-model fallback chains reserved for later routing and CLI lanes.
+    #[serde(default)]
+    pub image_fallbacks: Vec<ModelFallbackChainConfig>,
+    /// Provider auth-order metadata reserved for later auth/profile management lanes.
+    #[serde(default)]
+    pub auth_orders: Vec<ModelAuthOrderConfig>,
     #[serde(default)]
     pub providers: Vec<ModelProviderConfig>,
 }
@@ -475,6 +487,22 @@ impl ModelsConfig {
             model: model_ref.to_string(),
         })
     }
+}
+
+/// Named ordered fallback chain metadata.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelFallbackChainConfig {
+    pub name: String,
+    #[serde(default)]
+    pub chain: Vec<String>,
+}
+
+/// Provider auth-order metadata.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelAuthOrderConfig {
+    pub provider: String,
+    #[serde(default)]
+    pub order: Vec<String>,
 }
 
 /// A single configured model-provider target.
@@ -1125,6 +1153,10 @@ port = "not-a-number"
     fn model_inventory_lists_provider_model_ids() {
         let config = ModelsConfig {
             default_model: Some("oc-01-openai/gpt-5.4".into()),
+            default_image_model: None,
+            fallbacks: vec![],
+            image_fallbacks: vec![],
+            auth_orders: vec![],
             providers: vec![
                 ModelProviderConfig {
                     name: "oc-01-openai".into(),
@@ -1168,6 +1200,10 @@ port = "not-a-number"
     fn model_resolution_supports_provider_model_ids() {
         let config = ModelsConfig {
             default_model: None,
+            default_image_model: None,
+            fallbacks: vec![],
+            image_fallbacks: vec![],
+            auth_orders: vec![],
             providers: vec![ModelProviderConfig {
                 name: "hamza-eastus2".into(),
                 kind: "openai".into(),
@@ -1199,6 +1235,10 @@ port = "not-a-number"
     fn model_resolution_rejects_ambiguous_short_names() {
         let config = ModelsConfig {
             default_model: None,
+            default_image_model: None,
+            fallbacks: vec![],
+            image_fallbacks: vec![],
+            auth_orders: vec![],
             providers: vec![
                 ModelProviderConfig {
                     name: "oc-01-openai".into(),
@@ -1501,6 +1541,10 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
             config.models.default_model.as_deref(),
             Some("google/gemini-2.0-flash")
         );
+        assert_eq!(config.models.default_image_model, None);
+        assert!(config.models.fallbacks.is_empty());
+        assert!(config.models.image_fallbacks.is_empty());
+        assert!(config.models.auth_orders.is_empty());
         assert_eq!(config.models.providers.len(), 2);
         assert_eq!(config.models.providers[0].kind, "gemini");
         assert_eq!(config.models.providers[1].kind, "aws-bedrock");
@@ -1519,6 +1563,10 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
     fn resolve_model_accepts_provider_alias_kinds_without_affecting_inventory_matching() {
         let config = ModelsConfig {
             default_model: Some("google/gemini-2.0-flash".into()),
+            default_image_model: None,
+            fallbacks: vec![],
+            image_fallbacks: vec![],
+            auth_orders: vec![],
             providers: vec![
                 ModelProviderConfig {
                     name: "google".into(),
@@ -1559,6 +1607,82 @@ models = ["anthropic.claude-3-5-sonnet-20241022-v2:0"]
             bedrock.canonical_model_id(),
             "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"
         );
+    }
+
+    #[test]
+    fn models_config_loads_image_defaults_fallbacks_and_auth_orders_from_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = temp_config_path("models-image-fallbacks-auth-orders");
+        fs::write(
+            &path,
+            r#"
+[models]
+default_model = "oc-01-openai/gpt-5.4"
+default_image_model = "oc-01-openai/gpt-image-1"
+
+[[models.fallbacks]]
+name = "default-chat"
+chain = ["oc-01-openai/gpt-5.4", "oc-01-anthropic/claude-sonnet-4-6"]
+
+[[models.image_fallbacks]]
+name = "default-image"
+chain = ["oc-01-openai/gpt-image-1", "google/imagen-3"]
+
+[[models.auth_orders]]
+provider = "oc-01-openai"
+order = ["api_key", "api_key_env", "azure_cli"]
+
+[[models.providers]]
+name = "oc-01-openai"
+kind = "openai"
+base_url = "https://example.test/openai/v1"
+api_key_env = "OPENAI_API_KEY"
+models = ["gpt-5.4", "gpt-image-1"]
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(
+            config.models.default_image_model.as_deref(),
+            Some("oc-01-openai/gpt-image-1")
+        );
+        assert_eq!(
+            config.models.fallbacks,
+            vec![ModelFallbackChainConfig {
+                name: "default-chat".into(),
+                chain: vec![
+                    "oc-01-openai/gpt-5.4".into(),
+                    "oc-01-anthropic/claude-sonnet-4-6".into(),
+                ],
+            }]
+        );
+        assert_eq!(
+            config.models.image_fallbacks,
+            vec![ModelFallbackChainConfig {
+                name: "default-image".into(),
+                chain: vec!["oc-01-openai/gpt-image-1".into(), "google/imagen-3".into(),],
+            }]
+        );
+        assert_eq!(
+            config.models.auth_orders,
+            vec![ModelAuthOrderConfig {
+                provider: "oc-01-openai".into(),
+                order: vec!["api_key".into(), "api_key_env".into(), "azure_cli".into()],
+            }]
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn models_config_defaults_new_image_fallback_and_auth_metadata() {
+        let config = AppConfig::default();
+
+        assert_eq!(config.models.default_image_model, None);
+        assert!(config.models.fallbacks.is_empty());
+        assert!(config.models.image_fallbacks.is_empty());
+        assert!(config.models.auth_orders.is_empty());
     }
 
     #[test]

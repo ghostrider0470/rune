@@ -775,6 +775,10 @@ async fn routed_provider_dispatches_by_provider_model_id_and_strips_prefix() {
 
     let models = ModelsConfig {
         default_model: Some("oc-01-openai/gpt-5.4".into()),
+        default_image_model: None,
+        fallbacks: vec![],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
         providers: vec![
             ModelProviderConfig {
                 name: "oc-01-openai".into(),
