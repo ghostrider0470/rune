@@ -27,6 +27,49 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
 
+/// Validate that an Azure API version follows the `YYYY-MM-DD` or
+/// `YYYY-MM-DD-preview` format.  Returns `Ok(())` on success or a
+/// [`ModelError::Configuration`] describing the problem.
+fn validate_azure_api_version(version: &str) -> Result<(), ModelError> {
+    // Accepted formats: "2024-06-01", "2024-02-15-preview"
+    let (date_part, suffix) = match version.strip_suffix("-preview") {
+        Some(date) => (date, true),
+        None => (version, false),
+    };
+
+    let parts: Vec<&str> = date_part.split('-').collect();
+    let valid = parts.len() == 3
+        && parts[0].len() == 4
+        && parts[0].chars().all(|c| c.is_ascii_digit())
+        && parts[1].len() == 2
+        && parts[1].chars().all(|c| c.is_ascii_digit())
+        && parts[2].len() == 2
+        && parts[2].chars().all(|c| c.is_ascii_digit());
+
+    if !valid {
+        let hint = if suffix {
+            "expected YYYY-MM-DD-preview"
+        } else {
+            "expected YYYY-MM-DD or YYYY-MM-DD-preview"
+        };
+        return Err(ModelError::Configuration(format!(
+            "invalid Azure API version '{version}': {hint}"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Validate that an Azure provider has a non-empty endpoint URL.
+fn validate_azure_endpoint(base_url: &str, provider_kind: &str) -> Result<(), ModelError> {
+    if base_url.trim().is_empty() {
+        return Err(ModelError::Configuration(format!(
+            "{provider_kind} provider requires a non-empty base_url / endpoint"
+        )));
+    }
+    Ok(())
+}
+
 /// Build a `Box<dyn ModelProvider>` from a [`ModelProviderConfig`].
 ///
 /// Provider selection is driven by `provider_name`:
@@ -64,8 +107,10 @@ pub fn provider_from_config(
             }
         }
         "anthropic_azure" | "azure_anthropic" => {
+            validate_azure_endpoint(&cfg.base_url, "Anthropic Azure")?;
             let api_key = resolve_api_key(cfg)?;
             let api_version = cfg.api_version.as_deref().unwrap_or("2023-06-01");
+            validate_azure_api_version(api_version)?;
             Ok(Box::new(AnthropicProvider::azure(
                 &cfg.base_url,
                 &api_key,
@@ -73,6 +118,7 @@ pub fn provider_from_config(
             )))
         }
         "azure" | "azure_openai" | "azure-openai" => {
+            validate_azure_endpoint(&cfg.base_url, "Azure OpenAI")?;
             let api_key = resolve_api_key(cfg)?;
             let deployment = cfg.deployment_name.as_deref().ok_or_else(|| {
                 ModelError::Configuration("Azure provider requires deployment_name".into())
@@ -80,6 +126,7 @@ pub fn provider_from_config(
             let api_version = cfg.api_version.as_deref().ok_or_else(|| {
                 ModelError::Configuration("Azure provider requires api_version".into())
             })?;
+            validate_azure_api_version(api_version)?;
             Ok(Box::new(AzureOpenAiProvider::new(
                 &cfg.base_url,
                 deployment,
@@ -88,11 +135,14 @@ pub fn provider_from_config(
             )))
         }
         "azure-foundry" | "azure-ai" => {
+            validate_azure_endpoint(&cfg.base_url, "Azure Foundry")?;
             let api_key = resolve_api_key(cfg)?;
+            let api_version = cfg.api_version.as_deref().unwrap_or("2023-06-01");
+            validate_azure_api_version(api_version)?;
             Ok(Box::new(AzureFoundryProvider::with_api_version(
                 &cfg.base_url,
                 &api_key,
-                cfg.api_version.as_deref().unwrap_or("2023-06-01"),
+                api_version,
             )))
         }
         "openai" => {
@@ -452,5 +502,106 @@ mod tests {
         let err = provider_from_config(&cfg).expect_err("missing api key should error");
         assert!(err.to_string().contains("RUNE_TEST_MISSING_KEY"));
         assert!(err.to_string().contains("google"));
+    }
+
+    // --- Azure API-version validation ---
+
+    #[test]
+    fn valid_azure_api_versions() {
+        assert!(validate_azure_api_version("2024-06-01").is_ok());
+        assert!(validate_azure_api_version("2025-01-01").is_ok());
+        assert!(validate_azure_api_version("2023-06-01").is_ok());
+        assert!(validate_azure_api_version("2024-02-15-preview").is_ok());
+    }
+
+    #[test]
+    fn invalid_azure_api_version_format() {
+        let err = validate_azure_api_version("v1").unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("invalid Azure API version 'v1'"));
+
+        let err = validate_azure_api_version("2024/06/01").unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+
+        let err = validate_azure_api_version("2024-6-1").unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+
+        let err = validate_azure_api_version("latest").unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+
+        let err = validate_azure_api_version("").unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+    }
+
+    #[test]
+    fn azure_config_rejects_invalid_api_version() {
+        let cfg = ModelProviderConfig {
+            name: "azure".into(),
+            kind: "azure-openai".into(),
+            base_url: "https://test.openai.azure.com".into(),
+            deployment_name: Some("gpt-4o".into()),
+            api_version: Some("v1-bad".into()),
+            api_key: Some("test-key".into()),
+            api_key_env: None,
+            model_alias: None,
+            models: vec![],
+        };
+        let err = provider_from_config(&cfg).unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("invalid Azure API version"));
+    }
+
+    #[test]
+    fn azure_config_rejects_empty_endpoint() {
+        let cfg = ModelProviderConfig {
+            name: "azure".into(),
+            kind: "azure-openai".into(),
+            base_url: String::new(),
+            deployment_name: Some("gpt-4o".into()),
+            api_version: Some("2024-06-01".into()),
+            api_key: Some("test-key".into()),
+            api_key_env: None,
+            model_alias: None,
+            models: vec![],
+        };
+        let err = provider_from_config(&cfg).unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("non-empty base_url"));
+    }
+
+    #[test]
+    fn azure_foundry_config_rejects_empty_endpoint() {
+        let cfg = ModelProviderConfig {
+            name: "foundry".into(),
+            kind: "azure-foundry".into(),
+            base_url: String::new(),
+            deployment_name: None,
+            api_version: None,
+            api_key: Some("test-key".into()),
+            api_key_env: None,
+            model_alias: None,
+            models: vec![],
+        };
+        let err = provider_from_config(&cfg).unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("non-empty base_url"));
+    }
+
+    #[test]
+    fn anthropic_azure_config_rejects_empty_endpoint() {
+        let cfg = ModelProviderConfig {
+            name: "anthropic-azure".into(),
+            kind: "anthropic_azure".into(),
+            base_url: String::new(),
+            deployment_name: None,
+            api_version: Some("2023-06-01".into()),
+            api_key: Some("test-key".into()),
+            api_key_env: None,
+            model_alias: None,
+            models: vec![],
+        };
+        let err = provider_from_config(&cfg).unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("non-empty base_url"));
     }
 }
