@@ -1410,4 +1410,37 @@ mod tests {
             "expected unrestricted warning for yolo + no-sandbox"
         );
     }
+
+    /// Simulate what happens when --yolo --no-sandbox CLI flags are applied
+    /// via `apply_cli_overrides` before doctor runs.
+    #[test]
+    fn cli_bypass_flags_flow_through_to_doctor() {
+        let mut config = AppConfig::default();
+        // Default should pass
+        let before = check_approval_security(&config);
+        assert!(before.iter().all(|r| r.status == CheckStatus::Pass));
+
+        // Apply CLI overrides (simulating --yolo --no-sandbox)
+        config.apply_cli_overrides(true, true);
+
+        let after = check_approval_security(&config);
+        assert!(
+            after
+                .iter()
+                .any(|r| r.name == "approval.mode" && r.status == CheckStatus::Warn),
+            "yolo via CLI flag should warn in doctor"
+        );
+        assert!(
+            after
+                .iter()
+                .any(|r| r.name == "security.posture" && r.status == CheckStatus::Warn),
+            "no-sandbox via CLI flag should warn in doctor"
+        );
+        assert!(
+            after
+                .iter()
+                .any(|r| r.name == "security.unrestricted" && r.status == CheckStatus::Warn),
+            "combined CLI flags should trigger unrestricted warning"
+        );
+    }
 }

@@ -35,6 +35,20 @@ pub struct Cli {
     )]
     pub gateway_url: String,
 
+    /// Auto-approve all tool calls (sets approval.mode=yolo for this invocation).
+    ///
+    /// Intended for trusted local dev environments where interactive approval
+    /// prompts are unwanted.  Equivalent to `RUNE_APPROVAL__MODE=yolo`.
+    #[arg(long, global = true)]
+    pub yolo: bool,
+
+    /// Disable filesystem sandbox / workspace boundary enforcement.
+    ///
+    /// Intended for trusted environments where the agent needs unrestricted
+    /// filesystem access.  Equivalent to `RUNE_SECURITY__SANDBOX=false`.
+    #[arg(long, global = true)]
+    pub no_sandbox: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -1592,5 +1606,42 @@ mod tests {
     #[test]
     fn missing_subcommand_is_error() {
         assert!(Cli::try_parse_from(["rune"]).is_err());
+    }
+
+    // ── Trusted-environment bypass flags (#64) ───────────────────────
+
+    #[test]
+    fn parse_yolo_flag() {
+        let cli = Cli::try_parse_from(["rune", "--yolo", "status"]).unwrap();
+        assert!(cli.yolo);
+        assert!(!cli.no_sandbox);
+    }
+
+    #[test]
+    fn parse_no_sandbox_flag() {
+        let cli = Cli::try_parse_from(["rune", "--no-sandbox", "doctor"]).unwrap();
+        assert!(cli.no_sandbox);
+        assert!(!cli.yolo);
+    }
+
+    #[test]
+    fn parse_yolo_and_no_sandbox_combined() {
+        let cli = Cli::try_parse_from(["rune", "--yolo", "--no-sandbox", "status"]).unwrap();
+        assert!(cli.yolo);
+        assert!(cli.no_sandbox);
+    }
+
+    #[test]
+    fn bypass_flags_default_to_false() {
+        let cli = Cli::try_parse_from(["rune", "status"]).unwrap();
+        assert!(!cli.yolo);
+        assert!(!cli.no_sandbox);
+    }
+
+    #[test]
+    fn yolo_flag_works_after_subcommand() {
+        // clap global flags can appear before or after the subcommand.
+        let cli = Cli::try_parse_from(["rune", "gateway", "status", "--yolo"]).unwrap();
+        assert!(cli.yolo);
     }
 }
