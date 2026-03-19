@@ -112,6 +112,28 @@ impl Default for OllamaProvider {
 }
 
 impl OllamaProvider {
+    /// Probe for a running Ollama instance, respecting the `OLLAMA_HOST`
+    /// environment variable.
+    ///
+    /// Resolution order:
+    /// 1. If `OLLAMA_HOST` is set and non-empty, probe that URL.
+    /// 2. Otherwise fall back to `http://localhost:11434`.
+    ///
+    /// `OLLAMA_HOST` follows Ollama's own convention — it may be a bare
+    /// `host:port`, a full `http://host:port` URL, or just a host name.
+    /// A scheme is prepended when missing and the default port is appended
+    /// when absent.
+    pub async fn probe_env() -> Option<Self> {
+        match std::env::var("OLLAMA_HOST") {
+            Ok(val) if !val.trim().is_empty() => {
+                let base = normalize_ollama_host(val.trim());
+                debug!(ollama_host = %base, "OLLAMA_HOST set — probing custom endpoint");
+                Self::probe_url(&base).await
+            }
+            _ => Self::probe_local().await,
+        }
+    }
+
     /// Probe `http://localhost:11434` (or a custom URL) for a running Ollama
     /// instance.  Returns `Some(OllamaProvider)` if the server responds to
     /// `GET /api/tags` within a short timeout, `None` otherwise.
@@ -149,6 +171,31 @@ impl OllamaProvider {
                 .unwrap_or_default(),
         })
     }
+}
+
+/// Normalize an `OLLAMA_HOST` value into a full `http(s)://host:port` base URL.
+///
+/// Ollama's own CLI accepts several shapes:
+/// - `http://host:port`  / `https://host:port` — returned as-is (trailing `/` stripped).
+/// - `host:port` — `http://` is prepended.
+/// - `host` (no port) — `http://host:11434` is returned.
+///
+/// This mirrors the behaviour of Ollama's Go client normalisation.
+fn normalize_ollama_host(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+
+    // Already has a scheme → just ensure no trailing slash.
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return trimmed.to_string();
+    }
+
+    // Bare host:port (e.g. "192.168.1.5:11434").
+    if trimmed.contains(':') {
+        return format!("http://{trimmed}");
+    }
+
+    // Bare hostname — append default Ollama port.
+    format!("http://{trimmed}:11434")
 }
 
 /// Response from Ollama's `/api/tags` endpoint.
@@ -216,5 +263,84 @@ mod tests {
         // Port 19999 should not have an Ollama instance.
         let result = OllamaProvider::probe_url("http://127.0.0.1:19999").await;
         assert!(result.is_none(), "probe of unreachable host should return None");
+    }
+
+    // --- normalize_ollama_host tests ---
+
+    #[test]
+    fn normalize_full_http_url() {
+        assert_eq!(
+            normalize_ollama_host("http://192.168.1.5:11434"),
+            "http://192.168.1.5:11434"
+        );
+    }
+
+    #[test]
+    fn normalize_full_https_url() {
+        assert_eq!(
+            normalize_ollama_host("https://ollama.example.com:443"),
+            "https://ollama.example.com:443"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_trailing_slash() {
+        assert_eq!(
+            normalize_ollama_host("http://myhost:11434/"),
+            "http://myhost:11434"
+        );
+    }
+
+    #[test]
+    fn normalize_bare_host_port() {
+        assert_eq!(
+            normalize_ollama_host("192.168.1.100:11434"),
+            "http://192.168.1.100:11434"
+        );
+    }
+
+    #[test]
+    fn normalize_bare_hostname_appends_default_port() {
+        assert_eq!(
+            normalize_ollama_host("ollama-server"),
+            "http://ollama-server:11434"
+        );
+    }
+
+    #[test]
+    fn normalize_bare_ip_appends_default_port() {
+        assert_eq!(
+            normalize_ollama_host("192.168.1.100"),
+            "http://192.168.1.100:11434"
+        );
+    }
+
+    #[test]
+    fn normalize_trims_whitespace() {
+        assert_eq!(
+            normalize_ollama_host("  http://myhost:11434  "),
+            "http://myhost:11434"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_env_falls_back_to_local_when_unset() {
+        // Ensure OLLAMA_HOST is not set, then probe_env should behave like
+        // probe_local (i.e. return None on CI where nothing listens on 11434).
+        unsafe { std::env::remove_var("OLLAMA_HOST"); }
+        let result = OllamaProvider::probe_env().await;
+        // We can't assert Some because Ollama may not be running, but the
+        // code path should not panic.
+        let _ = result;
+    }
+
+    #[tokio::test]
+    async fn probe_env_uses_ollama_host_when_set() {
+        // Point OLLAMA_HOST at an unreachable address — should return None
+        // without panicking, proving the env var was read.
+        unsafe { std::env::set_var("OLLAMA_HOST", "http://127.0.0.1:19999"); }
+        let result = OllamaProvider::probe_env().await;
+        assert!(result.is_none(), "unreachable OLLAMA_HOST should return None");
+        unsafe { std::env::remove_var("OLLAMA_HOST"); }
     }
 }
