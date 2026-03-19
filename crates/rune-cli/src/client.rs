@@ -338,7 +338,9 @@ impl GatewayClient {
 
     /// Aggregate persisted session-turn token usage. Monetary cost is intentionally not derived yet.
     pub async fn gateway_usage_cost(&self) -> Result<GatewayUsageCostResponse> {
-        let sessions = self.sessions_list(None, None, None, None, 500).await?;
+        let sessions = self
+            .sessions_list(None, None, None, None, 500)
+            .await?;
         let mut total_turns = 0usize;
         let mut prompt_tokens = 0u64;
         let mut completion_tokens = 0u64;
@@ -2591,7 +2593,10 @@ mod tests {
             .await;
 
         let client = GatewayClient::new(&server.uri());
-        let resp = client.sessions_list(None, None, None, None, 100).await.unwrap();
+        let resp = client
+            .sessions_list(None, None, None, None, 100)
+            .await
+            .unwrap();
         assert_eq!(resp.sessions.len(), 2);
         assert_eq!(resp.sessions[0].id, "s1");
         assert_eq!(resp.sessions[1].channel, None);
@@ -2735,6 +2740,69 @@ mod tests {
 
         let client = GatewayClient::new(&server.uri());
         let err = client.agents_show("nonexistent").await.unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn sessions_tree_builds_hierarchy() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions/root-1/tree"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "root-1",
+                "kind": "direct",
+                "status": "running",
+                "channel": "local",
+                "children": [
+                    {
+                        "id": "child-a",
+                        "kind": "subagent",
+                        "status": "running",
+                        "channel": "local",
+                        "children": [
+                            {
+                                "id": "grandchild-1",
+                                "kind": "subagent",
+                                "status": "idle",
+                                "channel": "local",
+                                "children": []
+                            }
+                        ]
+                    },
+                    {
+                        "id": "child-b",
+                        "kind": "subagent",
+                        "status": "idle",
+                        "channel": "local",
+                        "children": []
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.sessions_tree("root-1").await.unwrap();
+        assert_eq!(resp.root.id, "root-1");
+        assert_eq!(resp.root.children.len(), 2);
+        assert_eq!(resp.root.children[0].id, "child-a");
+        assert_eq!(resp.root.children[0].children.len(), 1);
+        assert_eq!(resp.root.children[0].children[0].id, "grandchild-1");
+        assert_eq!(resp.root.children[1].id, "child-b");
+        assert!(resp.root.children[1].children.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sessions_tree_not_found() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions/missing/tree"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let err = client.sessions_tree("missing").await.unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 

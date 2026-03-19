@@ -338,6 +338,12 @@ pub enum AgentsAction {
         /// Subagent session ID to inspect.
         id: String,
     },
+    /// Display the full delegation tree (parent → children → grandchildren).
+    Tree {
+        /// Maximum number of sessions to fetch for tree construction.
+        #[arg(long, default_value_t = 500)]
+        limit: u64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1876,6 +1882,30 @@ mod tests {
             Command::Agents {
                 action: AgentsAction::Status { id },
             } => assert_eq!(id, "agent-abc"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_tree() {
+        let cli = Cli::try_parse_from(["rune", "agents", "tree"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Agents {
+                action: AgentsAction::Tree { limit: 500 }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_agents_tree_with_limit() {
+        let cli = Cli::try_parse_from(["rune", "agents", "tree", "--limit", "200"]).unwrap();
+        match cli.command {
+            Command::Agents {
+                action: AgentsAction::Tree { limit },
+            } => {
+                assert_eq!(limit, 200);
+            }
             other => panic!("unexpected command: {other:?}"),
         }
     }
