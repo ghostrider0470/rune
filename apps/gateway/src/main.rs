@@ -23,7 +23,7 @@ use tokio::signal;
 use tracing::{error, info, warn};
 
 use rune_channels::TelegramAdapter;
-use rune_config::{AppConfig, MemoryLevel, StorageBackend};
+use rune_config::{AppConfig, MemoryLevel, RuntimeMode, StorageBackend};
 use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
@@ -69,15 +69,30 @@ const DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS: u64 = 5;
 #[tokio::main]
 async fn main() -> Result<()> {
     let config_path = discover_config_path();
-    let config = AppConfig::load(config_path.as_deref()).with_context(|| {
+    let mut config = AppConfig::load(config_path.as_deref()).with_context(|| {
         format!(
             "failed to load config from {}",
             display_config_path(config_path.as_deref())
         )
     })?;
 
+    // Resolve runtime mode and swap Docker-default paths to ~/.rune/* when
+    // running standalone on a bare host (zero-config quick-start, issue #61).
+    let resolved_mode = config.mode.resolve(&config);
+    config.adjust_paths_for_mode(&resolved_mode);
+
     init_logging(&config.logging);
     emit_startup_banner(&config, config_path.as_deref());
+
+    // Auto-create missing directories in Standalone mode so that `rune` boots
+    // without manual `mkdir` (zero-config, issue #61).
+    if resolved_mode == RuntimeMode::Standalone {
+        if let Err(errors) = config.ensure_dirs() {
+            for error in &errors {
+                warn!(error = %error, "failed to auto-create directory");
+            }
+        }
+    }
 
     if let Err(errors) = config.validate_paths() {
         for error in errors {
