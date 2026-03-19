@@ -555,6 +555,45 @@ pub enum MessageAction {
         #[arg(long)]
         session: Option<String>,
     },
+    /// List or reply to message threads.
+    Thread {
+        #[command(subcommand)]
+        action: MessageThreadAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MessageThreadAction {
+    /// List messages within a thread.
+    List {
+        /// Thread ID to list messages from.
+        #[arg(long)]
+        thread_id: String,
+        /// Channel adapter the thread belongs to.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Session ID the thread belongs to.
+        #[arg(long)]
+        session: Option<String>,
+        /// Maximum number of messages to return.
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
+    },
+    /// Reply to an existing thread.
+    Reply {
+        /// Thread ID to reply to.
+        #[arg(long)]
+        thread_id: String,
+        /// Channel adapter the thread belongs to.
+        #[arg(long)]
+        channel: String,
+        /// Reply message text.
+        #[arg(long)]
+        text: String,
+        /// Session ID the thread belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2442,6 +2481,190 @@ mod tests {
             "rune",
             "message",
             "delete",
+            "--channel",
+            "telegram",
+        ])
+        .is_err());
+    }
+
+    // ── Message thread (#74) ────────────────────────────────────────
+
+    #[test]
+    fn parse_message_thread_list() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "thread",
+            "list",
+            "--thread-id",
+            "thr-42",
+            "--channel",
+            "telegram",
+            "--session",
+            "sess-7",
+            "--limit",
+            "10",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Thread {
+                        action:
+                            MessageThreadAction::List {
+                                thread_id,
+                                channel,
+                                session,
+                                limit,
+                            },
+                    },
+            } => {
+                assert_eq!(thread_id, "thr-42");
+                assert_eq!(channel.as_deref(), Some("telegram"));
+                assert_eq!(session.as_deref(), Some("sess-7"));
+                assert_eq!(limit, 10);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_thread_list_defaults() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "thread",
+            "list",
+            "--thread-id",
+            "thr-1",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Thread {
+                        action:
+                            MessageThreadAction::List {
+                                thread_id,
+                                channel,
+                                session,
+                                limit,
+                            },
+                    },
+            } => {
+                assert_eq!(thread_id, "thr-1");
+                assert!(channel.is_none());
+                assert!(session.is_none());
+                assert_eq!(limit, 50);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_thread_list_requires_thread_id() {
+        assert!(
+            Cli::try_parse_from(["rune", "message", "thread", "list"]).is_err()
+        );
+    }
+
+    #[test]
+    fn parse_message_thread_reply() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "thread",
+            "reply",
+            "--thread-id",
+            "thr-42",
+            "--channel",
+            "telegram",
+            "--text",
+            "Thanks for the update",
+            "--session",
+            "sess-7",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Thread {
+                        action:
+                            MessageThreadAction::Reply {
+                                thread_id,
+                                channel,
+                                text,
+                                session,
+                            },
+                    },
+            } => {
+                assert_eq!(thread_id, "thr-42");
+                assert_eq!(channel, "telegram");
+                assert_eq!(text, "Thanks for the update");
+                assert_eq!(session.as_deref(), Some("sess-7"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_thread_reply_without_session() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "thread",
+            "reply",
+            "--thread-id",
+            "thr-99",
+            "--channel",
+            "discord",
+            "--text",
+            "reply text",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Thread {
+                        action:
+                            MessageThreadAction::Reply {
+                                thread_id,
+                                channel,
+                                text,
+                                session,
+                            },
+                    },
+            } => {
+                assert_eq!(thread_id, "thr-99");
+                assert_eq!(channel, "discord");
+                assert_eq!(text, "reply text");
+                assert!(session.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_thread_reply_requires_thread_id_channel_text() {
+        assert!(
+            Cli::try_parse_from(["rune", "message", "thread", "reply"]).is_err()
+        );
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "thread",
+            "reply",
+            "--thread-id",
+            "thr-1",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "thread",
+            "reply",
+            "--thread-id",
+            "thr-1",
             "--channel",
             "telegram",
         ])
