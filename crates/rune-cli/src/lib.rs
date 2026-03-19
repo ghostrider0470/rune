@@ -25,8 +25,8 @@ pub use cli::Cli;
 use cli::{
     ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell, ConfigAction,
     CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
-    MessageThreadAction, ModelsAction, RemindersAction, SessionsAction, SystemAction,
-    SystemEventAction, SystemHeartbeatAction,
+    MessageThreadAction, MessageVoiceAction, ModelsAction, RemindersAction, SessionsAction,
+    SystemAction, SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -1341,6 +1341,80 @@ pub async fn run(cli: Cli) -> Result<()> {
                             session.as_deref(),
                         )
                         .await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            MessageAction::Voice { action } => match action {
+                MessageVoiceAction::Send {
+                    text,
+                    channel,
+                    voice,
+                    model,
+                    session,
+                    output,
+                } => {
+                    use output::MessageVoiceSendResponse;
+
+                    let audio = client
+                        .tts_synthesize(&text, voice.as_deref(), model.as_deref())
+                        .await;
+                    match audio {
+                        Ok(bytes) => {
+                            let bytes_len = bytes.len();
+                            let output_path = if let Some(ref path) = output {
+                                tokio::fs::write(path, &bytes)
+                                    .await
+                                    .with_context(|| {
+                                        format!("failed to write audio to {path}")
+                                    })?;
+                                Some(path.clone())
+                            } else {
+                                None
+                            };
+                            let send_result = client
+                                .message_send(
+                                    &channel,
+                                    &format!("[voice] {text}"),
+                                    session.as_deref(),
+                                    None,
+                                )
+                                .await?;
+                            let result = MessageVoiceSendResponse {
+                                success: true,
+                                channel: channel.clone(),
+                                bytes_synthesized: bytes_len,
+                                output_path,
+                                channel_delivered: send_result.success,
+                                message_id: send_result.message_id,
+                                detail: if send_result.success {
+                                    format!(
+                                        "Synthesized {bytes_len} bytes and delivered to {channel}",
+                                    )
+                                } else {
+                                    format!(
+                                        "Synthesized {bytes_len} bytes but channel delivery failed: {}",
+                                        send_result.detail,
+                                    )
+                                },
+                            };
+                            println!("{}", render(&result, format));
+                        }
+                        Err(e) => {
+                            let result = MessageVoiceSendResponse {
+                                success: false,
+                                channel: channel.clone(),
+                                bytes_synthesized: 0,
+                                output_path: None,
+                                channel_delivered: false,
+                                message_id: None,
+                                detail: format!("TTS synthesis failed: {e}"),
+                            };
+                            println!("{}", render(&result, format));
+                        }
+                    }
+                }
+                MessageVoiceAction::Status => {
+                    let result = client.message_voice_status().await?;
                     println!("{}", render(&result, format));
                 }
             },

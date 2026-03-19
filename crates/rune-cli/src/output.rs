@@ -2002,6 +2002,79 @@ impl fmt::Display for MessageThreadReplyResponse {
     }
 }
 
+/// Response for `message voice send`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageVoiceSendResponse {
+    pub success: bool,
+    pub channel: String,
+    pub bytes_synthesized: usize,
+    pub output_path: Option<String>,
+    pub channel_delivered: bool,
+    pub message_id: Option<String>,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageVoiceSendResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} [{}] {}", self.channel, self.detail)?;
+        if let Some(ref path) = self.output_path {
+            write!(f, " (saved: {path})")?;
+        }
+        if let Some(ref id) = self.message_id {
+            write!(f, " (id={id})")?;
+        }
+        Ok(())
+    }
+}
+
+/// A TTS voice entry from the engine's available voices.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TtsVoiceDetail {
+    pub id: String,
+    pub name: String,
+    pub language: String,
+}
+
+impl fmt::Display for TtsVoiceDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({}, {})", self.id, self.name, self.language)
+    }
+}
+
+/// Response for `message voice status`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageVoiceStatusResponse {
+    pub enabled: bool,
+    pub provider: String,
+    pub voice: String,
+    pub model: String,
+    pub auto_mode: String,
+    pub voices: Vec<TtsVoiceDetail>,
+}
+
+impl fmt::Display for MessageVoiceStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.enabled { "✓" } else { "✗" };
+        writeln!(
+            f,
+            "{icon} TTS engine: {}",
+            if self.enabled { "enabled" } else { "disabled" },
+        )?;
+        writeln!(f, "  Provider: {}", self.provider)?;
+        writeln!(f, "  Voice:    {}", self.voice)?;
+        writeln!(f, "  Model:    {}", self.model)?;
+        writeln!(f, "  Auto:     {}", self.auto_mode)?;
+        if !self.voices.is_empty() {
+            writeln!(f, "  Available voices:")?;
+            for v in &self.voices {
+                writeln!(f, "    {v}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
