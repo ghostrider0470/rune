@@ -1239,6 +1239,24 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::React {
+                message_id,
+                emoji,
+                remove,
+                channel,
+                session,
+            } => {
+                let result = client
+                    .message_react(
+                        &message_id,
+                        &emoji,
+                        remove,
+                        channel.as_deref(),
+                        session.as_deref(),
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Reminders { action } => match action {
             RemindersAction::Add {
