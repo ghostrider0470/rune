@@ -441,6 +441,14 @@ After restart, the runtime must preserve and recover at minimum:
 
 Long-running OS child processes may not survive restart in all modes, but their prior existence and terminal or lost state must remain inspectable. The runtime must not pretend the work never existed.
 
+Operators should treat container restart verification as a first-class workflow, not an ad hoc sanity check. At minimum the documented post-restart path should verify:
+
+1. `rune doctor` for writable mounts and path sanity
+2. health/status surfaces for dependency readiness
+3. scheduler/job state for expected next runs and preserved history
+4. session/transcript inspectability for recently active work
+5. approval queues / durable audit trails for work that was pending across restart
+
 ---
 
 ## 10. Probe and doctor expectations in containers

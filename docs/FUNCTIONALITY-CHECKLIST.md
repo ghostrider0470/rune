@@ -368,6 +368,7 @@ Implementation note (2026-03-13): `completion generate <shell>` now emits real s
 - [ ] metrics/tracing
 - [x] backup/export
 - [x] restore/migration workflow
+- [x] restart preservation workflow
 - [ ] update path
 - [ ] doctor/diagnostics
 - [ ] doctor interactive repair flow
