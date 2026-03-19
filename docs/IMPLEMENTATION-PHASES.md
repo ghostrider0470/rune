@@ -214,6 +214,7 @@ Reproduce proactive automation behavior.
 ### Acceptance criteria
 
 - scheduled jobs are durable and inspectable
+- schedule edits and disable/re-enable transitions recompute or clear `next_run_at` rather than preserving stale due state
 - heartbeat behavior preserves shipped no-op and duplicate-suppression semantics
 - scheduled executions are auditable; `sessionTarget=isolated` cron jobs create descendant subagent sessions while main-target cron jobs, reminders, and heartbeats reuse scheduled session contexts
 - operator can list, inspect, enable, disable, wake, and review job history
@@ -225,6 +226,7 @@ Reproduce proactive automation behavior.
 ### Recommended parity tests
 
 - cron create/list/show/edit/disable/enable/run-now/wake flows
+- schedule-edit recompute plus disable/re-enable `next_run_at` transition tests
 - due-only vs forced-run history tests
 - `systemEvent` vs `agentTurn` session-target validation tests
 - delivery-mode retention/inspection tests for `none` / `announce` / `webhook`

@@ -202,6 +202,7 @@ Do not mark a subsystem parity-complete without black-box evidence.
 
 - enabled/disabled state is durable
 - schedule definition is compatibility surface: `at`, `every`, and cron-expression semantics may not drift silently
+- `next_run_at` is derived scheduler state, not sticky metadata: create, schedule-edit, disable, and re-enable transitions must clear or recompute the executable next-fire time from the current job contract rather than preserving stale cadence
 - `sessionTarget=main` maps to `systemEvent` payloads and `sessionTarget=isolated` maps to `agentTurn` payloads; invalid combinations fail explicitly
 - reminder timing and terminal outcomes remain operator-predictable; reminder `target` is retained as operator-visible metadata even though current execution still reuses the scheduled main session
 - delivery modes preserve `none`, `announce`, and `webhook` as durable, inspectable job metadata; runtime-specific branching on those modes is not yet a shipped contract
@@ -233,6 +234,7 @@ Do not mark a subsystem parity-complete without black-box evidence.
 
 - missed runs are visible
 - invalid schedules fail explicitly; stored cron jobs whose next run can no longer be computed disable rather than fabricating future fire times
+- schedule edits and disable/re-enable transitions must not preserve stale `next_run_at`; if a valid next fire cannot be derived, inspection should surface `next_run_at=null` or a disabled job rather than silently keeping the old cadence
 - invalid `sessionTarget`/payload combinations fail explicitly
 - disabled jobs do not run silently
 - reminder delivery failures resolve to explicit `missed` outcomes rather than disappearing
@@ -242,6 +244,7 @@ Do not mark a subsystem parity-complete without black-box evidence.
 ### Minimum parity evidence
 
 - cron create/list/show/update/disable/enable/run/wake tests
+- schedule-edit recompute plus disable/re-enable `next_run_at` transition tests
 - due-only vs forced-run history tests
 - `systemEvent` vs `agentTurn` session-target tests
 - delivery-mode retention/inspection tests for `none`/`announce`/`webhook`

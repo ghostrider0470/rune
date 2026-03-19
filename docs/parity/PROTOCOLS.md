@@ -912,6 +912,7 @@ Cron jobs must preserve:
 - explicit schedule definition
 - `at`, `every`, and cron-expression schedule concepts
 - enable/disable state
+- derived `next_run_at` semantics that recompute on schedule edits and re-enable transitions, and clear executable due state when disabled
 - run history
 - isolated execution context for `sessionTarget=isolated` jobs
 - configurable runtime/model if supported
@@ -936,6 +937,7 @@ Current surface note:
 - current CLI `cron add` creates one-shot `system_event` jobs only
 - current CLI `cron edit` is limited to name and delivery-mode mutation
 - `cron wake` and `system event` share the same wake-queueing surface
+- current `main` still has one remaining cron-semantic gap: schedule edits and disable/re-enable transitions can preserve stale `next_run_at` because update-time recomputation is not yet durable
 
 ## 11.2 Payload and delivery contract
 
