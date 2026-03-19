@@ -1496,6 +1496,8 @@ pub struct CronJobSummary {
     pub schedule: CronScheduleSummary,
     pub payload: CronPayloadSummary,
     pub delivery_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
     pub enabled: bool,
     pub session_target: String,
     pub created_at: String,
@@ -1548,6 +1550,9 @@ impl fmt::Display for CronJobDetailResponse {
         writeln!(f, "  Enabled:        {}", self.job.enabled)?;
         writeln!(f, "  Session target: {}", self.job.session_target)?;
         writeln!(f, "  Delivery mode:  {}", self.job.delivery_mode)?;
+        if let Some(url) = &self.job.webhook_url {
+            writeln!(f, "  Webhook URL:    {url}")?;
+        }
         writeln!(f, "  Schedule:       {}", self.job.schedule.render_human())?;
         writeln!(f, "  Payload:        {}", self.job.payload.render_human())?;
         writeln!(f, "  Created:        {}", self.job.created_at)?;
@@ -1869,6 +1874,7 @@ mod tests {
                     text: "run daily check".into(),
                 },
                 delivery_mode: "announce".into(),
+                webhook_url: None,
                 enabled: true,
                 session_target: "main".into(),
                 created_at: "2026-03-18T09:00:00Z".into(),
@@ -1900,6 +1906,7 @@ mod tests {
                     timeout_seconds: Some(30),
                 },
                 delivery_mode: "webhook".into(),
+                webhook_url: Some("https://example.com/hook".into()),
                 enabled: false,
                 session_target: "isolated".into(),
                 created_at: "2026-03-18T09:00:00Z".into(),
@@ -1911,6 +1918,7 @@ mod tests {
 
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Delivery mode:  webhook"));
+        assert!(out.contains("Webhook URL:    https://example.com/hook"));
         assert!(out.contains("Schedule:       every 60000ms anchor=12345"));
         assert!(out.contains(
             "Payload:        agent_turn message=\"check queue\" model=gpt-5.4 timeout=30s"

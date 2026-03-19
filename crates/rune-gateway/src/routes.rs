@@ -497,6 +497,8 @@ pub struct CronJobRequest {
     pub session_target: String,
     #[serde(default, rename = "deliveryMode", alias = "delivery_mode")]
     pub delivery_mode: Option<SchedulerDeliveryMode>,
+    #[serde(default, rename = "webhookUrl", alias = "webhook_url")]
+    pub webhook_url: Option<String>,
     pub enabled: Option<bool>,
 }
 
@@ -537,6 +539,8 @@ pub struct CronUpdateRequest {
     pub payload: Option<CronPayloadRequest>,
     #[serde(default, rename = "deliveryMode", alias = "delivery_mode")]
     pub delivery_mode: Option<SchedulerDeliveryMode>,
+    #[serde(default, rename = "webhookUrl", alias = "webhook_url")]
+    pub webhook_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -553,6 +557,8 @@ pub struct CronJobResponse {
     pub schedule: Schedule,
     pub payload: JobPayload,
     pub delivery_mode: SchedulerDeliveryMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
     pub session_target: SessionTarget,
     pub enabled: bool,
     pub created_at: String,
@@ -639,6 +645,7 @@ pub async fn cron_add(
         schedule,
         payload,
         delivery_mode: body.delivery_mode.unwrap_or(SchedulerDeliveryMode::None),
+        webhook_url: body.webhook_url,
         session_target,
         enabled: body.enabled.unwrap_or(true),
         created_at: now,
@@ -688,6 +695,7 @@ pub async fn cron_update(
         schedule: new_schedule,
         payload: new_payload,
         delivery_mode: body.delivery_mode,
+        webhook_url: body.webhook_url,
     };
 
     state
@@ -741,22 +749,11 @@ pub async fn cron_run(
         turn_executor: state.turn_executor.clone(),
         workspace_root,
         device_registry: state.device_registry.clone(),
+        event_tx: state.event_tx.clone(),
     };
 
-    let started_at = Utc::now();
-    let (status, output) = run_job_lifecycle(&deps, &job, true, SchedulerRunTrigger::Manual).await;
-
-    let _ = state.event_tx.send(SessionEvent {
-        session_id: job_id.to_string(),
-        kind: "cron_run_completed".to_string(),
-        payload: json!({
-            "job_id": job_id.to_string(),
-            "started_at": started_at,
-            "status": status,
-            "output": output,
-        }),
-        state_changed: true,
-    });
+    let (_status, _output) =
+        run_job_lifecycle(&deps, &job, true, SchedulerRunTrigger::Manual).await;
 
     Ok(Json(CronMutationResponse {
         success: true,
@@ -1444,6 +1441,7 @@ fn job_to_response(job: Job) -> CronJobResponse {
         schedule: job.schedule,
         payload: job.payload,
         delivery_mode: job.delivery_mode,
+        webhook_url: job.webhook_url,
         session_target: job.session_target,
         enabled: job.enabled,
         created_at: job.created_at.to_rfc3339(),

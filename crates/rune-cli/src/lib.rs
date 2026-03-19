@@ -871,6 +871,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 at,
                 session_target,
                 delivery_mode,
+                webhook_url,
             } => {
                 let at = DateTime::parse_from_rfc3339(&at)
                     .with_context(|| format!("invalid --at timestamp: {at}"))?
@@ -882,6 +883,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                         at,
                         &session_target,
                         delivery_mode.as_str(),
+                        webhook_url.as_deref(),
                     )
                     .await?;
                 println!("{}", render(&result, format));
@@ -894,12 +896,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 id,
                 name,
                 delivery_mode,
+                webhook_url,
             } => {
                 let result = client
                     .cron_update(
                         &id,
                         name.as_deref(),
                         delivery_mode.map(CronDeliveryMode::as_str),
+                        webhook_url.as_deref(),
                     )
                     .await?;
                 println!("{}", render(&result, format));
