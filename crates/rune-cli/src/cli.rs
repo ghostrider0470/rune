@@ -587,6 +587,11 @@ pub enum MessageAction {
         #[command(subcommand)]
         action: MessageThreadAction,
     },
+    /// Synthesize and send voice messages via TTS.
+    Voice {
+        #[command(subcommand)]
+        action: MessageVoiceAction,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -621,6 +626,33 @@ pub enum MessageThreadAction {
         #[arg(long)]
         session: Option<String>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MessageVoiceAction {
+    /// Synthesize text to speech and send as a voice message.
+    Send {
+        /// Text to synthesize into speech.
+        #[arg(long)]
+        text: String,
+        /// Target channel adapter for delivery (e.g. "telegram", "discord").
+        #[arg(long)]
+        channel: String,
+        /// Override the default TTS voice (e.g. "alloy", "nova", "shimmer").
+        #[arg(long)]
+        voice: Option<String>,
+        /// Override the default TTS model (e.g. "tts-1", "tts-1-hd").
+        #[arg(long)]
+        model: Option<String>,
+        /// Optional session ID to associate the message with.
+        #[arg(long)]
+        session: Option<String>,
+        /// Save synthesized audio to a local file path.
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Show TTS engine status and available voices.
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2886,5 +2918,125 @@ mod tests {
             "telegram",
         ])
         .is_err());
+    }
+
+    // ── Message voice (#74) ────────────────────────────────────────
+
+    #[test]
+    fn parse_message_voice_send() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "voice",
+            "send",
+            "--text",
+            "Hello from Rune",
+            "--channel",
+            "telegram",
+            "--voice",
+            "alloy",
+            "--model",
+            "tts-1-hd",
+            "--session",
+            "sess-5",
+            "--output",
+            "/tmp/voice.mp3",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Voice {
+                        action:
+                            MessageVoiceAction::Send {
+                                text,
+                                channel,
+                                voice,
+                                model,
+                                session,
+                                output,
+                            },
+                    },
+            } => {
+                assert_eq!(text, "Hello from Rune");
+                assert_eq!(channel, "telegram");
+                assert_eq!(voice.as_deref(), Some("alloy"));
+                assert_eq!(model.as_deref(), Some("tts-1-hd"));
+                assert_eq!(session.as_deref(), Some("sess-5"));
+                assert_eq!(output.as_deref(), Some("/tmp/voice.mp3"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_voice_send_minimal() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "voice",
+            "send",
+            "--text",
+            "Hey",
+            "--channel",
+            "discord",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Voice {
+                        action:
+                            MessageVoiceAction::Send {
+                                text,
+                                channel,
+                                voice,
+                                model,
+                                session,
+                                output,
+                            },
+                    },
+            } => {
+                assert_eq!(text, "Hey");
+                assert_eq!(channel, "discord");
+                assert!(voice.is_none());
+                assert!(model.is_none());
+                assert!(session.is_none());
+                assert!(output.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_voice_send_requires_text_and_channel() {
+        assert!(
+            Cli::try_parse_from(["rune", "message", "voice", "send", "--text", "hello"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "rune",
+                "message",
+                "voice",
+                "send",
+                "--channel",
+                "telegram",
+            ])
+            .is_err()
+        );
+        assert!(Cli::try_parse_from(["rune", "message", "voice", "send"]).is_err());
+    }
+
+    #[test]
+    fn parse_message_voice_status() {
+        let cli = Cli::try_parse_from(["rune", "message", "voice", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Message {
+                action: MessageAction::Voice {
+                    action: MessageVoiceAction::Status
+                }
+            }
+        ));
     }
 }

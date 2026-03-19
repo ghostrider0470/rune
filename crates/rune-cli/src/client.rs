@@ -1406,6 +1406,82 @@ impl GatewayClient {
         }
     }
 
+    /// `GET /tts/status`
+    pub async fn message_voice_status(
+        &self,
+    ) -> Result<crate::output::MessageVoiceStatusResponse> {
+        use crate::output::{MessageVoiceStatusResponse, TtsVoiceDetail};
+
+        let resp = self
+            .http
+            .get(self.url("/tts/status"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /tts/status")?;
+            let voices = v["voices"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|e| TtsVoiceDetail {
+                    id: e["id"].as_str().unwrap_or("?").to_string(),
+                    name: e["name"].as_str().unwrap_or("").to_string(),
+                    language: e["language"].as_str().unwrap_or("").to_string(),
+                })
+                .collect();
+            Ok(MessageVoiceStatusResponse {
+                enabled: v["enabled"].as_bool().unwrap_or(false),
+                provider: v["provider"].as_str().unwrap_or("").to_string(),
+                voice: v["voice"].as_str().unwrap_or("").to_string(),
+                model: v["model"].as_str().unwrap_or("").to_string(),
+                auto_mode: v["auto_mode"].as_str().unwrap_or("off").to_string(),
+                voices,
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
+        }
+    }
+
+    /// `POST /tts/synthesize` — returns raw audio bytes.
+    pub async fn tts_synthesize(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        let mut body = json!({ "text": text });
+        if let Some(v) = voice {
+            body["voice"] = json!(v);
+        }
+        if let Some(m) = model {
+            body["model"] = json!(m);
+        }
+        let resp = self
+            .http
+            .post(self.url("/tts/synthesize"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let bytes = resp
+                .bytes()
+                .await
+                .context("failed to read audio from POST /tts/synthesize")?;
+            Ok(bytes.to_vec())
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("TTS synthesis failed: HTTP {status}: {body_text}");
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(
         &self,
