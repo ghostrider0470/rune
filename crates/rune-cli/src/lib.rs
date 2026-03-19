@@ -1274,6 +1274,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::Read {
+                message_id,
+                channel,
+                session,
+            } => {
+                let result = client
+                    .message_read(&message_id, &channel, session.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
             MessageAction::Delete {
                 message_id,
                 channel,

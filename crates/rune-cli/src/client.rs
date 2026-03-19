@@ -1186,6 +1186,66 @@ impl GatewayClient {
         }
     }
 
+    /// `GET /messages/{id}` — read/fetch a single message by ID.
+    pub async fn message_read(
+        &self,
+        message_id: &str,
+        channel: &str,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageReadResponse> {
+        use crate::output::MessageReadResponse;
+
+        let mut params: Vec<(&str, &str)> = vec![("channel", channel)];
+        if let Some(s) = session {
+            params.push(("session", s));
+        }
+        let resp = self
+            .http
+            .get(self.url(&format!("/messages/{message_id}")))
+            .query(&params)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /messages/{id}")?;
+            Ok(MessageReadResponse {
+                success: true,
+                message_id: v["id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                channel: v["channel"]
+                    .as_str()
+                    .unwrap_or(channel)
+                    .to_string(),
+                sender: v["sender"].as_str().map(ToString::to_string),
+                text: v["text"].as_str().map(ToString::to_string),
+                timestamp: v["timestamp"].as_str().map(ToString::to_string),
+                thread_id: v["thread_id"].as_str().map(ToString::to_string),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("Message retrieved")
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageReadResponse {
+                success: false,
+                message_id: message_id.to_string(),
+                channel: channel.to_string(),
+                sender: None,
+                text: None,
+                timestamp: None,
+                thread_id: None,
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
     /// `GET /messages/threads/{id}`
     pub async fn message_thread_list(
         &self,
@@ -2773,6 +2833,84 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let resp = client
             .message_delete("msg-missing", "telegram", None)
+            .await
+            .unwrap();
+        assert!(!resp.success);
+        assert!(resp.detail.contains("404"));
+        assert!(resp.detail.contains("Message not found"));
+    }
+
+    #[tokio::test]
+    async fn message_read_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/messages/msg-42"))
+            .and(query_param("channel", "telegram"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg-42",
+                "channel": "telegram",
+                "sender": "alice",
+                "text": "Hello world",
+                "timestamp": "2026-03-19T12:00:00Z",
+                "detail": "Message retrieved"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_read("msg-42", "telegram", None)
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message_id, "msg-42");
+        assert_eq!(resp.channel, "telegram");
+        assert_eq!(resp.sender.as_deref(), Some("alice"));
+        assert_eq!(resp.text.as_deref(), Some("Hello world"));
+        assert_eq!(resp.timestamp.as_deref(), Some("2026-03-19T12:00:00Z"));
+        assert!(resp.thread_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn message_read_with_session_and_thread() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/messages/msg-77"))
+            .and(query_param("channel", "discord"))
+            .and(query_param("session", "sess-5"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "msg-77",
+                "channel": "discord",
+                "sender": "bob",
+                "text": "threaded message",
+                "timestamp": "2026-03-19T14:00:00Z",
+                "thread_id": "thr-10"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_read("msg-77", "discord", Some("sess-5"))
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message_id, "msg-77");
+        assert_eq!(resp.thread_id.as_deref(), Some("thr-10"));
+    }
+
+    #[tokio::test]
+    async fn message_read_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/messages/msg-missing"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Message not found"))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_read("msg-missing", "telegram", None)
             .await
             .unwrap();
         assert!(!resp.success);

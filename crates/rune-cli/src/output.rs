@@ -1889,6 +1889,35 @@ impl fmt::Display for MessageDeleteResponse {
     }
 }
 
+/// Response for `message read` — fetch a single message by ID.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageReadResponse {
+    pub success: bool,
+    pub message_id: String,
+    pub channel: String,
+    pub sender: Option<String>,
+    pub text: Option<String>,
+    pub timestamp: Option<String>,
+    pub thread_id: Option<String>,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.success {
+            return write!(f, "✗ message {}: {}", self.message_id, self.detail);
+        }
+        let sender = self.sender.as_deref().unwrap_or("unknown");
+        let ts = self.timestamp.as_deref().unwrap_or("?");
+        let text = self.text.as_deref().unwrap_or("");
+        write!(f, "[{}] {} {sender}: {text}", self.channel, ts)?;
+        if let Some(ref tid) = self.thread_id {
+            write!(f, " (thread={tid})")?;
+        }
+        write!(f, " (id={})", self.message_id)
+    }
+}
+
 /// A single message within a thread listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadMessage {
@@ -3205,6 +3234,100 @@ mod tests {
         assert_eq!(v["message_id"], "msg-42");
         assert_eq!(v["channel"], "telegram");
         assert_eq!(v["detail"], "Message deleted");
+    }
+
+    // ── MessageReadResponse ──────────────────────────────────────────
+
+    #[test]
+    fn render_message_read_success_human() {
+        let r = MessageReadResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            channel: "telegram".into(),
+            sender: Some("alice".into()),
+            text: Some("Hello world".into()),
+            timestamp: Some("2026-03-19T12:00:00Z".into()),
+            thread_id: None,
+            detail: "Message retrieved".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("[telegram]"));
+        assert!(out.contains("alice"));
+        assert!(out.contains("Hello world"));
+        assert!(out.contains("(id=msg-42)"));
+    }
+
+    #[test]
+    fn render_message_read_success_with_thread() {
+        let r = MessageReadResponse {
+            success: true,
+            message_id: "msg-77".into(),
+            channel: "discord".into(),
+            sender: Some("bob".into()),
+            text: Some("threaded msg".into()),
+            timestamp: Some("2026-03-19T14:00:00Z".into()),
+            thread_id: Some("thr-10".into()),
+            detail: "Message retrieved".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("(thread=thr-10)"));
+        assert!(out.contains("bob"));
+    }
+
+    #[test]
+    fn render_message_read_failure_human() {
+        let r = MessageReadResponse {
+            success: false,
+            message_id: "msg-404".into(),
+            channel: "telegram".into(),
+            sender: None,
+            text: None,
+            timestamp: None,
+            thread_id: None,
+            detail: "Gateway returned HTTP 404: not found".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.starts_with("✗"));
+        assert!(out.contains("msg-404"));
+        assert!(out.contains("404"));
+    }
+
+    #[test]
+    fn render_message_read_json() {
+        let r = MessageReadResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            channel: "telegram".into(),
+            sender: Some("alice".into()),
+            text: Some("Hello world".into()),
+            timestamp: Some("2026-03-19T12:00:00Z".into()),
+            thread_id: None,
+            detail: "Message retrieved".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["success"].as_bool().unwrap());
+        assert_eq!(v["message_id"], "msg-42");
+        assert_eq!(v["channel"], "telegram");
+        assert_eq!(v["sender"], "alice");
+        assert_eq!(v["text"], "Hello world");
+    }
+
+    #[test]
+    fn render_message_read_success_no_sender() {
+        let r = MessageReadResponse {
+            success: true,
+            message_id: "msg-50".into(),
+            channel: "slack".into(),
+            sender: None,
+            text: Some("system message".into()),
+            timestamp: None,
+            thread_id: None,
+            detail: "Message retrieved".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("unknown"));
+        assert!(out.contains("system message"));
     }
 
     // ── MessageThreadListResponse ──────────────────────────────────
