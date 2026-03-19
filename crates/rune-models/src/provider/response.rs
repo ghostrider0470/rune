@@ -134,6 +134,92 @@ pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, Mod
     })
 }
 
+// ── Anthropic error format ──────────────────────────────────────────
+
+/// Anthropic API error envelope: `{ "type": "error", "error": { "type": "...", "message": "..." } }`.
+#[derive(Deserialize)]
+struct AnthropicApiErrorEnvelope {
+    error: Option<AnthropicApiError>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicApiError {
+    #[serde(rename = "type")]
+    error_type: Option<String>,
+    message: Option<String>,
+}
+
+/// Map an HTTP error response from the Anthropic Messages API to a [`ModelError`].
+///
+/// Anthropic uses a different error format than OpenAI:
+/// - Error type is in `error.type` (e.g. `authentication_error`, `rate_limit_error`)
+/// - HTTP 529 signals overloaded (transient)
+/// - 400 `invalid_request_error` may indicate context length or other request issues
+pub(crate) async fn map_anthropic_error_response(resp: Response) -> ModelError {
+    let status = resp.status().as_u16();
+    let retry_after = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+
+    let body = resp.text().await.unwrap_or_default();
+
+    let parsed = serde_json::from_str::<AnthropicApiErrorEnvelope>(&body)
+        .ok()
+        .and_then(|e| e.error)
+        .map(|e| {
+            let error_type = e.error_type.unwrap_or_default();
+            let msg = e.message.unwrap_or_else(|| body.clone());
+            (error_type, msg)
+        });
+
+    let (error_type, message) = parsed.unwrap_or_else(|| (String::new(), body));
+
+    match status {
+        401 | 403 => ModelError::Auth(message),
+        404 => ModelError::Provider(message),
+        429 => {
+            if message.to_lowercase().contains("quota") {
+                ModelError::QuotaExhausted(message)
+            } else {
+                ModelError::RateLimited {
+                    message,
+                    retry_after_secs: retry_after,
+                }
+            }
+        }
+        529 => ModelError::Transient(message),
+        400 if is_anthropic_context_length(&error_type, &message) => {
+            ModelError::ContextLengthExceeded(message)
+        }
+        400 if error_type == "invalid_request_error"
+            && (message.to_lowercase().contains("content filter")
+                || message.to_lowercase().contains("content_filter")) =>
+        {
+            ModelError::ContentFiltered(message)
+        }
+        400 => ModelError::Provider(message),
+        500..=599 => ModelError::Transient(message),
+        _ => ModelError::Provider(format!("HTTP {status}: {message}")),
+    }
+}
+
+/// Detect Anthropic context-length errors.
+///
+/// Anthropic signals this as `invalid_request_error` with messages containing
+/// keywords like "too many tokens" or "context length".
+fn is_anthropic_context_length(error_type: &str, message: &str) -> bool {
+    if error_type != "invalid_request_error" {
+        return false;
+    }
+    let msg_lower = message.to_lowercase();
+    msg_lower.contains("too many tokens")
+        || msg_lower.contains("context length")
+        || msg_lower.contains("maximum number of tokens")
+        || msg_lower.contains("token limit")
+}
+
 /// Detect Azure-specific "unsupported API version" errors.
 ///
 /// Azure returns error codes like `InvalidApiVersionIdentifier` or messages
