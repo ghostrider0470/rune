@@ -76,6 +76,9 @@ pub(crate) async fn map_error_response(resp: Response) -> ModelError {
                 }
             }
         }
+        400 if is_unsupported_api_version(&code, &message) => {
+            ModelError::UnsupportedApiVersion(message)
+        }
         400 if code.contains("context_length") || message.contains("context_length") => {
             ModelError::ContextLengthExceeded(message)
         }
@@ -129,4 +132,20 @@ pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, Mod
         finish_reason,
         tool_calls: message.tool_calls.unwrap_or_default(),
     })
+}
+
+/// Detect Azure-specific "unsupported API version" errors.
+///
+/// Azure returns error codes like `InvalidApiVersionIdentifier` or messages
+/// mentioning the api-version when the requested version is not supported.
+fn is_unsupported_api_version(code: &str, message: &str) -> bool {
+    let code_lower = code.to_lowercase();
+    let msg_lower = message.to_lowercase();
+    code_lower.contains("invalidapiversionidentifier")
+        || code_lower.contains("invalidapiversion")
+        || (msg_lower.contains("api version") || msg_lower.contains("api-version"))
+            && (msg_lower.contains("not supported")
+                || msg_lower.contains("invalid")
+                || msg_lower.contains("not found")
+                || msg_lower.contains("unsupported"))
 }
