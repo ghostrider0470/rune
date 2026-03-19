@@ -9,7 +9,8 @@ use serde_json::json;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
 use crate::output::{
-    ActionResult, AgentDetailResponse, AgentListResponse, AgentSummary,
+    ActionResult, AgentDetailResponse, AgentListResponse, AgentSummary, AgentTreeNode,
+    AgentTreeResponse,
     ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
@@ -17,8 +18,7 @@ use crate::output::{
     GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
     HealthResponse, HeartbeatStatusResponse, ModelScanProviderResult, ModelScanResponse,
     MessageSearchHit, MessageSearchResponse, MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
-    SessionListResponse, SessionStatusCard, SessionSummary, SessionTreeNode,
-    SessionTreeResponse, StatusResponse,
+    SessionListResponse, SessionStatusCard, SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -338,7 +338,7 @@ impl GatewayClient {
 
     /// Aggregate persisted session-turn token usage. Monetary cost is intentionally not derived yet.
     pub async fn gateway_usage_cost(&self) -> Result<GatewayUsageCostResponse> {
-        let sessions = self.sessions_list(None, None, None, None, 500).await?;
+        let sessions = self.sessions_list(None, None, 500).await?;
         let mut total_turns = 0usize;
         let mut prompt_tokens = 0u64;
         let mut completion_tokens = 0u64;
@@ -1653,8 +1653,6 @@ impl GatewayClient {
         &self,
         active_minutes: Option<u64>,
         channel: Option<&str>,
-        kind: Option<&str>,
-        parent: Option<&str>,
         limit: u64,
     ) -> Result<SessionListResponse> {
         let mut query: Vec<(&str, String)> = vec![("limit", limit.to_string())];
@@ -1663,12 +1661,6 @@ impl GatewayClient {
         }
         if let Some(channel) = channel {
             query.push(("channel", channel.to_string()));
-        }
-        if let Some(kind) = kind {
-            query.push(("kind", kind.to_string()));
-        }
-        if let Some(parent) = parent {
-            query.push(("parent", parent.to_string()));
         }
 
         let resp = self
@@ -1688,10 +1680,8 @@ impl GatewayClient {
                 .iter()
                 .map(|v| SessionSummary {
                     id: v["id"].as_str().unwrap_or("?").to_string(),
-                    kind: v["kind"].as_str().unwrap_or("direct").to_string(),
                     status: v["status"].as_str().unwrap_or("unknown").to_string(),
                     channel: v["channel"].as_str().map(String::from),
-                    requester_session_id: v["requester_session_id"].as_str().map(String::from),
                     created_at: v["created_at"].as_str().map(String::from),
                     turn_count: v["turn_count"].as_u64().map(|n| n as u32),
                     usage_prompt_tokens: v["usage_prompt_tokens"].as_u64(),
@@ -1721,13 +1711,11 @@ impl GatewayClient {
                 .context("invalid JSON from /sessions/:id")?;
             Ok(SessionDetailResponse {
                 id: v["id"].as_str().unwrap_or("?").to_string(),
-                kind: v["kind"].as_str().unwrap_or("direct").to_string(),
                 status: v["status"].as_str().unwrap_or("unknown").to_string(),
                 channel: v["channel"]
                     .as_str()
                     .map(String::from)
                     .or_else(|| v["channel_ref"].as_str().map(String::from)),
-                requester_session_id: v["requester_session_id"].as_str().map(String::from),
                 created_at: v["created_at"].as_str().map(String::from),
                 turn_count: v["turn_count"].as_u64().map(|n| n as u32),
                 latest_model: v["latest_model"].as_str().map(String::from),
@@ -1846,26 +1834,79 @@ impl GatewayClient {
         }
     }
 
-    /// `GET /sessions/:id/tree`
-    pub async fn sessions_tree(&self, id: &str) -> Result<SessionTreeResponse> {
+    /// `GET /sessions` — fetch all sessions and build a delegation tree.
+    pub async fn agents_tree(&self, limit: u64) -> Result<AgentTreeResponse> {
+        let query: Vec<(&str, String)> = vec![("limit", limit.to_string())];
+
         let resp = self
             .http
-            .get(self.url(&format!("/sessions/{id}/tree")))
+            .get(self.url("/sessions"))
+            .query(&query)
             .send()
             .await
             .context("failed to reach gateway")?;
 
-        if resp.status().is_success() {
-            let root: SessionTreeNode = resp
-                .json()
-                .await
-                .context("invalid JSON from /sessions/:id/tree")?;
-            Ok(SessionTreeResponse { root })
-        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            bail!("Session '{id}' not found.");
-        } else {
+        if !resp.status().is_success() {
             bail!("Gateway returned HTTP {}", resp.status());
         }
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .context("invalid JSON from /sessions")?;
+
+        let sessions: Vec<(String, String, String, Option<String>)> = body
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|v| {
+                (
+                    v["id"].as_str().unwrap_or("?").to_string(),
+                    v["kind"].as_str().unwrap_or("direct").to_string(),
+                    v["status"].as_str().unwrap_or("unknown").to_string(),
+                    v["requester_session_id"].as_str().map(String::from),
+                )
+            })
+            .collect();
+
+        // Build adjacency: parent_id → children
+        let mut children_map: std::collections::HashMap<String, Vec<usize>> =
+            std::collections::HashMap::new();
+        let mut roots: Vec<usize> = Vec::new();
+
+        for (i, (_id, _kind, _status, parent)) in sessions.iter().enumerate() {
+            if let Some(pid) = parent {
+                children_map.entry(pid.clone()).or_default().push(i);
+            } else {
+                roots.push(i);
+            }
+        }
+
+        fn build_node(
+            idx: usize,
+            sessions: &[(String, String, String, Option<String>)],
+            children_map: &std::collections::HashMap<String, Vec<usize>>,
+        ) -> AgentTreeNode {
+            let (id, kind, status, _parent) = &sessions[idx];
+            let child_indices = children_map.get(id).cloned().unwrap_or_default();
+            let children: Vec<AgentTreeNode> = child_indices
+                .iter()
+                .map(|&ci| build_node(ci, sessions, children_map))
+                .collect();
+            AgentTreeNode {
+                id: id.clone(),
+                kind: kind.clone(),
+                status: status.clone(),
+                children,
+            }
+        }
+
+        let roots: Vec<AgentTreeNode> = roots
+            .iter()
+            .map(|&i| build_node(i, &sessions, &children_map))
+            .collect();
+
+        Ok(AgentTreeResponse { roots })
     }
 
     /// Run doctor checks: config validation + gateway connectivity + model provider reachability.
@@ -2591,7 +2632,7 @@ mod tests {
             .await;
 
         let client = GatewayClient::new(&server.uri());
-        let resp = client.sessions_list(None, None, None, None, 100).await.unwrap();
+        let resp = client.sessions_list(None, None, 100).await.unwrap();
         assert_eq!(resp.sessions.len(), 2);
         assert_eq!(resp.sessions[0].id, "s1");
         assert_eq!(resp.sessions[1].channel, None);
@@ -2736,6 +2777,70 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let err = client.agents_show("nonexistent").await.unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn agents_tree_builds_hierarchy() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": "root-1",
+                    "kind": "direct",
+                    "status": "running",
+                    "requester_session_id": null,
+                    "turn_count": 5
+                },
+                {
+                    "id": "child-a",
+                    "kind": "subagent",
+                    "status": "running",
+                    "requester_session_id": "root-1",
+                    "turn_count": 2
+                },
+                {
+                    "id": "grandchild-1",
+                    "kind": "subagent",
+                    "status": "idle",
+                    "requester_session_id": "child-a",
+                    "turn_count": 1
+                },
+                {
+                    "id": "child-b",
+                    "kind": "subagent",
+                    "status": "idle",
+                    "requester_session_id": "root-1",
+                    "turn_count": 0
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.agents_tree(500).await.unwrap();
+        assert_eq!(resp.roots.len(), 1);
+        assert_eq!(resp.roots[0].id, "root-1");
+        assert_eq!(resp.roots[0].children.len(), 2);
+        assert_eq!(resp.roots[0].children[0].id, "child-a");
+        assert_eq!(resp.roots[0].children[0].children.len(), 1);
+        assert_eq!(resp.roots[0].children[0].children[0].id, "grandchild-1");
+        assert_eq!(resp.roots[0].children[1].id, "child-b");
+        assert!(resp.roots[0].children[1].children.is_empty());
+    }
+
+    #[tokio::test]
+    async fn agents_tree_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.agents_tree(500).await.unwrap();
+        assert!(resp.roots.is_empty());
     }
 
     #[test]

@@ -376,6 +376,61 @@ impl fmt::Display for AgentDetailResponse {
     }
 }
 
+/// A node in the agent delegation tree for `rune agents tree`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTreeNode {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<AgentTreeNode>,
+}
+
+impl AgentTreeNode {
+    fn fmt_tree(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        prefix: &str,
+        connector: &str,
+    ) -> fmt::Result {
+        writeln!(f, "{prefix}{connector}{} [{}] ({})", self.id, self.status, self.kind)?;
+        let child_prefix = format!("{prefix}{}", if connector.is_empty() {
+            ""
+        } else if connector.starts_with('└') {
+            "    "
+        } else {
+            "│   "
+        });
+        for (i, child) in self.children.iter().enumerate() {
+            let is_last = i == self.children.len() - 1;
+            let child_connector = if is_last { "└── " } else { "├── " };
+            child.fmt_tree(f, &child_prefix, child_connector)?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `rune agents tree`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTreeResponse {
+    pub roots: Vec<AgentTreeNode>,
+}
+
+impl fmt::Display for AgentTreeResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.roots.is_empty() {
+            return write!(f, "No sessions found.");
+        }
+        for (i, root) in self.roots.iter().enumerate() {
+            root.fmt_tree(f, "", "")?;
+            if i < self.roots.len() - 1 {
+                writeln!(f)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// First-class `/status` / `session_status` parity card for an individual session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStatusCard {
@@ -2512,6 +2567,65 @@ mod tests {
         let out = render(&detail, OutputFormat::Human);
         assert!(out.contains("Agent: sub-1"));
         assert!(out.contains("Parent:  parent-abc"));
+    }
+
+    #[test]
+    fn render_agent_tree_empty() {
+        let tree = AgentTreeResponse { roots: vec![] };
+        assert_eq!(render(&tree, OutputFormat::Human), "No sessions found.");
+    }
+
+    #[test]
+    fn render_agent_tree_hierarchy() {
+        let tree = AgentTreeResponse {
+            roots: vec![AgentTreeNode {
+                id: "root-1".into(),
+                kind: "direct".into(),
+                status: "running".into(),
+                children: vec![
+                    AgentTreeNode {
+                        id: "child-a".into(),
+                        kind: "subagent".into(),
+                        status: "running".into(),
+                        children: vec![AgentTreeNode {
+                            id: "grandchild-1".into(),
+                            kind: "subagent".into(),
+                            status: "idle".into(),
+                            children: vec![],
+                        }],
+                    },
+                    AgentTreeNode {
+                        id: "child-b".into(),
+                        kind: "subagent".into(),
+                        status: "idle".into(),
+                        children: vec![],
+                    },
+                ],
+            }],
+        };
+        let out = render(&tree, OutputFormat::Human);
+        assert!(out.contains("root-1 [running] (direct)"));
+        assert!(out.contains("child-a [running] (subagent)"));
+        assert!(out.contains("grandchild-1 [idle] (subagent)"));
+        assert!(out.contains("child-b [idle] (subagent)"));
+        // Verify tree connectors are present
+        assert!(out.contains("├──") || out.contains("└──"));
+    }
+
+    #[test]
+    fn render_agent_tree_json() {
+        let tree = AgentTreeResponse {
+            roots: vec![AgentTreeNode {
+                id: "root-1".into(),
+                kind: "direct".into(),
+                status: "running".into(),
+                children: vec![],
+            }],
+        };
+        let out = render(&tree, OutputFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["roots"][0]["id"], "root-1");
+        assert_eq!(parsed["roots"][0]["kind"], "direct");
     }
 
     #[test]

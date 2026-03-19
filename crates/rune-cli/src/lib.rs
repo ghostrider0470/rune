@@ -1130,6 +1130,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.session_status(&id).await?;
                 println!("{}", render(&result, format));
             }
+            AgentsAction::Tree { limit } => {
+                let result = client.agents_tree(limit).await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Channels { action } => {
             let channels = channel_details();
