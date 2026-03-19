@@ -2045,17 +2045,19 @@ models = ["gpt-5.4", "gpt-image-1"]
         let tmp = tempfile::TempDir::new().unwrap();
         let base = tmp.path().join("rune-ensure-test");
 
-        let mut config = AppConfig::default();
-        config.paths = PathsConfig {
-            db_dir: base.join("db"),
-            sessions_dir: base.join("sessions"),
-            memory_dir: base.join("memory"),
-            media_dir: base.join("media"),
-            skills_dir: base.join("skills"),
-            logs_dir: base.join("logs"),
-            backups_dir: base.join("backups"),
-            config_dir: base.join("config"),
-            secrets_dir: base.join("secrets"),
+        let config = AppConfig {
+            paths: PathsConfig {
+                db_dir: base.join("db"),
+                sessions_dir: base.join("sessions"),
+                memory_dir: base.join("memory"),
+                media_dir: base.join("media"),
+                skills_dir: base.join("skills"),
+                logs_dir: base.join("logs"),
+                backups_dir: base.join("backups"),
+                config_dir: base.join("config"),
+                secrets_dir: base.join("secrets"),
+            },
+            ..Default::default()
         };
 
         assert!(!base.join("db").exists());
@@ -2077,17 +2079,19 @@ models = ["gpt-5.4", "gpt-image-1"]
         let tmp = tempfile::TempDir::new().unwrap();
         let base = tmp.path().join("rune-ensure-idem");
 
-        let mut config = AppConfig::default();
-        config.paths = PathsConfig {
-            db_dir: base.join("db"),
-            sessions_dir: base.join("sessions"),
-            memory_dir: base.join("memory"),
-            media_dir: base.join("media"),
-            skills_dir: base.join("skills"),
-            logs_dir: base.join("logs"),
-            backups_dir: base.join("backups"),
-            config_dir: base.join("config"),
-            secrets_dir: base.join("secrets"),
+        let config = AppConfig {
+            paths: PathsConfig {
+                db_dir: base.join("db"),
+                sessions_dir: base.join("sessions"),
+                memory_dir: base.join("memory"),
+                media_dir: base.join("media"),
+                skills_dir: base.join("skills"),
+                logs_dir: base.join("logs"),
+                backups_dir: base.join("backups"),
+                config_dir: base.join("config"),
+                secrets_dir: base.join("secrets"),
+            },
+            ..Default::default()
         };
 
         config.ensure_dirs().expect("first call should succeed");
@@ -2101,17 +2105,19 @@ models = ["gpt-5.4", "gpt-image-1"]
         let tmp = tempfile::TempDir::new().unwrap();
         let base = tmp.path().join("rune-ensure-validate");
 
-        let mut config = AppConfig::default();
-        config.paths = PathsConfig {
-            db_dir: base.join("db"),
-            sessions_dir: base.join("sessions"),
-            memory_dir: base.join("memory"),
-            media_dir: base.join("media"),
-            skills_dir: base.join("skills"),
-            logs_dir: base.join("logs"),
-            backups_dir: base.join("backups"),
-            config_dir: base.join("config"),
-            secrets_dir: base.join("secrets"),
+        let config = AppConfig {
+            paths: PathsConfig {
+                db_dir: base.join("db"),
+                sessions_dir: base.join("sessions"),
+                memory_dir: base.join("memory"),
+                media_dir: base.join("media"),
+                skills_dir: base.join("skills"),
+                logs_dir: base.join("logs"),
+                backups_dir: base.join("backups"),
+                config_dir: base.join("config"),
+                secrets_dir: base.join("secrets"),
+            },
+            ..Default::default()
         };
 
         config.ensure_dirs().expect("ensure_dirs should succeed");
