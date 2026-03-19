@@ -131,6 +131,7 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 | `broadcast` | `rune message broadcast` | **Shipped** | #147 |
 | `thread` | `rune message thread list/reply` | **Shipped** | #151 |
 | `voice` | `rune message voice send/status` | **Shipped** | #155 |
+| `tag` | `rune message tag add/remove/list` | **Shipped** | — |
 | `reactions` | — | **Not started** | Listing reactions on a message |
 | `poll` | — | **Not started** | Poll creation/management |
 | `channel` | — | **Not started** | Channel-scoped message operations |

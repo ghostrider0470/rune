@@ -1406,6 +1406,170 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /messages/{id}/tags` — add a tag to a message.
+    pub async fn message_tag_add(
+        &self,
+        message_id: &str,
+        tag: &str,
+        channel: Option<&str>,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageTagResponse> {
+        use crate::output::MessageTagResponse;
+
+        let mut body = json!({
+            "tag": tag,
+        });
+        if let Some(ch) = channel {
+            body["channel"] = json!(ch);
+        }
+        if let Some(s) = session {
+            body["session"] = json!(s);
+        }
+        let resp = self
+            .http
+            .post(self.url(&format!("/messages/{message_id}/tags")))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /messages/{id}/tags")?;
+            Ok(MessageTagResponse {
+                success: true,
+                message_id: v["message_id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                tag: v["tag"].as_str().unwrap_or(tag).to_string(),
+                added: true,
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("Tag added")
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageTagResponse {
+                success: false,
+                message_id: message_id.to_string(),
+                tag: tag.to_string(),
+                added: true,
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
+    /// `DELETE /messages/{id}/tags/{tag}` — remove a tag from a message.
+    pub async fn message_tag_remove(
+        &self,
+        message_id: &str,
+        tag: &str,
+        channel: Option<&str>,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageTagResponse> {
+        use crate::output::MessageTagResponse;
+
+        let mut params: Vec<(&str, &str)> = vec![];
+        if let Some(ch) = channel {
+            params.push(("channel", ch));
+        }
+        if let Some(s) = session {
+            params.push(("session", s));
+        }
+        let resp = self
+            .http
+            .delete(self.url(&format!("/messages/{message_id}/tags/{tag}")))
+            .query(&params)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from DELETE /messages/{id}/tags/{tag}")?;
+            Ok(MessageTagResponse {
+                success: true,
+                message_id: v["message_id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                tag: v["tag"].as_str().unwrap_or(tag).to_string(),
+                added: false,
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("Tag removed")
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageTagResponse {
+                success: false,
+                message_id: message_id.to_string(),
+                tag: tag.to_string(),
+                added: false,
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
+    /// `GET /messages/{id}/tags` — list all tags on a message.
+    pub async fn message_tag_list(
+        &self,
+        message_id: &str,
+        channel: Option<&str>,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageTagListResponse> {
+        use crate::output::MessageTagListResponse;
+
+        let mut params: Vec<(&str, &str)> = vec![];
+        if let Some(ch) = channel {
+            params.push(("channel", ch));
+        }
+        if let Some(s) = session {
+            params.push(("session", s));
+        }
+        let resp = self
+            .http
+            .get(self.url(&format!("/messages/{message_id}/tags")))
+            .query(&params)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /messages/{id}/tags")?;
+            let tags = v["tags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(MessageTagListResponse {
+                message_id: v["message_id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                tags,
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "GET /messages/{message_id}/tags returned HTTP {status}: {body_text}"
+            );
+        }
+    }
+
     /// `GET /tts/status`
     pub async fn message_voice_status(
         &self,

@@ -600,6 +600,57 @@ pub enum MessageAction {
         #[command(subcommand)]
         action: MessageVoiceAction,
     },
+    /// Add, remove, or list tags on a message.
+    Tag {
+        #[command(subcommand)]
+        action: MessageTagAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MessageTagAction {
+    /// Add a tag to a message.
+    Add {
+        /// ID of the message to tag.
+        #[arg(long)]
+        message_id: String,
+        /// Tag name to add (e.g. "urgent", "followup", "resolved").
+        #[arg(long)]
+        tag: String,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Remove a tag from a message.
+    Remove {
+        /// ID of the message to untag.
+        #[arg(long)]
+        message_id: String,
+        /// Tag name to remove.
+        #[arg(long)]
+        tag: String,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// List all tags on a message.
+    List {
+        /// ID of the message to list tags for.
+        #[arg(long)]
+        message_id: String,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
