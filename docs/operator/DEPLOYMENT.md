@@ -144,6 +144,26 @@ This layout should work:
 
 If a managed DB is used, `/data/db` may be unused or reserved for local indexes/caches, but the logical slot should still exist in the deployment mental model.
 
+## 5.1 Local ↔ Docker path equivalence
+
+Local-first mode uses `~/.rune/` as the data root. Docker mode uses `/data/` (plus `/config` and `/secrets` at the container root). The two layouts are logically equivalent:
+
+| Purpose | Local path | Docker path | Notes |
+|---|---|---|---|
+| Database | `~/.rune/db/` | `/data/db` | SQLite file or managed-DB cache/indexes |
+| Sessions | `~/.rune/sessions/` | `/data/sessions` | Transcripts, exports, session artifacts |
+| Memory | `~/.rune/memory/` | `/data/memory` | Daily notes, long-term memory, workspace knowledge |
+| Media | `~/.rune/media/` | `/data/media` | Attachments, audio, images, TTS outputs |
+| Skills | `~/.rune/skills/` | `/data/skills` | Installed skills, plugin bundles |
+| Logs | `~/.rune/logs/` | `/data/logs` | Structured logs, debug bundles, diagnostic dumps |
+| Backups | `~/.rune/backups/` | `/data/backups` | Export archives, snapshot bundles |
+| Config | `~/.rune/config/` | `/config` | Config overlays, provider/channel config |
+| Secrets | `~/.rune/secrets/` | `/secrets` | Credential files, certificate/key material |
+
+**Parity rule:** any feature that works against a local `~/.rune/` path must work identically against the corresponding Docker `/data/` (or `/config`/`/secrets`) mount. The runtime resolves a single `DATA_ROOT` at startup — `~/.rune` locally, `/data` in Docker — and all subsystem paths are relative to it. `/config` and `/secrets` are resolved independently because container orchestrators often inject them from separate sources.
+
+**Fail-fast contract:** if a required path is missing or unwritable at startup, the runtime must exit with a clear error naming the path and expected permissions. `rune doctor` surfaces the same checks interactively (see PROTOCOLS.md §15.3).
+
 ---
 
 ## 6. Persistent vs ephemeral state

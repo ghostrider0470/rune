@@ -463,6 +463,9 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - `/config`
 - `/secrets`
 
+Local-first mode uses `~/.rune/` as the equivalent root (e.g. `~/.rune/db/` ↔ `/data/db`).
+See [DEPLOYMENT.md §5.1](../operator/DEPLOYMENT.md#51-local--docker-path-equivalence) for the full mapping table and fail-fast contract.
+
 ### External surfaces
 
 - deployment docs and config model
