@@ -367,8 +367,22 @@ pub enum MemoryAction {
 
 #[derive(Debug, Subcommand)]
 pub enum SystemAction {
-    /// Queue a system event/wake for the runtime.
+    /// Inject, schedule, and list system events.
     Event {
+        #[command(subcommand)]
+        action: SystemEventAction,
+    },
+    /// Show whether HEARTBEAT.md exists and when it last changed.
+    Heartbeat {
+        #[command(subcommand)]
+        action: SystemHeartbeatAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SystemEventAction {
+    /// Inject an immediate system event/wake into the runtime.
+    Inject {
         /// Text to inject.
         #[arg(long)]
         text: String,
@@ -379,10 +393,32 @@ pub enum SystemAction {
         #[arg(long = "context-messages")]
         context_messages: Option<u64>,
     },
-    /// Show whether HEARTBEAT.md exists and when it last changed.
-    Heartbeat {
-        #[command(subcommand)]
-        action: SystemHeartbeatAction,
+    /// Schedule a future system event as a cron job.
+    Schedule {
+        /// Text for the system event payload.
+        #[arg(long)]
+        text: String,
+        /// Fire time as RFC3339/ISO-8601.
+        #[arg(long)]
+        at: String,
+        /// Human-readable name for the job.
+        #[arg(long)]
+        name: Option<String>,
+        /// Session target (`main` or `isolated`). Defaults to `main`.
+        #[arg(long, default_value = "main")]
+        session_target: String,
+        /// Delivery mode for the scheduled work (`none`, `announce`, or `webhook`).
+        #[arg(long, value_enum, default_value_t = CronDeliveryMode::None)]
+        delivery_mode: CronDeliveryMode,
+        /// Webhook URL for `webhook` delivery mode.
+        #[arg(long)]
+        webhook_url: Option<String>,
+    },
+    /// List system-event cron jobs.
+    List {
+        /// Include disabled jobs in the listing.
+        #[arg(long)]
+        include_disabled: bool,
     },
 }
 
@@ -951,11 +987,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_system_event() {
+    fn parse_system_event_inject() {
         let cli = Cli::try_parse_from([
             "rune",
             "system",
             "event",
+            "inject",
             "--text",
             "Reminder: check Rune",
             "--mode",
@@ -968,14 +1005,166 @@ mod tests {
             Command::System {
                 action:
                     SystemAction::Event {
-                        text,
-                        mode,
-                        context_messages,
+                        action:
+                            SystemEventAction::Inject {
+                                text,
+                                mode,
+                                context_messages,
+                            },
                     },
             } => {
                 assert_eq!(text, "Reminder: check Rune");
                 assert_eq!(mode, WakeMode::Now);
                 assert_eq!(context_messages, Some(2));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_system_event_inject_defaults() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "system",
+            "event",
+            "inject",
+            "--text",
+            "ping",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::System {
+                action:
+                    SystemAction::Event {
+                        action:
+                            SystemEventAction::Inject {
+                                text,
+                                mode,
+                                context_messages,
+                            },
+                    },
+            } => {
+                assert_eq!(text, "ping");
+                assert_eq!(mode, WakeMode::NextHeartbeat);
+                assert_eq!(context_messages, None);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_system_event_schedule() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "system",
+            "event",
+            "schedule",
+            "--text",
+            "deploy check",
+            "--at",
+            "2026-04-01T09:00:00Z",
+            "--name",
+            "morning-check",
+            "--session-target",
+            "isolated",
+            "--delivery-mode",
+            "announce",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::System {
+                action:
+                    SystemAction::Event {
+                        action:
+                            SystemEventAction::Schedule {
+                                text,
+                                at,
+                                name,
+                                session_target,
+                                delivery_mode,
+                                webhook_url,
+                            },
+                    },
+            } => {
+                assert_eq!(text, "deploy check");
+                assert_eq!(at, "2026-04-01T09:00:00Z");
+                assert_eq!(name.as_deref(), Some("morning-check"));
+                assert_eq!(session_target, "isolated");
+                assert_eq!(delivery_mode, CronDeliveryMode::Announce);
+                assert!(webhook_url.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_system_event_schedule_defaults() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "system",
+            "event",
+            "schedule",
+            "--text",
+            "hello",
+            "--at",
+            "2026-04-01T09:00:00Z",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::System {
+                action:
+                    SystemAction::Event {
+                        action:
+                            SystemEventAction::Schedule {
+                                session_target,
+                                delivery_mode,
+                                name,
+                                ..
+                            },
+                    },
+            } => {
+                assert_eq!(session_target, "main");
+                assert_eq!(delivery_mode, CronDeliveryMode::None);
+                assert!(name.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_system_event_list() {
+        let cli = Cli::try_parse_from(["rune", "system", "event", "list"]).unwrap();
+        match cli.command {
+            Command::System {
+                action:
+                    SystemAction::Event {
+                        action: SystemEventAction::List { include_disabled },
+                    },
+            } => {
+                assert!(!include_disabled);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_system_event_list_include_disabled() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "system",
+            "event",
+            "list",
+            "--include-disabled",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::System {
+                action:
+                    SystemAction::Event {
+                        action: SystemEventAction::List { include_disabled },
+                    },
+            } => {
+                assert!(include_disabled);
             }
             other => panic!("unexpected command: {other:?}"),
         }

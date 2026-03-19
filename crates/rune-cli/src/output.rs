@@ -1649,6 +1649,24 @@ impl fmt::Display for CronListResponse {
     }
 }
 
+/// System event list response (filtered cron jobs with `system_event` payload).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemEventListResponse {
+    pub events: Vec<CronJobSummary>,
+}
+
+impl fmt::Display for SystemEventListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.events.is_empty() {
+            return write!(f, "No system event jobs.");
+        }
+        for job in &self.events {
+            writeln!(f, "  {job}")?;
+        }
+        Ok(())
+    }
+}
+
 /// Cron run history item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronRunSummary {
