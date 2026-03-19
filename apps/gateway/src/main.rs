@@ -1985,16 +1985,16 @@ async fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
             }
         }
     } else {
-        // Zero-config Ollama auto-detection (issue #61): probe localhost:11434
-        // before falling back to the inert echo provider.
+        // Zero-config Ollama auto-detection (issue #61): honour OLLAMA_HOST
+        // for non-default endpoints, then fall back to localhost:11434.
         info!("no model providers configured — probing for local Ollama…");
-        match rune_models::OllamaProvider::probe_local().await {
+        match rune_models::OllamaProvider::probe_env().await {
             Some(provider) => {
-                info!("local Ollama detected at http://localhost:11434 — using as default provider");
+                info!(url = %provider.url(), "Ollama detected — using as default provider");
                 Arc::new(provider)
             }
             None => {
-                info!("no local Ollama found — using echo fallback (configure a provider in config.toml)");
+                info!("no Ollama found — using echo fallback (configure a provider in config.toml or set OLLAMA_HOST)");
                 Arc::new(EchoModelProvider)
             }
         }
