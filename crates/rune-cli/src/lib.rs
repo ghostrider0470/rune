@@ -777,9 +777,71 @@ async fn init_workspace(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Check bypass acknowledgment and prompt for first-use confirmation when
+/// `--yolo` or `--no-sandbox` is active.  Returns `Ok(())` when the operator
+/// has acknowledged (or `--accept-risk` was passed), or `Err` if they decline.
+fn confirm_bypass_if_needed(cli: &Cli) -> Result<()> {
+    use rune_config::{BypassAcknowledgment, BypassPosture};
+    use std::io::{BufRead, IsTerminal, Write};
+
+    // Build a minimal config to detect the posture.  The env vars have
+    // already been set by `apply_global_cli_environment`.
+    let mut probe = rune_config::AppConfig::default();
+    probe.apply_cli_overrides(cli.yolo, cli.no_sandbox);
+
+    let posture = match BypassPosture::detect(&probe) {
+        Some(p) => p,
+        None => return Ok(()), // standard mode, nothing to confirm
+    };
+
+    let ack = BypassAcknowledgment::from_home()
+        .unwrap_or_else(|| BypassAcknowledgment::new(std::path::Path::new("/tmp/.rune-config")));
+
+    if ack.is_acknowledged() {
+        // Already acknowledged — emit a brief reminder on stderr.
+        eprintln!("{}", posture.acknowledged_reminder());
+        return Ok(());
+    }
+
+    // First use: show the full warning.
+    eprintln!("{}", posture.first_use_warning());
+
+    if cli.accept_risk {
+        // Non-interactive acknowledgment (CI/scripts).
+        eprintln!("--accept-risk passed; acknowledging bypass risk automatically.");
+        ack.record().ok(); // best-effort persistence
+        return Ok(());
+    }
+
+    // Interactive confirmation — only if stdin is a TTY.
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "Bypass mode requires acknowledgment. \
+             Pass --accept-risk in non-interactive contexts."
+        );
+    }
+
+    eprint!("Type YES to acknowledge and continue: ");
+    std::io::stderr().flush().ok();
+
+    let mut input = String::new();
+    std::io::stdin().lock().read_line(&mut input)?;
+
+    if input.trim() == "YES" {
+        ack.record().ok(); // best-effort persistence
+        Ok(())
+    } else {
+        anyhow::bail!("Bypass not acknowledged — aborting.");
+    }
+}
+
 /// Execute the parsed CLI command against the configured gateway and print output.
 pub async fn run(cli: Cli) -> Result<()> {
     apply_global_cli_environment(&cli);
+
+    // First-use bypass confirmation (issue #64).
+    confirm_bypass_if_needed(&cli)?;
+
     let format = OutputFormat::from_json_flag(cli.json);
     let client = GatewayClient::new(&cli.gateway_url);
 
