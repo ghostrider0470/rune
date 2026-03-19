@@ -161,6 +161,21 @@ impl AppConfig {
         }
     }
 
+    /// Apply CLI startup-flag overrides on top of the resolved config.
+    ///
+    /// Used by `--yolo` and `--no-sandbox` CLI flags to override the persisted
+    /// config without editing files or setting environment variables.
+    /// This is the *only* entry point for CLI→config bypass wiring; runtime
+    /// execution semantics are not altered here (see issue #64 follow-ups).
+    pub fn apply_cli_overrides(&mut self, yolo: bool, no_sandbox: bool) {
+        if yolo {
+            self.approval.mode = ApprovalMode::Yolo;
+        }
+        if no_sandbox {
+            self.security.sandbox = false;
+        }
+    }
+
     /// When mode resolves to Standalone and paths are still at Docker defaults,
     /// swap to `~/.rune/*`.
     pub fn adjust_paths_for_mode(&mut self, resolved_mode: &RuntimeMode) {
@@ -2363,5 +2378,63 @@ mode = "auto-exec"
             Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 0);
         assert_eq!(caps.approval_mode, "yolo");
         assert_eq!(caps.security_posture, "unrestricted");
+    }
+
+    // ── CLI override tests (#64) ─────────────────────────────────────
+
+    #[test]
+    fn apply_cli_overrides_yolo() {
+        let mut config = AppConfig::default();
+        assert_eq!(config.approval.mode, ApprovalMode::Prompt);
+
+        config.apply_cli_overrides(true, false);
+        assert_eq!(config.approval.mode, ApprovalMode::Yolo);
+        // security unchanged
+        assert!(config.security.sandbox);
+    }
+
+    #[test]
+    fn apply_cli_overrides_no_sandbox() {
+        let mut config = AppConfig::default();
+        assert!(config.security.sandbox);
+
+        config.apply_cli_overrides(false, true);
+        assert!(!config.security.sandbox);
+        // approval unchanged
+        assert_eq!(config.approval.mode, ApprovalMode::Prompt);
+    }
+
+    #[test]
+    fn apply_cli_overrides_both() {
+        let mut config = AppConfig::default();
+        config.apply_cli_overrides(true, true);
+        assert_eq!(config.approval.mode, ApprovalMode::Yolo);
+        assert!(!config.security.sandbox);
+        assert_eq!(config.security.posture(), "no-sandbox");
+    }
+
+    #[test]
+    fn apply_cli_overrides_noop_when_both_false() {
+        let original = AppConfig::default();
+        let mut config = original.clone();
+        config.apply_cli_overrides(false, false);
+        assert_eq!(config.approval, original.approval);
+        assert_eq!(config.security, original.security);
+    }
+
+    #[test]
+    fn apply_cli_overrides_on_top_of_file_config() {
+        // Simulate file config that already sets auto-file mode.
+        let mut config = AppConfig::default();
+        config.approval.mode = ApprovalMode::AutoFile;
+        config.security.trust_spells = true;
+
+        // --yolo should override auto-file → yolo
+        config.apply_cli_overrides(true, true);
+        assert_eq!(config.approval.mode, ApprovalMode::Yolo);
+        assert!(!config.security.sandbox);
+        // trust_spells is untouched by CLI flags
+        assert!(config.security.trust_spells);
+        assert_eq!(config.security.posture(), "unrestricted");
     }
 }

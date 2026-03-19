@@ -68,13 +68,17 @@ const DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS: u64 = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config_path = discover_config_path();
-    let mut config = AppConfig::load(config_path.as_deref()).with_context(|| {
+    let flags = parse_startup_flags();
+    let config_path = flags.config_path.as_deref();
+    let mut config = AppConfig::load(config_path).with_context(|| {
         format!(
             "failed to load config from {}",
-            display_config_path(config_path.as_deref())
+            display_config_path(config_path)
         )
     })?;
+
+    // Apply CLI bypass flags (issue #64) on top of file/env config.
+    config.apply_cli_overrides(flags.yolo, flags.no_sandbox);
 
     // Resolve runtime mode and swap Docker-default paths to ~/.rune/* when
     // running standalone on a bare host (zero-config quick-start, issue #61).
@@ -82,7 +86,7 @@ async fn main() -> Result<()> {
     config.adjust_paths_for_mode(&resolved_mode);
 
     init_logging(&config.logging);
-    emit_startup_banner(&config, config_path.as_deref());
+    emit_startup_banner(&config, config_path);
 
     // Auto-create missing directories in Standalone mode so that `rune` boots
     // without manual `mkdir` (zero-config, issue #61).
@@ -131,19 +135,49 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn discover_config_path() -> Option<PathBuf> {
-    std::env::args_os()
-        .skip(1)
-        .collect::<Vec<_>>()
-        .windows(2)
-        .find_map(|window| {
-            if window[0] == "--config" {
-                Some(PathBuf::from(&window[1]))
-            } else {
-                None
+/// Lightweight startup flags parsed from argv.
+///
+/// The gateway binary intentionally avoids pulling in clap to keep binary size
+/// small.  We parse the handful of supported flags manually.
+struct StartupFlags {
+    config_path: Option<PathBuf>,
+    yolo: bool,
+    no_sandbox: bool,
+}
+
+fn parse_startup_flags() -> StartupFlags {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut config_path: Option<PathBuf> = None;
+    let mut yolo = false;
+    let mut no_sandbox = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--config" => {
+                if i + 1 < args.len() {
+                    config_path = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                    continue;
+                }
             }
-        })
-        .or_else(|| std::env::var_os("RUNE_CONFIG").map(PathBuf::from))
+            "--yolo" => yolo = true,
+            "--no-sandbox" => no_sandbox = true,
+            _ => {}
+        }
+        i += 1;
+    }
+
+    // Fall back to RUNE_CONFIG env var when --config is not passed.
+    if config_path.is_none() {
+        config_path = std::env::var_os("RUNE_CONFIG").map(PathBuf::from);
+    }
+
+    StartupFlags {
+        config_path,
+        yolo,
+        no_sandbox,
+    }
 }
 
 fn display_config_path(path: Option<&Path>) -> String {
@@ -177,6 +211,8 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
         config_path = %display_config_path(config_path),
         store_backend,
         model_backend = if config.models.providers.is_empty() { "auto-detect (probing Ollama…)" } else { "configured" },
+        approval_mode = config.approval.mode.as_str(),
+        security_posture = config.security.posture(),
         "starting rune gateway"
     );
 }

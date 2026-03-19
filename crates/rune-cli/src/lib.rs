@@ -92,13 +92,33 @@ fn apply_global_cli_environment(cli: &Cli) {
         }
         clap::builder::styling::Styles::plain();
     }
+
+    // Trusted-environment bypass flags (issue #64): set env vars so that
+    // subsequent config loads (e.g. `rune doctor`) resolve the override
+    // without requiring a TOML edit.
+    if cli.yolo {
+        unsafe {
+            std::env::set_var("RUNE_APPROVAL__MODE", "yolo");
+        }
+    }
+    if cli.no_sandbox {
+        unsafe {
+            std::env::set_var("RUNE_SECURITY__SANDBOX", "false");
+        }
+    }
 }
 
-fn run_gateway_foreground() -> Result<()> {
+fn run_gateway_foreground(yolo: bool, no_sandbox: bool) -> Result<()> {
     let mut args = Vec::new();
     if let Some(config_path) = std::env::var_os("RUNE_CONFIG") {
         args.push("--config".to_string());
         args.push(config_path.to_string_lossy().into_owned());
+    }
+    if yolo {
+        args.push("--yolo".to_string());
+    }
+    if no_sandbox {
+        args.push("--no-sandbox".to_string());
     }
 
     let status = StdCommand::new("rune-gateway")
@@ -762,6 +782,10 @@ pub async fn run(cli: Cli) -> Result<()> {
     let format = OutputFormat::from_json_flag(cli.json);
     let client = GatewayClient::new(&cli.gateway_url);
 
+    // Capture bypass flags before the match moves fields out of `cli`.
+    let bypass_yolo = cli.yolo;
+    let bypass_no_sandbox = cli.no_sandbox;
+
     match cli.command {
         Command::Gateway { action } | Command::Daemon { action } => match action {
             GatewayAction::Status => {
@@ -808,7 +832,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
             GatewayAction::Run => {
-                run_gateway_foreground()?;
+                run_gateway_foreground(bypass_yolo, bypass_no_sandbox)?;
             }
         },
         Command::Status => {
