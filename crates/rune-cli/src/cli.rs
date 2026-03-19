@@ -282,7 +282,7 @@ pub enum CronAction {
 
 #[derive(Debug, Subcommand)]
 pub enum SessionsAction {
-    /// List sessions with optional activity/channel filters.
+    /// List sessions with optional activity/channel/kind filters.
     List {
         /// Only include sessions active within the last N minutes.
         #[arg(long = "active")]
@@ -290,6 +290,12 @@ pub enum SessionsAction {
         /// Only include sessions for the given channel reference.
         #[arg(long)]
         channel: Option<String>,
+        /// Filter by session kind (e.g. "direct", "subagent", "scheduled").
+        #[arg(long)]
+        kind: Option<String>,
+        /// Only show children of this parent/requester session ID.
+        #[arg(long)]
+        parent: Option<String>,
         /// Maximum number of sessions to return.
         #[arg(long, default_value_t = 100)]
         limit: u64,
@@ -302,6 +308,11 @@ pub enum SessionsAction {
     /// Show the first-class status card for a specific session.
     Status {
         /// Session ID to inspect.
+        id: String,
+    },
+    /// Show the delegation tree rooted at a session (parent → children → grandchildren).
+    Tree {
+        /// Session ID to use as tree root.
         id: String,
     },
 }
@@ -1698,16 +1709,25 @@ mod tests {
     #[test]
     fn parse_sessions_list() {
         let cli = Cli::try_parse_from(["rune", "sessions", "list"]).unwrap();
-        assert!(matches!(
-            cli.command,
+        match cli.command {
             Command::Sessions {
-                action: SessionsAction::List {
-                    active_minutes: None,
-                    channel: None,
-                    limit: 100
-                }
+                action:
+                    SessionsAction::List {
+                        active_minutes,
+                        channel,
+                        kind,
+                        parent,
+                        limit,
+                    },
+            } => {
+                assert_eq!(active_minutes, None);
+                assert_eq!(channel, None);
+                assert_eq!(kind, None);
+                assert_eq!(parent, None);
+                assert_eq!(limit, 100);
             }
-        ));
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]
@@ -1731,11 +1751,40 @@ mod tests {
                         active_minutes,
                         channel,
                         limit,
+                        ..
                     },
             } => {
                 assert_eq!(active_minutes, Some(30));
                 assert_eq!(channel.as_deref(), Some("telegram"));
                 assert_eq!(limit, 25);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sessions_list_kind_filter() {
+        let cli =
+            Cli::try_parse_from(["rune", "sessions", "list", "--kind", "subagent"]).unwrap();
+        match cli.command {
+            Command::Sessions {
+                action: SessionsAction::List { kind, .. },
+            } => {
+                assert_eq!(kind.as_deref(), Some("subagent"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sessions_list_parent_filter() {
+        let cli =
+            Cli::try_parse_from(["rune", "sessions", "list", "--parent", "abc-123"]).unwrap();
+        match cli.command {
+            Command::Sessions {
+                action: SessionsAction::List { parent, .. },
+            } => {
+                assert_eq!(parent.as_deref(), Some("abc-123"));
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -1758,6 +1807,17 @@ mod tests {
         match &cli.command {
             Command::Sessions {
                 action: SessionsAction::Status { id },
+            } => assert_eq!(id, "abc-123"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sessions_tree() {
+        let cli = Cli::try_parse_from(["rune", "sessions", "tree", "abc-123"]).unwrap();
+        match &cli.command {
+            Command::Sessions {
+                action: SessionsAction::Tree { id },
             } => assert_eq!(id, "abc-123"),
             other => panic!("unexpected command: {other:?}"),
         }

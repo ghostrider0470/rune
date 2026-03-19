@@ -927,7 +927,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             let gateway = client.status().await?;
             let health = client.health().await?;
             let cron = client.cron_status().await?;
-            let sessions = client.sessions_list(None, None, 5).await?;
+            let sessions = client.sessions_list(None, None, None, None, 5).await?;
             let channels = channel_details();
             let models = model_provider_details();
             let memory = memory::status().await?;
@@ -1086,10 +1086,18 @@ pub async fn run(cli: Cli) -> Result<()> {
             SessionsAction::List {
                 active_minutes,
                 channel,
+                kind,
+                parent,
                 limit,
             } => {
                 let result = client
-                    .sessions_list(active_minutes, channel.as_deref(), limit)
+                    .sessions_list(
+                        active_minutes,
+                        channel.as_deref(),
+                        kind.as_deref(),
+                        parent.as_deref(),
+                        limit,
+                    )
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -1099,6 +1107,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             SessionsAction::Status { id } => {
                 let result = client.session_status(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            SessionsAction::Tree { id } => {
+                let result = client.sessions_tree(&id).await?;
                 println!("{}", render(&result, format));
             }
         },
