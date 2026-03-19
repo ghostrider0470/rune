@@ -219,9 +219,10 @@ Reproduce proactive automation behavior.
 - scheduled executions are auditable; `sessionTarget=isolated` cron jobs create descendant subagent sessions while main-target cron jobs, reminders, and heartbeats reuse scheduled session contexts
 - operator can list, inspect, enable, disable, wake, and review job history
 - `sessionTarget=main` vs `sessionTarget=isolated` semantics are preserved without payload coercion
-- `none` / `announce` / `webhook` delivery modes remain inspectable even though runtime-specific branching is still follow-on work
+- `none` / `announce` / `webhook` delivery modes are executable: `announce` broadcasts a `cron_run_completed` event via the session event channel, `webhook` POSTs the job result to the configured URL, and `none` suppresses outbound delivery
 - reminder outcomes persist as delivered / missed / cancelled rather than disappearing into logs only
-- reminder targets remain inspectable even though current runtime delivery still reuses the scheduled main session
+- reminder targets route execution: `"main"` executes in the stable scheduled main session, `"isolated"` creates a one-shot subagent session; unknown targets fall back to `"main"` with a warning
+- due jobs and reminders are claimed atomically before execution; stale claims expire after the configured lease duration for crash recovery; concurrent supervisor ticks cannot duplicate execution
 
 ### Recommended parity tests
 
@@ -229,8 +230,10 @@ Reproduce proactive automation behavior.
 - schedule-edit recompute plus disable/re-enable `next_run_at` transition tests
 - due-only vs forced-run history tests
 - `systemEvent` vs `agentTurn` session-target validation tests
-- delivery-mode retention/inspection tests for `none` / `announce` / `webhook`
-- reminder due/delivered/missed/cancelled plus target-retention flows
+- delivery-mode execution tests for `none` / `announce` / `webhook` including webhook POST and announce event broadcast
+- reminder due/delivered/missed/cancelled plus target-routing flows
+- reminder target routing tests: `"main"` vs `"isolated"` session creation
+- durable claim/lease tests: atomic claim, stale-claim reclaim, release-and-reclaim, concurrent duplicate suppression
 - wake mode normalization and queued-event payload tests
 - heartbeat instruction loading, no-op suppression, and duplicate-notification suppression persistence behavior
 

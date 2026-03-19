@@ -204,8 +204,9 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - schedule definition is compatibility surface: `at`, `every`, and cron-expression semantics may not drift silently
 - `next_run_at` is derived scheduler state, not sticky metadata: create, schedule-edit, disable, and re-enable transitions must clear or recompute the executable next-fire time from the current job contract rather than preserving stale cadence
 - `sessionTarget=main` maps to `systemEvent` payloads and `sessionTarget=isolated` maps to `agentTurn` payloads; invalid combinations fail explicitly
-- reminder timing and terminal outcomes remain operator-predictable; reminder `target` is retained as operator-visible metadata even though current execution still reuses the scheduled main session
-- delivery modes preserve `none`, `announce`, and `webhook` as durable, inspectable job metadata; runtime-specific branching on those modes is not yet a shipped contract
+- reminder timing and terminal outcomes remain operator-predictable; reminder `target` routes execution: `"main"` delivers through the stable scheduled main session, `"isolated"` creates a one-shot subagent session under it; unknown targets fall back to `"main"` with a warning
+- delivery modes are executable runtime behavior: `announce` broadcasts a `cron_run_completed` event via the session event channel, `webhook` POSTs the job result payload to the configured URL (30 s timeout, no retry), and `none` suppresses outbound delivery; all three modes remain durable and inspectable as job metadata
+- due jobs and reminders are claimed atomically before execution via `claimed_at`; stale claims older than the configured lease duration (default 300 s) expire and become reclaimable for crash recovery; concurrent supervisor ticks cannot duplicate execution
 - heartbeat no-op and duplicate-suppression semantics are preserved; broader quiet-window policy is still follow-on work
 - repeated heartbeats do not spam without new cause
 - `sessionTarget=isolated` cron jobs remain auditable as isolated descendant runs; main-target cron jobs, reminders, and heartbeats reuse scheduled session contexts
@@ -216,8 +217,9 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - jobs
 - schedules/due times
 - session target and payload kind
-- delivery mode
+- delivery mode and webhook URL
 - last/next run metadata
+- claim/lease state (`claimed_at`) for atomic due-work acquisition
 - run history with due/manual trigger visibility
 - delivered/missed/cancelled status for reminders
 - heartbeat anti-spam state sufficient to suppress duplicate notifications across restarts
@@ -247,8 +249,10 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - schedule-edit recompute plus disable/re-enable `next_run_at` transition tests
 - due-only vs forced-run history tests
 - `systemEvent` vs `agentTurn` session-target tests
-- delivery-mode retention/inspection tests for `none`/`announce`/`webhook`
-- reminder due/delivered/missed/cancelled and target-retention tests
+- delivery-mode execution tests: `announce` event broadcast, `webhook` POST, `none` suppression
+- durable claim/lease tests: atomic claim, stale-claim reclaim, release-and-reclaim, concurrent duplicate suppression
+- reminder due/delivered/missed/cancelled and target-routing tests
+- reminder target routing tests: `"main"` vs `"isolated"` session creation
 - wake mode normalization/event-payload tests
 - heartbeat no-op, notify, and duplicate-suppression persistence tests
 
