@@ -1,13 +1,19 @@
 //! Azure OpenAI provider — correct URL construction with deployment/api-version.
+//!
+//! Azure OpenAI uses the deployment name embedded in the URL path, so the
+//! request body intentionally **excludes** the `model` field.  This matches
+//! the Azure OpenAI REST contract where the deployment already identifies the
+//! model.
 
 use async_trait::async_trait;
 use reqwest::Client;
+use serde::Serialize;
 use tracing::debug;
 
 use super::ModelProvider;
 use super::response::{ApiResponse, map_error_response, parse_response};
 use crate::error::ModelError;
-use crate::types::{CompletionRequest, CompletionResponse};
+use crate::types::{ChatMessage, CompletionRequest, CompletionResponse, ToolDefinition};
 
 /// Azure OpenAI provider.
 ///
@@ -44,20 +50,42 @@ impl AzureOpenAiProvider {
     }
 }
 
+/// Azure OpenAI request body.
+///
+/// Intentionally **omits** `model` — Azure routes by deployment name in the URL.
+/// Uses `max_tokens` which is the field name Azure OpenAI expects.
+#[derive(Debug, Serialize)]
+struct AzureOpenAiRequest<'a> {
+    messages: &'a [ChatMessage],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: &'a Option<Vec<ToolDefinition>>,
+}
+
 #[async_trait]
 impl ModelProvider for AzureOpenAiProvider {
     async fn complete(
         &self,
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
-        debug!(url = %self.url, "Azure OpenAI completion request");
+        let body = AzureOpenAiRequest {
+            messages: &request.messages,
+            temperature: request.temperature,
+            max_tokens: request.max_tokens,
+            tools: &request.tools,
+        };
+
+        debug!(url = %self.url, msg_count = body.messages.len(), "Azure OpenAI completion request");
 
         let resp = self
             .client
             .post(&self.url)
             .header("api-key", &self.api_key)
             .header("Content-Type", "application/json")
-            .json(request)
+            .json(&body)
             .send()
             .await?;
 
