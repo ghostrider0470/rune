@@ -1848,6 +1848,27 @@ impl fmt::Display for MessageReactResponse {
     }
 }
 
+/// Response from a message pin/unpin operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagePinResponse {
+    pub success: bool,
+    pub message_id: String,
+    pub pinned: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for MessagePinResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        let verb = if self.pinned { "pinned" } else { "unpinned" };
+        write!(f, "{icon} {verb} message {}", self.message_id)?;
+        if !self.detail.is_empty() {
+            write!(f, ": {}", self.detail)?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -2982,6 +3003,76 @@ mod tests {
         };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓ added fire on message msg-1"));
+        assert!(!out.contains(":"));
+    }
+
+    // ── MessagePinResponse ──────────────────────────────────────────
+
+    #[test]
+    fn message_pin_response_human_pin() {
+        let r = MessagePinResponse {
+            success: true,
+            message_id: "msg-50".into(),
+            pinned: true,
+            detail: "Message pinned".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓ pinned message msg-50"));
+        assert!(out.contains("Message pinned"));
+    }
+
+    #[test]
+    fn message_pin_response_human_unpin() {
+        let r = MessagePinResponse {
+            success: true,
+            message_id: "msg-77".into(),
+            pinned: false,
+            detail: "Message unpinned".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓ unpinned message msg-77"));
+        assert!(out.contains("Message unpinned"));
+    }
+
+    #[test]
+    fn message_pin_response_human_failure() {
+        let r = MessagePinResponse {
+            success: false,
+            message_id: "msg-99".into(),
+            pinned: true,
+            detail: "Gateway returned HTTP 404: Message not found".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✗ pinned message msg-99"));
+        assert!(out.contains("404"));
+    }
+
+    #[test]
+    fn message_pin_response_json() {
+        let r = MessagePinResponse {
+            success: true,
+            message_id: "msg-50".into(),
+            pinned: true,
+            detail: "Message pinned".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["message_id"], "msg-50");
+        assert_eq!(v["pinned"], true);
+        assert_eq!(v["detail"], "Message pinned");
+    }
+
+    #[test]
+    fn message_pin_response_empty_detail() {
+        let r = MessagePinResponse {
+            success: true,
+            message_id: "msg-1".into(),
+            pinned: true,
+            detail: String::new(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓ pinned message msg-1"));
         assert!(!out.contains(":"));
     }
 }

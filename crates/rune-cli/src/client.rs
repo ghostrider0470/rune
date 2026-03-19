@@ -1075,6 +1075,68 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /messages/pin`
+    pub async fn message_pin(
+        &self,
+        message_id: &str,
+        unpin: bool,
+        channel: Option<&str>,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessagePinResponse> {
+        use crate::output::MessagePinResponse;
+
+        let mut body = json!({
+            "message_id": message_id,
+        });
+        if unpin {
+            body["unpin"] = json!(true);
+        }
+        if let Some(ch) = channel {
+            body["channel"] = json!(ch);
+        }
+        if let Some(s) = session {
+            body["session"] = json!(s);
+        }
+        let resp = self
+            .http
+            .post(self.url("/messages/pin"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /messages/pin")?;
+            Ok(MessagePinResponse {
+                success: true,
+                message_id: v["message_id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                pinned: !v["unpinned"].as_bool().unwrap_or(unpin),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or(if unpin {
+                        "Message unpinned"
+                    } else {
+                        "Message pinned"
+                    })
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessagePinResponse {
+                success: false,
+                message_id: message_id.to_string(),
+                pinned: !unpin,
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(
         &self,
@@ -2389,6 +2451,105 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let resp = client
             .message_react("msg-missing", "👍", false, None, None)
+            .await
+            .unwrap();
+        assert!(!resp.success);
+        assert!(resp.detail.contains("404"));
+        assert!(resp.detail.contains("Message not found"));
+    }
+
+    #[tokio::test]
+    async fn message_pin_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/pin"))
+            .and(body_json(json!({
+                "message_id": "msg-50"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message_id": "msg-50",
+                "detail": "Message pinned"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_pin("msg-50", false, None, None)
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message_id, "msg-50");
+        assert!(resp.pinned);
+        assert_eq!(resp.detail, "Message pinned");
+    }
+
+    #[tokio::test]
+    async fn message_unpin_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/pin"))
+            .and(body_json(json!({
+                "message_id": "msg-77",
+                "unpin": true
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message_id": "msg-77",
+                "unpinned": true,
+                "detail": "Message unpinned"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_pin("msg-77", true, None, None)
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message_id, "msg-77");
+        assert!(!resp.pinned);
+        assert_eq!(resp.detail, "Message unpinned");
+    }
+
+    #[tokio::test]
+    async fn message_pin_with_channel_and_session() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/pin"))
+            .and(body_json(json!({
+                "message_id": "msg-10",
+                "channel": "telegram",
+                "session": "sess-5"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "message_id": "msg-10",
+                "detail": "Message pinned"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_pin("msg-10", false, Some("telegram"), Some("sess-5"))
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert!(resp.pinned);
+    }
+
+    #[tokio::test]
+    async fn message_pin_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/pin"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Message not found"))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_pin("msg-missing", false, None, None)
             .await
             .unwrap();
         assert!(!resp.success);
