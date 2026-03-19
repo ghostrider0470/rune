@@ -306,6 +306,8 @@ pub enum ModelsAction {
     Status,
     /// Show configured alias-to-provider/model mappings.
     Aliases,
+    /// Show provider auth/API-key configuration status and management hints.
+    Auth,
     /// Set the default model in local config.toml after validating against configured inventory.
     Set {
         /// Model id to set. Accepts canonical `provider/model` ids and unambiguous short names.
@@ -805,6 +807,17 @@ mod tests {
             cli.command,
             Command::Models {
                 action: ModelsAction::Aliases
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_models_auth() {
+        let cli = Cli::try_parse_from(["rune", "models", "auth"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Models {
+                action: ModelsAction::Auth
             }
         ));
     }

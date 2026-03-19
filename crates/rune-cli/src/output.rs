@@ -696,6 +696,67 @@ pub struct ModelAliasDetail {
     pub note: Option<String>,
 }
 
+/// Per-provider auth-management detail for `models auth`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAuthProviderDetail {
+    pub provider: String,
+    pub provider_kind: String,
+    pub credential_source: String,
+    pub credentials_ready: bool,
+    pub api_key_configured: bool,
+    pub api_key_env: Option<String>,
+    pub auth_order: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+impl fmt::Display for ModelAuthProviderDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} [{}] source={} creds={}",
+            self.provider,
+            self.provider_kind,
+            self.credential_source,
+            if self.credentials_ready { "ready" } else { "missing" }
+        )
+    }
+}
+
+/// Response for `models auth`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAuthResponse {
+    pub providers: Vec<ModelAuthProviderDetail>,
+}
+
+impl fmt::Display for ModelAuthResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.providers.is_empty() {
+            return write!(f, "No model auth providers configured.");
+        }
+        writeln!(f, "Model auth")?;
+        for provider in &self.providers {
+            writeln!(f, "  - {provider}")?;
+            writeln!(
+                f,
+                "    api_key configured: {}",
+                provider.api_key_configured
+            )?;
+            writeln!(
+                f,
+                "    api_key_env: {}",
+                provider.api_key_env.as_deref().unwrap_or("(default/provider-specific)")
+            )?;
+            if !provider.auth_order.is_empty() {
+                writeln!(f, "    auth_order: {}", provider.auth_order.join(" -> "))?;
+            }
+            for note in &provider.notes {
+                writeln!(f, "    note: {note}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for ModelAliasDetail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -2104,6 +2165,28 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("fast -> hamza-eastus2/gpt-5.4-mini"));
         assert!(out.contains("deployment: gpt-5.4-mini"));
+    }
+
+    #[test]
+    fn render_model_auth_response() {
+        let response = ModelAuthResponse {
+            providers: vec![ModelAuthProviderDetail {
+                provider: "hamza-eastus2".into(),
+                provider_kind: "azure-openai".into(),
+                credential_source: "env:OPENAI_API_KEY".into(),
+                credentials_ready: false,
+                api_key_configured: false,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                auth_order: vec!["api_key".into(), "api_key_env".into(), "azure_cli".into()],
+                notes: vec![
+                    "Use `rune config set models.providers.<n>.api_key_env \"OPENAI_API_KEY\"` or set the environment variable before launch.".into(),
+                ],
+            }],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Model auth"));
+        assert!(out.contains("hamza-eastus2 [azure-openai] source=env:OPENAI_API_KEY creds=missing"));
+        assert!(out.contains("auth_order: api_key -> api_key_env -> azure_cli"));
     }
 
     #[test]

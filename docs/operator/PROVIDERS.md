@@ -142,7 +142,7 @@ For detailed Azure compatibility requirements, see [`../AZURE-COMPATIBILITY.md`]
 
 | Gap | Description |
 |---|---|
-| `models auth` CLI | No dedicated auth management command; operators use `rune config set` or edit `config.toml` directly |
+| `models auth` CLI | Auth status/inspection command exists; secret mutation still uses `rune config set` or direct `config.toml` editing |
 | Per-agent auth order | Config structure exists in `rune-config` (`auth_orders`) but no CLI surface to inspect or mutate |
 | Azure setup wizard | Azure providers work but require manual `config.toml` editing; no guided setup flow |
 | Scan breadth | `models scan` probes Ollama only; cloud provider probing not yet implemented |

@@ -40,7 +40,7 @@ Operator surface for provider inventory, model selection, fallback chains, and p
 
 | Subcommand | Purpose | Status |
 |---|---|---|
-| `rune models auth` | Manage provider auth/API keys | Not implemented — use `rune config set` for now |
+| `rune models auth` | Inspect provider auth/API-key configuration status and management hints | Implemented as inspectable auth-status surface; mutation still uses `rune config set` |
 
 ### Output modes
 
