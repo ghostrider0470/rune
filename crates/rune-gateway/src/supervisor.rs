@@ -4,16 +4,18 @@
 
 use std::sync::Arc;
 
-use tokio::sync::watch;
+use serde_json::json;
+use tokio::sync::{broadcast, watch};
 use tracing::{debug, error, info, warn};
 
-use rune_core::{SchedulerRunTrigger, SessionKind, TriggerKind};
+use rune_core::{SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind, TriggerKind};
 use rune_runtime::heartbeat::{HeartbeatResponseAction, HeartbeatRunner};
 use rune_runtime::scheduler::{Job, JobPayload, ReminderStore, Scheduler, SessionTarget};
 use rune_runtime::{SessionEngine, TurnExecutor};
 use rune_store::models::SessionRow;
 
 use crate::pairing::DeviceRegistry;
+use crate::state::SessionEvent;
 
 /// Manages background services (heartbeat, scheduler, reminders).
 pub struct BackgroundSupervisor {
@@ -31,6 +33,8 @@ pub struct SupervisorDeps {
     pub turn_executor: Arc<TurnExecutor>,
     pub workspace_root: Option<String>,
     pub device_registry: Arc<DeviceRegistry>,
+    /// Broadcast channel for session/runtime events (delivery announce).
+    pub event_tx: broadcast::Sender<SessionEvent>,
 }
 
 impl BackgroundSupervisor {
@@ -112,7 +116,90 @@ pub(crate) async fn run_job_lifecycle(
         deps.scheduler.advance_next_run(&job_id).await;
     }
 
+    // Deliver the result based on the job's delivery_mode.
+    deliver_result(deps, job, &status, &output, run_trigger).await;
+
     (status, output)
+}
+
+/// Deliver a job result according to the job's `delivery_mode`.
+async fn deliver_result(
+    deps: &SupervisorDeps,
+    job: &Job,
+    status: &rune_runtime::scheduler::JobRunStatus,
+    output: &str,
+    trigger: SchedulerRunTrigger,
+) {
+    deliver_result_standalone(&deps.event_tx, job, status, output, trigger).await;
+}
+
+/// Core delivery logic, callable without full `SupervisorDeps` (for testing).
+async fn deliver_result_standalone(
+    event_tx: &broadcast::Sender<SessionEvent>,
+    job: &Job,
+    status: &rune_runtime::scheduler::JobRunStatus,
+    output: &str,
+    trigger: SchedulerRunTrigger,
+) {
+    match job.delivery_mode {
+        SchedulerDeliveryMode::None => {
+            // Silent execution — no additional delivery.
+        }
+        SchedulerDeliveryMode::Announce => {
+            let _ = event_tx.send(SessionEvent {
+                session_id: job.id.to_string(),
+                kind: "cron_run_completed".to_string(),
+                payload: json!({
+                    "job_id": job.id.to_string(),
+                    "job_name": job.name,
+                    "delivery_mode": "announce",
+                    "trigger": trigger.as_str(),
+                    "status": status,
+                    "output": output,
+                }),
+                state_changed: true,
+            });
+            debug!(job_id = %job.id, "announce delivery sent");
+        }
+        SchedulerDeliveryMode::Webhook => {
+            let Some(url) = job.webhook_url.as_deref() else {
+                warn!(job_id = %job.id, "webhook delivery_mode but no webhook_url configured; skipping");
+                return;
+            };
+            let payload = json!({
+                "job_id": job.id.to_string(),
+                "job_name": job.name,
+                "delivery_mode": "webhook",
+                "trigger": trigger.as_str(),
+                "status": status,
+                "output": output,
+            });
+            match reqwest::Client::new()
+                .post(url)
+                .json(&payload)
+                .timeout(std::time::Duration::from_secs(30))
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        info!(job_id = %job.id, url = %url, "webhook delivery succeeded");
+                    } else {
+                        warn!(
+                            job_id = %job.id, url = %url, status = %resp.status(),
+                            "webhook delivery returned non-success status"
+                        );
+                    }
+                }
+                Err(error) => {
+                    error!(
+                        job_id = %job.id, url = %url, error = %error,
+                        "webhook delivery failed"
+                    );
+                }
+            }
+        }
+    }
 }
 
 async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<bool>) {
@@ -379,6 +466,8 @@ async fn execute_in_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rune_core::JobId;
+    use rune_runtime::scheduler::{Job, JobPayload, JobRunStatus, Schedule, SessionTarget};
 
     #[tokio::test]
     async fn supervisor_starts_and_stops_cleanly() {
@@ -396,5 +485,90 @@ mod tests {
     async fn supervisor_default_trait() {
         let supervisor = BackgroundSupervisor::default();
         assert!(supervisor.handle.is_none());
+    }
+
+    fn make_test_job(delivery_mode: SchedulerDeliveryMode, webhook_url: Option<String>) -> Job {
+        Job {
+            id: JobId::new(),
+            name: Some("test-job".into()),
+            schedule: Schedule::Every {
+                every_ms: 60_000,
+                anchor_ms: None,
+            },
+            payload: JobPayload::SystemEvent {
+                text: "test event".into(),
+            },
+            delivery_mode,
+            webhook_url,
+            session_target: SessionTarget::Main,
+            enabled: true,
+            created_at: chrono::Utc::now(),
+            last_run_at: None,
+            next_run_at: None,
+            run_count: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn deliver_announce_broadcasts_event() {
+        let (event_tx, mut rx) = broadcast::channel(16);
+        let job = make_test_job(SchedulerDeliveryMode::Announce, None);
+
+        // Call deliver_result_standalone which tests the announce path directly.
+        deliver_result_standalone(
+            &event_tx,
+            &job,
+            &JobRunStatus::Completed,
+            "hello world",
+            SchedulerRunTrigger::Due,
+        )
+        .await;
+
+        let event = rx.try_recv().expect("announce mode should broadcast an event");
+        assert_eq!(event.kind, "cron_run_completed");
+        assert_eq!(event.payload["delivery_mode"], "announce");
+        assert_eq!(event.payload["output"], "hello world");
+        assert!(event.state_changed);
+    }
+
+    #[tokio::test]
+    async fn deliver_none_does_not_broadcast() {
+        let (event_tx, mut rx) = broadcast::channel(16);
+        let job = make_test_job(SchedulerDeliveryMode::None, None);
+
+        deliver_result_standalone(
+            &event_tx,
+            &job,
+            &JobRunStatus::Completed,
+            "silent output",
+            SchedulerRunTrigger::Due,
+        )
+        .await;
+
+        assert!(
+            rx.try_recv().is_err(),
+            "none mode should NOT broadcast any event"
+        );
+    }
+
+    #[tokio::test]
+    async fn deliver_webhook_without_url_does_not_panic() {
+        let (event_tx, mut rx) = broadcast::channel(16);
+        let job = make_test_job(SchedulerDeliveryMode::Webhook, None);
+
+        // Should not panic or broadcast — just warn and return.
+        deliver_result_standalone(
+            &event_tx,
+            &job,
+            &JobRunStatus::Completed,
+            "output",
+            SchedulerRunTrigger::Due,
+        )
+        .await;
+
+        assert!(
+            rx.try_recv().is_err(),
+            "webhook mode without URL should not broadcast"
+        );
     }
 }

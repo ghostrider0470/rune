@@ -179,6 +179,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         turn_executor: state.turn_executor.clone(),
         workspace_root,
         device_registry: state.device_registry.clone(),
+        event_tx: state.event_tx.clone(),
     };
 
     let app = build_router(state, auth_token);

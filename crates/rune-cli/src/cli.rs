@@ -180,18 +180,21 @@ pub enum CronAction {
         /// Delivery mode for the scheduled work (`none`, `announce`, or `webhook`).
         #[arg(long, value_enum, default_value_t = CronDeliveryMode::None)]
         delivery_mode: CronDeliveryMode,
+        /// Webhook URL for `webhook` delivery mode.
+        #[arg(long)]
+        webhook_url: Option<String>,
     },
     /// Inspect a job.
     Show {
         /// Job ID.
         id: String,
     },
-    /// Update a job's display name or delivery mode.
+    /// Update a job's display name, delivery mode, or webhook URL.
     #[command(group(
         ArgGroup::new("cron_edit_changes")
             .required(true)
             .multiple(true)
-            .args(["name", "delivery_mode"])
+            .args(["name", "delivery_mode", "webhook_url"])
     ))]
     Edit {
         /// Job ID.
@@ -202,6 +205,9 @@ pub enum CronAction {
         /// New delivery mode.
         #[arg(long, value_enum)]
         delivery_mode: Option<CronDeliveryMode>,
+        /// New webhook URL for `webhook` delivery mode.
+        #[arg(long)]
+        webhook_url: Option<String>,
     },
     /// Enable a job.
     Enable {
@@ -1105,6 +1111,7 @@ mod tests {
                         id,
                         name,
                         delivery_mode,
+                        ..
                     },
             } => {
                 assert_eq!(id, "job-1");

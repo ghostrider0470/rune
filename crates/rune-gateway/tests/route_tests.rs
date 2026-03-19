@@ -1360,6 +1360,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
                 text: "run daily check".into(),
             },
             delivery_mode: rune_core::SchedulerDeliveryMode::Announce,
+            webhook_url: None,
             session_target: rune_runtime::scheduler::SessionTarget::Main,
             enabled: true,
             created_at: now,
@@ -4073,6 +4074,78 @@ async fn cron_get_and_update_delivery_mode() {
     assert_eq!(response.status(), StatusCode::OK);
     let job = body_json(response).await;
     assert_eq!(job["delivery_mode"], "webhook");
+}
+
+#[tokio::test]
+async fn cron_create_with_webhook_url_roundtrips() {
+    let app = build_test_app(None);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/cron")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "name":"webhook-job",
+                        "schedule":{"kind":"at","at":"2026-03-18T10:00:00Z"},
+                        "payload":{"kind":"system_event","text":"fire!"},
+                        "session_target":"main",
+                        "delivery_mode":"webhook",
+                        "webhook_url":"https://example.com/hook",
+                        "enabled":true
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let job_id = created["job_id"].as_str().unwrap().to_string();
+
+    // GET the job and verify webhook_url is persisted
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let job = body_json(response).await;
+    assert_eq!(job["delivery_mode"], "webhook");
+    assert_eq!(job["webhook_url"], "https://example.com/hook");
+
+    // Update the webhook_url
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/cron/{job_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{ "webhook_url":"https://example.com/new-hook" }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Verify the update stuck
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let job = body_json(response).await;
+    assert_eq!(job["webhook_url"], "https://example.com/new-hook");
 }
 
 #[tokio::test]

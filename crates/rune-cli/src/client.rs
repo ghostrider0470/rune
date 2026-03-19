@@ -549,18 +549,23 @@ impl GatewayClient {
         at: DateTime<Utc>,
         session_target: &str,
         delivery_mode: &str,
+        webhook_url: Option<&str>,
     ) -> Result<ActionResult> {
+        let mut body = json!({
+            "name": name,
+            "schedule": { "kind": "at", "at": at.to_rfc3339() },
+            "payload": { "kind": "system_event", "text": text },
+            "session_target": session_target,
+            "delivery_mode": delivery_mode,
+            "enabled": true
+        });
+        if let Some(url) = webhook_url {
+            body["webhook_url"] = json!(url);
+        }
         let resp = self
             .http
             .post(self.url("/cron"))
-            .json(&json!({
-                "name": name,
-                "schedule": { "kind": "at", "at": at.to_rfc3339() },
-                "payload": { "kind": "system_event", "text": text },
-                "session_target": session_target,
-                "delivery_mode": delivery_mode,
-                "enabled": true
-            }))
+            .json(&body)
             .send()
             .await
             .context("failed to reach gateway")?;
@@ -585,6 +590,7 @@ impl GatewayClient {
         id: &str,
         name: Option<&str>,
         delivery_mode: Option<&str>,
+        webhook_url: Option<&str>,
     ) -> Result<ActionResult> {
         let mut payload = serde_json::Map::new();
         if let Some(name) = name {
@@ -592,6 +598,9 @@ impl GatewayClient {
         }
         if let Some(delivery_mode) = delivery_mode {
             payload.insert("delivery_mode".to_string(), json!(delivery_mode));
+        }
+        if let Some(webhook_url) = webhook_url {
+            payload.insert("webhook_url".to_string(), json!(webhook_url));
         }
         self.cron_patch(id, serde_json::Value::Object(payload), "Cron job updated")
             .await
@@ -1506,6 +1515,7 @@ mod tests {
                     .with_timezone(&Utc),
                 "main",
                 "announce",
+                None,
             )
             .await
             .unwrap();
@@ -1531,7 +1541,7 @@ mod tests {
 
         let client = GatewayClient::new(&server.uri());
         let resp = client
-            .cron_update("job-1", Some("renamed"), Some("webhook"))
+            .cron_update("job-1", Some("renamed"), Some("webhook"), None)
             .await
             .unwrap();
         assert!(resp.success);

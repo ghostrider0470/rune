@@ -70,6 +70,9 @@ pub struct Job {
     pub schedule: Schedule,
     pub payload: JobPayload,
     pub delivery_mode: SchedulerDeliveryMode,
+    /// Webhook URL for `Webhook` delivery mode. Ignored for other modes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
     pub session_target: SessionTarget,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
@@ -95,6 +98,8 @@ struct StoredJobRecord {
     pub payload: JobPayload,
     #[serde(default = "default_scheduler_delivery_mode")]
     pub delivery_mode: SchedulerDeliveryMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
     pub session_target: SessionTarget,
     #[serde(default)]
     pub run_count: u64,
@@ -274,6 +279,9 @@ impl Scheduler {
                 if let Some(delivery_mode) = update.delivery_mode {
                     job.delivery_mode = delivery_mode;
                 }
+                if let Some(webhook_url) = update.webhook_url {
+                    job.webhook_url = Some(webhook_url);
+                }
 
                 recompute_next_run(job, schedule_changed, enabled_change, was_enabled);
 
@@ -297,6 +305,9 @@ impl Scheduler {
                 }
                 if let Some(delivery_mode) = update.delivery_mode {
                     job.delivery_mode = delivery_mode;
+                }
+                if let Some(webhook_url) = update.webhook_url {
+                    job.webhook_url = Some(webhook_url);
                 }
 
                 recompute_next_run(&mut job, schedule_changed, enabled_change, was_enabled);
@@ -679,6 +690,7 @@ pub struct JobUpdate {
     pub schedule: Option<Schedule>,
     pub payload: Option<JobPayload>,
     pub delivery_mode: Option<SchedulerDeliveryMode>,
+    pub webhook_url: Option<String>,
 }
 
 // ── Reminders ─────────────────────────────────────────────────────────────────
@@ -1136,6 +1148,7 @@ fn row_to_job(row: JobRow) -> Result<Job, StoreError> {
         schedule,
         payload: stored.payload,
         delivery_mode: row.delivery_mode.parse().unwrap_or(stored.delivery_mode),
+        webhook_url: stored.webhook_url,
         session_target: stored.session_target,
         enabled: row.enabled,
         created_at: row.created_at,
@@ -1209,6 +1222,7 @@ fn stored_job_payload(job: &Job) -> serde_json::Value {
         name: job.name.clone(),
         payload: job.payload.clone(),
         delivery_mode: job.delivery_mode,
+        webhook_url: job.webhook_url.clone(),
         session_target: job.session_target,
         run_count: job.run_count,
     })
@@ -1250,6 +1264,7 @@ mod tests {
                 text: "test event".into(),
             },
             delivery_mode: SchedulerDeliveryMode::None,
+            webhook_url: None,
             session_target: SessionTarget::Main,
             enabled: true,
             created_at: Utc::now(),
