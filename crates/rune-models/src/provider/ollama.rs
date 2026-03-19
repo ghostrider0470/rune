@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::ModelProvider;
 use super::openai::OpenAiProvider;
@@ -103,6 +103,87 @@ impl OllamaProvider {
 
         Ok(tags.models)
     }
+
+    /// Select the best available model as a zero-config default.
+    ///
+    /// Heuristic (applied in order):
+    /// 1. If no models are pulled, return `None`.
+    /// 2. If exactly one model exists, use it.
+    /// 3. Otherwise rank by a preference table of well-known families
+    ///    (preferring larger / more capable variants), breaking ties by
+    ///    model size descending.
+    ///
+    /// The returned name is suitable for use in the `model` field of an
+    /// OpenAI-compatible completion request to this Ollama instance.
+    pub async fn pick_default_model(&self) -> Option<String> {
+        let models = match self.list_models().await {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(error = %e, "failed to list Ollama models for auto-selection");
+                return None;
+            }
+        };
+
+        if models.is_empty() {
+            return None;
+        }
+        if models.len() == 1 {
+            return Some(models[0].name.clone());
+        }
+
+        Some(rank_preferred_model(&models).name.clone())
+    }
+}
+
+/// Well-known model family prefixes in descending preference order.
+///
+/// Within each family the table entry is just a prefix — e.g. `"llama3"`
+/// matches `llama3:latest`, `llama3.3:70b`, etc.  Earlier entries win.
+const MODEL_PREFERENCE: &[&str] = &[
+    // Meta Llama family — newest / largest first.
+    "llama3.3",
+    "llama3.2",
+    "llama3.1",
+    "llama3",
+    // Alibaba Qwen
+    "qwen2.5",
+    "qwen2",
+    // Mistral
+    "mixtral",
+    "mistral",
+    // Google Gemma
+    "gemma2",
+    "gemma",
+    // Microsoft Phi
+    "phi3",
+    "phi",
+    // DeepSeek
+    "deepseek-r1",
+    "deepseek-v2",
+    "deepseek",
+    // Generic catch-all for anything with "llama" in the name.
+    "llama",
+];
+
+/// Pick the best model from a non-empty slice using the preference table.
+///
+/// Falls back to the largest model by `size` if nothing matches the table.
+fn rank_preferred_model(models: &[OllamaModel]) -> &OllamaModel {
+    debug_assert!(!models.is_empty());
+
+    for prefix in MODEL_PREFERENCE {
+        // Find the largest model matching this prefix (size descending).
+        let best = models
+            .iter()
+            .filter(|m| m.name.starts_with(prefix))
+            .max_by_key(|m| m.size);
+        if let Some(model) = best {
+            return model;
+        }
+    }
+
+    // Nothing matched the preference table — return the largest model.
+    models.iter().max_by_key(|m| m.size).unwrap()
 }
 
 impl Default for OllamaProvider {
@@ -342,5 +423,76 @@ mod tests {
         let result = OllamaProvider::probe_env().await;
         assert!(result.is_none(), "unreachable OLLAMA_HOST should return None");
         unsafe { std::env::remove_var("OLLAMA_HOST"); }
+    }
+
+    // --- rank_preferred_model tests ---
+
+    fn make_model(name: &str, size: u64) -> OllamaModel {
+        OllamaModel {
+            name: name.to_string(),
+            model: name.to_string(),
+            size,
+            digest: String::new(),
+            modified_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn rank_prefers_llama3_family() {
+        let models = vec![
+            make_model("mistral:latest", 4_000_000_000),
+            make_model("llama3.1:8b", 8_000_000_000),
+            make_model("phi3:latest", 2_000_000_000),
+        ];
+        assert_eq!(rank_preferred_model(&models).name, "llama3.1:8b");
+    }
+
+    #[test]
+    fn rank_prefers_larger_within_same_family() {
+        let models = vec![
+            make_model("llama3.1:8b", 4_000_000_000),
+            make_model("llama3.1:70b", 40_000_000_000),
+            make_model("llama3.1:latest", 4_000_000_000),
+        ];
+        assert_eq!(rank_preferred_model(&models).name, "llama3.1:70b");
+    }
+
+    #[test]
+    fn rank_prefers_newer_llama_generation() {
+        let models = vec![
+            make_model("llama3:latest", 4_000_000_000),
+            make_model("llama3.3:latest", 4_000_000_000),
+        ];
+        assert_eq!(rank_preferred_model(&models).name, "llama3.3:latest");
+    }
+
+    #[test]
+    fn rank_falls_back_to_largest_when_no_known_family() {
+        let models = vec![
+            make_model("custom-model:v1", 2_000_000_000),
+            make_model("my-finetune:latest", 8_000_000_000),
+            make_model("tiny-model:latest", 500_000_000),
+        ];
+        assert_eq!(rank_preferred_model(&models).name, "my-finetune:latest");
+    }
+
+    #[test]
+    fn rank_with_qwen_and_gemma() {
+        let models = vec![
+            make_model("gemma2:latest", 5_000_000_000),
+            make_model("qwen2.5:14b", 14_000_000_000),
+        ];
+        // qwen2.5 is higher in the preference table than gemma2.
+        assert_eq!(rank_preferred_model(&models).name, "qwen2.5:14b");
+    }
+
+    #[test]
+    fn rank_deepseek_family() {
+        let models = vec![
+            make_model("deepseek-r1:latest", 7_000_000_000),
+            make_model("phi:latest", 2_000_000_000),
+        ];
+        // phi is higher in preference table than deepseek.
+        assert_eq!(rank_preferred_model(&models).name, "phi:latest");
     }
 }
