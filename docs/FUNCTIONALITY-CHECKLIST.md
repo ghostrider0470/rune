@@ -86,6 +86,8 @@ Interpretation rules:
 - [ ] per-agent auth order override
 - [ ] Azure-aware provider config
 
+Implementation note (2026-03-19): the operator CLI now exposes the `models` command family with eight shipped subcommands covering config-backed provider inventory, credential-readiness hints, default-model and image-model mutation, alias inspection, text and image fallback chain listing, and provider scanning. Provider routing is backed by `RoutedModelProvider` in `rune-models` which executes fallback chains on retriable errors (rate-limit, transient 5xx, quota exhaustion, transport failure). Ten providers are implemented: OpenAI, Anthropic, Azure OpenAI, Azure AI Foundry, Google (Gemini), Ollama, Groq, DeepSeek, Mistral, and AWS Bedrock. `models scan` currently probes Ollama providers only via the native `/api/tags` endpoint. Provider selection is config-driven through `config.toml` provider definitions with API key resolution from direct config, `api_key_env`, or standard environment variables. The remaining gaps under issue #72 are: `models auth` (dedicated auth management CLI), per-agent auth order override (config structure exists but no CLI surface), and Azure-aware provider config (Azure providers are implemented but no Azure-specific CLI setup surface beyond `config set`).
+
 ### Memory CLI
 - [x] `memory status`
 - [ ] `memory index`
