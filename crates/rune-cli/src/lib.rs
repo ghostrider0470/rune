@@ -1229,6 +1229,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::Broadcast {
+                text,
+                channels,
+                session,
+            } => {
+                let result = client
+                    .message_broadcast(&text, &channels, session.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Reminders { action } => match action {
             RemindersAction::Add {

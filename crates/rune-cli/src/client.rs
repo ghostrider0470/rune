@@ -951,6 +951,64 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /messages/broadcast`
+    pub async fn message_broadcast(
+        &self,
+        text: &str,
+        channels: &[String],
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageBroadcastResponse> {
+        use crate::output::{MessageBroadcastChannelResult, MessageBroadcastResponse};
+
+        let mut body = json!({
+            "text": text,
+        });
+        if !channels.is_empty() {
+            body["channels"] = json!(channels);
+        }
+        if let Some(s) = session {
+            body["session"] = json!(s);
+        }
+        let resp = self
+            .http
+            .post(self.url("/messages/broadcast"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /messages/broadcast")?;
+            let results = v["results"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|r| MessageBroadcastChannelResult {
+                    channel: r["channel"].as_str().unwrap_or("?").to_string(),
+                    success: r["success"].as_bool().unwrap_or(false),
+                    message_id: r["id"].as_str().map(String::from),
+                    detail: r["detail"]
+                        .as_str()
+                        .unwrap_or("sent")
+                        .to_string(),
+                })
+                .collect::<Vec<_>>();
+            let succeeded = results.iter().filter(|r| r.success).count();
+            Ok(MessageBroadcastResponse {
+                total: results.len(),
+                succeeded,
+                failed: results.len() - succeeded,
+                results,
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
+        }
+    }
+
     /// `GET /sessions`
     pub async fn sessions_list(
         &self,
@@ -2058,5 +2116,110 @@ mod tests {
             .unwrap();
         assert_eq!(resp.total, 0);
         assert!(resp.hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn message_broadcast_parses_results() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/broadcast"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "results": [
+                    {
+                        "channel": "telegram",
+                        "success": true,
+                        "id": "msg-1",
+                        "detail": "Message sent"
+                    },
+                    {
+                        "channel": "discord",
+                        "success": true,
+                        "id": "msg-2",
+                        "detail": "Message sent"
+                    },
+                    {
+                        "channel": "slack",
+                        "success": false,
+                        "id": null,
+                        "detail": "Channel not configured"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_broadcast(
+                "System maintenance",
+                &["telegram".into(), "discord".into(), "slack".into()],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.total, 3);
+        assert_eq!(resp.succeeded, 2);
+        assert_eq!(resp.failed, 1);
+        assert!(resp.results[0].success);
+        assert_eq!(resp.results[0].channel, "telegram");
+        assert_eq!(resp.results[0].message_id.as_deref(), Some("msg-1"));
+        assert!(!resp.results[2].success);
+        assert_eq!(resp.results[2].detail, "Channel not configured");
+    }
+
+    #[tokio::test]
+    async fn message_broadcast_with_session() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/broadcast"))
+            .and(body_json(json!({
+                "text": "hello all",
+                "channels": ["telegram"],
+                "session": "sess-42"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "results": [
+                    {
+                        "channel": "telegram",
+                        "success": true,
+                        "id": "msg-10",
+                        "detail": "Message sent"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_broadcast("hello all", &["telegram".into()], Some("sess-42"))
+            .await
+            .unwrap();
+        assert_eq!(resp.total, 1);
+        assert_eq!(resp.succeeded, 1);
+        assert_eq!(resp.failed, 0);
+    }
+
+    #[tokio::test]
+    async fn message_broadcast_empty_channels_omits_field() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages/broadcast"))
+            .and(body_json(json!({
+                "text": "broadcast to all"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "results": []
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .message_broadcast("broadcast to all", &[], None)
+            .await
+            .unwrap();
+        assert_eq!(resp.total, 0);
+        assert_eq!(resp.succeeded, 0);
     }
 }

@@ -498,6 +498,18 @@ pub enum MessageAction {
         #[arg(long, default_value_t = 25)]
         limit: u64,
     },
+    /// Broadcast a message to multiple channel adapters simultaneously.
+    Broadcast {
+        /// Message body text.
+        #[arg(long)]
+        text: String,
+        /// Comma-separated list of target channels (default: all enabled channels).
+        #[arg(long, value_delimiter = ',')]
+        channels: Vec<String>,
+        /// Optional session ID to associate the broadcast with.
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2059,5 +2071,93 @@ mod tests {
     #[test]
     fn message_search_requires_query() {
         assert!(Cli::try_parse_from(["rune", "message", "search"]).is_err());
+    }
+
+    #[test]
+    fn parse_message_broadcast() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "broadcast",
+            "--text",
+            "System maintenance in 10 minutes",
+            "--channels",
+            "telegram,discord,slack",
+            "--session",
+            "sess-99",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Broadcast {
+                        text,
+                        channels,
+                        session,
+                    },
+            } => {
+                assert_eq!(text, "System maintenance in 10 minutes");
+                assert_eq!(channels, vec!["telegram", "discord", "slack"]);
+                assert_eq!(session.as_deref(), Some("sess-99"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_broadcast_no_channels() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "broadcast",
+            "--text",
+            "Hello everyone",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Broadcast {
+                        text,
+                        channels,
+                        session,
+                    },
+            } => {
+                assert_eq!(text, "Hello everyone");
+                assert!(channels.is_empty());
+                assert!(session.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_broadcast_requires_text() {
+        assert!(Cli::try_parse_from(["rune", "message", "broadcast"]).is_err());
+    }
+
+    #[test]
+    fn parse_message_broadcast_single_channel() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "broadcast",
+            "--text",
+            "alert",
+            "--channels",
+            "telegram",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Broadcast {
+                        channels, ..
+                    },
+            } => {
+                assert_eq!(channels, vec!["telegram"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 }
