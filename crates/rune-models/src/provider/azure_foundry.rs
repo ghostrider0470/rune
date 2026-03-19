@@ -14,7 +14,7 @@ use serde::Serialize;
 use tracing::debug;
 
 use super::ModelProvider;
-use super::response::{ApiResponse, map_error_response, parse_response};
+use super::response::{ApiResponse, map_anthropic_error_response, map_error_response, parse_response};
 use crate::error::ModelError;
 use crate::types::{ChatMessage, CompletionRequest, CompletionResponse, FinishReason, Usage};
 
@@ -108,7 +108,7 @@ impl AzureFoundryProvider {
             .await?;
 
         if !resp.status().is_success() {
-            return Err(map_error_response(resp).await);
+            return Err(map_anthropic_error_response(resp).await);
         }
 
         let anthropic_resp: AnthropicResponse = resp.json().await.map_err(|e| {

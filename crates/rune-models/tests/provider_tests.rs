@@ -2071,3 +2071,294 @@ async fn foundry_openai_vs_azure_openai_body_contrast() {
         "Azure OpenAI uses /openai/deployments/ path"
     );
 }
+
+// === Azure Foundry Anthropic-path error mapping =============================
+//
+// The Anthropic Messages API returns errors in a different format than OpenAI:
+//   { "type": "error", "error": { "type": "<error_type>", "message": "..." } }
+//
+// These tests verify that Foundry correctly classifies each Anthropic error type
+// into the right ModelError variant.
+
+fn anthropic_error_body(error_type: &str, message: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": error_type,
+            "message": message
+        }
+    })
+}
+
+fn claude_request() -> CompletionRequest {
+    CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Hello".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        model: Some("claude-sonnet-4-5-20250514".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    }
+}
+
+/// Anthropic 401 authentication_error → ModelError::Auth
+#[tokio::test]
+async fn foundry_anthropic_maps_401_authentication_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_json(anthropic_error_body("authentication_error", "Invalid API key")),
+        )
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "bad-key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::Auth(ref msg) if msg.contains("Invalid API key")),
+        "expected Auth, got {err:?}"
+    );
+}
+
+/// Anthropic 403 permission_error → ModelError::Auth
+#[tokio::test]
+async fn foundry_anthropic_maps_403_permission_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .set_body_json(anthropic_error_body("permission_error", "Not allowed")),
+        )
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::Auth(_)),
+        "expected Auth, got {err:?}"
+    );
+}
+
+/// Anthropic 404 not_found_error → ModelError::Provider
+#[tokio::test]
+async fn foundry_anthropic_maps_404_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(anthropic_error_body("not_found_error", "Model not found")),
+        )
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::Provider(_)),
+        "expected Provider, got {err:?}"
+    );
+}
+
+/// Anthropic 429 rate_limit_error → ModelError::RateLimited with retry-after
+#[tokio::test]
+async fn foundry_anthropic_maps_429_rate_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "45")
+                .set_body_json(anthropic_error_body("rate_limit_error", "Rate limited")),
+        )
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    match err {
+        ModelError::RateLimited {
+            retry_after_secs,
+            ref message,
+        } => {
+            assert_eq!(retry_after_secs, Some(45));
+            assert!(message.contains("Rate limited"));
+        }
+        other => panic!("expected RateLimited, got {other:?}"),
+    }
+}
+
+/// Anthropic 529 overloaded_error → ModelError::Transient (retriable)
+#[tokio::test]
+async fn foundry_anthropic_maps_529_overloaded() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(529)
+                .set_body_json(anthropic_error_body("overloaded_error", "Overloaded")),
+        )
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::Transient(ref msg) if msg.contains("Overloaded")),
+        "expected Transient for 529, got {err:?}"
+    );
+    assert!(err.is_retriable(), "529 overloaded must be retriable");
+}
+
+/// Anthropic 500 api_error → ModelError::Transient
+#[tokio::test]
+async fn foundry_anthropic_maps_500_api_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(500)
+                .set_body_json(anthropic_error_body("api_error", "Internal server error")),
+        )
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::Transient(_)),
+        "expected Transient for 500, got {err:?}"
+    );
+}
+
+/// Anthropic 400 with context length indicator → ModelError::ContextLengthExceeded
+#[tokio::test]
+async fn foundry_anthropic_maps_400_context_length() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(anthropic_error_body(
+            "invalid_request_error",
+            "prompt has too many tokens: 200000 tokens > 100000 maximum",
+        )))
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::ContextLengthExceeded(_)),
+        "expected ContextLengthExceeded, got {err:?}"
+    );
+}
+
+/// Anthropic 400 with content filter indicator → ModelError::ContentFiltered
+#[tokio::test]
+async fn foundry_anthropic_maps_400_content_filter() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(anthropic_error_body(
+            "invalid_request_error",
+            "content filter triggered: blocked by content_filter policy",
+        )))
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::ContentFiltered(_)),
+        "expected ContentFiltered, got {err:?}"
+    );
+}
+
+/// Anthropic 400 generic invalid_request_error → ModelError::Provider
+#[tokio::test]
+async fn foundry_anthropic_maps_400_generic_request_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(anthropic_error_body(
+            "invalid_request_error",
+            "messages: at least one message is required",
+        )))
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::Provider(_)),
+        "expected Provider for generic 400, got {err:?}"
+    );
+}
+
+/// Anthropic error with non-JSON body still maps correctly by status code
+#[tokio::test]
+async fn foundry_anthropic_maps_non_json_error_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(502).set_body_string("Bad Gateway"))
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let err = p.complete(&claude_request()).await.unwrap_err();
+    assert!(
+        matches!(err, ModelError::Transient(ref msg) if msg.contains("Bad Gateway")),
+        "expected Transient for 502 with plain text body, got {err:?}"
+    );
+}
+
+/// Contrast: same 401 status but OpenAI vs Anthropic error format both map to Auth.
+/// Verifies the Foundry routes each path through the correct error mapper.
+#[tokio::test]
+async fn foundry_error_format_contrast_openai_vs_anthropic() {
+    let openai_server = MockServer::start().await;
+    let anthropic_server = MockServer::start().await;
+
+    // OpenAI error format
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "error": { "message": "Invalid key (openai)", "code": "invalid_api_key" }
+        })))
+        .mount(&openai_server)
+        .await;
+
+    // Anthropic error format
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_json(anthropic_error_body("authentication_error", "Invalid key (anthropic)")),
+        )
+        .mount(&anthropic_server)
+        .await;
+
+    // OpenAI path (gpt model)
+    let openai_provider = AzureFoundryProvider::new(&openai_server.uri(), "bad");
+    let openai_err = openai_provider
+        .complete(&CompletionRequest {
+            model: Some("gpt-5.4".into()),
+            ..simple_request()
+        })
+        .await
+        .unwrap_err();
+
+    // Anthropic path (claude model)
+    let anthropic_provider = AzureFoundryProvider::new(&anthropic_server.uri(), "bad");
+    let anthropic_err = anthropic_provider
+        .complete(&claude_request())
+        .await
+        .unwrap_err();
+
+    // Both should map to Auth
+    assert!(
+        matches!(openai_err, ModelError::Auth(ref msg) if msg.contains("openai")),
+        "OpenAI path should map to Auth, got {openai_err:?}"
+    );
+    assert!(
+        matches!(anthropic_err, ModelError::Auth(ref msg) if msg.contains("anthropic")),
+        "Anthropic path should map to Auth, got {anthropic_err:?}"
+    );
+}
