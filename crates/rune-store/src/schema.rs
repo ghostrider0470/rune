@@ -67,6 +67,7 @@ table! {
         payload -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+        claimed_at -> Nullable<Timestamptz>,
     }
 }
 

@@ -160,6 +160,7 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRow> {
         payload: parse_json(&row.get::<_, String>(9)?),
         created_at: parse_dt(&row.get::<_, String>(10)?),
         updated_at: parse_dt(&row.get::<_, String>(11)?),
+        claimed_at: parse_dt_opt(row.get(12)?),
     })
 }
 
@@ -255,7 +256,7 @@ fn row_to_pairing_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PairingRe
 const SESSION_COLS: &str = "id, kind, status, workspace_root, channel_ref, requester_session_id, latest_turn_id, metadata, created_at, updated_at, last_activity_at";
 const TURN_COLS: &str = "id, session_id, trigger_kind, status, model_ref, started_at, ended_at, usage_prompt_tokens, usage_completion_tokens";
 const TRANSCRIPT_COLS: &str = "id, session_id, turn_id, seq, kind, payload, created_at";
-const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload_kind, delivery_mode, payload, created_at, updated_at";
+const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload_kind, delivery_mode, payload, created_at, updated_at, claimed_at";
 const JOB_RUN_COLS: &str =
     "id, job_id, started_at, finished_at, trigger_kind, status, output, created_at";
 const APPROVAL_COLS: &str = "id, subject_type, subject_id, reason, decision, decided_by, decided_at, presented_payload, created_at";
@@ -621,7 +622,7 @@ impl JobRepo for SqliteJobRepo {
             .call(move |conn| {
                 conn.execute(
                     &format!(
-                        "INSERT INTO jobs ({JOB_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
+                        "INSERT INTO jobs ({JOB_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"
                     ),
                     rusqlite::params![
                         j.id.to_string(),
@@ -636,6 +637,7 @@ impl JobRepo for SqliteJobRepo {
                         serde_json::to_string(&j.payload).unwrap_or_default(),
                         to_rfc3339(&j.created_at),
                         to_rfc3339(&j.updated_at),
+                        Option::<String>::None, // claimed_at
                     ],
                 )?;
                 conn.prepare(&format!("SELECT {JOB_COLS} FROM jobs WHERE id = ?1"))?
@@ -746,6 +748,69 @@ impl JobRepo for SqliteJobRepo {
             })
             .await
             .map_err(|e| map_err(e, "job", &id.to_string()))
+    }
+
+    async fn claim_due_jobs(
+        &self,
+        job_type: &str,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<JobRow>, StoreError> {
+        let jt = job_type.to_string();
+        let now_s = to_rfc3339(&now);
+        let stale_s = to_rfc3339(&stale_before);
+        self.conn
+            .call(move |conn| {
+                // Use the due-at column for reminders, next_run_at for cron.
+                let due_col = if jt == "reminder" {
+                    "due_at"
+                } else {
+                    "next_run_at"
+                };
+
+                // Atomically claim: UPDATE … WHERE selects only claimable rows.
+                let update_sql = format!(
+                    "UPDATE jobs SET claimed_at = ?1 WHERE id IN (\
+                        SELECT id FROM jobs \
+                        WHERE job_type = ?2 AND enabled = 1 \
+                          AND {due_col} IS NOT NULL AND {due_col} <= ?1 \
+                          AND (claimed_at IS NULL OR claimed_at < ?3) \
+                        ORDER BY {due_col} ASC \
+                        LIMIT ?4\
+                    )"
+                );
+                conn.execute(
+                    &update_sql,
+                    rusqlite::params![&now_s, &jt, &stale_s, limit],
+                )?;
+
+                // Fetch the rows we just claimed.
+                let select_sql = format!(
+                    "SELECT {JOB_COLS} FROM jobs \
+                     WHERE job_type = ?1 AND claimed_at = ?2 \
+                     ORDER BY {due_col} ASC"
+                );
+                conn.prepare(&select_sql)?
+                    .query_map(rusqlite::params![&jt, &now_s], row_to_job)?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn release_claim(&self, id: Uuid) -> Result<(), StoreError> {
+        let id_s = id.to_string();
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE jobs SET claimed_at = NULL WHERE id = ?1",
+                    [&id_s],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(StoreError::from)
     }
 }
 

@@ -244,6 +244,19 @@ SET delivery_mode = CASE
 END;
 "#,
     },
+    Migration {
+        version: 4,
+        name: "add_durable_claims",
+        sql: r#"
+-- Durable claim/lease column: set when a supervisor claims a due job for
+-- execution.  NULL means unclaimed.  A stale claimed_at (older than the
+-- lease duration) is treated as expired so another supervisor may reclaim.
+ALTER TABLE jobs ADD COLUMN claimed_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_jobs_due_unclaimed
+    ON jobs (enabled, next_run_at)
+    WHERE claimed_at IS NULL;
+"#,
+    },
 ];
 
 /// Run all pending migrations on the given connection.

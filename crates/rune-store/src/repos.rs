@@ -152,6 +152,25 @@ pub trait JobRepo: Send + Sync {
         last_run_at: chrono::DateTime<chrono::Utc>,
         next_run_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<JobRow, StoreError>;
+
+    /// Atomically claim up to `limit` due jobs of `job_type` for execution.
+    ///
+    /// A job is claimable when:
+    ///   - `enabled = true`
+    ///   - `next_run_at <= now`  (or `due_at <= now` for reminders)
+    ///   - `claimed_at IS NULL` **or** `claimed_at < stale_before` (expired lease)
+    ///
+    /// Returns the claimed rows with `claimed_at` set to `now`.
+    async fn claim_due_jobs(
+        &self,
+        job_type: &str,
+        now: chrono::DateTime<chrono::Utc>,
+        stale_before: chrono::DateTime<chrono::Utc>,
+        limit: i64,
+    ) -> Result<Vec<JobRow>, StoreError>;
+
+    /// Release the claim on a job (clear `claimed_at`).
+    async fn release_claim(&self, id: Uuid) -> Result<(), StoreError>;
 }
 
 // ── Job run repository ──────────────────────────────────────────────────────

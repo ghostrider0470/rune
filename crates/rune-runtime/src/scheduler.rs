@@ -528,6 +528,41 @@ impl Scheduler {
         }
     }
 
+    /// Atomically claim due cron jobs for execution, preventing duplicates.
+    ///
+    /// For in-memory backends this falls back to `get_due_jobs()`.
+    /// For durable backends, jobs are atomically marked with `claimed_at`
+    /// so that concurrent supervisors cannot double-execute the same job.
+    /// Claims older than `lease_secs` are considered expired and reclaimable.
+    pub async fn claim_due_jobs(&self, lease_secs: i64) -> Vec<Job> {
+        let now = Utc::now();
+        let stale_before = now - chrono::Duration::seconds(lease_secs);
+        match &self.backend {
+            SchedulerBackend::Memory(_) => self.get_due_jobs().await,
+            SchedulerBackend::Repo { jobs: repo, .. } => {
+                match repo.claim_due_jobs("cron", now, stale_before, 50).await {
+                    Ok(rows) => rows
+                        .into_iter()
+                        .filter_map(|row| row_to_job(row).ok())
+                        .collect(),
+                    Err(error) => {
+                        warn!(error = %error, "failed to claim due persisted cron jobs");
+                        Vec::new()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Release the durable claim on a job after execution completes.
+    pub async fn release_claim(&self, id: &JobId) {
+        if let SchedulerBackend::Repo { jobs: repo, .. } = &self.backend {
+            if let Err(error) = repo.release_claim(Uuid::from(*id)).await {
+                warn!(job_id = %id, error = %error, "failed to release job claim");
+            }
+        }
+    }
+
     /// Compute and set the next run time for a job after a firing attempt.
     pub async fn advance_next_run(&self, id: &JobId) {
         match &self.backend {
@@ -967,6 +1002,39 @@ impl ReminderStore {
                 .into_iter()
                 .filter(Reminder::is_due)
                 .collect(),
+        }
+    }
+
+    /// Atomically claim due reminders for delivery, preventing duplicates.
+    ///
+    /// For in-memory backends this falls back to `get_due()`.
+    /// For durable backends, reminders are atomically marked with `claimed_at`.
+    pub async fn claim_due(&self, lease_secs: i64) -> Vec<Reminder> {
+        let now = Utc::now();
+        let stale_before = now - chrono::Duration::seconds(lease_secs);
+        match &self.backend {
+            ReminderStoreBackend::Memory(_) => self.get_due().await,
+            ReminderStoreBackend::Repo { jobs: repo, .. } => {
+                match repo.claim_due_jobs("reminder", now, stale_before, 50).await {
+                    Ok(rows) => rows
+                        .into_iter()
+                        .filter_map(|row| row_to_reminder(row).ok())
+                        .collect(),
+                    Err(error) => {
+                        warn!(error = %error, "failed to claim due persisted reminders");
+                        Vec::new()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Release the durable claim on a reminder after delivery completes.
+    pub async fn release_claim(&self, id: &JobId) {
+        if let ReminderStoreBackend::Repo { jobs: repo, .. } = &self.backend {
+            if let Err(error) = repo.release_claim(Uuid::from(*id)).await {
+                warn!(reminder_id = %id, error = %error, "failed to release reminder claim");
+            }
         }
     }
 
