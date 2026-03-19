@@ -418,6 +418,7 @@ Observed subflows include:
 - `at`, `every`, and cron expression schedules
 - timezone support
 - enabled/disabled state
+- schedule edits and disable/re-enable transitions recompute or clear `next_run_at` instead of preserving stale due state
 - main-session `systemEvent` jobs
 - isolated `agentTurn` jobs
 - retained `announce`/`webhook`/`none` delivery-mode metadata
@@ -1148,7 +1149,7 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 - explicit `systemEvent` vs `agentTurn` payload validation
 - explicit `none` / `announce` / `webhook` delivery-mode retention and inspection
 
-Implementation note (2026-03-19): Rune now has durable cron semantics end to end: gateway routes cover `GET /cron/status`, `GET /cron`, `GET /cron/{id}`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, and `GET /cron/{id}/runs`; CLI flows cover `cron status|list|add|show|edit|enable|disable|rm|run|runs|wake`; runtime schedule handling computes interval anchors and timezone-aware cron next-fire times; invalid cron/tz definitions fail instead of silently fabricating a next run; and durable PostgreSQL-backed `jobs`/`job_runs` persistence preserves created jobs, next-run state, and scheduled/manual run history across gateway restarts. Scheduled `main` jobs reuse the stable `system:scheduled-main` session while scheduled `isolated` jobs create fresh descendant `subagent` sessions linked through `requester_session_id`. The remaining gap is no longer job durability or validation; it is that the CLI create/edit surface is narrower than the gateway schema (`cron add` is one-shot `system_event` only and `cron edit` only mutates name/delivery mode), and runtime execution still treats `none` / `announce` / `webhook` as inspectable metadata rather than distinct delivery paths.
+Implementation note (2026-03-19): Rune now has durable cron semantics end to end around creation, inspection, persistence, and execution surface: gateway routes cover `GET /cron/status`, `GET /cron`, `GET /cron/{id}`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, and `GET /cron/{id}/runs`; CLI flows cover `cron status|list|add|show|edit|enable|disable|rm|run|runs|wake`; runtime schedule handling computes interval anchors and timezone-aware cron next-fire times; invalid cron/tz definitions fail instead of silently fabricating a next run; and durable PostgreSQL-backed `jobs`/`job_runs` persistence preserves created jobs, next-run state, and scheduled/manual run history across gateway restarts. Scheduled `main` jobs reuse the stable `system:scheduled-main` session while scheduled `isolated` jobs create fresh descendant `subagent` sessions linked through `requester_session_id`. The remaining gaps are now narrower and explicit: current `main` still preserves stale `next_run_at` across schedule edits and disable/re-enable transitions, the CLI create/edit surface is narrower than the gateway schema (`cron add` is one-shot `system_event` only and `cron edit` only mutates name/delivery mode), and runtime execution still treats `none` / `announce` / `webhook` as inspectable metadata rather than distinct delivery paths.
 
 ---
 
