@@ -1139,6 +1139,12 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 - next-run calculation
 - due-only vs forced run semantics
 - run history retention
+- explicit `at`, `every`, and cron-expression schedule support
+- explicit `sessionTarget=main` vs `sessionTarget=isolated` behavior
+- explicit `systemEvent` vs `agentTurn` payload validation
+- explicit `none` / `announce` / `webhook` delivery-mode retention
+
+Implementation note (2026-03-19): Rune now has executable operator parity for the core cron surface: gateway routes cover `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, and `GET /cron/{id}/runs`; CLI flows cover `cron status|list|add|edit|enable|disable|rm|run|runs|wake`; runtime schedule handling computes interval anchors and timezone-aware cron next-fire times; invalid cron/tz definitions fail instead of silently fabricating a next run; and durable PostgreSQL-backed `jobs`/`job_runs` persistence now preserves created jobs, next-run state, and scheduled/manual run history across gateway restarts. Scheduled `main` jobs reuse the stable `system:scheduled-main` session while scheduled `isolated` jobs create fresh descendant `subagent` sessions linked through `requester_session_id`. Remaining parity work is broader black-box evidence for webhook delivery paths and any quiet-window policy layered above the core scheduler.
 
 ---
 
@@ -1152,8 +1158,9 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 - reminder text shaped like a reminder when delivered
 - mention that it is a reminder depending on timing/context
 - target chat/session delivery
+- delivered / missed / cancelled terminal outcomes remain inspectable
 
-Implementation note (2026-03-13): Rune now ships an executable reminder surface end-to-end: gateway routes for `GET /reminders`, `POST /reminders`, and `DELETE /reminders/{id}`; CLI flows for `reminders add|list|cancel`; runtime due-checking and delivered-state tracking in the scheduler; and supervisor-driven delivery by executing reminder text as a scheduled turn. Remaining parity work is durability across restart and evidence that final delivered wording consistently matches the OpenClaw reminder-shaping contract.
+Implementation note (2026-03-19): Rune now ships an executable reminder surface end-to-end with durable outcomes: gateway routes expose `GET /reminders`, `POST /reminders`, and `DELETE /reminders/{id}`; CLI flows expose `reminders add|list|cancel`; reminders persist through the scheduler job repository as `reminder` jobs with `announce` delivery mode; due-checking records delivery attempts; successful sends mark reminders delivered; failed sends mark reminders missed with persisted error context; and user/operator cancellation produces an explicit cancelled terminal outcome instead of silent disappearance. The remaining parity gap is not basic durability anymore; it is stronger black-box evidence that final delivered wording consistently matches the OpenClaw reminder-shaping contract.
 
 ---
 
@@ -1166,6 +1173,8 @@ Implementation note (2026-03-13): Rune now ships an executable reminder surface 
 - immediate wake
 - next-heartbeat wake
 - optional context carry-forward
+
+Implementation note (2026-03-19): Rune currently normalizes wake mode to `now` or `next-heartbeat`, with `next-heartbeat` as the default, and exposes that control through the cron wake flow. Remaining work is mostly evidence and any higher-level operator ergonomics, not absence of the wake-mode contract itself.
 
 ---
 
@@ -1182,8 +1191,9 @@ Implementation note (2026-03-13): Rune now ships an executable reminder surface 
 - suppress outbound delivery when heartbeat result is no-op ack
 - respect quiet windows and anti-spam behavior
 - maintain minimal state for proactive checks
+- persist enough anti-spam state to avoid duplicate notifications after restart
 
-Implementation note (2026-03-13): Rune now has a real heartbeat runner with persisted runner state, `HEARTBEAT.md` prompt loading, due-checking, suppression of no-op `HEARTBEAT_OK` responses, supervisor execution, and operator surfaces through `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, and CLI `system heartbeat presence|last|enable|disable|status`. Remaining work is fuller parity around quiet-window/duplicate-notification policy and restart durability evidence.
+Implementation note (2026-03-19): Rune now has a real heartbeat runner with persisted runner state, `HEARTBEAT.md` prompt loading, due-checking, suppression of no-op `HEARTBEAT_OK` responses, duplicate-notification suppression via normalized-response fingerprinting, persisted suppression counters/fingerprint state, supervisor execution, and operator surfaces through `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, and CLI `system heartbeat presence|last|enable|disable|status`. The remaining gap has narrowed: this is no longer “duplicate suppression missing,” but fuller parity evidence for OpenClaw-equivalent quiet-window and broader anti-spam policy behavior.
 
 ---
 

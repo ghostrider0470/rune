@@ -916,6 +916,19 @@ Cron jobs must preserve:
 - isolated execution context
 - configurable runtime/model if supported
 - due-only vs forced-run semantics
+- explicit wake semantics for `now` vs `next-heartbeat` where wake flows exist
+
+Validation rules:
+
+- `sessionTarget=main` requires a `systemEvent` payload
+- `sessionTarget=isolated` requires an `agentTurn` payload
+- invalid target/payload pairings fail as validation errors, not silent coercions
+- invalid cron expressions or timezone values fail explicitly and must not fabricate future run times
+
+Run-history expectations:
+
+- history should distinguish at least due-triggered vs operator-forced/manual runs
+- history rows should remain attributable to the originating job, trigger kind, and resulting scheduled session/run
 
 ## 11.2 Payload and delivery contract
 
@@ -924,11 +937,22 @@ Scheduled work must preserve the conceptual distinction between:
 - `systemEvent` payloads for main-session jobs
 - `agentTurn` payloads for isolated jobs
 
+Session-target semantics must preserve:
+
+- main-target runs reusing the stable scheduled main-session context
+- isolated-target runs creating fresh isolated/subagent descendant sessions with requester linkage
+
 Delivery modes must preserve:
 
 - `none`
 - `announce`
 - `webhook`
+
+Delivery semantics must also preserve:
+
+- `announce` meaning an operator-visible/session-visible surfaced result
+- `webhook` meaning an outbound webhook-style delivery path rather than an in-band chat announcement
+- `none` meaning the run remains auditable in history without requiring an operator-facing message
 
 ## 11.3 Heartbeat contract
 
@@ -944,7 +968,14 @@ Heartbeat invariants:
 
 - heartbeat runs are isolated and auditable
 - repeated heartbeats should not duplicate notifications without new cause
-- quiet/no-op outcomes should still be representable in run history
+- quiet/no-op outcomes should still be representable in run history or persisted heartbeat state
+- anti-spam state must survive restart well enough to avoid replaying the same notification solely because the process restarted
+
+Heartbeat suppression semantics:
+
+- `HEARTBEAT_OK`-style no-op responses suppress outbound delivery
+- duplicate non-noop responses may be suppressed when their normalized fingerprint matches the last delivered notification
+- suppression decisions should remain inspectable through runner state/status surfaces even when no outbound message is emitted
 
 ## 11.4 Reminder contract
 
@@ -956,6 +987,12 @@ Reminders need:
 - one-shot vs recurring distinction
 - delivered / missed / cancelled outcome tracking
 - reminder wording that reads like a reminder when fired
+
+Reminder outcome semantics must preserve:
+
+- successful delivery marking the reminder terminal as delivered
+- failed delivery attempts marking the reminder terminal as missed with inspectable error context
+- operator/user cancellation marking the reminder terminal as cancelled rather than silently deleting auditability
 
 ---
 

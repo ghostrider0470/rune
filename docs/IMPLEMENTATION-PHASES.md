@@ -215,14 +215,19 @@ Reproduce proactive automation behavior.
 - scheduled jobs are durable and inspectable
 - heartbeat behavior preserves quiet/no-op semantics
 - reminders and cron runs create auditable isolated execution records
-- operator can list, inspect, enable, disable, and review job history
+- operator can list, inspect, enable, disable, wake, and review job history
+- `sessionTarget=main` vs `sessionTarget=isolated` semantics are preserved without payload coercion
+- `none` / `announce` / `webhook` delivery modes remain inspectable and behaviorally distinct
+- reminder outcomes persist as delivered / missed / cancelled rather than disappearing into logs only
 
 ### Recommended parity tests
 
-- cron create/list/disable/enable/run-now flows
-- reminder due/delivered/cancelled flows
-- heartbeat instruction loading and no-op behavior
-- duplicate-notification suppression for repeated heartbeats
+- cron create/list/edit/disable/enable/run-now/wake flows
+- due-only vs forced-run history tests
+- `systemEvent` vs `agentTurn` session-target validation tests
+- delivery-mode tests for `none` / `announce` / `webhook`
+- reminder due/delivered/missed/cancelled flows
+- heartbeat instruction loading, no-op suppression, and duplicate-notification suppression behavior
 
 ### Key risk retired
 Automation behavior mismatch.

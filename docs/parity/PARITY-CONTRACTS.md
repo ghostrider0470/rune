@@ -196,11 +196,15 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - heartbeat-driven checks
 - isolated scheduled agent runs
 - run history and next-run calculation
+- scheduled payload and delivery semantics
 
 ### Invariants
 
 - enabled/disabled state is durable
+- schedule definition is compatibility surface: `at`, `every`, and cron-expression semantics may not drift silently
+- `sessionTarget=main` maps to `systemEvent` payloads and `sessionTarget=isolated` maps to `agentTurn` payloads; invalid combinations fail explicitly
 - reminder timing and wording remain operator-predictable
+- delivery modes preserve `none`, `announce`, and `webhook` semantics
 - heartbeat quiet/no-op semantics are preserved
 - repeated heartbeats do not spam without new cause
 - isolated scheduled runs remain auditable as isolated runs
@@ -209,28 +213,38 @@ Do not mark a subsystem parity-complete without black-box evidence.
 
 - jobs
 - schedules/due times
+- session target and payload kind
+- delivery mode and wake mode
 - last/next run metadata
-- run history
+- run history with due/manual trigger visibility
 - delivered/missed/cancelled status for reminders
+- heartbeat anti-spam state sufficient to suppress duplicate notifications across restarts
 
 ### External surfaces
 
 - cron APIs/CLI
-- run-now and inspection workflows
+- reminder APIs/CLI
+- heartbeat status/enable/disable APIs and CLI workflows
+- run-now, wake, and inspection workflows
 - history views
 
 ### Failure behavior expectations
 
 - missed runs are visible
 - invalid schedules fail explicitly
+- invalid `sessionTarget`/payload combinations fail explicitly
 - disabled jobs do not run silently
+- reminder delivery failures resolve to explicit `missed` outcomes rather than disappearing
+- heartbeat no-op and duplicate suppressions remain operator-inspectable even when no outbound message is emitted
 
 ### Minimum parity evidence
 
-- cron create/list/update/disable/enable/run tests
-- reminder due/delivered/cancelled tests
-- heartbeat no-op and notify tests
-- duplicate-suppression tests
+- cron create/list/update/disable/enable/run/wake tests
+- due-only vs forced-run history tests
+- `systemEvent` vs `agentTurn` session-target tests
+- delivery-mode tests for `none`/`announce`/`webhook`
+- reminder due/delivered/missed/cancelled tests
+- heartbeat no-op, notify, and duplicate-suppression tests
 
 ---
 
