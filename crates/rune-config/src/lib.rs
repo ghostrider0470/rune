@@ -122,6 +122,41 @@ impl AppConfig {
         }
     }
 
+    /// Auto-create required persistent directories for Standalone mode.
+    ///
+    /// In Standalone mode the process owns `~/.rune/*` and can safely create
+    /// missing directories.  In Server/Docker mode the operator is expected to
+    /// provision volumes, so we only log a warning and leave creation to them.
+    pub fn ensure_dirs(&self) -> Result<(), Vec<ConfigError>> {
+        let dirs = [
+            ("db_dir", &self.paths.db_dir),
+            ("sessions_dir", &self.paths.sessions_dir),
+            ("memory_dir", &self.paths.memory_dir),
+            ("media_dir", &self.paths.media_dir),
+            ("skills_dir", &self.paths.skills_dir),
+            ("logs_dir", &self.paths.logs_dir),
+            ("backups_dir", &self.paths.backups_dir),
+            ("config_dir", &self.paths.config_dir),
+            ("secrets_dir", &self.paths.secrets_dir),
+        ];
+        let mut errors = Vec::new();
+        for (name, path) in &dirs {
+            if !path.exists() {
+                if let Err(e) = std::fs::create_dir_all(path) {
+                    errors.push(ConfigError::PathValidation {
+                        path: path.display().to_string(),
+                        reason: format!("failed to create {name}: {e}"),
+                    });
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
     /// When mode resolves to Standalone and paths are still at Docker defaults,
     /// swap to `~/.rune/*`.
     pub fn adjust_paths_for_mode(&mut self, resolved_mode: &RuntimeMode) {
@@ -2003,5 +2038,85 @@ models = ["gpt-5.4", "gpt-image-1"]
 
         // A chain with only one entry has no fallbacks.
         assert!(config.fallback_chain_for("openai/gpt-5.4").is_none());
+    }
+
+    #[test]
+    fn ensure_dirs_creates_missing_directories() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("rune-ensure-test");
+
+        let mut config = AppConfig::default();
+        config.paths = PathsConfig {
+            db_dir: base.join("db"),
+            sessions_dir: base.join("sessions"),
+            memory_dir: base.join("memory"),
+            media_dir: base.join("media"),
+            skills_dir: base.join("skills"),
+            logs_dir: base.join("logs"),
+            backups_dir: base.join("backups"),
+            config_dir: base.join("config"),
+            secrets_dir: base.join("secrets"),
+        };
+
+        assert!(!base.join("db").exists());
+        config.ensure_dirs().expect("ensure_dirs should succeed");
+
+        assert!(base.join("db").is_dir());
+        assert!(base.join("sessions").is_dir());
+        assert!(base.join("memory").is_dir());
+        assert!(base.join("media").is_dir());
+        assert!(base.join("skills").is_dir());
+        assert!(base.join("logs").is_dir());
+        assert!(base.join("backups").is_dir());
+        assert!(base.join("config").is_dir());
+        assert!(base.join("secrets").is_dir());
+    }
+
+    #[test]
+    fn ensure_dirs_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("rune-ensure-idem");
+
+        let mut config = AppConfig::default();
+        config.paths = PathsConfig {
+            db_dir: base.join("db"),
+            sessions_dir: base.join("sessions"),
+            memory_dir: base.join("memory"),
+            media_dir: base.join("media"),
+            skills_dir: base.join("skills"),
+            logs_dir: base.join("logs"),
+            backups_dir: base.join("backups"),
+            config_dir: base.join("config"),
+            secrets_dir: base.join("secrets"),
+        };
+
+        config.ensure_dirs().expect("first call should succeed");
+        config
+            .ensure_dirs()
+            .expect("second call should also succeed (idempotent)");
+    }
+
+    #[test]
+    fn ensure_dirs_then_validate_paths_passes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("rune-ensure-validate");
+
+        let mut config = AppConfig::default();
+        config.paths = PathsConfig {
+            db_dir: base.join("db"),
+            sessions_dir: base.join("sessions"),
+            memory_dir: base.join("memory"),
+            media_dir: base.join("media"),
+            skills_dir: base.join("skills"),
+            logs_dir: base.join("logs"),
+            backups_dir: base.join("backups"),
+            config_dir: base.join("config"),
+            secrets_dir: base.join("secrets"),
+        };
+
+        config.ensure_dirs().expect("ensure_dirs should succeed");
+        config
+            .validate_paths()
+            .expect("validate_paths should pass after ensure_dirs");
     }
 }
