@@ -2,8 +2,9 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
-    AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason, ModelError, ModelProvider,
-    OpenAiProvider, Role, RoutedModelProvider, provider_from_config,
+    AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason, FunctionDefinition,
+    ModelError, ModelProvider, OpenAiProvider, Role, RoutedModelProvider, ToolDefinition,
+    provider_from_config,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -92,6 +93,273 @@ async fn azure_sends_api_key_header() {
     assert_eq!(resp.content.as_deref(), Some("Hello! How can I help?"));
     assert_eq!(resp.finish_reason, Some(FinishReason::Stop));
     assert_eq!(resp.usage.total_tokens, 18);
+}
+
+// --- Azure request body golden tests ---
+
+/// Azure OpenAI must NOT send the `model` field — the deployment name in the URL
+/// identifies the model.  This contrasts with vanilla OpenAI which always sends `model`.
+#[tokio::test]
+async fn azure_body_omits_model_field() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let _ = p.complete(&simple_request()).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert!(
+        body.get("model").is_none(),
+        "Azure OpenAI body must NOT contain 'model' — deployment is in the URL. Got: {body}"
+    );
+}
+
+/// Azure OpenAI uses `max_tokens`, not `max_completion_tokens`.
+#[tokio::test]
+async fn azure_body_uses_max_tokens_not_max_completion_tokens() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let mut request = simple_request();
+    request.max_tokens = Some(512);
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(
+        body.get("max_tokens"),
+        Some(&serde_json::json!(512)),
+        "Azure body should use 'max_tokens'"
+    );
+    assert!(
+        body.get("max_completion_tokens").is_none(),
+        "Azure body must NOT contain 'max_completion_tokens'"
+    );
+}
+
+/// When max_tokens is None, the field should be omitted entirely.
+#[tokio::test]
+async fn azure_body_omits_max_tokens_when_none() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let mut request = simple_request();
+    request.max_tokens = None;
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert!(
+        body.get("max_tokens").is_none(),
+        "Azure body should omit 'max_tokens' when not set"
+    );
+}
+
+/// Azure request body forwards tools correctly.
+#[tokio::test]
+async fn azure_body_includes_tools_when_provided() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let mut request = simple_request();
+    request.tools = Some(vec![ToolDefinition {
+        tool_type: "function".into(),
+        function: FunctionDefinition {
+            name: "get_weather".into(),
+            description: "Get current weather".into(),
+            parameters: serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
+        },
+    }]);
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let tools = body.get("tools").expect("Azure body should include 'tools'");
+    assert!(tools.is_array());
+    assert_eq!(tools.as_array().unwrap().len(), 1);
+    assert_eq!(tools[0]["function"]["name"], "get_weather");
+}
+
+/// Azure request body omits tools when None.
+#[tokio::test]
+async fn azure_body_omits_tools_when_none() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let mut request = simple_request();
+    request.tools = None;
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert!(
+        body.get("tools").is_none(),
+        "Azure body should omit 'tools' when not set"
+    );
+}
+
+/// Golden test: full Azure request shape with all fields populated.
+#[tokio::test]
+async fn azure_request_golden_shape_full() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o-prod", "2024-06-01", "secret-key");
+    let request = CompletionRequest {
+        messages: vec![
+            ChatMessage {
+                role: Role::System,
+                content: Some("You are helpful.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: Role::User,
+                content: Some("Hello".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+        ],
+        model: Some("gpt-4o".into()), // should NOT appear in Azure body
+        temperature: Some(0.7),
+        max_tokens: Some(1024),
+        tools: None,
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let req = &requests[0];
+
+    // Header assertions
+    let api_key_header = req
+        .headers
+        .get("api-key")
+        .expect("Azure must send api-key header");
+    assert_eq!(api_key_header.to_str().unwrap(), "secret-key");
+    assert!(
+        req.headers.get("authorization").is_none(),
+        "Azure must NOT send Authorization header"
+    );
+
+    // URL path assertion
+    assert!(
+        req.url.path().contains("/openai/deployments/gpt-4o-prod/"),
+        "URL must contain deployment name in path: {}",
+        req.url
+    );
+    assert!(
+        req.url
+            .query()
+            .unwrap_or("")
+            .contains("api-version=2024-06-01"),
+        "URL must contain api-version query param: {}",
+        req.url
+    );
+
+    // Body assertions
+    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+
+    // Must NOT have model
+    assert!(body.get("model").is_none(), "Azure body must omit 'model'");
+
+    // Must have messages
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0]["role"], "system");
+    assert_eq!(msgs[1]["role"], "user");
+
+    // Must have temperature and max_tokens
+    assert_eq!(body["temperature"], serde_json::json!(0.7));
+    assert_eq!(body["max_tokens"], serde_json::json!(1024));
+
+    // Only expected keys present
+    let keys: Vec<&str> = body.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+    for key in &keys {
+        assert!(
+            ["messages", "temperature", "max_tokens", "tools"].contains(key),
+            "unexpected key '{key}' in Azure request body"
+        );
+    }
+}
+
+/// Contrast test: OpenAI sends model + max_completion_tokens while Azure sends neither.
+#[tokio::test]
+async fn azure_vs_openai_body_shape_contrast() {
+    let azure_server = MockServer::start().await;
+    let openai_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&azure_server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&openai_server)
+        .await;
+
+    let azure = AzureOpenAiProvider::new(&azure_server.uri(), "dep", "2024-06-01", "k");
+    let openai = OpenAiProvider::new(&openai_server.uri(), "k");
+
+    let mut request = simple_request();
+    request.max_tokens = Some(256);
+
+    let _ = azure.complete(&request).await.unwrap();
+    let _ = openai.complete(&request).await.unwrap();
+
+    let azure_reqs = azure_server.received_requests().await.unwrap();
+    let openai_reqs = openai_server.received_requests().await.unwrap();
+
+    let azure_body: serde_json::Value = serde_json::from_slice(&azure_reqs[0].body).unwrap();
+    let openai_body: serde_json::Value = serde_json::from_slice(&openai_reqs[0].body).unwrap();
+
+    // Azure: no model, max_tokens
+    assert!(azure_body.get("model").is_none(), "Azure must omit model");
+    assert_eq!(azure_body["max_tokens"], 256);
+    assert!(azure_body.get("max_completion_tokens").is_none());
+
+    // OpenAI: has model, max_completion_tokens
+    assert!(openai_body.get("model").is_some(), "OpenAI must include model");
+    assert_eq!(openai_body["max_completion_tokens"], 256);
+    assert!(openai_body.get("max_tokens").is_none());
 }
 
 // --- OpenAI header handling ---

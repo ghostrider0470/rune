@@ -70,6 +70,27 @@ fn validate_azure_endpoint(base_url: &str, provider_kind: &str) -> Result<(), Mo
     Ok(())
 }
 
+/// Validate that an Azure deployment name is safe for URL path embedding.
+///
+/// Deployment names are interpolated directly into the Azure OpenAI URL path
+/// (`/openai/deployments/{name}/…`), so they must be non-empty, non-whitespace,
+/// and must not contain characters that would break the URL structure.
+fn validate_azure_deployment_name(name: &str) -> Result<(), ModelError> {
+    if name.trim().is_empty() {
+        return Err(ModelError::Configuration(
+            "Azure deployment_name must not be empty or whitespace-only".into(),
+        ));
+    }
+    const FORBIDDEN: &[char] = &['/', '?', '#', '%', ' '];
+    if let Some(bad) = name.chars().find(|c| FORBIDDEN.contains(c)) {
+        return Err(ModelError::Configuration(format!(
+            "Azure deployment_name '{name}' contains invalid character '{bad}' \
+             — deployment names are embedded in the URL path and must not contain /, ?, #, %, or spaces"
+        )));
+    }
+    Ok(())
+}
+
 /// Build a `Box<dyn ModelProvider>` from a [`ModelProviderConfig`].
 ///
 /// Provider selection is driven by `provider_name`:
@@ -123,6 +144,7 @@ pub fn provider_from_config(
             let deployment = cfg.deployment_name.as_deref().ok_or_else(|| {
                 ModelError::Configuration("Azure provider requires deployment_name".into())
             })?;
+            validate_azure_deployment_name(deployment)?;
             let api_version = cfg.api_version.as_deref().ok_or_else(|| {
                 ModelError::Configuration("Azure provider requires api_version".into())
             })?;
@@ -585,6 +607,66 @@ mod tests {
         let err = provider_from_config(&cfg).unwrap_err();
         assert!(matches!(err, ModelError::Configuration(_)));
         assert!(err.to_string().contains("non-empty base_url"));
+    }
+
+    // --- Azure deployment-name validation ---
+
+    #[test]
+    fn valid_azure_deployment_names() {
+        assert!(validate_azure_deployment_name("gpt-4o").is_ok());
+        assert!(validate_azure_deployment_name("my-deployment-v2").is_ok());
+        assert!(validate_azure_deployment_name("GPT4o_prod").is_ok());
+        assert!(validate_azure_deployment_name("a").is_ok());
+    }
+
+    #[test]
+    fn azure_deployment_name_rejects_empty() {
+        let err = validate_azure_deployment_name("").unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn azure_deployment_name_rejects_whitespace_only() {
+        let err = validate_azure_deployment_name("   ").unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn azure_deployment_name_rejects_path_unsafe_chars() {
+        for (name, bad_char) in [
+            ("my/deploy", '/'),
+            ("deploy?v=1", '?'),
+            ("deploy#frag", '#'),
+            ("deploy%20name", '%'),
+            ("has space", ' '),
+        ] {
+            let err = validate_azure_deployment_name(name).unwrap_err();
+            assert!(matches!(err, ModelError::Configuration(_)));
+            assert!(
+                err.to_string().contains(&format!("'{bad_char}'")),
+                "expected mention of '{bad_char}' in error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn azure_config_rejects_path_unsafe_deployment_name() {
+        let cfg = ModelProviderConfig {
+            name: "azure".into(),
+            kind: "azure-openai".into(),
+            base_url: "https://test.openai.azure.com".into(),
+            deployment_name: Some("my/bad-deploy".into()),
+            api_version: Some("2024-06-01".into()),
+            api_key: Some("test-key".into()),
+            api_key_env: None,
+            model_alias: None,
+            models: vec![],
+        };
+        let err = provider_from_config(&cfg).unwrap_err();
+        assert!(matches!(err, ModelError::Configuration(_)));
+        assert!(err.to_string().contains("invalid character"));
     }
 
     #[test]
