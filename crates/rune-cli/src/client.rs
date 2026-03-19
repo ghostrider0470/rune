@@ -14,8 +14,9 @@ use crate::output::{
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport,
     GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
-    HealthResponse, HeartbeatStatusResponse, ReminderSummary, RemindersListResponse,
-    SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary, StatusResponse,
+    HealthResponse, HeartbeatStatusResponse, ModelScanProviderResult, ModelScanResponse,
+    ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
+    SessionListResponse, SessionStatusCard, SessionSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -155,6 +156,42 @@ impl GatewayClient {
                     .unwrap_or("heartbeat disabled")
                     .to_string(),
             })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /models/scan`
+    pub async fn models_scan(&self) -> Result<ModelScanResponse> {
+        let resp = self
+            .http
+            .post(self.url("/models/scan"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let providers = resp
+                .json::<Vec<serde_json::Value>>()
+                .await
+                .context("invalid JSON from /models/scan")?
+                .into_iter()
+                .map(|value| ModelScanProviderResult {
+                    provider: value["provider"].as_str().unwrap_or("unknown").to_string(),
+                    models: value["models"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|model| ScannedModelDetail {
+                            name: model["name"].as_str().unwrap_or("unknown").to_string(),
+                            size: model["size"].as_u64(),
+                            modified_at: model["modified_at"].as_str().map(str::to_string),
+                        })
+                        .collect(),
+                })
+                .collect();
+            Ok(ModelScanResponse { providers })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -1520,6 +1557,34 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let resp = client.cron_wake("wake up", "now", Some(3)).await.unwrap();
         assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn models_scan_parses_provider_results() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/models/scan"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "provider": "ollama-local",
+                    "models": [
+                        {
+                            "name": "llama3.2:latest",
+                            "size": 12345,
+                            "modified_at": "2026-03-19T03:00:00Z"
+                        }
+                    ]
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.models_scan().await.unwrap();
+        assert_eq!(resp.providers.len(), 1);
+        assert_eq!(resp.providers[0].provider, "ollama-local");
+        assert_eq!(resp.providers[0].models[0].name, "llama3.2:latest");
+        assert_eq!(resp.providers[0].models[0].size, Some(12345));
     }
 
     #[tokio::test]

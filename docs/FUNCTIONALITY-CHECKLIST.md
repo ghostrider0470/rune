@@ -77,12 +77,12 @@ Interpretation rules:
 - [x] `models list`
 - [x] `models status`
 - [x] `models set`
-- [ ] `models set-image`
+- [x] `models set-image`
 - [x] `models aliases`
 - [ ] `models auth`
-- [ ] `models fallbacks`
-- [ ] `models image-fallbacks`
-- [ ] `models scan`
+- [x] `models fallbacks`
+- [x] `models image-fallbacks`
+- [x] `models scan`
 - [ ] per-agent auth order override
 - [ ] Azure-aware provider config
 
