@@ -116,10 +116,10 @@ Implementation note (2026-03-19): the operator CLI now exposes the `models` comm
 - [ ] `nodes` command family
 - [ ] `sessions` command family
 - [ ] `sessions cleanup`
-- [ ] `message` command family
-- [ ] message send/read/edit/delete/react/reactions/pin/unpin/pins/poll/broadcast breadth remains implemented or explicitly deferred
-- [ ] message channel/event/member/role/thread/voice/emoji/sticker/permissions/search breadth remains implemented or explicitly deferred
-- [ ] message moderation breadth (`ban`/`kick`/`timeout`) remains implemented or explicitly deferred
+- [x] `message` command family
+- [x] message send/read/edit/delete/react/pin/broadcast/thread/voice/search breadth implemented; reactions/unpin/pins/poll remain deferred/not started and explicitly tracked in `docs/parity/CLI-MATRIX.md`
+- [x] message channel/event/member/role/emoji/sticker/permissions breadth explicitly deferred/not started and tracked in `docs/parity/CLI-MATRIX.md`
+- [x] message moderation breadth (`ban`/`kick`/`timeout`) explicitly deferred/not started and tracked in `docs/parity/CLI-MATRIX.md`
 - [ ] `agent` command
 - [ ] `agents` command family
 - [ ] `acp` command family
