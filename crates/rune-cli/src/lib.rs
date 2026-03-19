@@ -1258,6 +1258,22 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::Edit {
+                message_id,
+                channel,
+                text,
+                session,
+            } => {
+                let result = client
+                    .message_edit(
+                        &message_id,
+                        &channel,
+                        &text,
+                        session.as_deref(),
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
             MessageAction::Pin {
                 message_id,
                 unpin,

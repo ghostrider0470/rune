@@ -1869,6 +1869,26 @@ impl fmt::Display for MessagePinResponse {
     }
 }
 
+/// Result of editing a message's text content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageEditResponse {
+    pub success: bool,
+    pub message_id: String,
+    pub channel: String,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageEditResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(
+            f,
+            "{icon} message {} on {}: {}",
+            self.message_id, self.channel, self.detail,
+        )
+    }
+}
+
 /// Result of deleting a message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageDeleteResponse {
@@ -3117,6 +3137,54 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓ added fire on message msg-1"));
         assert!(!out.contains(":"));
+    }
+
+    // ── MessageEditResponse ──────────────────────────────────────────
+
+    #[test]
+    fn message_edit_response_human_success() {
+        let r = MessageEditResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            channel: "telegram".into(),
+            detail: "Message edited".into(),
+        };
+        let out = r.to_string();
+        assert!(out.contains("✓"));
+        assert!(out.contains("msg-42"));
+        assert!(out.contains("telegram"));
+        assert!(out.contains("Message edited"));
+    }
+
+    #[test]
+    fn message_edit_response_human_failure() {
+        let r = MessageEditResponse {
+            success: false,
+            message_id: "msg-99".into(),
+            channel: "discord".into(),
+            detail: "Gateway returned HTTP 404: Message not found".into(),
+        };
+        let out = r.to_string();
+        assert!(out.contains("✗"));
+        assert!(out.contains("msg-99"));
+        assert!(out.contains("discord"));
+        assert!(out.contains("404"));
+    }
+
+    #[test]
+    fn message_edit_response_json() {
+        let r = MessageEditResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            channel: "telegram".into(),
+            detail: "Message edited".into(),
+        };
+        let json_out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&json_out).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["message_id"], "msg-42");
+        assert_eq!(v["channel"], "telegram");
+        assert_eq!(v["detail"], "Message edited");
     }
 
     // ── MessagePinResponse ──────────────────────────────────────────

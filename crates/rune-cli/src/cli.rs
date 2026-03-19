@@ -552,6 +552,21 @@ pub enum MessageAction {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Edit an existing message's text content.
+    Edit {
+        /// ID of the message to edit.
+        #[arg(long)]
+        message_id: String,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: String,
+        /// New message body text.
+        #[arg(long)]
+        text: String,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Pin or unpin a message in a channel.
     Pin {
         /// ID of the message to pin or unpin.
@@ -2326,6 +2341,113 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_message_edit() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "edit",
+            "--message-id",
+            "msg-42",
+            "--channel",
+            "telegram",
+            "--text",
+            "Updated text",
+            "--session",
+            "sess-7",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Edit {
+                        message_id,
+                        channel,
+                        text,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-42");
+                assert_eq!(channel, "telegram");
+                assert_eq!(text, "Updated text");
+                assert_eq!(session.as_deref(), Some("sess-7"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_edit_without_session() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "edit",
+            "--message-id",
+            "msg-99",
+            "--channel",
+            "discord",
+            "--text",
+            "Fixed typo",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Edit {
+                        message_id,
+                        channel,
+                        text,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-99");
+                assert_eq!(channel, "discord");
+                assert_eq!(text, "Fixed typo");
+                assert!(session.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_edit_requires_message_id_channel_and_text() {
+        // Missing --text
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "edit",
+            "--message-id",
+            "msg-1",
+            "--channel",
+            "telegram",
+        ])
+        .is_err());
+        // Missing --channel
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "edit",
+            "--message-id",
+            "msg-1",
+            "--text",
+            "hello",
+        ])
+        .is_err());
+        // Missing --message-id
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "edit",
+            "--channel",
+            "telegram",
+            "--text",
+            "hello",
+        ])
+        .is_err());
+        // Missing all
+        assert!(Cli::try_parse_from(["rune", "message", "edit"]).is_err());
     }
 
     #[test]
