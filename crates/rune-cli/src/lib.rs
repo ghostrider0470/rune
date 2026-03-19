@@ -1495,6 +1495,73 @@ models = ["gpt-5.4"]
         }
     }
 
+    /// Helper: generate a completion script into a buffer and return as a String.
+    fn generate_completion_string(shell: cli::CompletionShell) -> String {
+        let mut buf = Vec::new();
+        let mut command = cli::Cli::command();
+        clap_complete::generate(
+            completion_shell(shell),
+            &mut command,
+            "rune",
+            &mut buf,
+        );
+        String::from_utf8(buf).expect("completion script should be valid UTF-8")
+    }
+
+    #[test]
+    fn bash_completion_contains_subcommands() {
+        let script = generate_completion_string(cli::CompletionShell::Bash);
+        assert!(!script.is_empty(), "bash completion script must not be empty");
+        // The script should reference key top-level subcommands.
+        for cmd in ["gateway", "status", "completion", "config", "doctor"] {
+            assert!(
+                script.contains(cmd),
+                "bash completion missing subcommand `{cmd}`",
+            );
+        }
+    }
+
+    #[test]
+    fn zsh_completion_contains_subcommands() {
+        let script = generate_completion_string(cli::CompletionShell::Zsh);
+        assert!(!script.is_empty(), "zsh completion script must not be empty");
+        for cmd in ["gateway", "status", "completion", "config", "doctor"] {
+            assert!(
+                script.contains(cmd),
+                "zsh completion missing subcommand `{cmd}`",
+            );
+        }
+    }
+
+    #[test]
+    fn fish_completion_contains_subcommands() {
+        let script = generate_completion_string(cli::CompletionShell::Fish);
+        assert!(!script.is_empty(), "fish completion script must not be empty");
+        for cmd in ["gateway", "status", "completion", "config", "doctor"] {
+            assert!(
+                script.contains(cmd),
+                "fish completion missing subcommand `{cmd}`",
+            );
+        }
+    }
+
+    #[test]
+    fn completion_scripts_include_global_flags() {
+        // Global flags like --json should appear in all shell completions.
+        // Fish uses `-l json` instead of `--json`, so check for "json" broadly.
+        for shell in [
+            cli::CompletionShell::Bash,
+            cli::CompletionShell::Zsh,
+            cli::CompletionShell::Fish,
+        ] {
+            let script = generate_completion_string(shell);
+            assert!(
+                script.contains("json"),
+                "{shell:?} completion missing json flag reference",
+            );
+        }
+    }
+
     #[test]
     fn apply_global_cli_environment_sets_dev_profile_and_log_level() {
         let _guard = crate::test_env_lock()
