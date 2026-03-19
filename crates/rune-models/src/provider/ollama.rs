@@ -104,6 +104,32 @@ impl OllamaProvider {
         Ok(tags.models)
     }
 
+    /// Generate actionable guidance when no models are pulled.
+    ///
+    /// Returns a multi-line string with suggested `ollama pull` commands
+    /// for well-known models, sized for common hardware tiers.  Intended
+    /// for display at startup so zero-config users know exactly what to
+    /// do next.
+    pub fn empty_model_guidance(&self) -> String {
+        let base = &self.ollama_base;
+        format!(
+            "\n\
+            ╭─────────────────────────────────────────────────────────────╮\n\
+            │  Ollama is running at {base:<37} │\n\
+            │  but no models are pulled yet.                             │\n\
+            │                                                            │\n\
+            │  Quick start — pull a model:                               │\n\
+            │                                                            │\n\
+            │    ollama pull llama3.2        (2 GB, good for most tasks)  │\n\
+            │    ollama pull llama3.1:8b     (4.7 GB, stronger reasoning) │\n\
+            │    ollama pull qwen2.5:7b     (4.4 GB, multilingual)       │\n\
+            │                                                            │\n\
+            │  After pulling, restart Rune — it will auto-detect the     │\n\
+            │  model and configure itself.                               │\n\
+            ╰─────────────────────────────────────────────────────────────╯"
+        )
+    }
+
     /// Select the best available model as a zero-config default.
     ///
     /// Heuristic (applied in order):
@@ -494,5 +520,33 @@ mod tests {
         ];
         // phi is higher in preference table than deepseek.
         assert_eq!(rank_preferred_model(&models).name, "phi:latest");
+    }
+
+    // --- empty_model_guidance tests ---
+
+    #[test]
+    fn guidance_contains_pull_commands() {
+        let provider = OllamaProvider::new();
+        let guidance = provider.empty_model_guidance();
+        assert!(guidance.contains("ollama pull llama3.2"), "should suggest llama3.2");
+        assert!(guidance.contains("ollama pull llama3.1:8b"), "should suggest llama3.1:8b");
+        assert!(guidance.contains("ollama pull qwen2.5:7b"), "should suggest qwen2.5:7b");
+    }
+
+    #[test]
+    fn guidance_mentions_restart() {
+        let provider = OllamaProvider::new();
+        let guidance = provider.empty_model_guidance();
+        assert!(guidance.contains("restart Rune"), "should mention restarting Rune");
+    }
+
+    #[test]
+    fn guidance_shows_custom_endpoint() {
+        let provider = OllamaProvider::with_base_url("http://192.168.1.50:11434/v1");
+        let guidance = provider.empty_model_guidance();
+        assert!(
+            guidance.contains("192.168.1.50:11434"),
+            "should show the actual Ollama endpoint in guidance"
+        );
     }
 }
