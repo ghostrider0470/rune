@@ -813,7 +813,7 @@ impl fmt::Display for ModelFallbackChainDetail {
     }
 }
 
-/// Response for `models fallbacks`.
+/// Response for `models fallbacks` / `models image-fallbacks`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelFallbacksResponse {
     pub text_chains: Vec<ModelFallbackChainDetail>,
@@ -839,6 +839,67 @@ impl fmt::Display for ModelFallbacksResponse {
             for chain in &self.image_chains {
                 writeln!(f, "  {chain}")?;
             }
+        }
+        Ok(())
+    }
+}
+
+/// A single model discovered from a provider scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannedModelDetail {
+    pub name: String,
+    pub size: Option<u64>,
+    pub modified_at: Option<String>,
+}
+
+impl fmt::Display for ScannedModelDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)?;
+        if let Some(size) = self.size {
+            write!(f, " size={size}")?;
+        }
+        if let Some(modified_at) = &self.modified_at {
+            write!(f, " modified={modified_at}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Provider-level scan response for `models scan`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelScanProviderResult {
+    pub provider: String,
+    pub models: Vec<ScannedModelDetail>,
+}
+
+impl fmt::Display for ModelScanProviderResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "{}:", self.provider)?;
+        if self.models.is_empty() {
+            writeln!(f, "  (no models reported)")?;
+        } else {
+            for model in &self.models {
+                writeln!(f, "  - {model}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Response for `models scan`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelScanResponse {
+    pub providers: Vec<ModelScanProviderResult>,
+}
+
+impl fmt::Display for ModelScanResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.providers.is_empty() {
+            return write!(f, "No local model providers returned scan results.");
+        }
+        writeln!(f, "Discovered models:")?;
+        for provider in &self.providers {
+            write!(f, "{provider}")?;
         }
         Ok(())
     }
@@ -2105,6 +2166,51 @@ mod tests {
         assert_eq!(v["text_chains"][0]["name"], "default");
         assert_eq!(v["text_chains"][0]["chain"][0], "a/m1");
         assert!(v["image_chains"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn render_model_scan_empty() {
+        let response = ModelScanResponse { providers: vec![] };
+        assert_eq!(
+            render(&response, OutputFormat::Human),
+            "No local model providers returned scan results."
+        );
+    }
+
+    #[test]
+    fn render_model_scan_with_results() {
+        let response = ModelScanResponse {
+            providers: vec![ModelScanProviderResult {
+                provider: "ollama-local".into(),
+                models: vec![ScannedModelDetail {
+                    name: "llama3.2:latest".into(),
+                    size: Some(123456789),
+                    modified_at: Some("2026-03-19T03:00:00Z".into()),
+                }],
+            }],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Discovered models:"));
+        assert!(out.contains("ollama-local:"));
+        assert!(out.contains("llama3.2:latest size=123456789 modified=2026-03-19T03:00:00Z"));
+    }
+
+    #[test]
+    fn render_model_scan_json() {
+        let response = ModelScanResponse {
+            providers: vec![ModelScanProviderResult {
+                provider: "ollama-local".into(),
+                models: vec![ScannedModelDetail {
+                    name: "llama3.2:latest".into(),
+                    size: None,
+                    modified_at: None,
+                }],
+            }],
+        };
+        let out = render(&response, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["providers"][0]["provider"], "ollama-local");
+        assert_eq!(v["providers"][0]["models"][0]["name"], "llama3.2:latest");
     }
 
     #[test]

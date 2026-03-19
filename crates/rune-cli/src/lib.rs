@@ -35,8 +35,8 @@ use output::{
     ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
     ModelAliasDetail, ModelAliasesResponse, ModelFallbackChainDetail, ModelFallbacksResponse,
-    ModelListResponse, ModelProviderDetail, ModelSetImageResponse, ModelSetResponse,
-    ModelStatusResponse, OutputFormat, render,
+    ModelListResponse, ModelProviderDetail, ModelScanResponse, ModelSetImageResponse,
+    ModelSetResponse, ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -344,6 +344,24 @@ fn model_fallback_details() -> ModelFallbacksResponse {
         .collect();
     ModelFallbacksResponse {
         text_chains,
+        image_chains,
+    }
+}
+
+fn image_model_fallback_details() -> ModelFallbacksResponse {
+    let config = load_config();
+    let image_chains = config
+        .models
+        .image_fallbacks
+        .iter()
+        .map(|fb| ModelFallbackChainDetail {
+            name: fb.name.clone(),
+            kind: "image".to_string(),
+            chain: fb.chain.clone(),
+        })
+        .collect();
+    ModelFallbacksResponse {
+        text_chains: vec![],
         image_chains,
     }
 }
@@ -1006,6 +1024,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 ModelsAction::Fallbacks => {
                     let result = model_fallback_details();
+                    println!("{}", render(&result, format));
+                }
+                ModelsAction::ImageFallbacks => {
+                    let result = image_model_fallback_details();
+                    println!("{}", render(&result, format));
+                }
+                ModelsAction::Scan => {
+                    let result: ModelScanResponse = client.models_scan().await?;
                     println!("{}", render(&result, format));
                 }
             }

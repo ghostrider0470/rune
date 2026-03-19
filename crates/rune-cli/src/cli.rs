@@ -310,8 +310,12 @@ pub enum ModelsAction {
         /// Image model id to set. Accepts canonical `provider/model` ids and unambiguous short names.
         model: String,
     },
-    /// List configured text and image fallback chains.
+    /// List configured text fallback chains.
     Fallbacks,
+    /// List configured image fallback chains.
+    ImageFallbacks,
+    /// Scan locally reachable providers (for example Ollama) for available models.
+    Scan,
 }
 
 #[derive(Debug, Subcommand)]
@@ -829,6 +833,28 @@ mod tests {
             cli.command,
             Command::Models {
                 action: ModelsAction::Fallbacks
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_models_image_fallbacks() {
+        let cli = Cli::try_parse_from(["rune", "models", "image-fallbacks"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Models {
+                action: ModelsAction::ImageFallbacks
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_models_scan() {
+        let cli = Cli::try_parse_from(["rune", "models", "scan"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Models {
+                action: ModelsAction::Scan
             }
         ));
     }
