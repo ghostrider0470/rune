@@ -17,7 +17,7 @@ use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
 use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
-    SessionTarget,
+    SessionTarget, compute_initial_next_run,
 };
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
@@ -632,7 +632,7 @@ pub async fn cron_add(
 
     let now = Utc::now();
     let id = JobId::new();
-    let next_run_at = initial_next_run(&schedule);
+    let next_run_at = compute_initial_next_run(&schedule);
     let mut job = Job {
         id,
         name: body.name,
@@ -695,12 +695,6 @@ pub async fn cron_update(
         .update_job(&job_id, update)
         .await
         .ok_or_else(|| GatewayError::JobNotFound(job_id.to_string()))?;
-
-    if let Some(updated) = state.scheduler.get_job(&job_id).await {
-        if updated.next_run_at.is_none() && updated.enabled {
-            state.scheduler.advance_next_run(&job_id).await;
-        }
-    }
 
     Ok(Json(CronMutationResponse {
         success: true,
@@ -1441,63 +1435,6 @@ fn validate_job_contract(
             "sessionTarget=isolated requires payload.kind=agent_turn".to_string(),
         )),
     }
-}
-
-fn initial_next_run(schedule: &Schedule) -> Option<DateTime<Utc>> {
-    let now = Utc::now();
-    match schedule {
-        Schedule::At { at } => Some(*at),
-        Schedule::Every {
-            every_ms,
-            anchor_ms,
-        } => Some(compute_next_interval_run(*every_ms, *anchor_ms, now)),
-        Schedule::Cron { expr, tz } => compute_next_cron_run(expr, tz.as_deref(), now),
-    }
-}
-
-fn compute_next_interval_run(
-    every_ms: u64,
-    anchor_ms: Option<u64>,
-    now: DateTime<Utc>,
-) -> DateTime<Utc> {
-    let duration = chrono::Duration::milliseconds(every_ms as i64);
-
-    if let Some(anchor_ms) = anchor_ms {
-        let Some(anchor) = DateTime::<Utc>::from_timestamp_millis(anchor_ms as i64) else {
-            return now + duration;
-        };
-
-        if anchor > now {
-            return anchor;
-        }
-
-        let elapsed_ms = (now - anchor).num_milliseconds();
-        if elapsed_ms < 0 {
-            return anchor;
-        }
-
-        let steps = (elapsed_ms / every_ms as i64) + 1;
-        return anchor + chrono::Duration::milliseconds(steps * every_ms as i64);
-    }
-
-    now + duration
-}
-
-fn compute_next_cron_run(
-    expr: &str,
-    tz: Option<&str>,
-    now: DateTime<Utc>,
-) -> Option<DateTime<Utc>> {
-    let schedule = expr.parse::<cron::Schedule>().ok()?;
-    let timezone = match tz {
-        None => chrono_tz::UTC,
-        Some(value) => value.parse::<chrono_tz::Tz>().ok()?,
-    };
-    let after_local = now.with_timezone(&timezone);
-    schedule
-        .after(&after_local)
-        .next()
-        .map(|next| next.with_timezone(&Utc))
 }
 
 fn job_to_response(job: Job) -> CronJobResponse {

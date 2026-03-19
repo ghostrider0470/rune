@@ -4076,6 +4076,168 @@ async fn cron_get_and_update_delivery_mode() {
 }
 
 #[tokio::test]
+async fn cron_update_schedule_recomputes_next_run_at() {
+    let app = build_test_app(None);
+
+    // Create a job with a 60-second interval
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/cron")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "name":"recompute-test",
+                        "schedule":{"kind":"every","every_ms":60000},
+                        "payload":{"kind":"system_event","text":"tick"},
+                        "sessionTarget":"main",
+                        "enabled":true
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let job_id = created["job_id"].as_str().unwrap().to_string();
+
+    // Read the original next_run_at
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let original = body_json(response).await;
+    let original_next = original["next_run_at"].as_str().unwrap().to_string();
+
+    // Update the schedule to a cron expression (daily at 09:00 UTC)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/cron/{job_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{ "schedule": {"kind":"cron","expr":"0 0 9 * * *","tz":"UTC"} }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read the updated job and verify next_run_at changed
+    let response = app
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let updated = body_json(response).await;
+    let updated_next = updated["next_run_at"].as_str().unwrap().to_string();
+
+    assert_ne!(
+        original_next, updated_next,
+        "next_run_at must be recomputed when schedule changes"
+    );
+    // The new next_run_at should be at 09:00 UTC
+    let parsed = chrono::DateTime::parse_from_rfc3339(&updated_next).unwrap();
+    assert_eq!(parsed.hour(), 9);
+    assert_eq!(parsed.minute(), 0);
+}
+
+#[tokio::test]
+async fn cron_disable_clears_next_run_at_and_reenable_recomputes() {
+    let app = build_test_app(None);
+
+    // Create an enabled job
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/cron")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "name":"toggle-test",
+                        "schedule":{"kind":"every","every_ms":60000},
+                        "payload":{"kind":"system_event","text":"tick"},
+                        "sessionTarget":"main",
+                        "enabled":true
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let job_id = created["job_id"].as_str().unwrap().to_string();
+
+    // Disable the job
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/cron/{job_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{ "enabled": false }"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Verify next_run_at is cleared
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let disabled = body_json(response).await;
+    assert!(
+        disabled["next_run_at"].is_null(),
+        "disabled job should have null next_run_at"
+    );
+
+    // Re-enable the job
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/cron/{job_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{ "enabled": true }"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Verify next_run_at is recomputed
+    let response = app
+        .oneshot(
+            Request::get(format!("/cron/{job_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let reenabled = body_json(response).await;
+    assert!(
+        !reenabled["next_run_at"].is_null(),
+        "re-enabled job should have a freshly computed next_run_at"
+    );
+}
+
+#[tokio::test]
 async fn cron_wake_accepts_snake_case_and_normalizes_mode() {
     let app = build_test_app(None);
     let response = app

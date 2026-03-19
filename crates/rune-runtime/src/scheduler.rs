@@ -246,11 +246,18 @@ impl Scheduler {
     }
 
     /// Update a job.
+    ///
+    /// When the schedule or enabled state changes, `next_run_at` is recomputed
+    /// so that persisted jobs never fire on a stale cadence.
     pub async fn update_job(&self, id: &JobId, update: JobUpdate) -> Option<Job> {
+        let schedule_changed = update.schedule.is_some();
+        let enabled_change = update.enabled;
+
         match &self.backend {
             SchedulerBackend::Memory(jobs) => {
                 let mut jobs = jobs.lock().await;
                 let job = jobs.get_mut(id)?;
+                let was_enabled = job.enabled;
 
                 if let Some(name) = update.name {
                     job.name = Some(name);
@@ -267,11 +274,15 @@ impl Scheduler {
                 if let Some(delivery_mode) = update.delivery_mode {
                     job.delivery_mode = delivery_mode;
                 }
+
+                recompute_next_run(job, schedule_changed, enabled_change, was_enabled);
 
                 Some(job.clone())
             }
             SchedulerBackend::Repo { jobs: repo, .. } => {
                 let mut job = self.get_job(id).await?;
+                let was_enabled = job.enabled;
+
                 if let Some(name) = update.name {
                     job.name = Some(name);
                 }
@@ -287,6 +298,9 @@ impl Scheduler {
                 if let Some(delivery_mode) = update.delivery_mode {
                     job.delivery_mode = delivery_mode;
                 }
+
+                recompute_next_run(&mut job, schedule_changed, enabled_change, was_enabled);
+
                 let updated_at = Utc::now();
                 let payload = stored_job_payload(&job);
                 repo.update_job(
@@ -578,6 +592,19 @@ impl Scheduler {
                 }
             }
         }
+    }
+}
+
+/// Compute the initial `next_run_at` for a schedule (used on creation and after edits).
+pub fn compute_initial_next_run(schedule: &Schedule) -> Option<DateTime<Utc>> {
+    let now = Utc::now();
+    match schedule {
+        Schedule::At { at } => Some(*at),
+        Schedule::Every {
+            every_ms,
+            anchor_ms,
+        } => Some(compute_next_interval_run(*every_ms, *anchor_ms, now, now)),
+        Schedule::Cron { expr, tz } => compute_next_cron_run(expr, tz.as_deref(), now, now),
     }
 }
 
@@ -1153,6 +1180,30 @@ fn row_to_job_run(row: JobRunRow) -> JobRun {
     }
 }
 
+/// Recompute `next_run_at` when a schedule or enabled-state change occurs.
+///
+/// Rules:
+///   - schedule changed → fresh `next_run_at` from the new schedule
+///   - disabled → clear `next_run_at`
+///   - re-enabled (was disabled, now enabled) → fresh `next_run_at`
+fn recompute_next_run(
+    job: &mut Job,
+    schedule_changed: bool,
+    enabled_change: Option<bool>,
+    was_enabled: bool,
+) {
+    if !job.enabled {
+        // Job is disabled → no upcoming run.
+        job.next_run_at = None;
+        return;
+    }
+
+    if schedule_changed || (enabled_change == Some(true) && !was_enabled) {
+        // Schedule was edited or job was just re-enabled → compute fresh next_run_at.
+        job.next_run_at = compute_initial_next_run(&job.schedule);
+    }
+}
+
 fn stored_job_payload(job: &Job) -> serde_json::Value {
     serde_json::to_value(StoredJobRecord {
         name: job.name.clone(),
@@ -1545,5 +1596,143 @@ mod tests {
         let job = scheduler.get_job(&id).await.unwrap();
         assert!(!job.enabled);
         assert!(job.next_run_at.is_none());
+    }
+
+    // ── Schedule-edit / enable-disable recomputation tests ──────────────
+
+    #[tokio::test]
+    async fn update_schedule_recomputes_next_run_at() {
+        let scheduler = Scheduler::new();
+        let job = make_job("recompute-me");
+        let original_next = job.next_run_at;
+        let id = scheduler.add_job(job).await;
+
+        // Change from 60s interval to a cron schedule
+        let updated = scheduler
+            .update_job(
+                &id,
+                JobUpdate {
+                    schedule: Some(Schedule::Cron {
+                        expr: "0 0 9 * * *".into(),
+                        tz: Some("UTC".into()),
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        // next_run_at must have been recomputed (not the stale interval value)
+        assert_ne!(updated.next_run_at, original_next);
+        let next = updated.next_run_at.expect("should have a next_run_at");
+        assert_eq!(next.hour(), 9);
+        assert_eq!(next.minute(), 0);
+    }
+
+    #[tokio::test]
+    async fn update_interval_schedule_recomputes_next_run_at() {
+        let scheduler = Scheduler::new();
+        let job = make_job("interval-edit");
+        let id = scheduler.add_job(job).await;
+        let before = scheduler.get_job(&id).await.unwrap().next_run_at;
+
+        // Change from 60s to 300s interval
+        let updated = scheduler
+            .update_job(
+                &id,
+                JobUpdate {
+                    schedule: Some(Schedule::Every {
+                        every_ms: 300_000,
+                        anchor_ms: None,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        // The new next_run_at should be ~5 minutes from now, not ~1 minute
+        let next = updated.next_run_at.expect("should have next_run_at");
+        assert_ne!(Some(next), before);
+        let delta_ms = (next - Utc::now()).num_milliseconds();
+        // Should be roughly 300_000ms from now (allow generous tolerance)
+        assert!(
+            delta_ms > 200_000 && delta_ms < 400_000,
+            "expected ~300s delta, got {delta_ms}ms"
+        );
+    }
+
+    #[tokio::test]
+    async fn disable_clears_next_run_at() {
+        let scheduler = Scheduler::new();
+        let job = make_job("disable-me");
+        let id = scheduler.add_job(job).await;
+        assert!(scheduler.get_job(&id).await.unwrap().next_run_at.is_some());
+
+        let updated = scheduler
+            .update_job(
+                &id,
+                JobUpdate {
+                    enabled: Some(false),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(!updated.enabled);
+        assert!(
+            updated.next_run_at.is_none(),
+            "disabled job should have no next_run_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn reenable_recomputes_next_run_at() {
+        let scheduler = Scheduler::new();
+        let mut job = make_job("reenable-me");
+        job.enabled = false;
+        job.next_run_at = None;
+        let id = scheduler.add_job(job).await;
+
+        // Re-enable the job
+        let updated = scheduler
+            .update_job(
+                &id,
+                JobUpdate {
+                    enabled: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(updated.enabled);
+        assert!(
+            updated.next_run_at.is_some(),
+            "re-enabled job should have a freshly computed next_run_at"
+        );
+        assert!(updated.next_run_at.unwrap() > Utc::now());
+    }
+
+    #[tokio::test]
+    async fn name_only_update_preserves_next_run_at() {
+        let scheduler = Scheduler::new();
+        let job = make_job("rename-only");
+        let id = scheduler.add_job(job).await;
+        let before = scheduler.get_job(&id).await.unwrap().next_run_at;
+
+        let updated = scheduler
+            .update_job(
+                &id,
+                JobUpdate {
+                    name: Some("new-name".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(updated.next_run_at, before, "name-only update must not change next_run_at");
     }
 }
