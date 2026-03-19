@@ -34,8 +34,9 @@ use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
     ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
-    ModelAliasDetail, ModelAliasesResponse, ModelListResponse, ModelProviderDetail,
-    ModelSetResponse, ModelStatusResponse, OutputFormat, render,
+    ModelAliasDetail, ModelAliasesResponse, ModelFallbackChainDetail, ModelFallbacksResponse,
+    ModelListResponse, ModelProviderDetail, ModelSetImageResponse, ModelSetResponse,
+    ModelStatusResponse, OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -239,6 +240,112 @@ fn set_default_model(model_ref: &str) -> Result<ModelSetResponse> {
         default_model: canonical,
         note: "Local config updated; restart gateway to apply new default sessions.".to_string(),
     })
+}
+
+fn set_default_image_model(model_ref: &str) -> Result<ModelSetImageResponse> {
+    let config_path = discover_local_config_path();
+    let config = rune_config::AppConfig::load(Some(&config_path)).with_context(|| {
+        format!(
+            "failed to load config from {} before updating default image model",
+            config_path.display()
+        )
+    })?;
+
+    let resolved = config.models.resolve_model(model_ref).with_context(|| {
+        format!("model `{model_ref}` is not resolvable from configured inventory")
+    })?;
+    let canonical = resolved.canonical_model_id();
+    let inventory = config.models.model_ids();
+    if !inventory.is_empty() && !inventory.iter().any(|entry| entry == &canonical) {
+        anyhow::bail!("model `{model_ref}` is not present in configured inventory");
+    }
+    let previous = config.models.default_image_model.clone();
+
+    let original = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+
+    let mut lines = original
+        .lines()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>();
+
+    let mut in_models = false;
+    let mut replaced = false;
+    let mut insert_at = None;
+
+    for (idx, line) in lines.iter_mut().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section = trimmed.trim_matches(&['[', ']'][..]);
+            if section == "models" {
+                in_models = true;
+                insert_at = Some(idx + 1);
+                continue;
+            }
+            if in_models {
+                insert_at = Some(idx);
+                break;
+            }
+        }
+
+        if in_models && trimmed.starts_with("default_image_model") {
+            *line = format!("default_image_model = \"{canonical}\"");
+            replaced = true;
+            break;
+        }
+    }
+
+    if !replaced {
+        if let Some(idx) = insert_at {
+            lines.insert(idx, format!("default_image_model = \"{canonical}\""));
+        } else {
+            if !lines.is_empty() && !lines.last().is_some_and(|line| line.is_empty()) {
+                lines.push(String::new());
+            }
+            lines.push("[models]".to_string());
+            lines.push(format!("default_image_model = \"{canonical}\""));
+        }
+    }
+
+    let updated = format!("{}\n", lines.join("\n"));
+    std::fs::write(&config_path, updated)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+
+    Ok(ModelSetImageResponse {
+        changed: previous.as_deref() != Some(canonical.as_str()),
+        config_path: config_path.display().to_string(),
+        previous_image_model: previous,
+        default_image_model: canonical,
+        note: "Local config updated; restart gateway to apply new default image model.".to_string(),
+    })
+}
+
+fn model_fallback_details() -> ModelFallbacksResponse {
+    let config = load_config();
+    let text_chains = config
+        .models
+        .fallbacks
+        .iter()
+        .map(|fb| ModelFallbackChainDetail {
+            name: fb.name.clone(),
+            kind: "text".to_string(),
+            chain: fb.chain.clone(),
+        })
+        .collect();
+    let image_chains = config
+        .models
+        .image_fallbacks
+        .iter()
+        .map(|fb| ModelFallbackChainDetail {
+            name: fb.name.clone(),
+            kind: "image".to_string(),
+            chain: fb.chain.clone(),
+        })
+        .collect();
+    ModelFallbacksResponse {
+        text_chains,
+        image_chains,
+    }
 }
 
 fn channel_details() -> Vec<ChannelDetail> {
@@ -893,6 +1000,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = set_default_model(&model)?;
                     println!("{}", render(&result, format));
                 }
+                ModelsAction::SetImage { model } => {
+                    let result = set_default_image_model(&model)?;
+                    println!("{}", render(&result, format));
+                }
+                ModelsAction::Fallbacks => {
+                    let result = model_fallback_details();
+                    println!("{}", render(&result, format));
+                }
             }
         }
         Command::Memory { action } => match action {
@@ -1068,6 +1183,124 @@ models = ["grok-4-fast-reasoning"]
         assert_eq!(
             response.default_model,
             "hamza-eastus2/grok-4-fast-reasoning"
+        );
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn set_default_image_model_updates_existing_models_section() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[models]
+default_image_model = "oc-01-openai/dall-e-3"
+
+[[models.providers]]
+name = "oc-01-openai"
+kind = "openai"
+base_url = "https://example.test/openai/v1"
+api_key = "test-key"
+models = ["dall-e-3", "dall-e-4"]
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let response = set_default_image_model("oc-01-openai/dall-e-4").unwrap();
+        assert!(response.changed);
+        assert_eq!(
+            response.previous_image_model.as_deref(),
+            Some("oc-01-openai/dall-e-3")
+        );
+        assert_eq!(response.default_image_model, "oc-01-openai/dall-e-4");
+
+        let updated = std::fs::read_to_string(&config_path).unwrap();
+        assert!(updated.contains("default_image_model = \"oc-01-openai/dall-e-4\""));
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn set_default_image_model_inserts_when_missing() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[models]
+
+[[models.providers]]
+name = "hamza-eastus2"
+kind = "openai"
+base_url = "https://example.test/openai/v1"
+api_key = "test-key"
+models = ["dall-e-3"]
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let response = set_default_image_model("dall-e-3").unwrap();
+        assert!(response.changed);
+        assert_eq!(
+            response.default_image_model,
+            "hamza-eastus2/dall-e-3"
+        );
+        assert!(response.previous_image_model.is_none());
+
+        let updated = std::fs::read_to_string(&config_path).unwrap();
+        assert!(updated.contains("default_image_model = \"hamza-eastus2/dall-e-3\""));
+
+        unsafe {
+            std::env::remove_var("RUNE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn set_default_image_model_rejects_unknown_inventory_entry() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[[models.providers]]
+name = "oc-01-openai"
+kind = "openai"
+base_url = "https://example.test/openai/v1"
+api_key = "test-key"
+models = ["dall-e-3"]
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_CONFIG", &config_path);
+        }
+
+        let err = set_default_image_model("not-a-real-model").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("not present in configured inventory")
+                || err.to_string().contains("not resolvable")
         );
 
         unsafe {

@@ -305,6 +305,13 @@ pub enum ModelsAction {
         /// Model id to set. Accepts canonical `provider/model` ids and unambiguous short names.
         model: String,
     },
+    /// Set the default image model in local config.toml after validating against configured inventory.
+    SetImage {
+        /// Image model id to set. Accepts canonical `provider/model` ids and unambiguous short names.
+        model: String,
+    },
+    /// List configured text and image fallback chains.
+    Fallbacks,
 }
 
 #[derive(Debug, Subcommand)]
@@ -801,6 +808,29 @@ mod tests {
             } => assert_eq!(model, "hamza-eastus2/gpt-5.4"),
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_models_set_image() {
+        let cli =
+            Cli::try_parse_from(["rune", "models", "set-image", "hamza-eastus2/dall-e-3"]).unwrap();
+        match cli.command {
+            Command::Models {
+                action: ModelsAction::SetImage { model },
+            } => assert_eq!(model, "hamza-eastus2/dall-e-3"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_models_fallbacks() {
+        let cli = Cli::try_parse_from(["rune", "models", "fallbacks"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Models {
+                action: ModelsAction::Fallbacks
+            }
+        ));
     }
 
     #[test]
