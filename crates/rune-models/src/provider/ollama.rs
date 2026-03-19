@@ -111,6 +111,46 @@ impl Default for OllamaProvider {
     }
 }
 
+impl OllamaProvider {
+    /// Probe `http://localhost:11434` (or a custom URL) for a running Ollama
+    /// instance.  Returns `Some(OllamaProvider)` if the server responds to
+    /// `GET /api/tags` within a short timeout, `None` otherwise.
+    ///
+    /// This is intentionally fire-and-forget: network errors, timeouts, and
+    /// non-200 responses all map to `None` so the caller can fall back
+    /// gracefully.
+    pub async fn probe_local() -> Option<Self> {
+        Self::probe_url(DEFAULT_OLLAMA_BASE).await
+    }
+
+    /// Like [`probe_local`] but against an arbitrary Ollama base URL.
+    pub async fn probe_url(base_url: &str) -> Option<Self> {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .ok()?;
+
+        let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+        let resp = client.get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+
+        // Parse just enough to confirm the response is valid Ollama JSON.
+        let _tags: OllamaTagsResponse = resp.json().await.ok()?;
+
+        let openai_url = format!("{}/v1", base_url.trim_end_matches('/'));
+        Some(Self {
+            inner: OpenAiProvider::new(&openai_url, "ollama"),
+            ollama_base: base_url.trim_end_matches('/').to_string(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .unwrap_or_default(),
+        })
+    }
+}
+
 /// Response from Ollama's `/api/tags` endpoint.
 #[derive(Debug, Deserialize)]
 pub struct OllamaTagsResponse {
@@ -169,5 +209,12 @@ mod tests {
     fn base_url_without_v1_suffix() {
         let p = OllamaProvider::with_base_url("http://myhost:11434");
         assert_eq!(p.ollama_base, "http://myhost:11434");
+    }
+
+    #[tokio::test]
+    async fn probe_unreachable_returns_none() {
+        // Port 19999 should not have an Ollama instance.
+        let result = OllamaProvider::probe_url("http://127.0.0.1:19999").await;
+        assert!(result.is_none(), "probe of unreachable host should return None");
     }
 }

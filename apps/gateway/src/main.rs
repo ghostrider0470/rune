@@ -176,7 +176,7 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
         port = config.gateway.port,
         config_path = %display_config_path(config_path),
         store_backend,
-        model_backend = if config.models.providers.is_empty() { "demo-echo" } else { "configured-provider-or-demo-fallback" },
+        model_backend = if config.models.providers.is_empty() { "auto-detect (probing Ollama…)" } else { "configured" },
         "starting rune gateway"
     );
 }
@@ -208,7 +208,7 @@ async fn build_services(
         SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
     );
 
-    let model_provider: Arc<dyn ModelProvider> = build_model_provider(&config);
+    let model_provider: Arc<dyn ModelProvider> = build_model_provider(&config).await;
     let scheduler = Arc::new(Scheduler::new_with_repos(
         job_repo.clone(),
         job_run_repo.clone(),
@@ -1975,7 +1975,7 @@ impl SubagentManager for LiveSubagentManager {
     }
 }
 
-fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
+async fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
     if !config.models.providers.is_empty() {
         match RoutedModelProvider::from_models_config(&config.models) {
             Ok(provider) => Arc::new(provider),
@@ -1985,8 +1985,19 @@ fn build_model_provider(config: &AppConfig) -> Arc<dyn ModelProvider> {
             }
         }
     } else {
-        info!("no model providers configured — using echo fallback");
-        Arc::new(EchoModelProvider)
+        // Zero-config Ollama auto-detection (issue #61): probe localhost:11434
+        // before falling back to the inert echo provider.
+        info!("no model providers configured — probing for local Ollama…");
+        match rune_models::OllamaProvider::probe_local().await {
+            Some(provider) => {
+                info!("local Ollama detected at http://localhost:11434 — using as default provider");
+                Arc::new(provider)
+            }
+            None => {
+                info!("no local Ollama found — using echo fallback (configure a provider in config.toml)");
+                Arc::new(EchoModelProvider)
+            }
+        }
     }
 }
 
