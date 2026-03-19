@@ -140,6 +140,8 @@ pub struct JobRow {
     pub payload: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Set when a supervisor claims this job for execution; NULL = unclaimed.
+    pub claimed_at: Option<DateTime<Utc>>,
 }
 
 /// Insert payload for a new job.

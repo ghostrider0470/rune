@@ -533,6 +533,147 @@ async fn test_json_roundtrip(repo: &dyn SessionRepo) {
     assert_eq!(found.metadata, complex_json);
 }
 
+async fn test_claim_due_jobs(repo: &dyn JobRepo) {
+    let past = now() - chrono::Duration::seconds(60);
+    let future = now() + chrono::Duration::hours(1);
+
+    // Create a due cron job (next_run_at in the past).
+    let mut due_job = new_job();
+    due_job.job_type = "cron".into();
+    due_job.schedule = Some(r#"{"kind":"every","every_ms":60000}"#.into());
+    let due_id = due_job.id;
+    repo.create(due_job).await.unwrap();
+    // Set next_run_at to the past.
+    repo.record_run(due_id, past, Some(past)).await.unwrap();
+
+    // Create a not-yet-due cron job.
+    let mut future_job = new_job();
+    future_job.job_type = "cron".into();
+    future_job.schedule = Some(r#"{"kind":"every","every_ms":60000}"#.into());
+    let future_id = future_job.id;
+    repo.create(future_job).await.unwrap();
+    repo.record_run(future_id, now(), Some(future))
+        .await
+        .unwrap();
+
+    let claim_now = now();
+    let stale_before = claim_now - chrono::Duration::seconds(300);
+
+    // First claim should return only the due job.
+    let claimed = repo
+        .claim_due_jobs("cron", claim_now, stale_before, 10)
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1, "should claim exactly the one due job");
+    assert_eq!(claimed[0].id, due_id);
+    assert!(claimed[0].claimed_at.is_some());
+
+    // Second claim should return nothing (job already claimed, claim is fresh).
+    let claimed2 = repo
+        .claim_due_jobs("cron", now(), stale_before, 10)
+        .await
+        .unwrap();
+    assert!(
+        claimed2.is_empty(),
+        "duplicate claim must return empty (job is already claimed)"
+    );
+}
+
+async fn test_claim_stale_reclaim(repo: &dyn JobRepo) {
+    // Use a far-past next_run_at so it's "due" even at an old claim timestamp.
+    let far_past = now() - chrono::Duration::seconds(3600);
+
+    // Create a due cron job.
+    let mut job = new_job();
+    job.job_type = "cron".into();
+    job.schedule = Some(r#"{"kind":"every","every_ms":60000}"#.into());
+    let jid = job.id;
+    repo.create(job).await.unwrap();
+    repo.record_run(jid, far_past, Some(far_past)).await.unwrap();
+
+    let old_claim_time = now() - chrono::Duration::seconds(600);
+    let fresh_stale_before = now() - chrono::Duration::seconds(300);
+
+    // Simulate an old claim (as if a previous supervisor crashed 10 min ago).
+    let first_claimed = repo
+        .claim_due_jobs("cron", old_claim_time, old_claim_time, 10)
+        .await
+        .unwrap();
+    assert_eq!(first_claimed.len(), 1, "should claim the due job");
+
+    // Now reclaim with a fresh stale_before — old claim should be expired.
+    let reclaimed = repo
+        .claim_due_jobs("cron", now(), fresh_stale_before, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        reclaimed.len(),
+        1,
+        "stale claim should be reclaimable by another supervisor"
+    );
+    assert_eq!(reclaimed[0].id, jid);
+}
+
+async fn test_release_claim(repo: &dyn JobRepo) {
+    let past = now() - chrono::Duration::seconds(60);
+
+    let mut job = new_job();
+    job.job_type = "cron".into();
+    job.schedule = Some(r#"{"kind":"every","every_ms":60000}"#.into());
+    let jid = job.id;
+    repo.create(job).await.unwrap();
+    repo.record_run(jid, past, Some(past)).await.unwrap();
+
+    // Claim the job.
+    let claimed = repo
+        .claim_due_jobs("cron", now(), now() - chrono::Duration::seconds(300), 10)
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+
+    // Release the claim.
+    repo.release_claim(jid).await.unwrap();
+
+    // After release, the job should be re-claimable immediately.
+    let reclaimed = repo
+        .claim_due_jobs("cron", now(), now() - chrono::Duration::seconds(300), 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        reclaimed.len(),
+        1,
+        "released job should be immediately reclaimable"
+    );
+}
+
+async fn test_claim_due_reminders(repo: &dyn JobRepo) {
+    let past = now() - chrono::Duration::seconds(60);
+
+    // Create a due reminder.
+    let mut reminder = new_job();
+    reminder.job_type = "reminder".into();
+    reminder.due_at = Some(past);
+    let rid = reminder.id;
+    repo.create(reminder).await.unwrap();
+
+    let claim_now = now();
+    let stale_before = claim_now - chrono::Duration::seconds(300);
+
+    let claimed = repo
+        .claim_due_jobs("reminder", claim_now, stale_before, 10)
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, rid);
+
+    // Second claim returns empty.
+    let claimed2 = repo
+        .claim_due_jobs("reminder", now(), stale_before, 10)
+        .await
+        .unwrap();
+    assert!(claimed2.is_empty());
+}
+
 // ── SQLite contract module ───────────────────────────────────────────
 
 #[cfg(feature = "sqlite")]
@@ -649,5 +790,29 @@ mod sqlite_contract {
     async fn json_roundtrip() {
         let (s, ..) = repos().await;
         test_json_roundtrip(&s).await;
+    }
+
+    #[tokio::test]
+    async fn claim_due_jobs() {
+        let (_, _, _, j, ..) = repos().await;
+        test_claim_due_jobs(&j).await;
+    }
+
+    #[tokio::test]
+    async fn claim_stale_reclaim() {
+        let (_, _, _, j, ..) = repos().await;
+        test_claim_stale_reclaim(&j).await;
+    }
+
+    #[tokio::test]
+    async fn release_claim() {
+        let (_, _, _, j, ..) = repos().await;
+        test_release_claim(&j).await;
+    }
+
+    #[tokio::test]
+    async fn claim_due_reminders() {
+        let (_, _, _, j, ..) = repos().await;
+        test_claim_due_reminders(&j).await;
     }
 }

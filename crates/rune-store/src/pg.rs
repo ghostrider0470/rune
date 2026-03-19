@@ -474,6 +474,62 @@ impl JobRepo for PgJobRepo {
             .await
             .map_err(|e| not_found_or(e, "job", id))
     }
+
+    async fn claim_due_jobs(
+        &self,
+        job_type: &str,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<JobRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let due_col_sql = if job_type == "reminder" {
+            "due_at"
+        } else {
+            "next_run_at"
+        };
+        // Atomic claim: UPDATE with subquery + FOR UPDATE SKIP LOCKED,
+        // then SELECT the freshly claimed rows by matching claimed_at.
+        let update_sql = format!(
+            "UPDATE jobs SET claimed_at = $1 \
+             WHERE id IN (\
+                SELECT id FROM jobs \
+                WHERE job_type = $2 AND enabled = true \
+                  AND {due_col_sql} IS NOT NULL AND {due_col_sql} <= $1 \
+                  AND (claimed_at IS NULL OR claimed_at < $3) \
+                ORDER BY {due_col_sql} ASC \
+                LIMIT $4 \
+                FOR UPDATE SKIP LOCKED\
+             )"
+        );
+        sql_query(update_sql)
+            .bind::<diesel::sql_types::Timestamptz, _>(now)
+            .bind::<Text, _>(job_type)
+            .bind::<diesel::sql_types::Timestamptz, _>(stale_before)
+            .bind::<BigInt, _>(limit)
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+
+        // Fetch the rows we just claimed.
+        jobs::table
+            .filter(jobs::job_type.eq(job_type))
+            .filter(jobs::claimed_at.eq(Some(now)))
+            .select(JobRow::as_select())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn release_claim(&self, id: Uuid) -> Result<(), StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        diesel::update(jobs::table.find(id))
+            .set(jobs::claimed_at.eq(None::<DateTime<Utc>>))
+            .execute(&mut conn)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(())
+    }
 }
 
 // ── PgJobRunRepo ────────────────────────────────────────────────────

@@ -17,6 +17,11 @@ use rune_store::models::SessionRow;
 use crate::pairing::DeviceRegistry;
 use crate::state::SessionEvent;
 
+/// Default lease duration (seconds) for durable job/reminder claims.
+/// Claims older than this are considered expired and reclaimable by another
+/// supervisor instance (crash recovery).
+const CLAIM_LEASE_SECS: i64 = 300;
+
 /// Manages background services (heartbeat, scheduler, reminders).
 pub struct BackgroundSupervisor {
     handle: Option<tokio::task::JoinHandle<()>>,
@@ -249,16 +254,17 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
             error!(error = %error, "failed to prune expired pairing requests");
         }
 
-        // --- Scheduled jobs ---
-        let due_jobs = deps.scheduler.get_due_jobs().await;
+        // --- Scheduled jobs (durable claim prevents duplicate execution) ---
+        let due_jobs = deps.scheduler.claim_due_jobs(CLAIM_LEASE_SECS).await;
         for job in due_jobs {
             let job_id = job.id;
-            debug!(job_id = %job_id, name = ?job.name, "executing due job");
+            debug!(job_id = %job_id, name = ?job.name, "executing claimed job");
             let _ = run_job_lifecycle(&deps, &job, true, SchedulerRunTrigger::Due).await;
+            deps.scheduler.release_claim(&job_id).await;
         }
 
-        // --- Reminders ---
-        let due_reminders = deps.reminder_store.get_due().await;
+        // --- Reminders (durable claim prevents duplicate delivery) ---
+        let due_reminders = deps.reminder_store.claim_due(CLAIM_LEASE_SECS).await;
         for reminder in due_reminders {
             info!(reminder_id = %reminder.id, target = %reminder.target, "delivering reminder");
             let attempt = deps
@@ -294,6 +300,7 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                     }
                 }
             }
+            deps.reminder_store.release_claim(&reminder.id).await;
         }
     }
 }
