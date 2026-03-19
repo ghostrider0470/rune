@@ -856,3 +856,325 @@ async fn routed_provider_dispatches_by_provider_model_id_and_strips_prefix() {
         }
     }
 }
+
+// --- Fallback chain routing ---
+
+use rune_config::ModelFallbackChainConfig;
+
+#[tokio::test]
+async fn routed_provider_falls_back_on_retriable_error() {
+    let primary_server = MockServer::start().await;
+    let fallback_server = MockServer::start().await;
+
+    // Primary returns 429 (retriable).
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "60")
+                .set_body_json(serde_json::json!({
+                    "error": { "message": "rate limited", "code": "rate_limit" }
+                })),
+        )
+        .expect(1)
+        .mount(&primary_server)
+        .await;
+
+    // Fallback succeeds.
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&fallback_server)
+        .await;
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::set_var("TEST_FALLBACK_PRIMARY_KEY", "fake-primary");
+            std::env::set_var("TEST_FALLBACK_SECONDARY_KEY", "fake-secondary");
+        }
+    }
+
+    let models = ModelsConfig {
+        default_model: Some("primary/gpt-5.4".into()),
+        default_image_model: None,
+        fallbacks: vec![ModelFallbackChainConfig {
+            name: "default-chat".into(),
+            chain: vec![
+                "primary/gpt-5.4".into(),
+                "secondary/claude-opus-4-6".into(),
+            ],
+        }],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![
+            ModelProviderConfig {
+                name: "primary".into(),
+                kind: "openai".into(),
+                base_url: primary_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_FALLBACK_PRIMARY_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            ModelProviderConfig {
+                name: "secondary".into(),
+                kind: "openai".into(),
+                base_url: fallback_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_FALLBACK_SECONDARY_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("claude-opus-4-6".into())],
+            },
+        ],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+
+    let request = CompletionRequest {
+        model: Some("primary/gpt-5.4".into()),
+        ..simple_request()
+    };
+
+    // Should succeed via fallback.
+    let resp = provider.complete(&request).await.unwrap();
+    assert_eq!(resp.content.as_deref(), Some("Hello! How can I help?"));
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::remove_var("TEST_FALLBACK_PRIMARY_KEY");
+            std::env::remove_var("TEST_FALLBACK_SECONDARY_KEY");
+        }
+    }
+}
+
+#[tokio::test]
+async fn routed_provider_does_not_fallback_on_non_retriable_error() {
+    let primary_server = MockServer::start().await;
+    let fallback_server = MockServer::start().await;
+
+    // Primary returns 401 (non-retriable).
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "error": { "message": "Invalid key", "code": "invalid_api_key" }
+        })))
+        .expect(1)
+        .mount(&primary_server)
+        .await;
+
+    // Fallback should NOT be called.
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(0)
+        .mount(&fallback_server)
+        .await;
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::set_var("TEST_NOFB_PRIMARY_KEY", "fake-primary");
+            std::env::set_var("TEST_NOFB_SECONDARY_KEY", "fake-secondary");
+        }
+    }
+
+    let models = ModelsConfig {
+        default_model: Some("primary/gpt-5.4".into()),
+        default_image_model: None,
+        fallbacks: vec![ModelFallbackChainConfig {
+            name: "default-chat".into(),
+            chain: vec![
+                "primary/gpt-5.4".into(),
+                "secondary/claude-opus-4-6".into(),
+            ],
+        }],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![
+            ModelProviderConfig {
+                name: "primary".into(),
+                kind: "openai".into(),
+                base_url: primary_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_NOFB_PRIMARY_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            ModelProviderConfig {
+                name: "secondary".into(),
+                kind: "openai".into(),
+                base_url: fallback_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_NOFB_SECONDARY_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("claude-opus-4-6".into())],
+            },
+        ],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+
+    let request = CompletionRequest {
+        model: Some("primary/gpt-5.4".into()),
+        ..simple_request()
+    };
+
+    // Should fail immediately without trying fallback.
+    let err = provider.complete(&request).await.unwrap_err();
+    assert!(matches!(err, ModelError::Auth(_)));
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::remove_var("TEST_NOFB_PRIMARY_KEY");
+            std::env::remove_var("TEST_NOFB_SECONDARY_KEY");
+        }
+    }
+}
+
+#[tokio::test]
+async fn routed_provider_returns_last_error_when_all_fallbacks_fail() {
+    let primary_server = MockServer::start().await;
+    let fallback_server = MockServer::start().await;
+
+    // Primary returns 500 (retriable).
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .expect(1)
+        .mount(&primary_server)
+        .await;
+
+    // Fallback also returns 500 (retriable).
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Also Down"))
+        .expect(1)
+        .mount(&fallback_server)
+        .await;
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::set_var("TEST_ALLFB_PRIMARY_KEY", "fake-primary");
+            std::env::set_var("TEST_ALLFB_SECONDARY_KEY", "fake-secondary");
+        }
+    }
+
+    let models = ModelsConfig {
+        default_model: Some("primary/gpt-5.4".into()),
+        default_image_model: None,
+        fallbacks: vec![ModelFallbackChainConfig {
+            name: "default-chat".into(),
+            chain: vec![
+                "primary/gpt-5.4".into(),
+                "secondary/claude-opus-4-6".into(),
+            ],
+        }],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![
+            ModelProviderConfig {
+                name: "primary".into(),
+                kind: "openai".into(),
+                base_url: primary_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_ALLFB_PRIMARY_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            ModelProviderConfig {
+                name: "secondary".into(),
+                kind: "openai".into(),
+                base_url: fallback_server.uri(),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("TEST_ALLFB_SECONDARY_KEY".into()),
+                api_key: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("claude-opus-4-6".into())],
+            },
+        ],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+
+    let request = CompletionRequest {
+        model: Some("primary/gpt-5.4".into()),
+        ..simple_request()
+    };
+
+    // Both fail — should get the last error (from fallback).
+    let err = provider.complete(&request).await.unwrap_err();
+    assert!(matches!(err, ModelError::Transient(_)));
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::remove_var("TEST_ALLFB_PRIMARY_KEY");
+            std::env::remove_var("TEST_ALLFB_SECONDARY_KEY");
+        }
+    }
+}
+
+#[tokio::test]
+async fn routed_provider_skips_fallback_when_no_chain_configured() {
+    let primary_server = MockServer::start().await;
+
+    // Primary returns 500 (retriable) but there's no fallback chain.
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .expect(1)
+        .mount(&primary_server)
+        .await;
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::set_var("TEST_NOCHAIN_PRIMARY_KEY", "fake-primary");
+        }
+    }
+
+    let models = ModelsConfig {
+        default_model: Some("primary/gpt-5.4".into()),
+        default_image_model: None,
+        fallbacks: vec![], // No fallback chains.
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![ModelProviderConfig {
+            name: "primary".into(),
+            kind: "openai".into(),
+            base_url: primary_server.uri(),
+            deployment_name: None,
+            api_version: None,
+            api_key_env: Some("TEST_NOCHAIN_PRIMARY_KEY".into()),
+            api_key: None,
+            model_alias: None,
+            models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+        }],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+
+    let request = CompletionRequest {
+        model: Some("primary/gpt-5.4".into()),
+        ..simple_request()
+    };
+
+    let err = provider.complete(&request).await.unwrap_err();
+    assert!(matches!(err, ModelError::Transient(_)));
+
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::remove_var("TEST_NOCHAIN_PRIMARY_KEY");
+        }
+    }
+}

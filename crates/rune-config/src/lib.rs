@@ -419,6 +419,19 @@ impl ModelsConfig {
         ids
     }
 
+    /// Look up the fallback chain whose first entry matches `model_ref`.
+    ///
+    /// Returns the *remaining* entries (i.e. everything after the primary) so
+    /// the caller can iterate over alternatives without re-trying the primary.
+    #[must_use]
+    pub fn fallback_chain_for(&self, model_ref: &str) -> Option<&[String]> {
+        self.fallbacks
+            .iter()
+            .find(|chain| chain.chain.first().map(String::as_str) == Some(model_ref))
+            .and_then(|chain| chain.chain.get(1..))
+            .filter(|rest| !rest.is_empty())
+    }
+
     /// Resolve a configured model reference to its provider and raw model id.
     pub fn resolve_model<'a>(
         &'a self,
@@ -1888,5 +1901,64 @@ models = ["gpt-5.4", "gpt-image-1"]
         assert_eq!(RuntimeMode::Auto.as_str(), "auto");
         assert_eq!(RuntimeMode::Standalone.as_str(), "standalone");
         assert_eq!(RuntimeMode::Server.as_str(), "server");
+    }
+
+    #[test]
+    fn fallback_chain_for_returns_remaining_entries() {
+        let config = ModelsConfig {
+            fallbacks: vec![ModelFallbackChainConfig {
+                name: "default-chat".into(),
+                chain: vec![
+                    "openai/gpt-5.4".into(),
+                    "anthropic/claude-opus-4-6".into(),
+                    "google/gemini-2.0-flash".into(),
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let chain = config
+            .fallback_chain_for("openai/gpt-5.4")
+            .expect("should find chain for primary model");
+        assert_eq!(
+            chain,
+            &["anthropic/claude-opus-4-6", "google/gemini-2.0-flash"]
+        );
+    }
+
+    #[test]
+    fn fallback_chain_for_returns_none_when_model_not_primary() {
+        let config = ModelsConfig {
+            fallbacks: vec![ModelFallbackChainConfig {
+                name: "default-chat".into(),
+                chain: vec!["openai/gpt-5.4".into(), "anthropic/claude-opus-4-6".into()],
+            }],
+            ..Default::default()
+        };
+
+        // A model that appears only as a fallback (not primary) should not match.
+        assert!(config
+            .fallback_chain_for("anthropic/claude-opus-4-6")
+            .is_none());
+    }
+
+    #[test]
+    fn fallback_chain_for_returns_none_when_no_chains_configured() {
+        let config = ModelsConfig::default();
+        assert!(config.fallback_chain_for("openai/gpt-5.4").is_none());
+    }
+
+    #[test]
+    fn fallback_chain_for_returns_none_for_single_entry_chain() {
+        let config = ModelsConfig {
+            fallbacks: vec![ModelFallbackChainConfig {
+                name: "solo".into(),
+                chain: vec!["openai/gpt-5.4".into()],
+            }],
+            ..Default::default()
+        };
+
+        // A chain with only one entry has no fallbacks.
+        assert!(config.fallback_chain_for("openai/gpt-5.4").is_none());
     }
 }
