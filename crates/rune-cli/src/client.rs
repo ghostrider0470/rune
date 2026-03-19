@@ -15,7 +15,7 @@ use crate::output::{
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport, SystemEventListResponse,
     GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
     HealthResponse, HeartbeatStatusResponse, ModelScanProviderResult, ModelScanResponse,
-    ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
+    MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
     SessionListResponse, SessionStatusCard, SessionSummary, StatusResponse,
 };
 
@@ -841,6 +841,57 @@ impl GatewayClient {
                 format!("Gateway returned HTTP {}", resp.status())
             },
         })
+    }
+
+    /// `POST /messages/send`
+    pub async fn message_send(
+        &self,
+        channel: &str,
+        text: &str,
+        session: Option<&str>,
+        thread: Option<&str>,
+    ) -> Result<MessageSendResponse> {
+        let mut body = json!({
+            "channel": channel,
+            "text": text,
+        });
+        if let Some(s) = session {
+            body["session"] = json!(s);
+        }
+        if let Some(t) = thread {
+            body["thread"] = json!(t);
+        }
+        let resp = self
+            .http
+            .post(self.url("/messages/send"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /messages/send")?;
+            Ok(MessageSendResponse {
+                success: true,
+                channel: channel.to_string(),
+                message_id: v["id"].as_str().map(String::from),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("Message sent")
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageSendResponse {
+                success: false,
+                channel: channel.to_string(),
+                message_id: None,
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
     }
 
     /// `GET /sessions`

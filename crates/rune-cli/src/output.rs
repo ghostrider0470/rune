@@ -1705,6 +1705,26 @@ impl fmt::Display for CronRunsResponse {
     }
 }
 
+/// Response for `message send`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageSendResponse {
+    pub success: bool,
+    pub channel: String,
+    pub message_id: Option<String>,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageSendResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} [{}] {}", self.channel, self.detail)?;
+        if let Some(ref id) = self.message_id {
+            write!(f, " (id={id})")?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -2508,6 +2528,52 @@ mod tests {
         };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("[cancelled]"));
+    }
+
+    // ── Message family (#74) ─────────────────────────────────────────
+
+    #[test]
+    fn render_message_send_success() {
+        let r = MessageSendResponse {
+            success: true,
+            channel: "telegram".into(),
+            message_id: Some("msg-42".into()),
+            detail: "Message sent".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.starts_with('✓'));
+        assert!(out.contains("[telegram]"));
+        assert!(out.contains("(id=msg-42)"));
+    }
+
+    #[test]
+    fn render_message_send_failure() {
+        let r = MessageSendResponse {
+            success: false,
+            channel: "discord".into(),
+            message_id: None,
+            detail: "Gateway returned HTTP 503".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.starts_with('✗'));
+        assert!(out.contains("[discord]"));
+        assert!(out.contains("503"));
+        assert!(!out.contains("(id="));
+    }
+
+    #[test]
+    fn render_message_send_json() {
+        let r = MessageSendResponse {
+            success: true,
+            channel: "slack".into(),
+            message_id: Some("msg-99".into()),
+            detail: "Message sent".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["channel"], "slack");
+        assert_eq!(v["message_id"], "msg-99");
     }
 
     #[test]
