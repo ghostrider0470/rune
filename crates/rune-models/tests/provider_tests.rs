@@ -2,9 +2,9 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
-    AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason, FunctionDefinition,
-    ModelError, ModelProvider, OpenAiProvider, Role, RoutedModelProvider, ToolDefinition,
-    provider_from_config,
+    AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
+    FunctionDefinition, ModelError, ModelProvider, OpenAiProvider, Role, RoutedModelProvider,
+    ToolDefinition, provider_from_config,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1510,4 +1510,564 @@ async fn routed_provider_skips_fallback_when_no_chain_configured() {
             std::env::remove_var("TEST_NOCHAIN_PRIMARY_KEY");
         }
     }
+}
+
+// === Azure Foundry golden tests =============================================
+//
+// The Foundry provider routes by model family:
+//   claude-* → /anthropic/v1/messages  (Anthropic Messages API)
+//   *        → /openai/v1/chat/completions (OpenAI Chat Completions)
+//
+// These tests verify the exact URL, headers, and body shape for each path.
+
+fn anthropic_success_body() -> serde_json::Value {
+    serde_json::json!({
+        "content": [{"type": "text", "text": "Hello from Claude!"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 12, "output_tokens": 7}
+    })
+}
+
+// --- Foundry model-family routing ---
+
+/// Non-claude model names must hit the OpenAI endpoint path.
+#[tokio::test]
+async fn foundry_routes_gpt_to_openai_endpoint() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "foundry-key");
+    let request = CompletionRequest {
+        model: Some("gpt-5.4".into()),
+        ..simple_request()
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0].url.path().contains("/openai/v1/chat/completions"),
+        "GPT model should route to OpenAI path, got: {}",
+        requests[0].url
+    );
+}
+
+/// Claude model names must hit the Anthropic endpoint path.
+#[tokio::test]
+async fn foundry_routes_claude_to_anthropic_endpoint() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(anthropic_success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "foundry-key");
+    let request = CompletionRequest {
+        model: Some("claude-sonnet-4-5-20250514".into()),
+        ..simple_request()
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0].url.path().contains("/anthropic/v1/messages"),
+        "Claude model should route to Anthropic path, got: {}",
+        requests[0].url
+    );
+}
+
+/// Default model (no model specified) should route to OpenAI path.
+#[tokio::test]
+async fn foundry_default_model_routes_to_openai() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "foundry-key");
+    let mut request = simple_request();
+    request.model = None;
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    assert!(
+        requests[0].url.path().contains("/openai/v1/chat/completions"),
+        "Default (no model) should route to OpenAI path, got: {}",
+        requests[0].url
+    );
+}
+
+// --- Foundry OpenAI-path wire shape ---
+
+/// Foundry OpenAI path: body INCLUDES model (unlike Azure OpenAI which omits it).
+#[tokio::test]
+async fn foundry_openai_body_includes_model() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "foundry-key");
+    let request = CompletionRequest {
+        model: Some("gpt-5.4".into()),
+        ..simple_request()
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(
+        body.get("model"),
+        Some(&serde_json::json!("gpt-5.4")),
+        "Foundry OpenAI path must include 'model' in body (routing is by model field, not URL deployment)"
+    );
+}
+
+/// Foundry OpenAI path uses `max_completion_tokens` (standard OpenAI convention).
+#[tokio::test]
+async fn foundry_openai_uses_max_completion_tokens() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "foundry-key");
+    let mut request = simple_request();
+    request.model = Some("gpt-5.4".into());
+    request.max_tokens = Some(1024);
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(
+        body.get("max_completion_tokens"),
+        Some(&serde_json::json!(1024)),
+        "Foundry OpenAI path should use 'max_completion_tokens'"
+    );
+    assert!(
+        body.get("max_tokens").is_none(),
+        "Foundry OpenAI path must NOT use 'max_tokens'"
+    );
+}
+
+/// Golden: full Foundry OpenAI request shape with all fields populated.
+#[tokio::test]
+async fn foundry_openai_request_golden_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::with_api_version(&server.uri(), "my-foundry-key", "2024-05-01");
+    let request = CompletionRequest {
+        messages: vec![
+            ChatMessage {
+                role: Role::System,
+                content: Some("You are helpful.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: Role::User,
+                content: Some("What is Rust?".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+        ],
+        model: Some("gpt-5.4".into()),
+        temperature: Some(0.5),
+        max_tokens: Some(2048),
+        tools: Some(vec![ToolDefinition {
+            tool_type: "function".into(),
+            function: FunctionDefinition {
+                name: "search".into(),
+                description: "Search the web".into(),
+                parameters: serde_json::json!({"type": "object", "properties": {"q": {"type": "string"}}}),
+            },
+        }]),
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let req = &requests[0];
+
+    // URL: /openai/v1/chat/completions (no deployment path, no api-version query)
+    assert!(
+        req.url.path().contains("/openai/v1/chat/completions"),
+        "Foundry OpenAI URL path: {}",
+        req.url
+    );
+
+    // Auth: api-key header, NOT Bearer
+    let api_key_header = req
+        .headers
+        .get("api-key")
+        .expect("Foundry must send api-key header");
+    assert_eq!(api_key_header.to_str().unwrap(), "my-foundry-key");
+    assert!(
+        req.headers.get("authorization").is_none(),
+        "Foundry must NOT send Authorization header"
+    );
+
+    // Body
+    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+
+    assert_eq!(body["model"], "gpt-5.4", "Must include model");
+    assert_eq!(body["temperature"], 0.5);
+    assert_eq!(body["max_completion_tokens"], 2048);
+
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0]["role"], "system");
+    assert_eq!(msgs[1]["role"], "user");
+
+    let tools = body["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["function"]["name"], "search");
+}
+
+// --- Foundry Anthropic-path wire shape ---
+
+/// Foundry Anthropic path sends api-key AND anthropic-version headers.
+#[tokio::test]
+async fn foundry_anthropic_sends_correct_headers() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(anthropic_success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::with_api_version(&server.uri(), "my-key", "2023-06-01");
+    let request = CompletionRequest {
+        model: Some("claude-sonnet-4-5-20250514".into()),
+        ..simple_request()
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let req = &requests[0];
+
+    let api_key = req
+        .headers
+        .get("api-key")
+        .expect("Foundry Anthropic must send api-key header");
+    assert_eq!(api_key.to_str().unwrap(), "my-key");
+
+    let anthropic_version = req
+        .headers
+        .get("anthropic-version")
+        .expect("Foundry Anthropic must send anthropic-version header");
+    assert_eq!(anthropic_version.to_str().unwrap(), "2023-06-01");
+}
+
+/// Foundry Anthropic path extracts system message from messages array.
+#[tokio::test]
+async fn foundry_anthropic_extracts_system_message() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(anthropic_success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let request = CompletionRequest {
+        messages: vec![
+            ChatMessage {
+                role: Role::System,
+                content: Some("You are a helpful assistant.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: Role::User,
+                content: Some("Hi".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+        ],
+        model: Some("claude-sonnet-4-5-20250514".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+
+    // System message should be a top-level field, not in the messages array
+    assert_eq!(
+        body["system"], "You are a helpful assistant.",
+        "Anthropic format requires system as top-level field"
+    );
+
+    // Messages array should only contain non-system messages
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 1, "System message should be extracted");
+    assert_eq!(msgs[0]["role"], "user");
+    assert_eq!(msgs[0]["content"], "Hi");
+}
+
+/// Foundry Anthropic path uses `max_tokens` (Anthropic convention, required field).
+#[tokio::test]
+async fn foundry_anthropic_uses_max_tokens() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(anthropic_success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let request = CompletionRequest {
+        model: Some("claude-sonnet-4-5-20250514".into()),
+        max_tokens: Some(4096),
+        ..simple_request()
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+
+    assert_eq!(
+        body["max_tokens"], 4096,
+        "Anthropic path must use 'max_tokens'"
+    );
+    assert!(
+        body.get("max_completion_tokens").is_none(),
+        "Anthropic path must NOT use 'max_completion_tokens'"
+    );
+}
+
+/// Foundry Anthropic path defaults max_tokens to 8192 when not provided.
+#[tokio::test]
+async fn foundry_anthropic_defaults_max_tokens() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(anthropic_success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::new(&server.uri(), "key");
+    let request = CompletionRequest {
+        model: Some("claude-sonnet-4-5-20250514".into()),
+        max_tokens: None,
+        ..simple_request()
+    };
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+
+    assert_eq!(
+        body["max_tokens"], 8192,
+        "Anthropic path should default max_tokens to 8192"
+    );
+}
+
+/// Golden: full Foundry Anthropic request shape.
+#[tokio::test]
+async fn foundry_anthropic_request_golden_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(anthropic_success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureFoundryProvider::with_api_version(&server.uri(), "my-foundry-key", "2023-06-01");
+    let request = CompletionRequest {
+        messages: vec![
+            ChatMessage {
+                role: Role::System,
+                content: Some("Be concise.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: Role::User,
+                content: Some("Explain Rust.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: Some("Rust is a systems language.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: Role::User,
+                content: Some("More detail.".into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+        ],
+        model: Some("claude-sonnet-4-5-20250514".into()),
+        temperature: None,
+        max_tokens: Some(2048),
+        tools: None,
+    };
+    let resp = p.complete(&request).await.unwrap();
+
+    // Verify response parsing
+    assert_eq!(resp.content.as_deref(), Some("Hello from Claude!"));
+    assert_eq!(resp.finish_reason, Some(FinishReason::Stop));
+    assert_eq!(resp.usage.prompt_tokens, 12);
+    assert_eq!(resp.usage.completion_tokens, 7);
+
+    // Verify request shape
+    let requests = server.received_requests().await.unwrap();
+    let req = &requests[0];
+
+    // URL
+    assert!(
+        req.url.path().contains("/anthropic/v1/messages"),
+        "Anthropic path URL: {}",
+        req.url
+    );
+
+    // Headers
+    assert_eq!(
+        req.headers.get("api-key").unwrap().to_str().unwrap(),
+        "my-foundry-key"
+    );
+    assert_eq!(
+        req.headers
+            .get("anthropic-version")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "2023-06-01"
+    );
+
+    // Body
+    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+
+    assert_eq!(body["model"], "claude-sonnet-4-5-20250514");
+    assert_eq!(body["max_tokens"], 2048);
+    assert_eq!(body["system"], "Be concise.");
+
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 3, "System excluded, 3 remaining");
+    assert_eq!(msgs[0]["role"], "user");
+    assert_eq!(msgs[0]["content"], "Explain Rust.");
+    assert_eq!(msgs[1]["role"], "assistant");
+    assert_eq!(msgs[2]["role"], "user");
+
+    // Only expected top-level keys
+    let keys: std::collections::HashSet<&str> =
+        body.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+    let expected: std::collections::HashSet<&str> =
+        ["model", "max_tokens", "system", "messages"].into();
+    assert_eq!(
+        keys, expected,
+        "Unexpected keys in Anthropic request body: {keys:?}"
+    );
+}
+
+// --- Foundry vs Azure OpenAI contrast ---
+
+/// Contrast: Foundry OpenAI path includes model + uses max_completion_tokens,
+/// while Azure OpenAI omits model + uses max_tokens.
+#[tokio::test]
+async fn foundry_openai_vs_azure_openai_body_contrast() {
+    let foundry_server = MockServer::start().await;
+    let azure_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&foundry_server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&azure_server)
+        .await;
+
+    let foundry = AzureFoundryProvider::new(&foundry_server.uri(), "k");
+    let azure = AzureOpenAiProvider::new(&azure_server.uri(), "dep", "2024-06-01", "k");
+
+    let mut request = simple_request();
+    request.max_tokens = Some(512);
+
+    let _ = foundry.complete(&request).await.unwrap();
+    let _ = azure.complete(&request).await.unwrap();
+
+    let foundry_reqs = foundry_server.received_requests().await.unwrap();
+    let azure_reqs = azure_server.received_requests().await.unwrap();
+
+    let foundry_body: serde_json::Value =
+        serde_json::from_slice(&foundry_reqs[0].body).unwrap();
+    let azure_body: serde_json::Value =
+        serde_json::from_slice(&azure_reqs[0].body).unwrap();
+
+    // Foundry: has model, max_completion_tokens (OpenAI convention)
+    assert!(
+        foundry_body.get("model").is_some(),
+        "Foundry OpenAI must include model"
+    );
+    assert_eq!(foundry_body["max_completion_tokens"], 512);
+    assert!(foundry_body.get("max_tokens").is_none());
+
+    // Azure OpenAI: no model, max_tokens (Azure convention)
+    assert!(
+        azure_body.get("model").is_none(),
+        "Azure OpenAI must omit model"
+    );
+    assert_eq!(azure_body["max_tokens"], 512);
+    assert!(azure_body.get("max_completion_tokens").is_none());
+
+    // URL contrast
+    assert!(
+        foundry_reqs[0]
+            .url
+            .path()
+            .contains("/openai/v1/chat/completions"),
+        "Foundry uses /openai/v1/ path"
+    );
+    assert!(
+        azure_reqs[0]
+            .url
+            .path()
+            .contains("/openai/deployments/"),
+        "Azure OpenAI uses /openai/deployments/ path"
+    );
 }
