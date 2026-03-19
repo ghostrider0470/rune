@@ -482,6 +482,8 @@ pub struct SessionsListQuery {
     pub active_minutes: Option<u64>,
     pub channel: Option<String>,
     pub kind: Option<String>,
+    /// Filter by parent/requester session ID (returns children of this session).
+    pub parent: Option<Uuid>,
     pub limit: Option<usize>,
 }
 
@@ -879,6 +881,7 @@ pub async fn list_sessions(
         .map(|minutes| Utc::now() - chrono::Duration::minutes(minutes as i64));
     let channel_filter = query.channel.as_deref();
     let kind_filter = query.kind.as_deref();
+    let parent_filter = query.parent;
 
     let rows = state
         .session_repo
@@ -902,6 +905,11 @@ pub async fn list_sessions(
         .filter(|row| {
             active_cutoff
                 .map(|cutoff| row.last_activity_at >= cutoff)
+                .unwrap_or(true)
+        })
+        .filter(|row| {
+            parent_filter
+                .map(|parent_id| row.requester_session_id == Some(parent_id))
                 .unwrap_or(true)
         })
     {
@@ -1139,6 +1147,101 @@ pub async fn get_session_status(
         subagent_last_note,
         unresolved,
     }))
+}
+
+/// A single node in a session delegation tree.
+#[derive(Serialize)]
+pub struct SessionTreeNode {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    pub created_at: String,
+    pub turn_count: u32,
+    pub children: Vec<SessionTreeNode>,
+}
+
+/// `GET /sessions/{id}/tree` — return the delegation tree rooted at a session.
+pub async fn get_session_tree(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SessionTreeNode>, GatewayError> {
+    let root = state
+        .session_engine
+        .get_session(id)
+        .await
+        .map_err(|e| GatewayError::SessionNotFound(e.to_string()))?;
+
+    // Fetch all sessions and build the tree in-memory.
+    let all_rows = state
+        .session_repo
+        .list(500, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    // Build parent -> children index.
+    let mut children_map: std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>> =
+        std::collections::HashMap::new();
+    for row in &all_rows {
+        if let Some(parent_id) = row.requester_session_id {
+            children_map.entry(parent_id).or_default().push(row);
+        }
+    }
+
+    // Collect all session IDs in the subtree for turn-count lookup.
+    fn collect_ids(
+        session_id: Uuid,
+        children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
+        out: &mut Vec<Uuid>,
+    ) {
+        out.push(session_id);
+        if let Some(kids) = children_map.get(&session_id) {
+            for child in kids {
+                collect_ids(child.id, children_map, out);
+            }
+        }
+    }
+    let mut subtree_ids = Vec::new();
+    collect_ids(root.id, &children_map, &mut subtree_ids);
+
+    // Pre-compute turn counts.
+    let mut turn_counts = std::collections::HashMap::new();
+    for sid in &subtree_ids {
+        let turns = state
+            .turn_repo
+            .list_by_session(*sid)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+        turn_counts.insert(*sid, turns.len() as u32);
+    }
+
+    fn build_node(
+        row: &rune_store::models::SessionRow,
+        children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
+        turn_counts: &std::collections::HashMap<Uuid, u32>,
+    ) -> SessionTreeNode {
+        let children = children_map
+            .get(&row.id)
+            .map(|kids| {
+                kids.iter()
+                    .map(|child| build_node(child, children_map, turn_counts))
+                    .collect()
+            })
+            .unwrap_or_default();
+        SessionTreeNode {
+            id: row.id.to_string(),
+            kind: row.kind.clone(),
+            status: row.status.clone(),
+            channel: row.channel_ref.clone(),
+            created_at: row.created_at.to_rfc3339(),
+            turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
+            children,
+        }
+    }
+
+    let tree = build_node(&root, &children_map, &turn_counts);
+    Ok(Json(tree))
 }
 
 /// `PATCH /sessions/{id}` — update session metadata fields used by operator surfaces.

@@ -17,7 +17,8 @@ use crate::output::{
     GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
     HealthResponse, HeartbeatStatusResponse, ModelScanProviderResult, ModelScanResponse,
     MessageSearchHit, MessageSearchResponse, MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
-    SessionListResponse, SessionStatusCard, SessionSummary, StatusResponse,
+    SessionListResponse, SessionStatusCard, SessionSummary, SessionTreeNode,
+    SessionTreeResponse, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -337,7 +338,7 @@ impl GatewayClient {
 
     /// Aggregate persisted session-turn token usage. Monetary cost is intentionally not derived yet.
     pub async fn gateway_usage_cost(&self) -> Result<GatewayUsageCostResponse> {
-        let sessions = self.sessions_list(None, None, 500).await?;
+        let sessions = self.sessions_list(None, None, None, None, 500).await?;
         let mut total_turns = 0usize;
         let mut prompt_tokens = 0u64;
         let mut completion_tokens = 0u64;
@@ -1652,6 +1653,8 @@ impl GatewayClient {
         &self,
         active_minutes: Option<u64>,
         channel: Option<&str>,
+        kind: Option<&str>,
+        parent: Option<&str>,
         limit: u64,
     ) -> Result<SessionListResponse> {
         let mut query: Vec<(&str, String)> = vec![("limit", limit.to_string())];
@@ -1660,6 +1663,12 @@ impl GatewayClient {
         }
         if let Some(channel) = channel {
             query.push(("channel", channel.to_string()));
+        }
+        if let Some(kind) = kind {
+            query.push(("kind", kind.to_string()));
+        }
+        if let Some(parent) = parent {
+            query.push(("parent", parent.to_string()));
         }
 
         let resp = self
@@ -1679,8 +1688,10 @@ impl GatewayClient {
                 .iter()
                 .map(|v| SessionSummary {
                     id: v["id"].as_str().unwrap_or("?").to_string(),
+                    kind: v["kind"].as_str().unwrap_or("direct").to_string(),
                     status: v["status"].as_str().unwrap_or("unknown").to_string(),
                     channel: v["channel"].as_str().map(String::from),
+                    requester_session_id: v["requester_session_id"].as_str().map(String::from),
                     created_at: v["created_at"].as_str().map(String::from),
                     turn_count: v["turn_count"].as_u64().map(|n| n as u32),
                     usage_prompt_tokens: v["usage_prompt_tokens"].as_u64(),
@@ -1710,11 +1721,13 @@ impl GatewayClient {
                 .context("invalid JSON from /sessions/:id")?;
             Ok(SessionDetailResponse {
                 id: v["id"].as_str().unwrap_or("?").to_string(),
+                kind: v["kind"].as_str().unwrap_or("direct").to_string(),
                 status: v["status"].as_str().unwrap_or("unknown").to_string(),
                 channel: v["channel"]
                     .as_str()
                     .map(String::from)
                     .or_else(|| v["channel_ref"].as_str().map(String::from)),
+                requester_session_id: v["requester_session_id"].as_str().map(String::from),
                 created_at: v["created_at"].as_str().map(String::from),
                 turn_count: v["turn_count"].as_u64().map(|n| n as u32),
                 latest_model: v["latest_model"].as_str().map(String::from),
@@ -1828,6 +1841,28 @@ impl GatewayClient {
             })
         } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
             bail!("Agent session '{id}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /sessions/:id/tree`
+    pub async fn sessions_tree(&self, id: &str) -> Result<SessionTreeResponse> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/sessions/{id}/tree")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let root: SessionTreeNode = resp
+                .json()
+                .await
+                .context("invalid JSON from /sessions/:id/tree")?;
+            Ok(SessionTreeResponse { root })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Session '{id}' not found.");
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2556,7 +2591,7 @@ mod tests {
             .await;
 
         let client = GatewayClient::new(&server.uri());
-        let resp = client.sessions_list(None, None, 100).await.unwrap();
+        let resp = client.sessions_list(None, None, None, None, 100).await.unwrap();
         assert_eq!(resp.sessions.len(), 2);
         assert_eq!(resp.sessions[0].id, "s1");
         assert_eq!(resp.sessions[1].channel, None);

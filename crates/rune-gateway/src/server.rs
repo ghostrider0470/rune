@@ -259,6 +259,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
                 .delete(routes::delete_session),
         )
         .route("/sessions/{id}/status", get(routes::get_session_status))
+        .route("/sessions/{id}/tree", get(routes::get_session_tree))
         .route("/sessions/{id}/messages", post(routes::send_message))
         .route("/sessions/{id}/transcript", get(routes::get_transcript))
         .route(

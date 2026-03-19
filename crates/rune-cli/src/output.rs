@@ -103,8 +103,11 @@ impl fmt::Display for DoctorReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: String,
+    #[serde(default = "default_kind")]
+    pub kind: String,
     pub status: String,
     pub channel: Option<String>,
+    pub requester_session_id: Option<String>,
     pub created_at: Option<String>,
     pub turn_count: Option<u32>,
     pub usage_prompt_tokens: Option<u64>,
@@ -112,11 +115,21 @@ pub struct SessionSummary {
     pub latest_model: Option<String>,
 }
 
+fn default_kind() -> String {
+    "direct".to_string()
+}
+
 impl fmt::Display for SessionSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} [{}]", self.id, self.status)?;
+        if self.kind != "direct" {
+            write!(f, " kind={}", self.kind)?;
+        }
         if let Some(ref ch) = self.channel {
             write!(f, " ({ch})")?;
+        }
+        if let Some(ref parent) = self.requester_session_id {
+            write!(f, " parent={parent}")?;
         }
         if let Some(turns) = self.turn_count {
             write!(f, " turns={turns}")?;
@@ -155,8 +168,11 @@ impl fmt::Display for SessionListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetailResponse {
     pub id: String,
+    #[serde(default = "default_kind")]
+    pub kind: String,
     pub status: String,
     pub channel: Option<String>,
+    pub requester_session_id: Option<String>,
     pub created_at: Option<String>,
     pub turn_count: Option<u32>,
     pub latest_model: Option<String>,
@@ -169,9 +185,13 @@ pub struct SessionDetailResponse {
 impl fmt::Display for SessionDetailResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Session: {}", self.id)?;
+        writeln!(f, "  Kind:    {}", self.kind)?;
         writeln!(f, "  Status:  {}", self.status)?;
         if let Some(ref ch) = self.channel {
             writeln!(f, "  Channel: {ch}")?;
+        }
+        if let Some(ref parent) = self.requester_session_id {
+            writeln!(f, "  Parent:  {parent}")?;
         }
         if let Some(ref t) = self.created_at {
             writeln!(f, "  Created: {t}")?;
@@ -194,6 +214,67 @@ impl fmt::Display for SessionDetailResponse {
             writeln!(f, "  Last ended:   {ended_at}")?;
         }
         Ok(())
+    }
+}
+
+/// A single node in a session delegation tree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTreeNode {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub channel: Option<String>,
+    pub created_at: Option<String>,
+    pub turn_count: Option<u32>,
+    pub children: Vec<SessionTreeNode>,
+}
+
+/// Session delegation tree response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTreeResponse {
+    pub root: SessionTreeNode,
+}
+
+impl SessionTreeNode {
+    fn fmt_tree(&self, f: &mut fmt::Formatter<'_>, prefix: &str, is_last: bool) -> fmt::Result {
+        let connector = if prefix.is_empty() {
+            ""
+        } else if is_last {
+            "└── "
+        } else {
+            "├── "
+        };
+        write!(f, "{prefix}{connector}{} [{}]", self.id, self.status)?;
+        if self.kind != "direct" {
+            write!(f, " kind={}", self.kind)?;
+        }
+        if let Some(ref ch) = self.channel {
+            write!(f, " ({ch})")?;
+        }
+        if let Some(turns) = self.turn_count {
+            write!(f, " turns={turns}")?;
+        }
+        writeln!(f)?;
+
+        let child_prefix = if prefix.is_empty() {
+            String::new()
+        } else if is_last {
+            format!("{prefix}    ")
+        } else {
+            format!("{prefix}│   ")
+        };
+
+        for (i, child) in self.children.iter().enumerate() {
+            let last = i == self.children.len() - 1;
+            child.fmt_tree(f, &child_prefix, last)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for SessionTreeResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.root.fmt_tree(f, "", false)
     }
 }
 
@@ -2963,8 +3044,10 @@ mod tests {
                 total: 2,
                 sample: vec![SessionSummary {
                     id: "session-1".into(),
+                    kind: "direct".into(),
                     status: "running".into(),
                     channel: Some("telegram".into()),
+                    requester_session_id: None,
                     created_at: None,
                     turn_count: Some(1),
                     usage_prompt_tokens: Some(10),
