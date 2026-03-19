@@ -402,12 +402,14 @@ Observed subflows include:
 - `cron status`
 - `cron list`
 - `cron add`
+- `cron show`
 - `cron edit`
 - `cron enable`
 - `cron disable`
 - `cron rm`
 - `cron run`
 - `cron runs`
+- `cron wake`
 
 ### Parity
 - **exact** for workflow and job-payload concepts
@@ -418,7 +420,7 @@ Observed subflows include:
 - enabled/disabled state
 - main-session `systemEvent` jobs
 - isolated `agentTurn` jobs
-- announce/webhook/none delivery modes
+- retained `announce`/`webhook`/`none` delivery-mode metadata
 - history inspection
 - due-only vs forced run semantics
 
@@ -640,7 +642,7 @@ Observed local families include:
 - `secrets reload|audit|configure|apply`
 - `security audit`
 - `system event`
-- `system heartbeat last|enable|disable|presence`
+- `system heartbeat last|enable|disable|presence|status`
 - `sandbox list|recreate|explain`
 
 These are release-critical because they directly affect operability, setup posture, security posture, isolation posture, and proactive behavior.
@@ -1000,15 +1002,16 @@ Approval behavior matters.
 ### `cron`
 
 #### Parity
-- **exact**
+- **close** for durable scheduler semantics and operator inspection
+- **exact** for `sessionTarget`/payload validation and persisted run-history semantics
 
 #### Required behaviors
-- `status|list|add|update|remove|run|runs|wake`
+- `status|list|add|show|update|remove|run|runs|wake`
 - explicit job schema
 - `systemEvent` vs `agentTurn`
 - `sessionTarget=main` requiring `systemEvent`
 - `sessionTarget=isolated` requiring `agentTurn`
-- announce/webhook/none delivery modes
+- retained `announce`/`webhook`/`none` delivery-mode metadata
 - immediate and next-heartbeat wake modes
 
 ---
@@ -1131,7 +1134,8 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 ## 9.1 Cron jobs
 
 ### Parity
-- **exact**
+- **close** for durable scheduler semantics, gateway coverage, and operator inspection
+- **exact** for schedule parsing, `sessionTarget`/payload validation, and persisted due-vs-manual run history
 
 ### Required behaviors
 - durable job definition
@@ -1142,46 +1146,47 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 - explicit `at`, `every`, and cron-expression schedule support
 - explicit `sessionTarget=main` vs `sessionTarget=isolated` behavior
 - explicit `systemEvent` vs `agentTurn` payload validation
-- explicit `none` / `announce` / `webhook` delivery-mode retention
+- explicit `none` / `announce` / `webhook` delivery-mode retention and inspection
 
-Implementation note (2026-03-19): Rune now has executable operator parity for the core cron surface: gateway routes cover `GET /cron/status`, `GET /cron`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, and `GET /cron/{id}/runs`; CLI flows cover `cron status|list|add|edit|enable|disable|rm|run|runs|wake`; runtime schedule handling computes interval anchors and timezone-aware cron next-fire times; invalid cron/tz definitions fail instead of silently fabricating a next run; and durable PostgreSQL-backed `jobs`/`job_runs` persistence now preserves created jobs, next-run state, and scheduled/manual run history across gateway restarts. Scheduled `main` jobs reuse the stable `system:scheduled-main` session while scheduled `isolated` jobs create fresh descendant `subagent` sessions linked through `requester_session_id`. Remaining parity work is broader black-box evidence for webhook delivery paths and any quiet-window policy layered above the core scheduler.
+Implementation note (2026-03-19): Rune now has durable cron semantics end to end: gateway routes cover `GET /cron/status`, `GET /cron`, `GET /cron/{id}`, `POST /cron`, `POST /cron/wake`, `POST /cron/{id}`, `DELETE /cron/{id}`, `POST /cron/{id}/run`, and `GET /cron/{id}/runs`; CLI flows cover `cron status|list|add|show|edit|enable|disable|rm|run|runs|wake`; runtime schedule handling computes interval anchors and timezone-aware cron next-fire times; invalid cron/tz definitions fail instead of silently fabricating a next run; and durable PostgreSQL-backed `jobs`/`job_runs` persistence preserves created jobs, next-run state, and scheduled/manual run history across gateway restarts. Scheduled `main` jobs reuse the stable `system:scheduled-main` session while scheduled `isolated` jobs create fresh descendant `subagent` sessions linked through `requester_session_id`. The remaining gap is no longer job durability or validation; it is that the CLI create/edit surface is narrower than the gateway schema (`cron add` is one-shot `system_event` only and `cron edit` only mutates name/delivery mode), and runtime execution still treats `none` / `announce` / `webhook` as inspectable metadata rather than distinct delivery paths.
 
 ---
 
 ## 9.2 Reminders
 
 ### Parity
-- **exact**
+- **close** for one-shot timing, durable outcomes, and operator inspection
 
 ### Required behaviors
 - one-shot timing
 - reminder text shaped like a reminder when delivered
 - mention that it is a reminder depending on timing/context
-- target chat/session delivery
+- retained target chat/session metadata
 - delivered / missed / cancelled terminal outcomes remain inspectable
 
-Implementation note (2026-03-19): Rune now ships an executable reminder surface end-to-end with durable outcomes: gateway routes expose `GET /reminders`, `POST /reminders`, and `DELETE /reminders/{id}`; CLI flows expose `reminders add|list|cancel`; reminders persist through the scheduler job repository as `reminder` jobs with `announce` delivery mode; due-checking records delivery attempts; successful sends mark reminders delivered; failed sends mark reminders missed with persisted error context; and user/operator cancellation produces an explicit cancelled terminal outcome instead of silent disappearance. The remaining parity gap is not basic durability anymore; it is stronger black-box evidence that final delivered wording consistently matches the OpenClaw reminder-shaping contract.
+Implementation note (2026-03-19): Rune now ships an executable reminder surface with durable outcomes: gateway routes expose `GET /reminders`, `POST /reminders`, and `DELETE /reminders/{id}`; CLI flows expose `reminders add|list|cancel`; reminders persist through the scheduler job repository as `reminder` jobs with `announce` delivery mode; due-checking records delivery attempts; successful sends mark reminders delivered; failed sends mark reminders missed with persisted error context; and user/operator cancellation produces an explicit cancelled terminal outcome instead of silent disappearance. The remaining gap is target routing and final wording parity: the requested `target` is preserved for inspection, but the shipped runtime still executes reminder delivery in the stable scheduled main session rather than routing to a target-specific chat/session surface.
 
 ---
 
 ## 9.3 Wake events
 
 ### Parity
-- **exact**
+- **partial**
 
 ### Required behaviors
 - immediate wake
 - next-heartbeat wake
 - optional context carry-forward
 
-Implementation note (2026-03-19): Rune currently normalizes wake mode to `now` or `next-heartbeat`, with `next-heartbeat` as the default, and exposes that control through the cron wake flow. Remaining work is mostly evidence and any higher-level operator ergonomics, not absence of the wake-mode contract itself.
+Implementation note (2026-03-19): Rune currently normalizes wake mode to `now` or `next-heartbeat`, defaults omitted mode to `next-heartbeat`, accepts both `next-heartbeat` and `next_heartbeat`, and exposes that control through both `cron wake` and `system event`. Optional `context_messages` is preserved on the emitted `wake_event` payload for subscribers. The remaining gap is substantive rather than cosmetic: this is currently an operator/event-bus queueing surface, not a fully wired downstream wake-execution path.
 
 ---
 
 ## 9.4 Heartbeats
 
 ### Parity
-- **exact**
+- **close** for shipped no-op and duplicate-suppression semantics
+- **partial** for broader quiet-window policy
 
 ### Required behaviors
 - read `HEARTBEAT.md` if present
@@ -1193,7 +1198,7 @@ Implementation note (2026-03-19): Rune currently normalizes wake mode to `now` o
 - maintain minimal state for proactive checks
 - persist enough anti-spam state to avoid duplicate notifications after restart
 
-Implementation note (2026-03-19): Rune now has a real heartbeat runner with persisted runner state, `HEARTBEAT.md` prompt loading, due-checking, suppression of no-op `HEARTBEAT_OK` responses, duplicate-notification suppression via normalized-response fingerprinting, persisted suppression counters/fingerprint state, supervisor execution, and operator surfaces through `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, and CLI `system heartbeat presence|last|enable|disable|status`. The remaining gap has narrowed: this is no longer “duplicate suppression missing,” but fuller parity evidence for OpenClaw-equivalent quiet-window and broader anti-spam policy behavior.
+Implementation note (2026-03-19): Rune now has a real heartbeat runner with persisted runner state, `HEARTBEAT.md` prompt loading, due-checking, suppression of no-op `HEARTBEAT_OK` responses, duplicate-notification suppression via normalized-response fingerprinting, persisted suppression counters/fingerprint state, supervisor execution, and operator surfaces through `GET /heartbeat/status`, `POST /heartbeat/enable`, `POST /heartbeat/disable`, and CLI `system heartbeat presence|last|enable|disable|status`. The remaining gap has narrowed to quiet-window policy and broader anti-spam behavior: duplicate suppression now survives restart, but there is still no distinct runtime quiet-window mechanism beyond no-op and duplicate suppression.
 
 ---
 

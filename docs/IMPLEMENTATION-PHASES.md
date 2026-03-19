@@ -201,8 +201,9 @@ Reproduce proactive automation behavior.
 
 - cron scheduling
 - one-shot reminders
+- wake/system-event queueing
 - heartbeat runs
-- isolated scheduled session runs
+- isolated-target scheduled session runs
 - job history and next-run computation
 - missed-run and disable/enable semantics
 
@@ -213,21 +214,23 @@ Reproduce proactive automation behavior.
 ### Acceptance criteria
 
 - scheduled jobs are durable and inspectable
-- heartbeat behavior preserves quiet/no-op semantics
-- reminders and cron runs create auditable isolated execution records
+- heartbeat behavior preserves shipped no-op and duplicate-suppression semantics
+- scheduled executions are auditable; `sessionTarget=isolated` cron jobs create descendant subagent sessions while main-target cron jobs, reminders, and heartbeats reuse scheduled session contexts
 - operator can list, inspect, enable, disable, wake, and review job history
 - `sessionTarget=main` vs `sessionTarget=isolated` semantics are preserved without payload coercion
-- `none` / `announce` / `webhook` delivery modes remain inspectable and behaviorally distinct
+- `none` / `announce` / `webhook` delivery modes remain inspectable even though runtime-specific branching is still follow-on work
 - reminder outcomes persist as delivered / missed / cancelled rather than disappearing into logs only
+- reminder targets remain inspectable even though current runtime delivery still reuses the scheduled main session
 
 ### Recommended parity tests
 
-- cron create/list/edit/disable/enable/run-now/wake flows
+- cron create/list/show/edit/disable/enable/run-now/wake flows
 - due-only vs forced-run history tests
 - `systemEvent` vs `agentTurn` session-target validation tests
-- delivery-mode tests for `none` / `announce` / `webhook`
-- reminder due/delivered/missed/cancelled flows
-- heartbeat instruction loading, no-op suppression, and duplicate-notification suppression behavior
+- delivery-mode retention/inspection tests for `none` / `announce` / `webhook`
+- reminder due/delivered/missed/cancelled plus target-retention flows
+- wake mode normalization and queued-event payload tests
+- heartbeat instruction loading, no-op suppression, and duplicate-notification suppression persistence behavior
 
 ### Key risk retired
 Automation behavior mismatch.

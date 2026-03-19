@@ -913,7 +913,7 @@ Cron jobs must preserve:
 - `at`, `every`, and cron-expression schedule concepts
 - enable/disable state
 - run history
-- isolated execution context
+- isolated execution context for `sessionTarget=isolated` jobs
 - configurable runtime/model if supported
 - due-only vs forced-run semantics
 - explicit wake semantics for `now` vs `next-heartbeat` where wake flows exist
@@ -929,6 +929,13 @@ Run-history expectations:
 
 - history should distinguish at least due-triggered vs operator-forced/manual runs
 - history rows should remain attributable to the originating job, trigger kind, and resulting scheduled session/run
+
+Current surface note:
+
+- gateway create/update accepts full schedule and payload schemas
+- current CLI `cron add` creates one-shot `system_event` jobs only
+- current CLI `cron edit` is limited to name and delivery-mode mutation
+- `cron wake` and `system event` share the same wake-queueing surface
 
 ## 11.2 Payload and delivery contract
 
@@ -948,11 +955,17 @@ Delivery modes must preserve:
 - `announce`
 - `webhook`
 
-Delivery semantics must also preserve:
+Current shipped delivery semantics:
 
-- `announce` meaning an operator-visible/session-visible surfaced result
-- `webhook` meaning an outbound webhook-style delivery path rather than an in-band chat announcement
-- `none` meaning the run remains auditable in history without requiring an operator-facing message
+- the selected delivery mode is stored durably and remains operator-visible over gateway/CLI inspection surfaces
+- runtime execution does not yet branch on `none` vs `announce` vs `webhook`; outbound webhook-style delivery remains follow-on work
+- run history remains the durable audit surface regardless of delivery mode
+
+Wake semantics currently preserve:
+
+- accepted modes normalize to `now` or `next-heartbeat`
+- optional `context_messages` counts are surfaced on the queued wake event payload
+- the current shipped contract is queueing/inspection of wake events, not guaranteed downstream wake consumption
 
 ## 11.3 Heartbeat contract
 
@@ -970,6 +983,7 @@ Heartbeat invariants:
 - repeated heartbeats should not duplicate notifications without new cause
 - quiet/no-op outcomes should still be representable in run history or persisted heartbeat state
 - anti-spam state must survive restart well enough to avoid replaying the same notification solely because the process restarted
+- broader quiet-window policy is not yet part of the shipped runtime contract
 
 Heartbeat suppression semantics:
 
@@ -982,9 +996,9 @@ Heartbeat suppression semantics:
 Reminders need:
 
 - due time
-- target channel/session
+- target channel/session metadata
 - reminder payload/instruction
-- one-shot vs recurring distinction
+- one-shot-only reminder semantics distinct from cron jobs
 - delivered / missed / cancelled outcome tracking
 - reminder wording that reads like a reminder when fired
 
@@ -993,6 +1007,7 @@ Reminder outcome semantics must preserve:
 - successful delivery marking the reminder terminal as delivered
 - failed delivery attempts marking the reminder terminal as missed with inspectable error context
 - operator/user cancellation marking the reminder terminal as cancelled rather than silently deleting auditability
+- the current shipped runtime retaining the requested `target` while still delivering reminders through the stable scheduled main session
 
 ---
 

@@ -203,18 +203,19 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - enabled/disabled state is durable
 - schedule definition is compatibility surface: `at`, `every`, and cron-expression semantics may not drift silently
 - `sessionTarget=main` maps to `systemEvent` payloads and `sessionTarget=isolated` maps to `agentTurn` payloads; invalid combinations fail explicitly
-- reminder timing and wording remain operator-predictable
-- delivery modes preserve `none`, `announce`, and `webhook` semantics
-- heartbeat quiet/no-op semantics are preserved
+- reminder timing and terminal outcomes remain operator-predictable; reminder `target` is retained as operator-visible metadata even though current execution still reuses the scheduled main session
+- delivery modes preserve `none`, `announce`, and `webhook` as durable, inspectable job metadata; runtime-specific branching on those modes is not yet a shipped contract
+- heartbeat no-op and duplicate-suppression semantics are preserved; broader quiet-window policy is still follow-on work
 - repeated heartbeats do not spam without new cause
-- isolated scheduled runs remain auditable as isolated runs
+- `sessionTarget=isolated` cron jobs remain auditable as isolated descendant runs; main-target cron jobs, reminders, and heartbeats reuse scheduled session contexts
+- wake requests preserve explicit `now` vs `next-heartbeat` mode selection on the operator/event surface; durable wake execution is not yet a shipped contract
 
 ### Required persisted state
 
 - jobs
 - schedules/due times
 - session target and payload kind
-- delivery mode and wake mode
+- delivery mode
 - last/next run metadata
 - run history with due/manual trigger visibility
 - delivered/missed/cancelled status for reminders
@@ -222,29 +223,31 @@ Do not mark a subsystem parity-complete without black-box evidence.
 
 ### External surfaces
 
-- cron APIs/CLI
+- cron APIs/CLI, including inspection and wake/system-event queueing
 - reminder APIs/CLI
-- heartbeat status/enable/disable APIs and CLI workflows
+- heartbeat status/enable/disable APIs plus CLI presence/last/status workflows
 - run-now, wake, and inspection workflows
 - history views
 
 ### Failure behavior expectations
 
 - missed runs are visible
-- invalid schedules fail explicitly
+- invalid schedules fail explicitly; stored cron jobs whose next run can no longer be computed disable rather than fabricating future fire times
 - invalid `sessionTarget`/payload combinations fail explicitly
 - disabled jobs do not run silently
 - reminder delivery failures resolve to explicit `missed` outcomes rather than disappearing
+- invalid wake modes fail explicitly
 - heartbeat no-op and duplicate suppressions remain operator-inspectable even when no outbound message is emitted
 
 ### Minimum parity evidence
 
-- cron create/list/update/disable/enable/run/wake tests
+- cron create/list/show/update/disable/enable/run/wake tests
 - due-only vs forced-run history tests
 - `systemEvent` vs `agentTurn` session-target tests
-- delivery-mode tests for `none`/`announce`/`webhook`
-- reminder due/delivered/missed/cancelled tests
-- heartbeat no-op, notify, and duplicate-suppression tests
+- delivery-mode retention/inspection tests for `none`/`announce`/`webhook`
+- reminder due/delivered/missed/cancelled and target-retention tests
+- wake mode normalization/event-payload tests
+- heartbeat no-op, notify, and duplicate-suppression persistence tests
 
 ---
 
