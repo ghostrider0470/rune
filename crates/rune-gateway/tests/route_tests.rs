@@ -48,6 +48,8 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
         stt: false,
         tool_count,
         channels: vec![],
+        approval_mode: "prompt".to_string(),
+        security_posture: "sandboxed".to_string(),
     })
 }
 
