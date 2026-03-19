@@ -25,7 +25,8 @@ pub use cli::Cli;
 use cli::{
     ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell, ConfigAction,
     CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
-    MessageThreadAction, MessageVoiceAction, ModelsAction, RemindersAction, SessionsAction,
+    MessageTagAction, MessageThreadAction, MessageVoiceAction, ModelsAction, RemindersAction,
+    SessionsAction,
     SystemAction, SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
@@ -1477,6 +1478,54 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 MessageVoiceAction::Status => {
                     let result = client.message_voice_status().await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            MessageAction::Tag { action } => match action {
+                MessageTagAction::Add {
+                    message_id,
+                    tag,
+                    channel,
+                    session,
+                } => {
+                    let result = client
+                        .message_tag_add(
+                            &message_id,
+                            &tag,
+                            channel.as_deref(),
+                            session.as_deref(),
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                MessageTagAction::Remove {
+                    message_id,
+                    tag,
+                    channel,
+                    session,
+                } => {
+                    let result = client
+                        .message_tag_remove(
+                            &message_id,
+                            &tag,
+                            channel.as_deref(),
+                            session.as_deref(),
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                MessageTagAction::List {
+                    message_id,
+                    channel,
+                    session,
+                } => {
+                    let result = client
+                        .message_tag_list(
+                            &message_id,
+                            channel.as_deref(),
+                            session.as_deref(),
+                        )
+                        .await?;
                     println!("{}", render(&result, format));
                 }
             },

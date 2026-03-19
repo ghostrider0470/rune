@@ -2075,6 +2075,58 @@ impl fmt::Display for MessageVoiceStatusResponse {
     }
 }
 
+/// Response for `message tag add` / `message tag remove`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageTagResponse {
+    pub success: bool,
+    pub message_id: String,
+    pub tag: String,
+    pub added: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageTagResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        let verb = if self.added { "tagged" } else { "untagged" };
+        write!(
+            f,
+            "{icon} {verb} message {} with \"{}\"",
+            self.message_id, self.tag,
+        )?;
+        if !self.detail.is_empty() {
+            write!(f, ": {}", self.detail)?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `message tag list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageTagListResponse {
+    pub message_id: String,
+    pub tags: Vec<String>,
+}
+
+impl fmt::Display for MessageTagListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.tags.is_empty() {
+            return write!(f, "No tags on message {}", self.message_id);
+        }
+        write!(
+            f,
+            "Message {}: {} tag{}",
+            self.message_id,
+            self.tags.len(),
+            if self.tags.len() == 1 { "" } else { "s" },
+        )?;
+        for tag in &self.tags {
+            write!(f, "\n  {tag}")?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -3469,6 +3521,137 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("unknown"));
         assert!(out.contains("system message"));
+    }
+
+    // ── MessageTagResponse ──────────────────────────────────────────
+
+    #[test]
+    fn render_message_tag_add_success() {
+        let r = MessageTagResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            tag: "urgent".into(),
+            added: true,
+            detail: "Tag added".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("tagged"));
+        assert!(out.contains("msg-42"));
+        assert!(out.contains("\"urgent\""));
+        assert!(out.contains("Tag added"));
+    }
+
+    #[test]
+    fn render_message_tag_remove_success() {
+        let r = MessageTagResponse {
+            success: true,
+            message_id: "msg-99".into(),
+            tag: "followup".into(),
+            added: false,
+            detail: "Tag removed".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("untagged"));
+        assert!(out.contains("msg-99"));
+        assert!(out.contains("\"followup\""));
+        assert!(out.contains("Tag removed"));
+    }
+
+    #[test]
+    fn render_message_tag_failure() {
+        let r = MessageTagResponse {
+            success: false,
+            message_id: "msg-1".into(),
+            tag: "resolved".into(),
+            added: true,
+            detail: "Gateway returned HTTP 404: Message not found".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✗"));
+        assert!(out.contains("tagged"));
+        assert!(out.contains("404"));
+    }
+
+    #[test]
+    fn render_message_tag_json() {
+        let r = MessageTagResponse {
+            success: true,
+            message_id: "msg-42".into(),
+            tag: "urgent".into(),
+            added: true,
+            detail: "Tag added".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["success"].as_bool().unwrap());
+        assert_eq!(v["message_id"], "msg-42");
+        assert_eq!(v["tag"], "urgent");
+        assert!(v["added"].as_bool().unwrap());
+        assert_eq!(v["detail"], "Tag added");
+    }
+
+    #[test]
+    fn render_message_tag_empty_detail() {
+        let r = MessageTagResponse {
+            success: true,
+            message_id: "msg-1".into(),
+            tag: "done".into(),
+            added: true,
+            detail: String::new(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓ tagged message msg-1 with \"done\""));
+        assert!(!out.contains(":"));
+    }
+
+    // ── MessageTagListResponse ────────────────────────────────────
+
+    #[test]
+    fn render_message_tag_list_empty() {
+        let r = MessageTagListResponse {
+            message_id: "msg-42".into(),
+            tags: vec![],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert_eq!(out, "No tags on message msg-42");
+    }
+
+    #[test]
+    fn render_message_tag_list_with_tags() {
+        let r = MessageTagListResponse {
+            message_id: "msg-42".into(),
+            tags: vec!["urgent".into(), "followup".into()],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Message msg-42: 2 tags"));
+        assert!(out.contains("urgent"));
+        assert!(out.contains("followup"));
+    }
+
+    #[test]
+    fn render_message_tag_list_single_grammar() {
+        let r = MessageTagListResponse {
+            message_id: "msg-99".into(),
+            tags: vec!["resolved".into()],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("1 tag"));
+        assert!(!out.contains("tags"));
+    }
+
+    #[test]
+    fn render_message_tag_list_json() {
+        let r = MessageTagListResponse {
+            message_id: "msg-42".into(),
+            tags: vec!["urgent".into(), "followup".into()],
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["message_id"], "msg-42");
+        assert_eq!(v["tags"][0], "urgent");
+        assert_eq!(v["tags"][1], "followup");
     }
 
     // ── MessageThreadListResponse ──────────────────────────────────
