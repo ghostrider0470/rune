@@ -79,7 +79,7 @@ Interpretation rules:
 - [x] `models set`
 - [x] `models set-image`
 - [x] `models aliases`
-- [ ] `models auth`
+- [x] `models auth`
 - [x] `models fallbacks`
 - [x] `models image-fallbacks`
 - [x] `models scan`

@@ -34,9 +34,10 @@ use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
     ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
-    ModelAliasDetail, ModelAliasesResponse, ModelFallbackChainDetail, ModelFallbacksResponse,
-    ModelListResponse, ModelProviderDetail, ModelScanResponse, ModelSetImageResponse,
-    ModelSetResponse, ModelStatusResponse, OutputFormat, render,
+    ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
+    ModelFallbackChainDetail, ModelFallbacksResponse, ModelListResponse, ModelProviderDetail,
+    ModelScanResponse, ModelSetImageResponse, ModelSetResponse, ModelStatusResponse,
+    OutputFormat, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -595,6 +596,60 @@ fn provider_notes(provider: &rune_config::ModelProviderConfig) -> Option<String>
     }
 }
 
+fn model_auth_details() -> ModelAuthResponse {
+    let config = load_config();
+    let providers = config
+        .models
+        .providers
+        .iter()
+        .map(|provider| {
+            let auth_order = config
+                .models
+                .auth_orders
+                .iter()
+                .find(|entry| entry.provider == provider.name)
+                .map(|entry| entry.order.clone())
+                .unwrap_or_default();
+            let mut notes = Vec::new();
+            if provider.api_key.as_deref().is_some_and(|key| !key.trim().is_empty()) {
+                notes.push(
+                    "Direct api_key is configured in local config. Prefer api_key_env for cleaner operator rotation when possible.".to_string(),
+                );
+            } else if let Some(env_var) = provider.api_key_env.as_deref() {
+                notes.push(format!(
+                    "Use `rune config set models.providers.<n>.api_key_env \"{env_var}\"` or set `{env_var}` in the runtime environment before launch."
+                ));
+            } else {
+                notes.push(
+                    "No provider-specific api_key_env configured; runtime will fall back to provider defaults such as OPENAI_API_KEY when supported.".to_string(),
+                );
+            }
+            if let Some(note) = provider_notes(provider) {
+                notes.push(note);
+            }
+            if auth_order.is_empty() {
+                notes.push(
+                    "No explicit auth_order configured for this provider; default provider resolution order applies.".to_string(),
+                );
+            }
+            ModelAuthProviderDetail {
+                provider: provider.name.clone(),
+                provider_kind: provider.kind.clone(),
+                credential_source: provider_credential_source(provider),
+                credentials_ready: provider_credentials_ready(provider),
+                api_key_configured: provider
+                    .api_key
+                    .as_deref()
+                    .is_some_and(|key| !key.trim().is_empty()),
+                api_key_env: provider.api_key_env.clone(),
+                auth_order,
+                notes,
+            }
+        })
+        .collect();
+    ModelAuthResponse { providers }
+}
+
 fn model_provider_details() -> ModelListResponse {
     let config = load_config();
     let default_model = config.models.default_model.clone().or_else(|| {
@@ -1016,6 +1071,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 ModelsAction::Aliases => {
                     let result = model_alias_details();
+                    println!("{}", render(&result, format));
+                }
+                ModelsAction::Auth => {
+                    let result = model_auth_details();
                     println!("{}", render(&result, format));
                 }
                 ModelsAction::Set { model } => {
