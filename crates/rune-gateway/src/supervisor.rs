@@ -266,8 +266,8 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                 .start_delivery_attempt(&reminder.id)
                 .await;
 
-            // Deliver reminder by executing it as a turn in the stable scheduled session.
-            match run_reminder(&deps, &reminder.message).await {
+            // Deliver reminder via the session determined by its target field.
+            match run_reminder(&deps, &reminder.message, &reminder.target).await {
                 Ok(output) => {
                     if deps
                         .reminder_store
@@ -381,13 +381,39 @@ async fn run_agent_turn(
     }
 }
 
-/// Execute a reminder by running its message in the stable main scheduled session.
+/// Execute a reminder by running its message in the session determined by `target`.
+///
+/// Target routing:
+///   - `"main"` (default) → stable main scheduled session
+///   - `"isolated"` → one-shot subagent session under the main scheduled session
+///   - anything else → treated as `"main"` with a warning
 async fn run_reminder(
     deps: &SupervisorDeps,
     message: &str,
+    target: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let session = get_or_create_main_scheduled_session(deps).await?;
-    execute_in_session(deps, &session, message, None, false, TriggerKind::Reminder).await
+    match target {
+        "isolated" => {
+            let parent = get_or_create_main_scheduled_session(deps).await?;
+            let session = deps
+                .session_engine
+                .create_session_full(
+                    SessionKind::Subagent,
+                    deps.workspace_root.clone(),
+                    Some(parent.id),
+                    None,
+                )
+                .await?;
+            execute_in_session(deps, &session, message, None, true, TriggerKind::Reminder).await
+        }
+        other => {
+            if other != "main" {
+                warn!(target = %other, "unrecognized reminder target; falling back to main");
+            }
+            let session = get_or_create_main_scheduled_session(deps).await?;
+            execute_in_session(deps, &session, message, None, false, TriggerKind::Reminder).await
+        }
+    }
 }
 
 async fn get_or_create_main_scheduled_session(

@@ -1636,23 +1636,35 @@ pub struct ReminderSummary {
     pub delivered: bool,
     pub created_at: String,
     pub delivered_at: Option<String>,
+    /// Lifecycle status: pending, delivered, cancelled, missed.
+    #[serde(default)]
+    pub status: String,
+    /// When the reminder reached a terminal outcome.
+    pub outcome_at: Option<String>,
+    /// Last recorded terminal error, if any.
+    pub last_error: Option<String>,
 }
 
 impl fmt::Display for ReminderSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = if self.status.is_empty() {
+            if self.delivered { "delivered" } else { "pending" }
+        } else {
+            &self.status
+        };
         write!(
             f,
             "{} [{}] {} -> {}",
-            self.id,
-            if self.delivered {
-                "delivered"
-            } else {
-                "pending"
-            },
-            self.target,
-            self.message
+            self.id, label, self.target, self.message,
         )?;
-        write!(f, " at {}", self.fire_at)
+        write!(f, " at {}", self.fire_at)?;
+        if let Some(ref outcome_at) = self.outcome_at {
+            write!(f, " outcome={outcome_at}")?;
+        }
+        if let Some(ref last_error) = self.last_error {
+            write!(f, " error={last_error}")?;
+        }
+        Ok(())
     }
 }
 
@@ -2316,5 +2328,106 @@ mod tests {
         assert!(out.contains("Dashboard"));
         assert!(out.contains("Cron:      3 total / 2 enabled / 1 due"));
         assert!(out.contains("Default:   hamza-eastus2/gpt-5.4"));
+    }
+
+    #[test]
+    fn render_reminder_pending() {
+        let r = ReminderSummary {
+            id: "r-1".into(),
+            message: "Stand up".into(),
+            target: "main".into(),
+            fire_at: "2026-04-01T09:00:00Z".into(),
+            delivered: false,
+            created_at: "2026-03-19T10:00:00Z".into(),
+            delivered_at: None,
+            status: "pending".into(),
+            outcome_at: None,
+            last_error: None,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("[pending]"));
+        assert!(out.contains("main -> Stand up"));
+        assert!(!out.contains("outcome="));
+        assert!(!out.contains("error="));
+    }
+
+    #[test]
+    fn render_reminder_delivered() {
+        let r = ReminderSummary {
+            id: "r-2".into(),
+            message: "Take meds".into(),
+            target: "isolated".into(),
+            fire_at: "2026-04-01T08:00:00Z".into(),
+            delivered: true,
+            created_at: "2026-03-19T10:00:00Z".into(),
+            delivered_at: Some("2026-04-01T08:00:05Z".into()),
+            status: "delivered".into(),
+            outcome_at: Some("2026-04-01T08:00:05Z".into()),
+            last_error: None,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("[delivered]"));
+        assert!(out.contains("isolated -> Take meds"));
+        assert!(out.contains("outcome=2026-04-01T08:00:05Z"));
+    }
+
+    #[test]
+    fn render_reminder_missed_shows_error() {
+        let r = ReminderSummary {
+            id: "r-3".into(),
+            message: "Important".into(),
+            target: "main".into(),
+            fire_at: "2026-04-01T07:00:00Z".into(),
+            delivered: false,
+            created_at: "2026-03-19T10:00:00Z".into(),
+            delivered_at: None,
+            status: "missed".into(),
+            outcome_at: Some("2026-04-01T07:01:00Z".into()),
+            last_error: Some("session unavailable".into()),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("[missed]"));
+        assert!(out.contains("error=session unavailable"));
+        assert!(out.contains("outcome="));
+    }
+
+    #[test]
+    fn render_reminder_cancelled() {
+        let r = ReminderSummary {
+            id: "r-4".into(),
+            message: "Nevermind".into(),
+            target: "main".into(),
+            fire_at: "2026-04-01T12:00:00Z".into(),
+            delivered: false,
+            created_at: "2026-03-19T10:00:00Z".into(),
+            delivered_at: None,
+            status: "cancelled".into(),
+            outcome_at: Some("2026-03-20T10:00:00Z".into()),
+            last_error: None,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("[cancelled]"));
+    }
+
+    #[test]
+    fn render_reminder_json_includes_outcome_fields() {
+        let r = ReminderSummary {
+            id: "r-5".into(),
+            message: "JSON test".into(),
+            target: "isolated".into(),
+            fire_at: "2026-04-01T09:00:00Z".into(),
+            delivered: false,
+            created_at: "2026-03-19T10:00:00Z".into(),
+            delivered_at: None,
+            status: "missed".into(),
+            outcome_at: Some("2026-04-01T09:01:00Z".into()),
+            last_error: Some("timeout".into()),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["status"], "missed");
+        assert_eq!(v["outcome_at"], "2026-04-01T09:01:00Z");
+        assert_eq!(v["last_error"], "timeout");
+        assert_eq!(v["target"], "isolated");
     }
 }

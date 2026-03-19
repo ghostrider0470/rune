@@ -765,6 +765,9 @@ impl GatewayClient {
                     delivered: item["delivered"].as_bool().unwrap_or(false),
                     created_at: item["created_at"].as_str().unwrap_or("?").to_string(),
                     delivered_at: item["delivered_at"].as_str().map(String::from),
+                    status: item["status"].as_str().unwrap_or("pending").to_string(),
+                    outcome_at: item["outcome_at"].as_str().map(String::from),
+                    last_error: item["last_error"].as_str().map(String::from),
                 })
                 .collect();
             Ok(RemindersListResponse { reminders })
@@ -1742,5 +1745,63 @@ mod tests {
         let json = show_config().unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v["gateway"]["port"].is_number());
+    }
+
+    #[tokio::test]
+    async fn reminders_list_parses_outcome_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/reminders"))
+            .and(query_param("includeDelivered", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "id": "r-1",
+                    "message": "Stand up",
+                    "target": "isolated",
+                    "fire_at": "2026-04-01T09:00:00Z",
+                    "status": "delivered",
+                    "delivered": true,
+                    "created_at": "2026-03-19T10:00:00Z",
+                    "delivered_at": "2026-04-01T09:00:05Z",
+                    "outcome_at": "2026-04-01T09:00:05Z",
+                    "last_error": null
+                },
+                {
+                    "id": "r-2",
+                    "message": "Missed one",
+                    "target": "main",
+                    "fire_at": "2026-04-01T07:00:00Z",
+                    "status": "missed",
+                    "delivered": false,
+                    "created_at": "2026-03-19T10:00:00Z",
+                    "delivered_at": null,
+                    "outcome_at": "2026-04-01T07:01:00Z",
+                    "last_error": "session unavailable"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.reminders_list(true).await.unwrap();
+        assert_eq!(resp.reminders.len(), 2);
+
+        assert_eq!(resp.reminders[0].target, "isolated");
+        assert_eq!(resp.reminders[0].status, "delivered");
+        assert_eq!(
+            resp.reminders[0].outcome_at.as_deref(),
+            Some("2026-04-01T09:00:05Z")
+        );
+        assert!(resp.reminders[0].last_error.is_none());
+
+        assert_eq!(resp.reminders[1].status, "missed");
+        assert_eq!(
+            resp.reminders[1].last_error.as_deref(),
+            Some("session unavailable")
+        );
+        assert_eq!(
+            resp.reminders[1].outcome_at.as_deref(),
+            Some("2026-04-01T07:01:00Z")
+        );
     }
 }
