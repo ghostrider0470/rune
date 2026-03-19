@@ -510,6 +510,18 @@ pub enum MessageAction {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Delete a message by ID from a channel adapter.
+    Delete {
+        /// ID of the message to delete.
+        #[arg(long)]
+        message_id: String,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: String,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Add or remove an emoji reaction on a message.
     React {
         /// ID of the message to react to.
@@ -2351,6 +2363,87 @@ mod tests {
             "react",
             "--emoji",
             "👍",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn parse_message_delete() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "delete",
+            "--message-id",
+            "msg-42",
+            "--channel",
+            "telegram",
+            "--session",
+            "sess-7",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Delete {
+                        message_id,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-42");
+                assert_eq!(channel, "telegram");
+                assert_eq!(session.as_deref(), Some("sess-7"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_delete_without_session() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "delete",
+            "--message-id",
+            "msg-99",
+            "--channel",
+            "discord",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Delete {
+                        message_id,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-99");
+                assert_eq!(channel, "discord");
+                assert!(session.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_delete_requires_message_id_and_channel() {
+        assert!(Cli::try_parse_from(["rune", "message", "delete"]).is_err());
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "delete",
+            "--message-id",
+            "msg-1",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "delete",
+            "--channel",
+            "telegram",
         ])
         .is_err());
     }

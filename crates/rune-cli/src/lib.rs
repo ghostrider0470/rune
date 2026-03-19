@@ -1273,6 +1273,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::Delete {
+                message_id,
+                channel,
+                session,
+            } => {
+                let result = client
+                    .message_delete(&message_id, &channel, session.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Reminders { action } => match action {
             RemindersAction::Add {
