@@ -23,8 +23,8 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell, ConfigAction,
-    CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
+    AgentsAction, ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell,
+    ConfigAction, CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
     MessageTagAction, MessageThreadAction, MessageVoiceAction, ModelsAction, RemindersAction,
     SessionsAction,
     SystemAction, SystemEventAction, SystemHeartbeatAction,
@@ -1098,6 +1098,23 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
             SessionsAction::Status { id } => {
+                let result = client.session_status(&id).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Agents { action } => match action {
+            AgentsAction::List {
+                active_minutes,
+                limit,
+            } => {
+                let result = client.agents_list(active_minutes, limit).await?;
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Show { id } => {
+                let result = client.agents_show(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Status { id } => {
                 let result = client.session_status(&id).await?;
                 println!("{}", render(&result, format));
             }

@@ -9,7 +9,8 @@ use serde_json::json;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
 use crate::output::{
-    ActionResult, ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
+    ActionResult, AgentDetailResponse, AgentListResponse, AgentSummary,
+    ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport, SystemEventListResponse,
@@ -1749,6 +1750,89 @@ impl GatewayClient {
         }
     }
 
+    /// `GET /sessions?kind=subagent` — list subagent sessions.
+    pub async fn agents_list(
+        &self,
+        active_minutes: Option<u64>,
+        limit: u64,
+    ) -> Result<AgentListResponse> {
+        let mut query: Vec<(&str, String)> = vec![
+            ("kind", "subagent".to_string()),
+            ("limit", limit.to_string()),
+        ];
+        if let Some(active_minutes) = active_minutes {
+            query.push(("active", active_minutes.to_string()));
+        }
+
+        let resp = self
+            .http
+            .get(self.url("/sessions"))
+            .query(&query)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /sessions?kind=subagent")?;
+            let agents = body
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|v| AgentSummary {
+                    id: v["id"].as_str().unwrap_or("?").to_string(),
+                    status: v["status"].as_str().unwrap_or("unknown").to_string(),
+                    parent_session_id: v["requester_session_id"].as_str().map(String::from),
+                    created_at: v["created_at"].as_str().map(String::from),
+                    turn_count: v["turn_count"].as_u64().map(|n| n as u32),
+                    usage_prompt_tokens: v["usage_prompt_tokens"].as_u64(),
+                    usage_completion_tokens: v["usage_completion_tokens"].as_u64(),
+                    latest_model: v["latest_model"].as_str().map(String::from),
+                })
+                .collect();
+            Ok(AgentListResponse { agents })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /sessions/:id` — show subagent session detail (re-uses session endpoint).
+    pub async fn agents_show(&self, id: &str) -> Result<AgentDetailResponse> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/sessions/{id}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /sessions/:id")?;
+            Ok(AgentDetailResponse {
+                id: v["id"].as_str().unwrap_or("?").to_string(),
+                status: v["status"].as_str().unwrap_or("unknown").to_string(),
+                parent_session_id: v["requester_session_id"]
+                    .as_str()
+                    .map(String::from),
+                created_at: v["created_at"].as_str().map(String::from),
+                turn_count: v["turn_count"].as_u64().map(|n| n as u32),
+                latest_model: v["latest_model"].as_str().map(String::from),
+                usage_prompt_tokens: v["usage_prompt_tokens"].as_u64(),
+                usage_completion_tokens: v["usage_completion_tokens"].as_u64(),
+                last_turn_started_at: v["last_turn_started_at"].as_str().map(String::from),
+                last_turn_ended_at: v["last_turn_ended_at"].as_str().map(String::from),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Agent session '{id}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
     /// Run doctor checks: config validation + gateway connectivity + model provider reachability.
     pub async fn doctor(&self) -> Result<DoctorReport> {
         let mut checks = Vec::new();
@@ -2549,6 +2633,74 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let response = client.sessions_show("session-1").await.unwrap();
         assert_eq!(response.channel.as_deref(), Some("telegram:ops"));
+    }
+
+    #[tokio::test]
+    async fn agents_list_parses_subagent_sessions() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions"))
+            .and(query_param("kind", "subagent"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": "sub-1",
+                    "kind": "subagent",
+                    "status": "running",
+                    "requester_session_id": "parent-abc",
+                    "turn_count": 2
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.agents_list(None, 100).await.unwrap();
+        assert_eq!(resp.agents.len(), 1);
+        assert_eq!(resp.agents[0].id, "sub-1");
+        assert_eq!(
+            resp.agents[0].parent_session_id.as_deref(),
+            Some("parent-abc")
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_show_parses_detail() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions/sub-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "sub-1",
+                "kind": "subagent",
+                "status": "running",
+                "requester_session_id": "parent-abc",
+                "created_at": "2026-03-19T00:00:00Z",
+                "turn_count": 2,
+                "latest_model": "gpt-5",
+                "usage_prompt_tokens": 100,
+                "usage_completion_tokens": 50
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.agents_show("sub-1").await.unwrap();
+        assert_eq!(resp.id, "sub-1");
+        assert_eq!(resp.parent_session_id.as_deref(), Some("parent-abc"));
+        assert_eq!(resp.latest_model.as_deref(), Some("gpt-5"));
+    }
+
+    #[tokio::test]
+    async fn agents_show_not_found() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sessions/nonexistent"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let err = client.agents_show("nonexistent").await.unwrap_err();
+        assert!(err.to_string().contains("not found"));
     }
 
     #[test]

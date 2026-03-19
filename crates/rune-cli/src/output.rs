@@ -197,6 +197,104 @@ impl fmt::Display for SessionDetailResponse {
     }
 }
 
+/// Subagent summary for `rune agents list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSummary {
+    pub id: String,
+    pub status: String,
+    pub parent_session_id: Option<String>,
+    pub created_at: Option<String>,
+    pub turn_count: Option<u32>,
+    pub usage_prompt_tokens: Option<u64>,
+    pub usage_completion_tokens: Option<u64>,
+    pub latest_model: Option<String>,
+}
+
+impl fmt::Display for AgentSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} [{}]", self.id, self.status)?;
+        if let Some(ref parent) = self.parent_session_id {
+            write!(f, " parent={parent}")?;
+        }
+        if let Some(turns) = self.turn_count {
+            write!(f, " turns={turns}")?;
+        }
+        if let Some(ref model) = self.latest_model {
+            write!(f, " model={model}")?;
+        }
+        if let (Some(prompt), Some(completion)) =
+            (self.usage_prompt_tokens, self.usage_completion_tokens)
+        {
+            write!(f, " tokens={}/{}", prompt, completion)?;
+        }
+        Ok(())
+    }
+}
+
+/// Agent list response for `rune agents list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentListResponse {
+    pub agents: Vec<AgentSummary>,
+}
+
+impl fmt::Display for AgentListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.agents.is_empty() {
+            return write!(f, "No active subagent sessions.");
+        }
+        for a in &self.agents {
+            writeln!(f, "  {a}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Detailed subagent view for `rune agents show`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDetailResponse {
+    pub id: String,
+    pub status: String,
+    pub parent_session_id: Option<String>,
+    pub created_at: Option<String>,
+    pub turn_count: Option<u32>,
+    pub latest_model: Option<String>,
+    pub usage_prompt_tokens: Option<u64>,
+    pub usage_completion_tokens: Option<u64>,
+    pub last_turn_started_at: Option<String>,
+    pub last_turn_ended_at: Option<String>,
+}
+
+impl fmt::Display for AgentDetailResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Agent: {}", self.id)?;
+        writeln!(f, "  Status:  {}", self.status)?;
+        if let Some(ref parent) = self.parent_session_id {
+            writeln!(f, "  Parent:  {parent}")?;
+        }
+        if let Some(ref t) = self.created_at {
+            writeln!(f, "  Created: {t}")?;
+        }
+        if let Some(n) = self.turn_count {
+            writeln!(f, "  Turns:   {n}")?;
+        }
+        if let Some(ref model) = self.latest_model {
+            writeln!(f, "  Model:   {model}")?;
+        }
+        if let (Some(prompt), Some(completion)) =
+            (self.usage_prompt_tokens, self.usage_completion_tokens)
+        {
+            writeln!(f, "  Tokens:  {prompt}/{completion}")?;
+        }
+        if let Some(ref started_at) = self.last_turn_started_at {
+            writeln!(f, "  Last started: {started_at}")?;
+        }
+        if let Some(ref ended_at) = self.last_turn_ended_at {
+            writeln!(f, "  Last ended:   {ended_at}")?;
+        }
+        Ok(())
+    }
+}
+
 /// First-class `/status` / `session_status` parity card for an individual session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStatusCard {
@@ -2285,6 +2383,54 @@ mod tests {
     fn render_session_list_empty() {
         let l = SessionListResponse { sessions: vec![] };
         assert_eq!(render(&l, OutputFormat::Human), "No active sessions.");
+    }
+
+    #[test]
+    fn render_agent_list_empty() {
+        let l = AgentListResponse { agents: vec![] };
+        assert_eq!(
+            render(&l, OutputFormat::Human),
+            "No active subagent sessions."
+        );
+    }
+
+    #[test]
+    fn render_agent_list_with_entry() {
+        let l = AgentListResponse {
+            agents: vec![AgentSummary {
+                id: "sub-1".into(),
+                status: "running".into(),
+                parent_session_id: Some("parent-abc".into()),
+                created_at: Some("2026-03-19T00:00:00Z".into()),
+                turn_count: Some(3),
+                usage_prompt_tokens: Some(100),
+                usage_completion_tokens: Some(50),
+                latest_model: Some("gpt-5".into()),
+            }],
+        };
+        let out = render(&l, OutputFormat::Human);
+        assert!(out.contains("sub-1"));
+        assert!(out.contains("parent=parent-abc"));
+        assert!(out.contains("turns=3"));
+    }
+
+    #[test]
+    fn render_agent_detail() {
+        let detail = AgentDetailResponse {
+            id: "sub-1".into(),
+            status: "running".into(),
+            parent_session_id: Some("parent-abc".into()),
+            created_at: Some("2026-03-19T00:00:00Z".into()),
+            turn_count: Some(3),
+            latest_model: Some("gpt-5".into()),
+            usage_prompt_tokens: Some(100),
+            usage_completion_tokens: Some(50),
+            last_turn_started_at: None,
+            last_turn_ended_at: None,
+        };
+        let out = render(&detail, OutputFormat::Human);
+        assert!(out.contains("Agent: sub-1"));
+        assert!(out.contains("Parent:  parent-abc"));
     }
 
     #[test]
