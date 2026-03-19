@@ -49,6 +49,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_sandbox: bool,
 
+    /// Skip the interactive first-use confirmation prompt for bypass modes.
+    ///
+    /// When `--yolo` or `--no-sandbox` is used for the first time, Rune
+    /// normally requires an interactive acknowledgment.  Pass `--accept-risk`
+    /// to auto-acknowledge (useful in CI/scripts).
+    #[arg(long, global = true)]
+    pub accept_risk: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -2070,6 +2078,26 @@ mod tests {
         // clap global flags can appear before or after the subcommand.
         let cli = Cli::try_parse_from(["rune", "gateway", "status", "--yolo"]).unwrap();
         assert!(cli.yolo);
+    }
+
+    #[test]
+    fn parse_accept_risk_flag() {
+        let cli = Cli::try_parse_from(["rune", "--yolo", "--accept-risk", "status"]).unwrap();
+        assert!(cli.yolo);
+        assert!(cli.accept_risk);
+    }
+
+    #[test]
+    fn accept_risk_defaults_to_false() {
+        let cli = Cli::try_parse_from(["rune", "--yolo", "status"]).unwrap();
+        assert!(!cli.accept_risk);
+    }
+
+    #[test]
+    fn accept_risk_works_without_bypass_flags() {
+        let cli = Cli::try_parse_from(["rune", "--accept-risk", "status"]).unwrap();
+        assert!(cli.accept_risk);
+        assert!(!cli.yolo);
     }
 
     // ── Message family (#74) ─────────────────────────────────────────

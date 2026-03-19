@@ -216,17 +216,21 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
         "starting rune gateway"
     );
 
-    let unrestricted = config.approval.mode.is_yolo() || !config.security.sandbox;
-    if unrestricted {
-        let warning = if config.approval.mode.is_yolo() && !config.security.sandbox {
-            "WARNING: Rune is starting in unrestricted mode (--yolo + --no-sandbox). All approvals are auto-bypassed and sandbox boundaries are disabled. Use only in trusted environments."
-        } else if config.approval.mode.is_yolo() {
-            "WARNING: Rune is starting with approval bypass enabled (--yolo). Use only in trusted environments."
+    // First-use vs. acknowledged bypass warning (issue #64).
+    if let Some(posture) = rune_config::BypassPosture::detect(config) {
+        let ack = rune_config::BypassAcknowledgment::from_home()
+            .unwrap_or_else(|| {
+                rune_config::BypassAcknowledgment::new(std::path::Path::new("/tmp/.rune-config"))
+            });
+
+        if ack.is_acknowledged() {
+            let reminder = posture.acknowledged_reminder();
+            info!(bypass = reminder, "trusted-environment bypass active (previously acknowledged)");
         } else {
-            "WARNING: Rune is starting with sandbox disabled (--no-sandbox). Workspace boundary enforcement is off. Use only in trusted environments."
-        };
-        eprintln!("{warning}");
-        warn!(warning = warning, "trusted-environment bypass active");
+            let warning = posture.first_use_warning();
+            eprintln!("{warning}");
+            warn!(warning = %warning, "trusted-environment bypass active — NOT YET ACKNOWLEDGED");
+        }
     }
 }
 

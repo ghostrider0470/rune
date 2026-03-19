@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use figment::{
     Figment,
@@ -1113,6 +1114,127 @@ pub enum ConfigError {
     Load(#[from] Box<figment::Error>),
     #[error("path validation failed: {path} — {reason}")]
     PathValidation { path: String, reason: String },
+}
+
+// ── First-use bypass acknowledgment (issue #64) ─────────────────────
+
+/// Sentinel file name written to `config_dir` once the operator acknowledges
+/// the risks of running in an unrestricted startup posture.
+const BYPASS_ACK_SENTINEL: &str = ".yolo-acknowledged";
+
+/// Manages the persistent first-use acknowledgment for unrestricted bypass
+/// modes (`--yolo`, `--no-sandbox`).
+///
+/// When `--yolo` or `--no-sandbox` is used for the first time, the operator
+/// must explicitly confirm the risk.  After acknowledgment, a sentinel file
+/// is written so the warning is not repeated on subsequent starts.
+pub struct BypassAcknowledgment {
+    sentinel_path: PathBuf,
+}
+
+impl BypassAcknowledgment {
+    /// Create an acknowledgment tracker rooted in the given config directory.
+    pub fn new(config_dir: &Path) -> Self {
+        Self {
+            sentinel_path: config_dir.join(BYPASS_ACK_SENTINEL),
+        }
+    }
+
+    /// Resolve from `$HOME/.rune/config` (standalone default).
+    pub fn from_home() -> Option<Self> {
+        home_dir().map(|h| Self::new(&h.join(".rune").join("config")))
+    }
+
+    /// Whether the operator has previously acknowledged the bypass risk.
+    pub fn is_acknowledged(&self) -> bool {
+        self.sentinel_path.exists()
+    }
+
+    /// Record that the operator has acknowledged the bypass risk.
+    ///
+    /// Creates the parent directory if needed.  Returns `Ok(())` on success
+    /// or if the sentinel already exists.
+    pub fn record(&self) -> std::io::Result<()> {
+        if self.is_acknowledged() {
+            return Ok(());
+        }
+        if let Some(parent) = self.sentinel_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &self.sentinel_path,
+            format!(
+                "Bypass risk acknowledged at {:?}\n",
+                SystemTime::now()
+            ),
+        )
+    }
+
+    /// Remove a previously recorded acknowledgment.
+    ///
+    /// Useful for testing or when the operator wants to re-enable the
+    /// first-use warning.
+    pub fn revoke(&self) -> std::io::Result<()> {
+        if self.sentinel_path.exists() {
+            std::fs::remove_file(&self.sentinel_path)?;
+        }
+        Ok(())
+    }
+
+    /// Path to the sentinel file (exposed for diagnostics / testing).
+    pub fn sentinel_path(&self) -> &Path {
+        &self.sentinel_path
+    }
+}
+
+/// Describes the bypass posture for warning messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BypassPosture {
+    /// Both approval bypass and sandbox disabled.
+    FullUnrestricted,
+    /// Only approval bypass (--yolo).
+    YoloOnly,
+    /// Only sandbox disabled (--no-sandbox).
+    NoSandboxOnly,
+}
+
+impl BypassPosture {
+    /// Detect the active bypass posture from config, or `None` if standard.
+    pub fn detect(config: &AppConfig) -> Option<Self> {
+        match (config.approval.mode.is_yolo(), !config.security.sandbox) {
+            (true, true) => Some(Self::FullUnrestricted),
+            (true, false) => Some(Self::YoloOnly),
+            (false, true) => Some(Self::NoSandboxOnly),
+            (false, false) => None,
+        }
+    }
+
+    /// Full warning message shown on first use.
+    pub fn first_use_warning(self) -> &'static str {
+        match self {
+            Self::FullUnrestricted => "\
+WARNING: Rune is starting in unrestricted mode (--yolo + --no-sandbox).
+All tool approvals are auto-bypassed and sandbox boundaries are disabled.
+Only use this in trusted environments (local dev, air-gapped infra).",
+            Self::YoloOnly => "\
+WARNING: Rune is starting with approval bypass enabled (--yolo).
+All tool calls will be auto-approved without operator confirmation.
+Only use this in trusted environments.",
+            Self::NoSandboxOnly => "\
+WARNING: Rune is starting with sandbox disabled (--no-sandbox).
+Workspace boundary enforcement is off — agents can access the full filesystem.
+Only use this in trusted environments.",
+        }
+    }
+
+    /// Brief reminder shown on subsequent starts after acknowledgment.
+    pub fn acknowledged_reminder(self) -> &'static str {
+        match self {
+            Self::FullUnrestricted => "Bypass active: yolo + no-sandbox (previously acknowledged)",
+            Self::YoloOnly => "Bypass active: yolo mode (previously acknowledged)",
+            Self::NoSandboxOnly => "Bypass active: no-sandbox (previously acknowledged)",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2436,5 +2558,94 @@ mode = "auto-exec"
         // trust_spells is untouched by CLI flags
         assert!(config.security.trust_spells);
         assert_eq!(config.security.posture(), "unrestricted");
+    }
+
+    // ── Bypass acknowledgment tests (#64) ────────────────────────────
+
+    #[test]
+    fn bypass_ack_not_acknowledged_initially() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ack = BypassAcknowledgment::new(tmp.path());
+        assert!(!ack.is_acknowledged());
+    }
+
+    #[test]
+    fn bypass_ack_record_and_check() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ack = BypassAcknowledgment::new(tmp.path());
+        ack.record().unwrap();
+        assert!(ack.is_acknowledged());
+        // Sentinel file exists on disk.
+        assert!(ack.sentinel_path().exists());
+    }
+
+    #[test]
+    fn bypass_ack_record_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ack = BypassAcknowledgment::new(tmp.path());
+        ack.record().unwrap();
+        ack.record().unwrap(); // should not fail
+        assert!(ack.is_acknowledged());
+    }
+
+    #[test]
+    fn bypass_ack_revoke() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ack = BypassAcknowledgment::new(tmp.path());
+        ack.record().unwrap();
+        assert!(ack.is_acknowledged());
+        ack.revoke().unwrap();
+        assert!(!ack.is_acknowledged());
+    }
+
+    #[test]
+    fn bypass_ack_creates_parent_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("deep").join("nested").join("config");
+        let ack = BypassAcknowledgment::new(&nested);
+        ack.record().unwrap();
+        assert!(ack.is_acknowledged());
+    }
+
+    // ── BypassPosture detection tests (#64) ──────────────────────────
+
+    #[test]
+    fn bypass_posture_detect_standard() {
+        let config = AppConfig::default();
+        assert!(BypassPosture::detect(&config).is_none());
+    }
+
+    #[test]
+    fn bypass_posture_detect_yolo_only() {
+        let mut config = AppConfig::default();
+        config.approval.mode = ApprovalMode::Yolo;
+        assert_eq!(BypassPosture::detect(&config), Some(BypassPosture::YoloOnly));
+    }
+
+    #[test]
+    fn bypass_posture_detect_no_sandbox_only() {
+        let mut config = AppConfig::default();
+        config.security.sandbox = false;
+        assert_eq!(BypassPosture::detect(&config), Some(BypassPosture::NoSandboxOnly));
+    }
+
+    #[test]
+    fn bypass_posture_detect_full_unrestricted() {
+        let mut config = AppConfig::default();
+        config.approval.mode = ApprovalMode::Yolo;
+        config.security.sandbox = false;
+        assert_eq!(BypassPosture::detect(&config), Some(BypassPosture::FullUnrestricted));
+    }
+
+    #[test]
+    fn bypass_posture_warning_messages_not_empty() {
+        for posture in [
+            BypassPosture::FullUnrestricted,
+            BypassPosture::YoloOnly,
+            BypassPosture::NoSandboxOnly,
+        ] {
+            assert!(!posture.first_use_warning().is_empty());
+            assert!(!posture.acknowledged_reminder().is_empty());
+        }
     }
 }
