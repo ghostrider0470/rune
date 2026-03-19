@@ -773,7 +773,6 @@ fn missing_api_key_env_returns_auth_error() {
 
 #[tokio::test]
 async fn routed_provider_dispatches_by_provider_model_id_and_strips_prefix() {
-    let _guard = lock_env();
     let openai_server = MockServer::start().await;
     let codex_server = MockServer::start().await;
 
@@ -795,9 +794,12 @@ async fn routed_provider_dispatches_by_provider_model_id_and_strips_prefix() {
         .mount(&codex_server)
         .await;
 
-    unsafe {
-        std::env::set_var("TEST_ROUTED_OPENAI_KEY", "fake-openai");
-        std::env::set_var("TEST_ROUTED_CODEX_KEY", "fake-codex");
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::set_var("TEST_ROUTED_OPENAI_KEY", "fake-openai");
+            std::env::set_var("TEST_ROUTED_CODEX_KEY", "fake-codex");
+        }
     }
 
     let models = ModelsConfig {
@@ -842,8 +844,11 @@ async fn routed_provider_dispatches_by_provider_model_id_and_strips_prefix() {
     };
     provider.complete(&openai_request).await.unwrap();
 
-    unsafe {
-        std::env::remove_var("TEST_ROUTED_OPENAI_KEY");
-        std::env::remove_var("TEST_ROUTED_CODEX_KEY");
+    {
+        let _guard = lock_env();
+        unsafe {
+            std::env::remove_var("TEST_ROUTED_OPENAI_KEY");
+            std::env::remove_var("TEST_ROUTED_CODEX_KEY");
+        }
     }
 }
