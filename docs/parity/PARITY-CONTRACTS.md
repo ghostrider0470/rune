@@ -507,6 +507,7 @@ See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the fu
 - local Docker deployment with mounted state
 - backup workflow documentation naming included durable-state domains and exclusions
 - restore workflow documentation naming prerequisites and post-restore verification checks
+- restart-preservation documentation naming which state must survive container restart and which post-restart checks operators should run
 - restart durability tests
 - PostgreSQL-backed Azure-hosted mode tests
 - Azure Files/Blob mapping validation for intended domains
