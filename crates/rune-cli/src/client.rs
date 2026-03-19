@@ -12,7 +12,7 @@ use crate::output::{
     ActionResult, ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
-    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport,
+    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport, SystemEventListResponse,
     GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
     HealthResponse, HeartbeatStatusResponse, ModelScanProviderResult, ModelScanResponse,
     ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
@@ -739,6 +739,20 @@ impl GatewayClient {
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
+    }
+
+    /// List cron jobs filtered to only those with `system_event` payloads.
+    pub async fn system_event_list(
+        &self,
+        include_disabled: bool,
+    ) -> Result<SystemEventListResponse> {
+        let all = self.cron_list(include_disabled).await?;
+        let events = all
+            .jobs
+            .into_iter()
+            .filter(|job| job.payload.kind() == "system_event")
+            .collect();
+        Ok(SystemEventListResponse { events })
     }
 
     /// `GET /reminders`
@@ -1803,5 +1817,65 @@ mod tests {
             resp.reminders[1].outcome_at.as_deref(),
             Some("2026-04-01T07:01:00Z")
         );
+    }
+
+    #[tokio::test]
+    async fn system_event_list_filters_by_payload_kind() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/cron"))
+            .and(query_param("include_disabled", "false"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "id": "job-1",
+                    "name": "sys-ping",
+                    "schedule": { "kind": "at", "at": "2026-04-01T09:00:00Z" },
+                    "payload": { "kind": "system_event", "text": "ping" },
+                    "delivery_mode": "none",
+                    "enabled": true,
+                    "session_target": "main",
+                    "created_at": "2026-03-19T10:00:00Z",
+                    "last_run_at": null,
+                    "next_run_at": "2026-04-01T09:00:00Z",
+                    "run_count": 0
+                },
+                {
+                    "id": "job-2",
+                    "name": "agent-task",
+                    "schedule": { "kind": "cron", "expr": "0 * * * *" },
+                    "payload": { "kind": "agent_turn", "message": "do stuff" },
+                    "delivery_mode": "announce",
+                    "enabled": true,
+                    "session_target": "isolated",
+                    "created_at": "2026-03-19T10:00:00Z",
+                    "last_run_at": null,
+                    "next_run_at": "2026-04-01T10:00:00Z",
+                    "run_count": 0
+                },
+                {
+                    "id": "job-3",
+                    "name": "sys-check",
+                    "schedule": { "kind": "every", "every_ms": 60000 },
+                    "payload": { "kind": "system_event", "text": "health check" },
+                    "delivery_mode": "webhook",
+                    "webhook_url": "https://example.com/hook",
+                    "enabled": true,
+                    "session_target": "main",
+                    "created_at": "2026-03-19T10:00:00Z",
+                    "last_run_at": null,
+                    "next_run_at": "2026-03-19T10:01:00Z",
+                    "run_count": 0
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.system_event_list(false).await.unwrap();
+        assert_eq!(resp.events.len(), 2);
+        assert_eq!(resp.events[0].id, "job-1");
+        assert_eq!(resp.events[0].payload.kind(), "system_event");
+        assert_eq!(resp.events[1].id, "job-3");
+        assert_eq!(resp.events[1].payload.kind(), "system_event");
     }
 }

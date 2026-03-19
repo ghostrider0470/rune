@@ -25,7 +25,7 @@ pub use cli::Cli;
 use cli::{
     ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell, ConfigAction,
     CronAction, CronDeliveryMode, GatewayAction, MemoryAction, ModelsAction, RemindersAction,
-    SessionsAction, SystemAction, SystemHeartbeatAction,
+    SessionsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -1138,16 +1138,45 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         },
         Command::System { action } => match action {
-            SystemAction::Event {
-                text,
-                mode,
-                context_messages,
-            } => {
-                let result = client
-                    .cron_wake(&text, mode.as_str(), context_messages)
-                    .await?;
-                println!("{}", render(&result, format));
-            }
+            SystemAction::Event { action } => match action {
+                SystemEventAction::Inject {
+                    text,
+                    mode,
+                    context_messages,
+                } => {
+                    let result = client
+                        .cron_wake(&text, mode.as_str(), context_messages)
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                SystemEventAction::Schedule {
+                    text,
+                    at,
+                    name,
+                    session_target,
+                    delivery_mode,
+                    webhook_url,
+                } => {
+                    let at = DateTime::parse_from_rfc3339(&at)
+                        .with_context(|| format!("invalid --at timestamp: {at}"))?
+                        .with_timezone(&Utc);
+                    let result = client
+                        .cron_add_system_event(
+                            name.as_deref(),
+                            &text,
+                            at,
+                            &session_target,
+                            delivery_mode.as_str(),
+                            webhook_url.as_deref(),
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                SystemEventAction::List { include_disabled } => {
+                    let result = client.system_event_list(include_disabled).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
             SystemAction::Heartbeat { action } => match action {
                 SystemHeartbeatAction::Presence | SystemHeartbeatAction::Last => {
                     let result = heartbeat_presence();
