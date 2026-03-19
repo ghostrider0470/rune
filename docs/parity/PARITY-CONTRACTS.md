@@ -478,12 +478,38 @@ See [DEPLOYMENT.md §5.1](../operator/DEPLOYMENT.md#51-local--docker-path-equiva
 - read-only or degraded storage modes surface explicit errors
 - backup/restore workflows are documented and testable
 
+#### Read-only filesystem detection
+
+Writability is verified by write-probe (create + delete temp file), not by metadata/permission-bit inspection. This catches bind-mount RO, UID mismatch, SELinux/AppArmor denials, and filesystem-level RO mounts.
+
+All three detection surfaces must agree:
+
+- `rune doctor` CLI — Fail status per unwritable path, mode-aware fix hint
+- startup validation (`validate_paths`) — exit with clear error naming the path
+- gateway `POST /api/doctor/run` — per-path writability findings in response
+
+Unwritable required paths are Fail, never Warn. Silent fallback to ephemeral storage is never acceptable.
+
+#### Secrets-never-logged contract
+
+Secret **values** must never appear in: log output (any level), error messages, status/health/doctor responses, WebSocket payloads, transcript items, or diagnostic bundles.
+
+Scope: provider API keys, channel tokens, database credentials, certificate key material, any value from `/secrets` or secret-reference config fields.
+
+Secret **references** (key names, vault paths, env var names) may appear in diagnostics. Values may not.
+
+Violation is a release-blocking defect.
+
+See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the full invariant definition.
+
 ### Minimum parity evidence
 
 - local Docker deployment with mounted state
 - restart durability tests
 - PostgreSQL-backed Azure-hosted mode tests
 - Azure Files/Blob mapping validation for intended domains
+- write-probe detection of read-only mounts (Docker bind-mount with `ro` flag)
+- no secret values in `rune doctor` output, `/api/doctor/run` response, or structured logs
 
 ---
 

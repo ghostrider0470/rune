@@ -175,6 +175,23 @@ The config subsystem owns:
 - provider-, channel-, and agent-specific overrides
 - secrets references and injection model
 
+#### Secrets-never-logged invariant
+
+Secret values must never appear in:
+
+- log output (structured or unstructured, any severity level)
+- error messages returned to callers or rendered in CLI output
+- status/health/doctor endpoint responses
+- WebSocket event payloads
+- transcript items or tool result summaries
+- diagnostic bundles or debug dumps
+
+This applies to provider API keys, channel tokens, database credentials, certificate key material, and any value loaded from `/secrets` or injected via secret-reference config fields.
+
+Secret references (e.g. key names, vault paths, environment variable names) may appear in diagnostics. Secret values may not.
+
+Violation of this invariant is a release-blocking defect, not a cosmetic issue.
+
 ### 3.8 Doctor and diagnostics contract
 
 The diagnostic subsystem owns:
@@ -183,6 +200,27 @@ The diagnostic subsystem owns:
 - doctor checks and repair workflows
 - inspectable mismatch and drift reports
 - diagnostic bundle/export generation where shipped
+
+#### Read-only filesystem detection semantics
+
+Writability of configured storage paths is verified by **write-probe**, not by metadata inspection. The probe creates and immediately deletes a temporary file in the target directory. This catches failure modes that permission-bit checks miss:
+
+- bind-mount read-only (`ro` flag in Docker or fstab)
+- UID/GID mismatch between the runtime process and the mount owner
+- SELinux or AppArmor policy denials
+- filesystem-level read-only mounts
+
+Detection surfaces:
+
+| Surface | Behavior |
+|---|---|
+| `rune doctor` (CLI) | reports Fail (not Warn) per unwritable path with mode-aware fix hint |
+| `AppConfig::validate_paths()` (startup) | exits with a clear error naming the path and expected permissions |
+| `POST /api/doctor/run` (gateway) | includes per-path writability findings in the response body |
+
+Fix hints are **mode-aware**: standalone mode suggests `mkdir -p` / `chmod`; server/Docker mode suggests volume mount adjustments and UID guidance.
+
+An unwritable required storage path is a **Fail**, not a warning. Silent fallback to ephemeral storage is never acceptable.
 
 ---
 
