@@ -91,6 +91,11 @@ pub enum Command {
         #[command(subcommand)]
         action: SessionsAction,
     },
+    /// Inspect and manage subagent sessions.
+    Agents {
+        #[command(subcommand)]
+        action: AgentsAction,
+    },
     /// Inspect configured channel adapters.
     Channels {
         #[command(subcommand)]
@@ -297,6 +302,29 @@ pub enum SessionsAction {
     /// Show the first-class status card for a specific session.
     Status {
         /// Session ID to inspect.
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AgentsAction {
+    /// List active subagent sessions.
+    List {
+        /// Only include agents active within the last N minutes.
+        #[arg(long = "active")]
+        active_minutes: Option<u64>,
+        /// Maximum number of agents to return.
+        #[arg(long, default_value_t = 100)]
+        limit: u64,
+    },
+    /// Show details for a specific subagent session.
+    Show {
+        /// Subagent session ID to inspect.
+        id: String,
+    },
+    /// Show the first-class status card for a specific subagent session.
+    Status {
+        /// Subagent session ID to inspect.
         id: String,
     },
 }
@@ -1731,6 +1759,63 @@ mod tests {
             Command::Sessions {
                 action: SessionsAction::Status { id },
             } => assert_eq!(id, "abc-123"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_list() {
+        let cli = Cli::try_parse_from(["rune", "agents", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Agents {
+                action: AgentsAction::List {
+                    active_minutes: None,
+                    limit: 100
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_agents_list_with_filters() {
+        let cli = Cli::try_parse_from([
+            "rune", "agents", "list", "--active", "15", "--limit", "50",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Agents {
+                action:
+                    AgentsAction::List {
+                        active_minutes,
+                        limit,
+                    },
+            } => {
+                assert_eq!(active_minutes, Some(15));
+                assert_eq!(limit, 50);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_show() {
+        let cli = Cli::try_parse_from(["rune", "agents", "show", "agent-abc"]).unwrap();
+        match &cli.command {
+            Command::Agents {
+                action: AgentsAction::Show { id },
+            } => assert_eq!(id, "agent-abc"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_status() {
+        let cli = Cli::try_parse_from(["rune", "agents", "status", "agent-abc"]).unwrap();
+        match &cli.command {
+            Command::Agents {
+                action: AgentsAction::Status { id },
+            } => assert_eq!(id, "agent-abc"),
             other => panic!("unexpected command: {other:?}"),
         }
     }

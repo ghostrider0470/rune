@@ -481,6 +481,7 @@ pub struct SessionsListQuery {
     #[serde(rename = "active")]
     pub active_minutes: Option<u64>,
     pub channel: Option<String>,
+    pub kind: Option<String>,
     pub limit: Option<usize>,
 }
 
@@ -854,7 +855,10 @@ pub struct SessionResponse {
 #[derive(Serialize)]
 pub struct SessionListItem {
     pub id: String,
+    pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requester_session_id: Option<String>,
     pub channel: Option<String>,
     pub created_at: String,
     pub turn_count: u32,
@@ -874,6 +878,7 @@ pub async fn list_sessions(
         .active_minutes
         .map(|minutes| Utc::now() - chrono::Duration::minutes(minutes as i64));
     let channel_filter = query.channel.as_deref();
+    let kind_filter = query.kind.as_deref();
 
     let rows = state
         .session_repo
@@ -884,6 +889,11 @@ pub async fn list_sessions(
     let mut items = Vec::new();
     for row in rows
         .into_iter()
+        .filter(|row| {
+            kind_filter
+                .map(|kind| row.kind.eq_ignore_ascii_case(kind))
+                .unwrap_or(true)
+        })
         .filter(|row| {
             channel_filter
                 .map(|channel| row.channel_ref.as_deref() == Some(channel))
@@ -903,7 +913,9 @@ pub async fn list_sessions(
         let aggregate = aggregate_turns(&turns);
         items.push(SessionListItem {
             id: row.id.to_string(),
+            kind: row.kind,
             status: row.status,
+            requester_session_id: row.requester_session_id.map(|id| id.to_string()),
             channel: row.channel_ref,
             created_at: row.created_at.to_rfc3339(),
             turn_count: aggregate.turn_count,

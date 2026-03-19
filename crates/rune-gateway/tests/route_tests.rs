@@ -4688,6 +4688,101 @@ async fn list_sessions_filters_by_channel_and_activity() {
     assert_eq!(items[0]["channel"], "telegram");
 }
 
+// ── Agents (subagent kind filter) tests ───────────────────────────────────────
+
+#[tokio::test]
+async fn list_sessions_filters_by_kind_subagent() {
+    let app = build_test_app(None);
+
+    // Create a direct session.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let parent_json = body_json(response).await;
+    let parent_id = parent_json["id"].as_str().unwrap().to_string();
+
+    // Create a subagent session linked to the parent.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "subagent",
+                        "requester_session_id": parent_id,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    // List all sessions (should return 2).
+    let response = app
+        .clone()
+        .oneshot(Request::get("/sessions").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let all_sessions = body_json(response).await;
+    assert_eq!(all_sessions.as_array().unwrap().len(), 2);
+
+    // Filter by kind=subagent (should return 1).
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/sessions?kind=subagent")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["kind"], "subagent");
+    assert!(items[0]["requester_session_id"].is_string());
+}
+
+#[tokio::test]
+async fn list_sessions_includes_kind_field() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let response = app
+        .oneshot(Request::get("/sessions").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["kind"], "direct");
+}
+
 // ── Reminder route tests ──────────────────────────────────────────────────────
 
 #[tokio::test]
