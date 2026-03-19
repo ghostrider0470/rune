@@ -56,6 +56,67 @@ All `models` subcommands support `--json` for machine-readable output alongside 
 
 ---
 
+## `cron` command family
+
+Operator surface for scheduled job management, execution, and inspection.
+
+### Shipped subcommands
+
+| Subcommand | Purpose | Status |
+|---|---|---|
+| `rune cron status` | Show scheduler status (total, enabled, due counts) | Shipped |
+| `rune cron list [--include-disabled]` | List cron jobs | Shipped |
+| `rune cron add --text "<text>" --at "<iso-8601>" [--session-target main\|isolated] [--delivery-mode none\|announce\|webhook] [--webhook-url <url>]` | Create one-shot system_event job | Shipped |
+| `rune cron show <id>` | Show job details | Shipped |
+| `rune cron edit <id> [--name <name>] [--delivery-mode <mode>] [--webhook-url <url>]` | Edit job name or delivery mode | Shipped |
+| `rune cron enable <id>` | Enable job | Shipped |
+| `rune cron disable <id>` | Disable job | Shipped |
+| `rune cron rm <id>` | Remove job | Shipped |
+| `rune cron run <id>` | Trigger job immediately (manual run) | Shipped |
+| `rune cron runs <id>` | Show run history for job | Shipped |
+| `rune cron wake --text "<text>" [--mode next-heartbeat\|now] [--context-messages <n>]` | Queue wake event | Shipped |
+
+### CLI surface gaps
+
+- `cron add` creates one-shot `system_event` jobs only; the gateway API accepts the full schedule and payload schema including `every`, `cron`, and `agent_turn`
+- `cron edit` mutates name and delivery mode only; schedule and payload edits require the gateway API
+
+### Delivery mode behavior
+
+- `none` — silent execution, no outbound delivery
+- `announce` — broadcasts `cron_run_completed` event via the session event channel
+- `webhook` — POSTs result payload to configured webhook URL (30 s timeout)
+
+### Claim/lease semantics
+
+Due jobs are claimed atomically before execution. Stale claims older than 300 s expire for crash recovery. Concurrent supervisor ticks cannot duplicate execution.
+
+---
+
+## `reminders` command family
+
+Operator surface for one-shot reminder management.
+
+### Shipped subcommands
+
+| Subcommand | Purpose | Status |
+|---|---|---|
+| `rune reminders add <message> --in <duration> [--target <target>]` | Create reminder (duration: "30m", "2h", "1d", etc.) | Shipped |
+| `rune reminders list [--include-delivered]` | List reminders | Shipped |
+| `rune reminders cancel <id>` | Cancel reminder | Shipped |
+
+### Target routing
+
+- `"main"` (default) — executes in the stable `system:scheduled-main` session
+- `"isolated"` — creates a one-shot subagent session under the main scheduled session
+- unknown values — fall back to `"main"` with a warning
+
+### Reminder outcomes
+
+Reminders resolve to one of four terminal states: `pending`, `delivered`, `cancelled`, or `missed`. Failed delivery attempts produce `missed` with inspectable error context. Cancellation produces an explicit `cancelled` outcome rather than silent deletion.
+
+---
+
 ## Read next
 
 - use [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) when you need the full command/surface census

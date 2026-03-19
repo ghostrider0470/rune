@@ -937,7 +937,8 @@ Current surface note:
 - current CLI `cron add` creates one-shot `system_event` jobs only
 - current CLI `cron edit` is limited to name and delivery-mode mutation
 - `cron wake` and `system event` share the same wake-queueing surface
-- current `main` still has one remaining cron-semantic gap: schedule edits and disable/re-enable transitions can preserve stale `next_run_at` because update-time recomputation is not yet durable
+- schedule edits and disable/re-enable transitions recompute `next_run_at` from the current schedule definition rather than preserving stale cadence
+- due jobs are claimed atomically before execution via `claimed_at`; stale claims expire after the configured lease duration (default 300 s) for crash recovery
 
 ## 11.2 Payload and delivery contract
 
@@ -960,7 +961,7 @@ Delivery modes must preserve:
 Current shipped delivery semantics:
 
 - the selected delivery mode is stored durably and remains operator-visible over gateway/CLI inspection surfaces
-- runtime execution does not yet branch on `none` vs `announce` vs `webhook`; outbound webhook-style delivery remains follow-on work
+- runtime execution branches on delivery mode after job completion: `announce` broadcasts a `cron_run_completed` event via the session event channel, `webhook` POSTs the result payload to the configured URL (30 s timeout, no automatic retry), and `none` suppresses outbound delivery
 - run history remains the durable audit surface regardless of delivery mode
 
 Wake semantics currently preserve:
@@ -1009,7 +1010,8 @@ Reminder outcome semantics must preserve:
 - successful delivery marking the reminder terminal as delivered
 - failed delivery attempts marking the reminder terminal as missed with inspectable error context
 - operator/user cancellation marking the reminder terminal as cancelled rather than silently deleting auditability
-- the current shipped runtime retaining the requested `target` while still delivering reminders through the stable scheduled main session
+- reminder target routing: `"main"` (default) executes in the stable scheduled main session, `"isolated"` creates a one-shot subagent session under it; unknown targets fall back to `"main"` with a warning
+- due reminders are claimed atomically before execution; stale claims expire after the configured lease duration for crash recovery
 
 ---
 
