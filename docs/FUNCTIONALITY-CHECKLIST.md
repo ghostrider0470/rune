@@ -366,8 +366,8 @@ Implementation note (2026-03-13): `completion generate <shell>` now emits real s
 
 - [ ] structured logs
 - [ ] metrics/tracing
-- [ ] backup/export
-- [ ] restore/migration workflow
+- [x] backup/export
+- [x] restore/migration workflow
 - [ ] update path
 - [ ] doctor/diagnostics
 - [ ] doctor interactive repair flow

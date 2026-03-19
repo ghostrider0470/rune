@@ -564,6 +564,18 @@ Container deployment must make backup/restore straightforward.
 
 A restore should reconstruct the runtime without needing image-layer recovery or undocumented hidden paths.
 
+## 12.4 Minimum workflow contract
+
+Any documented Rune backup/restore workflow should make these steps explicit:
+
+1. **Quiesce or coordinate writes** where required (for example, ensure embedded PostgreSQL export/snapshot consistency and avoid mid-write filesystem capture).
+2. **Capture all required durable domains**: DB state, sessions, memory, media when retained, skills, logs/exports as policy requires, config overlays, and backup staging outputs.
+3. **Exclude secret values from backup metadata** while preserving secret references/config needed to reconnect the runtime after restore.
+4. **Restore into the same logical path layout** (`~/.rune/*` locally or `/data/*`, `/config`, `/secrets` in Docker).
+5. **Run post-restore verification**: `rune doctor`, health/status checks, scheduler/job sanity, and session/transcript inspectability checks.
+
+If a deployment mode uses managed PostgreSQL or external object storage, the operator docs must state which parts are restored from provider-native snapshots versus local filesystem artifacts.
+
 ---
 
 ## 13. Upgrade and migration expectations

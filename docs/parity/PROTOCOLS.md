@@ -1215,7 +1215,57 @@ Where supported, repair flows should distinguish between:
 - perform fix interactively
 - perform fix non-interactively when explicitly requested
 
-## 15.4 Logging and diagnostics contract
+## 15.4 Backup and restore workflow contract
+
+Backup/restore is part of the operator contract, not an implementation afterthought.
+
+### 15.4.1 Backup scope
+
+A compliant backup workflow must preserve or explicitly account for:
+
+- database state (`/data/db` or managed PostgreSQL equivalent)
+- session/transcript artifacts (`/data/sessions`)
+- memory files (`/data/memory`)
+- media artifacts when retained (`/data/media`)
+- skills/plugins bundles (`/data/skills`)
+- logs/exports when operator policy requires them (`/data/logs`)
+- backup archives/staging outputs (`/data/backups`)
+- config overlays (`/config`)
+- secret references/config metadata without exposing secret values (`/secrets` references, env-var names, vault paths)
+
+### 15.4.2 Backup behavior expectations
+
+Backup workflows must be:
+
+- **documented**  operator can tell what is included and what is intentionally excluded
+- **restorable**  output is suitable for reconstructing runtime state
+- **image-independent**  no reliance on hidden image-layer state or container archaeology
+- **mode-aware**  local embedded-PostgreSQL, mounted Docker, and managed-PostgreSQL deployments can differ in mechanism but not in operator clarity
+- **secret-safe**  secret values never appear in archive manifests, logs, doctor output, or status surfaces
+
+### 15.4.3 Restore behavior expectations
+
+A restore workflow must, at minimum, be able to reconstruct enough durable state to recover:
+
+- session and transcript inspectability
+- memory files and curated workspace state
+- scheduler/job state and next-run derivation
+- pending approvals and related operator auditability
+- config overlays and path layout expectations
+
+Where a restore cannot fully recreate a subsystem (for example, external provider-managed data), the limitation must be stated explicitly in operator docs.
+
+### 15.4.4 Minimum operator evidence
+
+The project should provide enough operator-facing documentation and/or commands that a reviewer can verify:
+
+- what to snapshot or export before upgrade
+- where backup artifacts live (`/data/backups` or equivalent)
+- how local paths map to Docker-mounted paths
+- what preconditions are required for a clean restore
+- what post-restore checks to run (`doctor`, health/status, scheduler state sanity)
+
+## 15.5 Logging and diagnostics contract
 
 Every major action should emit structured events/logs with:
 

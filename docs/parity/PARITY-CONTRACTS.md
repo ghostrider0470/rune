@@ -505,6 +505,8 @@ See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the fu
 ### Minimum parity evidence
 
 - local Docker deployment with mounted state
+- backup workflow documentation naming included durable-state domains and exclusions
+- restore workflow documentation naming prerequisites and post-restore verification checks
 - restart durability tests
 - PostgreSQL-backed Azure-hosted mode tests
 - Azure Files/Blob mapping validation for intended domains
