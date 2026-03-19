@@ -1777,6 +1777,51 @@ impl fmt::Display for MessageSearchResponse {
     }
 }
 
+/// Per-channel result within a broadcast.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageBroadcastChannelResult {
+    pub channel: String,
+    pub success: bool,
+    pub message_id: Option<String>,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageBroadcastChannelResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} [{}] {}", self.channel, self.detail)?;
+        if let Some(id) = &self.message_id {
+            write!(f, " (id: {id})")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `message broadcast`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageBroadcastResponse {
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub results: Vec<MessageBroadcastChannelResult>,
+}
+
+impl fmt::Display for MessageBroadcastResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "Broadcast: {}/{} channel{} succeeded",
+            self.succeeded,
+            self.total,
+            if self.total == 1 { "" } else { "s" },
+        )?;
+        for result in &self.results {
+            writeln!(f, "  {result}")?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -2738,5 +2783,100 @@ mod tests {
         assert_eq!(v["outcome_at"], "2026-04-01T09:01:00Z");
         assert_eq!(v["last_error"], "timeout");
         assert_eq!(v["target"], "isolated");
+    }
+
+    #[test]
+    fn render_message_broadcast_success() {
+        let r = MessageBroadcastResponse {
+            total: 2,
+            succeeded: 2,
+            failed: 0,
+            results: vec![
+                MessageBroadcastChannelResult {
+                    channel: "telegram".into(),
+                    success: true,
+                    message_id: Some("msg-1".into()),
+                    detail: "Message sent".into(),
+                },
+                MessageBroadcastChannelResult {
+                    channel: "discord".into(),
+                    success: true,
+                    message_id: Some("msg-2".into()),
+                    detail: "Message sent".into(),
+                },
+            ],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("2/2 channels succeeded"));
+        assert!(out.contains("✓ [telegram]"));
+        assert!(out.contains("✓ [discord]"));
+    }
+
+    #[test]
+    fn render_message_broadcast_partial_failure() {
+        let r = MessageBroadcastResponse {
+            total: 2,
+            succeeded: 1,
+            failed: 1,
+            results: vec![
+                MessageBroadcastChannelResult {
+                    channel: "telegram".into(),
+                    success: true,
+                    message_id: Some("msg-1".into()),
+                    detail: "Message sent".into(),
+                },
+                MessageBroadcastChannelResult {
+                    channel: "slack".into(),
+                    success: false,
+                    message_id: None,
+                    detail: "Channel not configured".into(),
+                },
+            ],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("1/2 channels succeeded"));
+        assert!(out.contains("✓ [telegram]"));
+        assert!(out.contains("✗ [slack]"));
+    }
+
+    #[test]
+    fn render_message_broadcast_json() {
+        let r = MessageBroadcastResponse {
+            total: 1,
+            succeeded: 1,
+            failed: 0,
+            results: vec![MessageBroadcastChannelResult {
+                channel: "telegram".into(),
+                success: true,
+                message_id: Some("msg-10".into()),
+                detail: "Message sent".into(),
+            }],
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["total"], 1);
+        assert_eq!(v["succeeded"], 1);
+        assert_eq!(v["failed"], 0);
+        assert_eq!(v["results"][0]["channel"], "telegram");
+        assert!(v["results"][0]["success"].as_bool().unwrap());
+        assert_eq!(v["results"][0]["message_id"], "msg-10");
+    }
+
+    #[test]
+    fn render_message_broadcast_single_channel_grammar() {
+        let r = MessageBroadcastResponse {
+            total: 1,
+            succeeded: 1,
+            failed: 0,
+            results: vec![MessageBroadcastChannelResult {
+                channel: "telegram".into(),
+                success: true,
+                message_id: None,
+                detail: "sent".into(),
+            }],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("1/1 channel succeeded"));
+        assert!(!out.contains("channels"));
     }
 }
