@@ -3135,6 +3135,92 @@ pub struct DoctorReport {
     pub run_at: String,
 }
 
+fn probe_writable(dir: &std::path::Path) -> bool {
+    let probe = dir.join(".rune_gateway_doctor_probe");
+    match std::fs::write(&probe, b"probe") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn gateway_path_hint(path: &std::path::Path, mode: &rune_config::RuntimeMode, writable: bool) -> String {
+    match (mode, writable) {
+        (rune_config::RuntimeMode::Standalone, false) => {
+            format!("Fix permissions: chmod u+w {}", path.display())
+        }
+        (rune_config::RuntimeMode::Standalone, true) => {
+            format!("Create the path: mkdir -p {}", path.display())
+        }
+        (_, false) => format!(
+            "Ensure the volume at {} is writable; check mount flags and container user UID",
+            path.display()
+        ),
+        (_, true) => format!(
+            "Mount a writable volume at {} (for example -v /host/path:{})",
+            path.display(),
+            path.display()
+        ),
+    }
+}
+
+fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
+    let mode = config.mode.resolve(config);
+    [
+        ("paths.db_dir", &config.paths.db_dir, true),
+        ("paths.sessions_dir", &config.paths.sessions_dir, true),
+        ("paths.memory_dir", &config.paths.memory_dir, true),
+        ("paths.media_dir", &config.paths.media_dir, true),
+        ("paths.skills_dir", &config.paths.skills_dir, true),
+        ("paths.logs_dir", &config.paths.logs_dir, true),
+        ("paths.backups_dir", &config.paths.backups_dir, true),
+        ("paths.config_dir", &config.paths.config_dir, true),
+        ("paths.secrets_dir", &config.paths.secrets_dir, true),
+    ]
+    .into_iter()
+    .map(|(name, path, required_persistent)| {
+        if !path.exists() {
+            DoctorCheck {
+                name: name.to_string(),
+                status: if required_persistent { "warn" } else { "info" },
+                message: format!(
+                    "{} is missing — {}",
+                    path.display(),
+                    gateway_path_hint(path, &mode, true)
+                ),
+            }
+        } else if !path.is_dir() {
+            DoctorCheck {
+                name: name.to_string(),
+                status: "fail",
+                message: format!(
+                    "{} exists but is not a directory — remove and recreate it as a directory",
+                    path.display()
+                ),
+            }
+        } else if !probe_writable(path) {
+            DoctorCheck {
+                name: name.to_string(),
+                status: "fail",
+                message: format!(
+                    "{} is not writable (write probe failed) — {}",
+                    path.display(),
+                    gateway_path_hint(path, &mode, false)
+                ),
+            }
+        } else {
+            DoctorCheck {
+                name: name.to_string(),
+                status: "pass",
+                message: format!("{} is present and writable", path.display()),
+            }
+        }
+    })
+    .collect()
+}
+
 /// `POST /api/doctor/run` — execute diagnostic checks.
 pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorReport>, GatewayError> {
     let mut checks = Vec::new();
@@ -3161,6 +3247,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
             "no auth token configured; gateway is unauthenticated".to_string()
         },
     });
+    checks.extend(storage_path_checks(&config));
     drop(config);
 
     let session_check = state.session_repo.list(1, 0).await;
@@ -3222,4 +3309,113 @@ pub async fn doctor_results(
     State(state): State<AppState>,
 ) -> Result<Json<DoctorReport>, GatewayError> {
     doctor_run(State(state)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn probe_writable_on_existing_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(probe_writable(tmp.path()));
+    }
+
+    #[test]
+    fn probe_writable_on_missing_dir() {
+        let missing = PathBuf::from("/tmp/rune_gateway_test_nonexistent_dir_probe");
+        assert!(!probe_writable(&missing));
+    }
+
+    #[test]
+    fn hint_standalone_missing_path() {
+        let p = PathBuf::from("/home/user/.rune/db");
+        let hint = gateway_path_hint(&p, &rune_config::RuntimeMode::Standalone, true);
+        assert!(hint.contains("mkdir -p"), "expected mkdir hint, got: {hint}");
+    }
+
+    #[test]
+    fn hint_standalone_unwritable_path() {
+        let p = PathBuf::from("/home/user/.rune/db");
+        let hint = gateway_path_hint(&p, &rune_config::RuntimeMode::Standalone, false);
+        assert!(hint.contains("chmod"), "expected chmod hint, got: {hint}");
+    }
+
+    #[test]
+    fn hint_server_missing_path() {
+        let p = PathBuf::from("/data/db");
+        let hint = gateway_path_hint(&p, &rune_config::RuntimeMode::Server, true);
+        assert!(
+            hint.contains("volume"),
+            "expected volume hint, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn hint_server_unwritable_path() {
+        let p = PathBuf::from("/data/db");
+        let hint = gateway_path_hint(&p, &rune_config::RuntimeMode::Server, false);
+        assert!(
+            hint.contains("mount flags"),
+            "expected mount flags hint, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn storage_checks_pass_for_writable_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        // Create all 9 subdirs
+        for sub in &[
+            "db", "sessions", "memory", "media", "skills", "logs", "backups", "config", "secrets",
+        ] {
+            std::fs::create_dir(base.join(sub)).unwrap();
+        }
+        let config = rune_config::AppConfig {
+            mode: rune_config::RuntimeMode::Standalone,
+            paths: rune_config::PathsConfig {
+                db_dir: base.join("db"),
+                sessions_dir: base.join("sessions"),
+                memory_dir: base.join("memory"),
+                media_dir: base.join("media"),
+                skills_dir: base.join("skills"),
+                logs_dir: base.join("logs"),
+                backups_dir: base.join("backups"),
+                config_dir: base.join("config"),
+                secrets_dir: base.join("secrets"),
+            },
+            ..Default::default()
+        };
+        let checks = storage_path_checks(&config);
+        assert_eq!(checks.len(), 9);
+        for c in &checks {
+            assert_eq!(c.status, "pass", "expected pass for {}: {}", c.name, c.message);
+        }
+    }
+
+    #[test]
+    fn storage_checks_warn_on_missing_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("nonexistent");
+        let config = rune_config::AppConfig {
+            mode: rune_config::RuntimeMode::Standalone,
+            paths: rune_config::PathsConfig {
+                db_dir: base.join("db"),
+                sessions_dir: base.join("sessions"),
+                memory_dir: base.join("memory"),
+                media_dir: base.join("media"),
+                skills_dir: base.join("skills"),
+                logs_dir: base.join("logs"),
+                backups_dir: base.join("backups"),
+                config_dir: base.join("config"),
+                secrets_dir: base.join("secrets"),
+            },
+            ..Default::default()
+        };
+        let checks = storage_path_checks(&config);
+        for c in &checks {
+            assert_eq!(c.status, "warn", "expected warn for {}: {}", c.name, c.message);
+        }
+    }
 }
