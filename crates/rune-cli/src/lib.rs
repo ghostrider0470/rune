@@ -1113,6 +1113,45 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.sessions_tree(&id).await?;
                 println!("{}", render(&result, format));
             }
+            SessionsAction::History {
+                id,
+                kind,
+                turn,
+                tail,
+            } => {
+                use crate::output::SessionHistoryResponse;
+
+                let all = client.sessions_transcript(&id).await?;
+                let total_entries = all.len();
+
+                // Apply filters.
+                let mut entries: Vec<_> = all
+                    .into_iter()
+                    .filter(|e| {
+                        kind.as_ref().is_none_or(|k| e.kind.eq_ignore_ascii_case(k))
+                    })
+                    .filter(|e| {
+                        turn.as_ref().is_none_or(|t| {
+                            e.turn_id.as_deref().is_some_and(|tid| tid == t.as_str())
+                        })
+                    })
+                    .collect();
+
+                // Apply --tail (show last N).
+                if let Some(n) = tail {
+                    let skip = entries.len().saturating_sub(n);
+                    entries = entries.into_iter().skip(skip).collect();
+                }
+
+                let shown = entries.len();
+                let resp = SessionHistoryResponse {
+                    session_id: id,
+                    total_entries,
+                    shown_entries: shown,
+                    entries,
+                };
+                println!("{}", render(&resp, format));
+            }
             SessionsAction::Export { id } => {
                 use crate::output::SessionExportBundle;
 

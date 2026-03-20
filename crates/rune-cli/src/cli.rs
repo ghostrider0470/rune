@@ -315,6 +315,20 @@ pub enum SessionsAction {
         /// Session ID to use as tree root.
         id: String,
     },
+    /// Display the conversation history / transcript for a session.
+    History {
+        /// Session ID to inspect.
+        id: String,
+        /// Filter entries by kind (e.g. "user_message", "assistant_message", "tool_request").
+        #[arg(long)]
+        kind: Option<String>,
+        /// Only show entries belonging to this turn ID.
+        #[arg(long)]
+        turn: Option<String>,
+        /// Show only the last N entries.
+        #[arg(long)]
+        tail: Option<usize>,
+    },
     /// Export a session as a JSON bundle (detail + transcript).
     Export {
         /// Session ID to export.
