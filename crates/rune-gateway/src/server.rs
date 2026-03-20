@@ -291,6 +291,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/models/scan", post(routes::scan_models))
         // Skill routes
         .route("/skills", get(routes::list_skills))
+        .route("/skills/{name}", get(routes::get_skill))
         .route("/skills/reload", post(routes::reload_skills))
         .route("/skills/{name}/enable", post(routes::enable_skill))
         .route("/skills/{name}/disable", post(routes::disable_skill))

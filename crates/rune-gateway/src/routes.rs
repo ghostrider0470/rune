@@ -2191,6 +2191,19 @@ pub async fn list_skills(
     Ok(Json(skills.into_iter().map(skill_to_response).collect()))
 }
 
+pub async fn get_skill(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<SkillResponse>, GatewayError> {
+    let skill = state
+        .skill_registry
+        .get(&name)
+        .await
+        .ok_or_else(|| GatewayError::SkillNotFound(name.clone()))?;
+
+    Ok(Json(skill_to_response(skill)))
+}
+
 pub async fn reload_skills(
     State(state): State<AppState>,
 ) -> Result<Json<SkillReloadResponse>, GatewayError> {
@@ -2208,7 +2221,7 @@ pub async fn enable_skill(
             message: format!("skill '{name}' enabled"),
         }))
     } else {
-        Err(GatewayError::BadRequest(format!("unknown skill: {name}")))
+        Err(GatewayError::SkillNotFound(name))
     }
 }
 
@@ -2222,7 +2235,7 @@ pub async fn disable_skill(
             message: format!("skill '{name}' disabled"),
         }))
     } else {
-        Err(GatewayError::BadRequest(format!("unknown skill: {name}")))
+        Err(GatewayError::SkillNotFound(name))
     }
 }
 
