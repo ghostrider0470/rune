@@ -36,9 +36,9 @@ use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
 };
 use output::{
-    ChannelAddResponse, ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse,
-    ChannelLogFile, ChannelLoginResponse, ChannelLogoutResponse, ChannelLogsResponse,
-    ChannelRemoveResponse, ChannelResolveResponse, ChannelStatusResponse, ChannelTestResponse,
+    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse,
+    ChannelLogFile, ChannelLogsResponse,
+    ChannelResolveResponse, ChannelStatusResponse,
     DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
@@ -1045,21 +1045,18 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
             LogsAction::Tail { level, source, follow, lines } => {
-                let result = client
-                    .logs_tail(level.as_deref(), source.as_deref(), follow, lines)
-                    .await?;
+                let http = reqwest::Client::new();
+                let result = logs::tail(&cli.gateway_url, &http, level.as_deref(), source.as_deref(), follow, lines).await?;
                 println!("{}", render(&result, format));
             }
             LogsAction::Search { query, level, source, limit } => {
-                let result = client
-                    .logs_search(&query, level.as_deref(), source.as_deref(), limit)
-                    .await?;
+                let http = reqwest::Client::new();
+                let result = logs::search(&cli.gateway_url, &http, &query, level.as_deref(), source.as_deref(), limit).await?;
                 println!("{}", render(&result, format));
             }
             LogsAction::Export { format: fmt, level, source, since, until, limit, output } => {
-                let result = client
-                    .logs_export(&fmt, level.as_deref(), source.as_deref(), since.as_deref(), until.as_deref(), limit, output.as_deref())
-                    .await?;
+                let http = reqwest::Client::new();
+                let result = logs::export(&cli.gateway_url, &http, &fmt, level.as_deref(), source.as_deref(), since.as_deref(), until.as_deref(), limit, output.as_deref()).await?;
                 println!("{}", render(&result, format));
             }
         },
@@ -1525,88 +1522,6 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 ChannelsAction::Logs { channel, limit } => {
                     let result = channel_logs(channel.as_deref(), limit);
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Add { name, kind, enable } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = if known {
-                        ChannelAddResponse {
-                            name,
-                            kind,
-                            enabled: false,
-                            message: "Channel with that name already exists.".to_string(),
-                        }
-                    } else {
-                        ChannelAddResponse {
-                            name,
-                            kind,
-                            enabled: enable,
-                            message: "Registered (restart gateway to activate).".to_string(),
-                        }
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Remove { name } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = ChannelRemoveResponse {
-                        name: name.clone(),
-                        removed: known,
-                        message: if known {
-                            "Removed (restart gateway to apply).".to_string()
-                        } else {
-                            format!("No channel named `{name}` found.")
-                        },
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Login { name } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = ChannelLoginResponse {
-                        name: name.clone(),
-                        success: known,
-                        message: if known {
-                            "Login accepted (credential stored).".to_string()
-                        } else {
-                            format!("No channel named `{name}` found.")
-                        },
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Logout { name } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = ChannelLogoutResponse {
-                        name: name.clone(),
-                        success: known,
-                        message: if known {
-                            "Logged out (credential cleared).".to_string()
-                        } else {
-                            format!("No channel named `{name}` found.")
-                        },
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Test { name } => {
-                    let channel = channels.iter().find(|c| c.name == name);
-                    let result = match channel {
-                        Some(ch) if ch.status == "ready" => ChannelTestResponse {
-                            name,
-                            reachable: true,
-                            latency_ms: Some(0),
-                            message: "Channel is ready.".to_string(),
-                        },
-                        Some(_) => ChannelTestResponse {
-                            name,
-                            reachable: false,
-                            latency_ms: None,
-                            message: "Channel exists but is not ready.".to_string(),
-                        },
-                        None => ChannelTestResponse {
-                            name,
-                            reachable: false,
-                            latency_ms: None,
-                            message: "No such channel configured.".to_string(),
-                        },
-                    };
                     println!("{}", render(&result, format));
                 }
             }
