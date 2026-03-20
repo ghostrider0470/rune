@@ -80,10 +80,10 @@ export function AdminBottomNav() {
   return (
     <nav
       aria-label="Admin navigation"
-      className="fixed bottom-0 left-0 right-0 z-40 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 lg:hidden"
+      className="fixed bottom-0 left-0 right-0 z-40 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 lg:hidden"
     >
       <div className="mx-auto w-full max-w-lg rounded-2xl border border-primary/20 bg-background/92 shadow-[0_10px_35px_rgba(15,23,42,0.18)] backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="flex items-center justify-between px-2 py-2">
+        <div className="flex items-center justify-between px-3 py-2.5">
           {navItems.map((item) => {
             const active = isActive(item);
             return (
@@ -93,7 +93,7 @@ export function AdminBottomNav() {
                 search={item.href === "/chat" ? chatLinkSearch : undefined}
                 aria-label={item.label}
                 className={cn(
-                  "relative flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-medium transition-all duration-200",
+                  "relative flex min-h-12 min-w-[44px] flex-1 flex-col items-center justify-center gap-1.5 rounded-xl text-xs font-medium transition-all duration-200",
                   designSystem.effects.focusRing,
                   active
                     ? "bg-primary/10 text-primary"
@@ -108,11 +108,11 @@ export function AdminBottomNav() {
                 >
                   {item.icon}
                 </div>
-                <span className="max-w-[54px] truncate text-[10px] leading-none">
+                <span className="max-w-[60px] truncate text-[11px] leading-none">
                   {item.label}
                 </span>
                 {active && (
-                  <div className="absolute inset-x-3 -bottom-1 h-0.5 rounded-full bg-gradient-to-r from-primary to-accent" />
+                  <div className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-gradient-to-r from-primary to-accent" />
                 )}
               </Link>
             );

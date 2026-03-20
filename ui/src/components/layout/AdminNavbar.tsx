@@ -94,7 +94,7 @@ export function AdminNavbar() {
     <nav
       aria-label="Admin navigation"
       className={cn(
-        "sticky top-0 z-[70] w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60",
+        "sticky top-0 z-[70] w-full border-b bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur supports-[backdrop-filter]:bg-background/60",
         "transition-all duration-300 shadow-lg shadow-primary/20",
         "border-primary"
       )}
@@ -103,7 +103,7 @@ export function AdminNavbar() {
       <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 pointer-events-none z-0" />
 
       <div className="relative z-10 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
+        <div className="flex h-14 items-center justify-between sm:h-16">
           {/* Left: Logo + Admin badge + nav links */}
           <div className="flex items-center gap-4">
             <Link
@@ -114,7 +114,7 @@ export function AdminNavbar() {
               <img
                 src="/assets/rune-logo-icon.svg"
                 alt="Rune"
-                className="h-12 w-auto py-0.5"
+                className="h-10 w-auto py-0.5 sm:h-12"
                 decoding="async"
               />
               <Badge
@@ -184,7 +184,7 @@ export function AdminNavbar() {
               </SheetTrigger>
               <SheetContent
                 side="right"
-                className="inset-y-auto top-16 h-[calc(100dvh-4rem)] w-screen max-w-none border-l-0 bg-background p-0 [&>button]:hidden sm:max-w-none"
+                className="inset-y-auto top-[calc(3.5rem+env(safe-area-inset-top))] h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] w-screen max-w-none border-l-0 bg-background p-0 [&>button]:hidden sm:top-[calc(4rem+env(safe-area-inset-top))] sm:h-[calc(100dvh-4rem-env(safe-area-inset-top))] sm:max-w-none"
               >
                 <SheetHeader className="border-b px-5 pb-4 pt-4">
                   <SheetTitle className="px-0 pt-0">
@@ -199,9 +199,9 @@ export function AdminNavbar() {
                   </SheetTitle>
                 </SheetHeader>
 
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5">
-                  <div className="mx-auto grid w-full max-w-md gap-5 pb-2">
-                    <div className="grid gap-2.5">
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
+                  <div className="mx-auto grid w-full max-w-md gap-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+                    <div className="grid gap-2">
                       {allItems.map((item) => {
                         const active = isActive(pathname, item);
                         const Icon = item.icon;
@@ -212,7 +212,7 @@ export function AdminNavbar() {
                             search={item.href === "/chat" ? chatLinkSearch : undefined}
                             onClick={() => setMobileMenuOpen(false)}
                             className={cn(
-                              "flex items-center gap-3 rounded-xl border px-4 py-3.5 font-medium transition-all",
+                              "flex min-h-12 items-center gap-3 rounded-xl border px-4 py-3 font-medium transition-all active:scale-[0.98]",
                               active
                                 ? "border-primary/40 bg-primary/10 text-primary"
                                 : "border-border bg-card/70 hover:border-primary/40 hover:bg-primary/10"
