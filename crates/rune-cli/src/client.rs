@@ -5056,3 +5056,109 @@ mod tests {
         assert!(client.configure().await.is_err());
     }
 }
+
+#[cfg(test)]
+mod subagent_tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn agent_spawn_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/spawn"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"session_id":"child-1","parent_session_id":"sess-1","mode":"coding","policy":"inherit","status":"spawned"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_spawn("sess-1","coding","inherit","test",None).await.unwrap();
+        assert_eq!(r.session_id, "child-1");
+        assert_eq!(r.parent_session_id, "sess-1");
+    }
+
+    #[tokio::test]
+    async fn agent_steer_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/child-1/steer"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"accepted":true,"detail":"ok"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_steer("child-1","focus").await.unwrap();
+        assert!(r.accepted);
+    }
+
+    #[tokio::test]
+    async fn agent_steer_404() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/x/steer"))
+            .respond_with(ResponseTemplate::new(404)).mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        assert!(c.agent_steer("x","hi").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn agent_kill_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/child-1/kill"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"killed":true,"detail":"done"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_kill("child-1",Some("timeout")).await.unwrap();
+        assert!(r.killed);
+    }
+
+    #[tokio::test]
+    async fn agent_run_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/s1/run"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"turn_id":"t1","status":"completed","output":"ok"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_run("s1","go",1,true).await.unwrap();
+        assert_eq!(r.turn_id, "t1");
+    }
+
+    #[tokio::test]
+    async fn agent_result_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/agents/s1/turns/t1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status":"completed","output":"res"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_result("s1","t1").await.unwrap();
+        assert_eq!(r.output.as_deref(), Some("res"));
+    }
+
+    #[tokio::test]
+    async fn acp_send_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/acp/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"m1","delivered":true})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.acp_send("a","b",r#"{"x":1}"#).await.unwrap();
+        assert!(r.delivered);
+    }
+
+    #[tokio::test]
+    async fn acp_inbox_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/acp/inbox"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"messages":[{"message_id":"m1","from":"b","received_at":"2026-03-20T10:00:00Z","payload":{}}]})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.acp_inbox("a").await.unwrap();
+        assert_eq!(r.messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn acp_ack_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/acp/messages/m1/ack"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"acknowledged":true})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.acp_ack("m1","a").await.unwrap();
+        assert!(r.acknowledged);
+    }
+}

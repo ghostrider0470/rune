@@ -84,8 +84,11 @@ pub enum Command {
     },
     /// Show a compact operator dashboard summary.
     Dashboard,
-    /// Query structured gateway logs.
-    Logs(LogsArgs),
+    /// Query, tail, search, and export structured gateway logs.
+    Logs {
+        #[command(subcommand)]
+        action: LogsAction,
+    },
     /// Manage cron jobs.
     Cron {
         #[command(subcommand)]
