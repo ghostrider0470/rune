@@ -1824,6 +1824,45 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /sessions` — create a new session via the gateway.
+    pub async fn sessions_create(
+        &self,
+        kind: &str,
+    ) -> Result<SessionDetailResponse> {
+        let resp = self
+            .http
+            .post(self.url("/sessions"))
+            .json(&json!({ "kind": kind }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /sessions")?;
+            Ok(SessionDetailResponse {
+                id: v["id"].as_str().unwrap_or("?").to_string(),
+                kind: v["kind"].as_str().unwrap_or("direct").to_string(),
+                status: v["status"].as_str().unwrap_or("unknown").to_string(),
+                channel: v["channel_ref"].as_str().map(String::from),
+                requester_session_id: v["requester_session_id"].as_str().map(String::from),
+                created_at: v["created_at"].as_str().map(String::from),
+                turn_count: v["turn_count"].as_u64().map(|n| n as u32),
+                latest_model: v["latest_model"].as_str().map(String::from),
+                usage_prompt_tokens: v["usage_prompt_tokens"].as_u64(),
+                usage_completion_tokens: v["usage_completion_tokens"].as_u64(),
+                last_turn_started_at: v["last_turn_started_at"].as_str().map(String::from),
+                last_turn_ended_at: v["last_turn_ended_at"].as_str().map(String::from),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
+        }
+    }
+
     /// `GET /sessions/:id`
     pub async fn sessions_show(&self, id: &str) -> Result<SessionDetailResponse> {
         let resp = self

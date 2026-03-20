@@ -39,7 +39,7 @@ use output::{
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
     ModelFallbackChainDetail, ModelFallbacksResponse, ModelListResponse, ModelProviderDetail,
     ModelScanResponse, ModelSetImageResponse, ModelSetResponse, ModelStatusResponse,
-    OutputFormat, TemplateListResponse, TemplateSummary, render,
+    OutputFormat, TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -1267,6 +1267,21 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let sessions = client.sessions_list(None, None, Some("subagent"), None, limit).await?;
                 let root = sessions.sessions.first().map(|s| s.id.clone()).unwrap_or_default();
                 let result = client.sessions_tree(&root).await?;
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Start { template } => {
+                let tpl = rune_core::builtin_template_by_slug(&template)
+                    .ok_or_else(|| anyhow::anyhow!(
+                        "unknown template slug \"{template}\". Run `rune agents templates` to see available templates."
+                    ))?;
+                let session = client.sessions_create("subagent").await?;
+                let result = TemplateStartResponse {
+                    session_id: session.id,
+                    template_slug: tpl.slug.to_string(),
+                    template_name: tpl.name.to_string(),
+                    mode: tpl.mode.to_string(),
+                    status: session.status,
+                };
                 println!("{}", render(&result, format));
             }
             AgentsAction::Templates { category } => {

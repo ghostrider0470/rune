@@ -392,6 +392,12 @@ pub enum AgentsAction {
         #[arg(long)]
         category: Option<String>,
     },
+    /// Start a new agent session from a built-in template.
+    Start {
+        /// Template slug to launch (e.g. "coding-agent").
+        #[arg(long)]
+        template: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1988,6 +1994,24 @@ mod tests {
             } => assert_eq!(category.as_deref(), Some("developer")),
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_agents_start_with_template() {
+        let cli =
+            Cli::try_parse_from(["rune", "agents", "start", "--template", "coding-agent"]).unwrap();
+        match &cli.command {
+            Command::Agents {
+                action: AgentsAction::Start { template },
+            } => assert_eq!(template, "coding-agent"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_start_requires_template() {
+        let result = Cli::try_parse_from(["rune", "agents", "start"]);
+        assert!(result.is_err(), "start without --template should fail");
     }
 
     #[test]
