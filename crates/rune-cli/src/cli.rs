@@ -461,6 +461,11 @@ pub enum ModelsAction {
 pub enum SkillsAction {
     /// List installed skills discovered by the gateway.
     List,
+    /// Show details for a single installed skill.
+    Info {
+        /// Skill name.
+        name: String,
+    },
     /// Re-scan the skills directory and report load/remove counts.
     Check,
     /// Enable a discovered skill in the gateway registry.
@@ -1031,6 +1036,17 @@ mod tests {
             Command::Skills {
                 action: SkillsAction::Check
             }
+        ));
+    }
+
+    #[test]
+    fn parse_skills_info() {
+        let cli = Cli::try_parse_from(["rune", "skills", "info", "alpha"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Skills {
+                action: SkillsAction::Info { name }
+            } if name == "alpha"
         ));
     }
 
