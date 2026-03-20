@@ -22,6 +22,8 @@ use crate::output::{
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
     SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
     SessionTreeNode, SessionTreeResponse, SkillCheckResponse, SkillInfoResponse,
+    SetupResponse, BackupCreateResponse, BackupListResponse, BackupRestoreResponse,
+    UpdateCheckResponse, UpdateApplyResponse, UpdateStatusResponse, ResetResponse,
     SkillListResponse, SkillSummary, StatusResponse,
 };
 
@@ -2455,6 +2457,15 @@ impl GatewayClient {
             bail!("Gateway returned HTTP {}", resp.status());
         }
     }
+
+    pub async fn setup(&self) -> Result<SetupResponse> { let r = self.http.post(self.url("/setup")).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
+    pub async fn backup_create(&self, label: Option<&str>) -> Result<BackupCreateResponse> { let mut b = serde_json::json!({}); if let Some(l) = label { b["label"] = serde_json::Value::String(l.into()); } let r = self.http.post(self.url("/backups")).json(&b).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
+    pub async fn backup_list(&self) -> Result<BackupListResponse> { let r = self.http.get(self.url("/backups")).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
+    pub async fn backup_restore(&self, id: &str) -> Result<BackupRestoreResponse> { let r = self.http.post(self.url(&format!("/backups/{id}/restore"))).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
+    pub async fn update_check(&self) -> Result<UpdateCheckResponse> { let r = self.http.get(self.url("/update/check")).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
+    pub async fn update_apply(&self) -> Result<UpdateApplyResponse> { let r = self.http.post(self.url("/update/apply")).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
+    pub async fn update_status(&self) -> Result<UpdateStatusResponse> { let r = self.http.get(self.url("/update/status")).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
+    pub async fn reset(&self) -> Result<ResetResponse> { let r = self.http.post(self.url("/reset")).send().await.context("gateway")?; if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); } }
 }
 
 fn local_config_path() -> std::path::PathBuf {
@@ -4404,4 +4415,19 @@ mod tests {
         assert!(resp.detail.contains("404"));
         assert!(resp.detail.contains("Thread not found"));
     }
+}
+
+#[cfg(test)]
+mod lifecycle_client_tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    #[tokio::test] async fn setup_ok() { let s = MockServer::start().await; Mock::given(method("POST")).and(path("/setup")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success":true,"detail":"done"}))).mount(&s).await; assert!(GatewayClient::new(&s.uri()).setup().await.unwrap().success); }
+    #[tokio::test] async fn backup_create_ok() { let s = MockServer::start().await; Mock::given(method("POST")).and(path("/backups")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success":true,"backup_id":"bk-42","detail":"ok"}))).mount(&s).await; assert_eq!(GatewayClient::new(&s.uri()).backup_create(Some("x")).await.unwrap().backup_id, "bk-42"); }
+    #[tokio::test] async fn backup_list_ok() { let s = MockServer::start().await; Mock::given(method("GET")).and(path("/backups")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"backups":[]}))).mount(&s).await; assert!(GatewayClient::new(&s.uri()).backup_list().await.unwrap().backups.is_empty()); }
+    #[tokio::test] async fn backup_restore_ok() { let s = MockServer::start().await; Mock::given(method("POST")).and(path("/backups/bk-1/restore")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success":true,"backup_id":"bk-1","detail":"ok"}))).mount(&s).await; assert!(GatewayClient::new(&s.uri()).backup_restore("bk-1").await.unwrap().success); }
+    #[tokio::test] async fn update_check_ok() { let s = MockServer::start().await; Mock::given(method("GET")).and(path("/update/check")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"available":true,"current_version":"0.1","latest_version":"0.2","detail":"x"}))).mount(&s).await; assert!(GatewayClient::new(&s.uri()).update_check().await.unwrap().available); }
+    #[tokio::test] async fn update_apply_ok() { let s = MockServer::start().await; Mock::given(method("POST")).and(path("/update/apply")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success":true,"version":"0.2","detail":"ok"}))).mount(&s).await; assert!(GatewayClient::new(&s.uri()).update_apply().await.unwrap().success); }
+    #[tokio::test] async fn update_status_ok() { let s = MockServer::start().await; Mock::given(method("GET")).and(path("/update/status")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"current_version":"0.2","update_channel":"stable","last_check":"2026-01-01"}))).mount(&s).await; assert_eq!(GatewayClient::new(&s.uri()).update_status().await.unwrap().update_channel, "stable"); }
+    #[tokio::test] async fn reset_ok() { let s = MockServer::start().await; Mock::given(method("POST")).and(path("/reset")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success":true,"detail":"ok"}))).mount(&s).await; assert!(GatewayClient::new(&s.uri()).reset().await.unwrap().success); }
 }

@@ -5098,3 +5098,53 @@ mod tests {
         assert!(out.contains("    line three"));
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupResponse { pub success: bool, pub detail: String }
+impl fmt::Display for SetupResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} {}", if self.success { "\u{2713}" } else { "\u{2717}" }, self.detail) } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupCreateResponse { pub success: bool, pub backup_id: String, pub detail: String }
+impl fmt::Display for BackupCreateResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} {} (id: {})", if self.success { "\u{2713}" } else { "\u{2717}" }, self.detail, self.backup_id) } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupSummary { pub id: String, pub label: Option<String>, pub created_at: String, pub size_bytes: Option<u64> }
+impl fmt::Display for BackupSummary { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.id)?; if let Some(ref l) = self.label { write!(f, " ({l})")?; } write!(f, " created={}", self.created_at)?; if let Some(s) = self.size_bytes { write!(f, " size={s}B")?; } Ok(()) } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupListResponse { pub backups: Vec<BackupSummary> }
+impl fmt::Display for BackupListResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.backups.is_empty() { return write!(f, "No backups found."); } for b in &self.backups { writeln!(f, "  {b}")?; } Ok(()) } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupRestoreResponse { pub success: bool, pub backup_id: String, pub detail: String }
+impl fmt::Display for BackupRestoreResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} {} (backup: {})", if self.success { "\u{2713}" } else { "\u{2717}" }, self.detail, self.backup_id) } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCheckResponse { pub available: bool, pub current_version: String, pub latest_version: Option<String>, pub detail: String }
+impl fmt::Display for UpdateCheckResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.available { write!(f, "Update available: {} \u{2192} {}", self.current_version, self.latest_version.as_deref().unwrap_or("unknown")) } else { write!(f, "Up to date ({})", self.current_version) } } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateApplyResponse { pub success: bool, pub version: String, pub detail: String }
+impl fmt::Display for UpdateApplyResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} {} (v{})", if self.success { "\u{2713}" } else { "\u{2717}" }, self.detail, self.version) } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateStatusResponse { pub current_version: String, pub update_channel: String, pub last_check: Option<String> }
+impl fmt::Display for UpdateStatusResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "version={} channel={}", self.current_version, self.update_channel)?; if let Some(ref l) = self.last_check { write!(f, " last_check={l}")?; } Ok(()) } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetResponse { pub success: bool, pub detail: String }
+impl fmt::Display for ResetResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} {}", if self.success { "\u{2713}" } else { "\u{2717}" }, self.detail) } }
+
+#[cfg(test)]
+mod lifecycle_output_tests {
+    use super::*;
+    #[test] fn setup_ok() { assert!(SetupResponse { success: true, detail: "x".into() }.to_string().contains("\u{2713}")); }
+    #[test] fn backup_create_ok() { assert!(BackupCreateResponse { success: true, backup_id: "b1".into(), detail: "x".into() }.to_string().contains("b1")); }
+    #[test] fn backup_list_empty() { assert_eq!(BackupListResponse { backups: vec![] }.to_string(), "No backups found."); }
+    #[test] fn backup_restore_ok() { assert!(BackupRestoreResponse { success: true, backup_id: "b1".into(), detail: "x".into() }.to_string().contains("\u{2713}")); }
+    #[test] fn update_check_ok() { assert!(UpdateCheckResponse { available: true, current_version: "0.1".into(), latest_version: Some("0.2".into()), detail: "x".into() }.to_string().contains("0.2")); }
+    #[test] fn update_up_to_date() { assert!(UpdateCheckResponse { available: false, current_version: "0.2".into(), latest_version: None, detail: "x".into() }.to_string().contains("Up to date")); }
+    #[test] fn update_apply_ok() { assert!(UpdateApplyResponse { success: true, version: "0.2".into(), detail: "x".into() }.to_string().contains("\u{2713}")); }
+    #[test] fn update_status_ok() { assert!(UpdateStatusResponse { current_version: "0.2".into(), update_channel: "stable".into(), last_check: None }.to_string().contains("stable")); }
+    #[test] fn reset_ok() { assert!(ResetResponse { success: true, detail: "x".into() }.to_string().contains("\u{2713}")); }
+}

@@ -23,11 +23,11 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    AgentsAction, ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell,
+    AgentsAction, ApprovalsAction, BackupAction, ChannelsAction, Command, CompletionAction, CompletionShell,
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, RemindersAction, SessionsAction, SkillsAction, SystemAction, SystemEventAction,
+    ModelsAction, RemindersAction, SessionsAction, SkillsAction, SystemAction, SystemEventAction, UpdateAction,
     SystemHeartbeatAction,
 };
 use client::{
@@ -1893,6 +1893,44 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::Setup => {
+            let result = client.setup().await?;
+            println!("{}", render(&result, format));
+        }
+        Command::Backup { action } => match action {
+            BackupAction::Create { label } => {
+                let result = client.backup_create(label.as_deref()).await?;
+                println!("{}", render(&result, format));
+            }
+            BackupAction::List => {
+                let result = client.backup_list().await?;
+                println!("{}", render(&result, format));
+            }
+            BackupAction::Restore { id, confirm } => {
+                if !confirm { anyhow::bail!("Backup restore requires --confirm flag."); }
+                let result = client.backup_restore(&id).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Update { action } => match action {
+            UpdateAction::Check => {
+                let result = client.update_check().await?;
+                println!("{}", render(&result, format));
+            }
+            UpdateAction::Apply => {
+                let result = client.update_apply().await?;
+                println!("{}", render(&result, format));
+            }
+            UpdateAction::Status => {
+                let result = client.update_status().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Reset { confirm } => {
+            if !confirm { anyhow::bail!("Factory reset requires --confirm flag."); }
+            let result = client.reset().await?;
+            println!("{}", render(&result, format));
+        }
         Command::Config { action } => match action {
             ConfigAction::Show => {
                 let result = show_config()?;
