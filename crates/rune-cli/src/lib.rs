@@ -36,9 +36,9 @@ use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
 };
 use output::{
-    ChannelAddResponse, ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse,
-    ChannelLogFile, ChannelLoginResponse, ChannelLogoutResponse, ChannelLogsResponse,
-    ChannelRemoveResponse, ChannelResolveResponse, ChannelStatusResponse, ChannelTestResponse,
+    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse,
+    ChannelLogFile, ChannelLogsResponse,
+    ChannelResolveResponse, ChannelStatusResponse,
     DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
@@ -1003,21 +1003,18 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
             LogsAction::Tail { level, source, follow, lines } => {
-                let result = client
-                    .logs_tail(level.as_deref(), source.as_deref(), follow, lines)
-                    .await?;
+                let http = reqwest::Client::new();
+                let result = logs::tail(&cli.gateway_url, &http, level.as_deref(), source.as_deref(), follow, lines).await?;
                 println!("{}", render(&result, format));
             }
             LogsAction::Search { query, level, source, limit } => {
-                let result = client
-                    .logs_search(&query, level.as_deref(), source.as_deref(), limit)
-                    .await?;
+                let http = reqwest::Client::new();
+                let result = logs::search(&cli.gateway_url, &http, &query, level.as_deref(), source.as_deref(), limit).await?;
                 println!("{}", render(&result, format));
             }
             LogsAction::Export { format: fmt, level, source, since, until, limit, output } => {
-                let result = client
-                    .logs_export(&fmt, level.as_deref(), source.as_deref(), since.as_deref(), until.as_deref(), limit, output.as_deref())
-                    .await?;
+                let http = reqwest::Client::new();
+                let result = logs::export(&cli.gateway_url, &http, &fmt, level.as_deref(), source.as_deref(), since.as_deref(), until.as_deref(), limit, output.as_deref()).await?;
                 println!("{}", render(&result, format));
             }
         },
