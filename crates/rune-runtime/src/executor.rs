@@ -11,7 +11,7 @@ use rune_core::{
 };
 use rune_models::{CompletionRequest, ModelProvider};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
-use rune_store::repos::{ApprovalRepo, SessionRepo, TranscriptRepo, TurnRepo};
+use rune_store::repos::{ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo};
 use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
 use crate::compaction::CompactionStrategy;
@@ -47,6 +47,7 @@ pub struct TurnExecutor {
     max_tool_iterations: u32,
     lane_queue: Option<Arc<LaneQueue>>,
     skill_registry: Option<Arc<SkillRegistry>>,
+    tool_approval_policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
 }
 
 impl TurnExecutor {
@@ -76,6 +77,7 @@ impl TurnExecutor {
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
             lane_queue: None,
             skill_registry: None,
+            tool_approval_policy_repo: None,
         }
     }
 
@@ -113,6 +115,12 @@ impl TurnExecutor {
     /// Attach a dynamic skill registry whose enabled skills are injected into the system prompt.
     pub fn with_skill_registry(mut self, registry: Arc<SkillRegistry>) -> Self {
         self.skill_registry = Some(registry);
+        self
+    }
+
+    /// Attach a durable tool approval policy store for persisting allow-always decisions.
+    pub fn with_tool_approval_policy_repo(mut self, repo: Arc<dyn ToolApprovalPolicyRepo>) -> Self {
+        self.tool_approval_policy_repo = Some(repo);
         self
     }
 
@@ -343,6 +351,20 @@ impl TurnExecutor {
                     Some(format!("resuming approved tool call for {tool_name}")),
                 )
                 .await?;
+
+                // Persist allow-always decisions durably so they survive restarts.
+                if decision == ApprovalDecision::AllowAlways {
+                    if let Some(ref repo) = self.tool_approval_policy_repo {
+                        if let Err(e) = repo.set_policy(&tool_name, "allow_always").await {
+                            warn!(
+                                tool = %tool_name,
+                                error = %e,
+                                "failed to persist allow-always policy"
+                            );
+                        }
+                    }
+                }
+
                 let response = TranscriptItem::ApprovalResponse {
                     approval_id: ApprovalId::from(approval.id),
                     decision,

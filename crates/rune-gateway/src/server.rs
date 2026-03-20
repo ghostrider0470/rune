@@ -143,7 +143,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let turn_executor = Arc::new(
         Arc::try_unwrap(services.turn_executor)
             .unwrap_or_else(|executor| (*executor).clone())
-            .with_skill_registry(skill_registry.clone()),
+            .with_skill_registry(skill_registry.clone())
+            .with_tool_approval_policy_repo(services.tool_approval_repo.clone()),
     );
 
     let state = AppState {
