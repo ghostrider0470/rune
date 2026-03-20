@@ -702,14 +702,23 @@ pub enum MessageAction {
         #[arg(long)]
         session: Option<String>,
     },
-    /// Pin or unpin a message in a channel.
+    /// Pin a message in a channel.
     Pin {
-        /// ID of the message to pin or unpin.
+        /// ID of the message to pin.
         #[arg(long)]
         message_id: String,
-        /// Unpin the message instead of pinning it.
+        /// Channel adapter the message belongs to.
         #[arg(long)]
-        unpin: bool,
+        channel: Option<String>,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Unpin a message in a channel.
+    Unpin {
+        /// ID of the message to unpin.
+        #[arg(long)]
+        message_id: String,
         /// Channel adapter the message belongs to.
         #[arg(long)]
         channel: Option<String>,
@@ -2927,13 +2936,11 @@ mod tests {
                 action:
                     MessageAction::Pin {
                         message_id,
-                        unpin,
                         channel,
                         session,
                     },
             } => {
                 assert_eq!(message_id, "msg-50");
-                assert!(!unpin);
                 assert_eq!(channel.as_deref(), Some("telegram"));
                 assert_eq!(session.as_deref(), Some("sess-3"));
             }
@@ -2946,24 +2953,21 @@ mod tests {
         let cli = Cli::try_parse_from([
             "rune",
             "message",
-            "pin",
+            "unpin",
             "--message-id",
             "msg-77",
-            "--unpin",
         ])
         .unwrap();
         match cli.command {
             Command::Message {
                 action:
-                    MessageAction::Pin {
+                    MessageAction::Unpin {
                         message_id,
-                        unpin,
                         channel,
                         session,
                     },
             } => {
                 assert_eq!(message_id, "msg-77");
-                assert!(unpin);
                 assert!(channel.is_none());
                 assert!(session.is_none());
             }
@@ -2974,7 +2978,19 @@ mod tests {
     #[test]
     fn message_pin_requires_message_id() {
         assert!(Cli::try_parse_from(["rune", "message", "pin"]).is_err());
-        assert!(Cli::try_parse_from(["rune", "message", "pin", "--unpin"]).is_err());
+    }
+
+    #[test]
+    fn message_unpin_requires_message_id() {
+        assert!(Cli::try_parse_from(["rune", "message", "unpin"]).is_err());
+    }
+
+    #[test]
+    fn message_pin_rejects_unpin_flag() {
+        assert!(
+            Cli::try_parse_from(["rune", "message", "pin", "--message-id", "msg-77", "--unpin"])
+                .is_err()
+        );
     }
 
     #[test]

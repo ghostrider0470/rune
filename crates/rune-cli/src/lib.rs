@@ -1563,14 +1563,28 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             MessageAction::Pin {
                 message_id,
-                unpin,
                 channel,
                 session,
             } => {
                 let result = client
                     .message_pin(
                         &message_id,
-                        unpin,
+                        false,
+                        channel.as_deref(),
+                        session.as_deref(),
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            MessageAction::Unpin {
+                message_id,
+                channel,
+                session,
+            } => {
+                let result = client
+                    .message_pin(
+                        &message_id,
+                        true,
                         channel.as_deref(),
                         session.as_deref(),
                     )

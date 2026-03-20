@@ -1204,7 +1204,6 @@ impl GatewayClient {
         }
     }
 
-    /// `POST /messages/pin`
     /// `PATCH /messages/{id}` — edit the text content of an existing message.
     pub async fn message_edit(
         &self,
@@ -1258,6 +1257,7 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /messages/pin`
     pub async fn message_pin(
         &self,
         message_id: &str,
