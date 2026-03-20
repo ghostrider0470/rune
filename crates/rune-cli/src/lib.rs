@@ -974,6 +974,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.skills_check().await?;
                 println!("{}", render(&result, format));
             }
+            SkillsAction::Enable { name } => {
+                let result = client.skills_enable(&name).await?;
+                println!("{}", render(&result, format));
+            }
+            SkillsAction::Disable { name } => {
+                let result = client.skills_disable(&name).await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Completion { action } => match action {
             CompletionAction::Generate { shell } => {

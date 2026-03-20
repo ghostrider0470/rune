@@ -239,6 +239,58 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /skills/{name}/enable`
+    pub async fn skills_enable(&self, name: &str) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/skills/{name}/enable")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /skills/{name}/enable")?;
+            Ok(ActionResult {
+                success: body["success"].as_bool().unwrap_or(true),
+                message: body["message"]
+                    .as_str()
+                    .unwrap_or("skill enabled")
+                    .to_string(),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /skills/{name}/disable`
+    pub async fn skills_disable(&self, name: &str) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/skills/{name}/disable")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /skills/{name}/disable")?;
+            Ok(ActionResult {
+                success: body["success"].as_bool().unwrap_or(true),
+                message: body["message"]
+                    .as_str()
+                    .unwrap_or("skill disabled")
+                    .to_string(),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
     /// `GET /gateway/health`
     pub async fn gateway_health(&self) -> Result<HealthResponse> {
         let resp = self
@@ -2835,6 +2887,42 @@ mod tests {
         assert_eq!(resp.discovered, 4);
         assert_eq!(resp.loaded, 3);
         assert_eq!(resp.removed, 1);
+    }
+
+    #[tokio::test]
+    async fn skills_enable_parses_action_result() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/skills/alpha/enable"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "skill 'alpha' enabled"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.skills_enable("alpha").await.unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message, "skill 'alpha' enabled");
+    }
+
+    #[tokio::test]
+    async fn skills_disable_parses_action_result() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/skills/alpha/disable"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "skill 'alpha' disabled"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.skills_disable("alpha").await.unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.message, "skill 'alpha' disabled");
     }
 
     #[tokio::test]

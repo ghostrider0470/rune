@@ -463,6 +463,16 @@ pub enum SkillsAction {
     List,
     /// Re-scan the skills directory and report load/remove counts.
     Check,
+    /// Enable a discovered skill in the gateway registry.
+    Enable {
+        /// Skill name.
+        name: String,
+    },
+    /// Disable a discovered skill in the gateway registry.
+    Disable {
+        /// Skill name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1022,6 +1032,28 @@ mod tests {
                 action: SkillsAction::Check
             }
         ));
+    }
+
+    #[test]
+    fn parse_skills_enable_disable() {
+        for (subcommand, matcher) in [("enable", "enable"), ("disable", "disable")] {
+            let cli = Cli::try_parse_from(["rune", "skills", subcommand, "alpha"]).unwrap();
+            match (matcher, cli.command) {
+                (
+                    "enable",
+                    Command::Skills {
+                        action: SkillsAction::Enable { name },
+                    },
+                )
+                | (
+                    "disable",
+                    Command::Skills {
+                        action: SkillsAction::Disable { name },
+                    },
+                ) => assert_eq!(name, "alpha"),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        }
     }
 
     #[test]
