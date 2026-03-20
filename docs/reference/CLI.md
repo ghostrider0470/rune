@@ -143,6 +143,30 @@ Reminders resolve to one of four terminal states: `pending`, `delivered`, `cance
 
 ---
 
+## `backup` command family
+
+Operator surface for durable-state snapshot and recovery workflows.
+
+### Expected subcommands
+
+| Subcommand | Purpose | Status |
+|---|---|---|
+| `rune backup create [--output <path>]` | Snapshot all durable state domains into a restorable archive | Not yet shipped |
+| `rune backup restore <archive>` | Restore runtime state from a backup archive | Not yet shipped |
+| `rune backup list` | List available backup archives in the configured backups directory | Not yet shipped |
+
+### Behavioral contract
+
+The `backup` family implements the workflow contract defined in [PROTOCOLS.md §15.4](../parity/PROTOCOLS.md#154-backup-and-restore-workflow-contract):
+
+- **Create** captures all 9 durable domains (db, sessions, memory, media, skills, logs, backups staging, config, secret references) into a self-contained archive at `/data/backups` (Docker) or `~/.rune/backups/` (local). Secret values are never included.
+- **Restore** requires the runtime to be stopped or quiesced. Restores into the expected path layout and emits post-restore verification steps (`rune doctor`, health/status, scheduler state, transcript inspectability).
+- **List** shows available archives with timestamp, size, and version compatibility.
+
+See [DEPLOYMENT.md §12](../operator/DEPLOYMENT.md#12-backup-and-restore-expectations) for deployment-mode-specific backup strategy guidance.
+
+---
+
 ## Read next
 
 - use [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) when you need the full command/surface census

@@ -476,7 +476,7 @@ See [DEPLOYMENT.md §5.1](../operator/DEPLOYMENT.md#51-local--docker-path-equiva
 
 - missing mounts/config fail fast and clearly
 - read-only or degraded storage modes surface explicit errors
-- backup/restore workflows are documented and testable
+- backup/restore workflows are documented and testable (see [PROTOCOLS.md §15.4](PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the full contract and CLI workflow spec)
 
 #### Read-only filesystem detection
 
@@ -505,8 +505,8 @@ See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the fu
 ### Minimum parity evidence
 
 - local Docker deployment with mounted state
-- backup workflow documentation naming included durable-state domains and exclusions
-- restore workflow documentation naming prerequisites and post-restore verification checks
+- backup workflow documentation naming included durable-state domains and exclusions (see [PROTOCOLS.md §15.4.5](PROTOCOLS.md#1545-cli-workflow-contract))
+- restore workflow documentation naming prerequisites and post-restore verification checks (see [PROTOCOLS.md §15.4.5](PROTOCOLS.md#1545-cli-workflow-contract))
 - restart-preservation documentation naming which state must survive container restart and which post-restart checks operators should run
 - restart durability tests
 - PostgreSQL-backed Azure-hosted mode tests

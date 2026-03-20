@@ -1265,6 +1265,38 @@ The project should provide enough operator-facing documentation and/or commands 
 - what preconditions are required for a clean restore
 - what post-restore checks to run (`doctor`, health/status, scheduler state sanity)
 
+### 15.4.5 CLI workflow contract
+
+The `rune backup` command family is the primary operator interface for snapshot and recovery workflows. These commands must implement the behavioral expectations defined in §15.4.1–§15.4.4.
+
+#### Expected subcommands
+
+| Subcommand | Purpose |
+|---|---|
+| `rune backup create [--output <path>]` | Snapshot all durable state domains into a restorable archive |
+| `rune backup restore <archive>` | Restore runtime state from a backup archive |
+| `rune backup list` | List available backup archives in the configured backups directory |
+
+#### `rune backup create` contract
+
+1. **Quiesce coordination** — coordinate with the runtime to ensure database consistency (e.g., WAL checkpoint for embedded PostgreSQL) before capture.
+2. **Scope** — capture all 9 durable domains per §15.4.1: db, sessions, memory, media (when retained), skills, logs (when policy requires), backups staging, config overlays, and secret references (never secret values).
+3. **Output** — write a self-contained archive to `/data/backups` (or `~/.rune/backups/` locally) by default. `--output` overrides the destination path.
+4. **Manifest** — the archive must include a manifest listing included domains, capture timestamp, runtime version, and any excluded domains with reason.
+5. **Secret safety** — secret values must not appear in the archive, its manifest, or any log output during the operation. Secret references (env var names, vault paths) are preserved.
+
+#### `rune backup restore` contract
+
+1. **Precondition** — the runtime should be stopped or in a quiesced state before restore. The command must refuse to overwrite live state without explicit confirmation.
+2. **Target layout** — restore into the same logical path layout that the running mode expects (`~/.rune/*` locally, `/data/*` + `/config` + `/secrets` in Docker).
+3. **Post-restore verification** — on completion, emit a checklist of recommended verification steps: run `rune doctor`, check health/status endpoints, verify scheduler/job state, and inspect recent session/transcript history.
+4. **Partial restore** — where a restore cannot fully recreate a subsystem (e.g., external managed PostgreSQL data, provider-side state), the command must state the limitation explicitly in its output.
+
+#### `rune backup list` contract
+
+1. List archives in the configured backups directory with timestamp, size, and manifest summary.
+2. Indicate whether each archive was created by the current runtime version or an older one.
+
 ## 15.5 Logging and diagnostics contract
 
 Every major action should emit structured events/logs with:
