@@ -567,6 +567,7 @@ See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the fu
 
 - built-in agent template definitions (slug, name, description, category, mode, spells)
 - `rune agents templates` listing surface with optional `--category` filter
+- `rune agents start --template <slug>` launch path: resolves template by slug, creates a subagent session via the gateway, renders session id / template / mode
 - JSON and human-readable output modes
 
 ### Invariants
@@ -575,29 +576,33 @@ See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the fu
 - template slugs are unique
 - all three categories (developer, operator, personal) are represented
 - `--category` filter returns only matching templates
+- `--template` with an unknown slug returns a user-facing error naming the slug and suggesting `rune agents templates`
 
 ### Required persisted state
 
-None — built-in templates are compiled into the binary.
+None — built-in templates are compiled into the binary. Session state is persisted by the gateway.
 
 ### External surfaces
 
 - `rune agents templates [--category <cat>]` CLI command
-- `rune agents templates --json` for machine-readable output
+- `rune agents start --template <slug>` CLI command
+- `rune agents templates --json` / `rune agents start --json` for machine-readable output
 
 ### Failure behavior expectations
 
 - unknown `--category` value returns empty list, not an error
+- unknown `--template` slug returns a descriptive error (not a panic)
 
 ### Minimum parity evidence
 
 - CLI parse tests for `rune agents templates` with and without `--category`
+- CLI parse tests for `rune agents start --template <slug>` and missing `--template`
 - core unit tests: slug uniqueness, minimum count, category coverage, serde roundtrip
-- output render tests: empty list, populated list (human + JSON)
+- output render tests: empty list, populated list (human + JSON), template start (human + JSON)
 
 ### Contract status
 
-`specified` — template listing surface implemented; `start --template` launch path not yet wired.
+`implemented` — template listing and `start --template` launch path wired end-to-end.
 
 ---
 

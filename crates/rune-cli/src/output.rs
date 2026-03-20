@@ -485,6 +485,26 @@ impl fmt::Display for TemplateListResponse {
     }
 }
 
+/// Response for `rune agents start --template <slug>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateStartResponse {
+    pub session_id: String,
+    pub template_slug: String,
+    pub template_name: String,
+    pub mode: String,
+    pub status: String,
+}
+
+impl fmt::Display for TemplateStartResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Session started from template.")?;
+        writeln!(f, "  Session:  {}", self.session_id)?;
+        writeln!(f, "  Template: {} ({})", self.template_name, self.template_slug)?;
+        writeln!(f, "  Mode:     {}", self.mode)?;
+        write!(f, "  Status:   {}", self.status)
+    }
+}
+
 /// First-class `/status` / `session_status` parity card for an individual session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStatusCard {
@@ -2996,6 +3016,40 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["templates"][0]["slug"], "coding-agent");
         assert_eq!(parsed["templates"][0]["spells"][0], "file-tools");
+    }
+
+    #[test]
+    fn render_template_start_human() {
+        let resp = TemplateStartResponse {
+            session_id: "abc-123".into(),
+            template_slug: "coding-agent".into(),
+            template_name: "Coding Agent".into(),
+            mode: "coder".into(),
+            status: "idle".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("Session started from template."));
+        assert!(out.contains("abc-123"));
+        assert!(out.contains("Coding Agent"));
+        assert!(out.contains("coding-agent"));
+        assert!(out.contains("coder"));
+        assert!(out.contains("idle"));
+    }
+
+    #[test]
+    fn render_template_start_json() {
+        let resp = TemplateStartResponse {
+            session_id: "abc-123".into(),
+            template_slug: "coding-agent".into(),
+            template_name: "Coding Agent".into(),
+            mode: "coder".into(),
+            status: "idle".into(),
+        };
+        let out = render(&resp, OutputFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["session_id"], "abc-123");
+        assert_eq!(parsed["template_slug"], "coding-agent");
+        assert_eq!(parsed["mode"], "coder");
     }
 
     #[test]
