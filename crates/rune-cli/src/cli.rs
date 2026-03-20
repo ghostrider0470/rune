@@ -386,6 +386,12 @@ pub enum AgentsAction {
         #[arg(long, default_value_t = 500)]
         limit: u64,
     },
+    /// List available pre-built agent templates.
+    Templates {
+        /// Filter templates by category (developer, operator, personal).
+        #[arg(long)]
+        category: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1973,6 +1979,30 @@ mod tests {
             } => {
                 assert_eq!(limit, 200);
             }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_templates() {
+        let cli = Cli::try_parse_from(["rune", "agents", "templates"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Agents {
+                action: AgentsAction::Templates { category: None }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_agents_templates_with_category() {
+        let cli =
+            Cli::try_parse_from(["rune", "agents", "templates", "--category", "developer"])
+                .unwrap();
+        match &cli.command {
+            Command::Agents {
+                action: AgentsAction::Templates { category },
+            } => assert_eq!(category.as_deref(), Some("developer")),
             other => panic!("unexpected command: {other:?}"),
         }
     }

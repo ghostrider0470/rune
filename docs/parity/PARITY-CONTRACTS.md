@@ -561,7 +561,47 @@ See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the fu
 
 ---
 
-## 13. Evidence checklist template
+## 13. Agent templates (#63)
+
+### Scope
+
+- built-in agent template definitions (slug, name, description, category, mode, spells)
+- `rune agents templates` listing surface with optional `--category` filter
+- JSON and human-readable output modes
+
+### Invariants
+
+- at least 4 built-in templates ship with the binary
+- template slugs are unique
+- all three categories (developer, operator, personal) are represented
+- `--category` filter returns only matching templates
+
+### Required persisted state
+
+None — built-in templates are compiled into the binary.
+
+### External surfaces
+
+- `rune agents templates [--category <cat>]` CLI command
+- `rune agents templates --json` for machine-readable output
+
+### Failure behavior expectations
+
+- unknown `--category` value returns empty list, not an error
+
+### Minimum parity evidence
+
+- CLI parse tests for `rune agents templates` with and without `--category`
+- core unit tests: slug uniqueness, minimum count, category coverage, serde roundtrip
+- output render tests: empty list, populated list (human + JSON)
+
+### Contract status
+
+`specified` — template listing surface implemented; `start --template` launch path not yet wired.
+
+---
+
+## 14. Evidence checklist template
 
 Use this template per subsystem during execution:
 
@@ -576,7 +616,7 @@ Use this template per subsystem during execution:
 
 ---
 
-## 14. Release rule
+## 15. Release rule
 
 The rewrite cannot honestly be described as functionally identical until every parity-critical subsystem is either:
 

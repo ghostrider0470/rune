@@ -431,6 +431,54 @@ impl fmt::Display for AgentTreeResponse {
     }
 }
 
+/// A single agent template entry for display in `rune agents templates`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateSummary {
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub mode: String,
+    pub spells: Vec<String>,
+}
+
+impl fmt::Display for TemplateSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "  {:<22} {:<24} [{}] mode={}",
+            self.slug, self.description, self.category, self.mode
+        )
+    }
+}
+
+/// Response for `rune agents templates`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateListResponse {
+    pub templates: Vec<TemplateSummary>,
+}
+
+impl fmt::Display for TemplateListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.templates.is_empty() {
+            return write!(f, "No templates available.");
+        }
+        writeln!(
+            f,
+            "  {:<22} {:<24} {:<12} MODE",
+            "SLUG", "DESCRIPTION", "CATEGORY"
+        )?;
+        for t in &self.templates {
+            writeln!(
+                f,
+                "  {:<22} {:<24} {:<12} {}",
+                t.slug, t.description, t.category, t.mode
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// First-class `/status` / `session_status` parity card for an individual session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStatusCard {
@@ -2872,6 +2920,60 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["roots"][0]["id"], "root-1");
         assert_eq!(parsed["roots"][0]["kind"], "direct");
+    }
+
+    #[test]
+    fn render_template_list_empty() {
+        let list = TemplateListResponse { templates: vec![] };
+        assert_eq!(render(&list, OutputFormat::Human), "No templates available.");
+    }
+
+    #[test]
+    fn render_template_list_with_entries() {
+        let list = TemplateListResponse {
+            templates: vec![
+                TemplateSummary {
+                    slug: "coding-agent".into(),
+                    name: "Coding Agent".into(),
+                    description: "Implements features".into(),
+                    category: "developer".into(),
+                    mode: "coder".into(),
+                    spells: vec!["file-tools".into(), "exec-tools".into()],
+                },
+                TemplateSummary {
+                    slug: "monitor-agent".into(),
+                    name: "Monitor Agent".into(),
+                    description: "Watches health".into(),
+                    category: "operator".into(),
+                    mode: "ask".into(),
+                    spells: vec!["status-tools".into()],
+                },
+            ],
+        };
+        let out = render(&list, OutputFormat::Human);
+        assert!(out.contains("coding-agent"));
+        assert!(out.contains("monitor-agent"));
+        assert!(out.contains("developer"));
+        assert!(out.contains("operator"));
+        assert!(out.contains("SLUG"));
+    }
+
+    #[test]
+    fn render_template_list_json() {
+        let list = TemplateListResponse {
+            templates: vec![TemplateSummary {
+                slug: "coding-agent".into(),
+                name: "Coding Agent".into(),
+                description: "Implements features".into(),
+                category: "developer".into(),
+                mode: "coder".into(),
+                spells: vec!["file-tools".into()],
+            }],
+        };
+        let out = render(&list, OutputFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["templates"][0]["slug"], "coding-agent");
+        assert_eq!(parsed["templates"][0]["spells"][0], "file-tools");
     }
 
     #[test]
