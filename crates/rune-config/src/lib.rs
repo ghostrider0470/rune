@@ -213,6 +213,43 @@ impl AppConfig {
                 source: ConfiguredDefaultModelSource::ModelsDefault,
             })
     }
+
+    /// Return the configured default provider before runtime auto-detection.
+    ///
+    /// This is detectable when:
+    /// - a configured default model resolves to an explicit provider, or
+    /// - exactly one explicit provider is configured
+    pub fn configured_default_provider(
+        &self,
+    ) -> Result<Option<ConfiguredDefaultProvider<'_>>, ModelResolutionError> {
+        if self.models.providers.is_empty() {
+            return Ok(None);
+        }
+
+        if let Some(selection) = self.configured_default_model() {
+            let resolved = self.models.resolve_model(selection.model)?;
+            return Ok(Some(ConfiguredDefaultProvider {
+                provider: resolved.provider,
+                source: match selection.source {
+                    ConfiguredDefaultModelSource::AgentConfig => {
+                        ConfiguredDefaultProviderSource::AgentConfig
+                    }
+                    ConfiguredDefaultModelSource::ModelsDefault => {
+                        ConfiguredDefaultProviderSource::ModelsDefault
+                    }
+                },
+            }));
+        }
+
+        if self.models.providers.len() == 1 {
+            return Ok(Some(ConfiguredDefaultProvider {
+                provider: &self.models.providers[0],
+                source: ConfiguredDefaultProviderSource::SingleProvider,
+            }));
+        }
+
+        Ok(None)
+    }
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -1060,6 +1097,33 @@ impl ConfiguredDefaultModelSource {
 pub struct ConfiguredDefaultModel<'a> {
     pub model: &'a str,
     pub source: ConfiguredDefaultModelSource,
+}
+
+/// Source of the configured default provider before runtime auto-detection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfiguredDefaultProviderSource {
+    AgentConfig,
+    ModelsDefault,
+    SingleProvider,
+}
+
+impl ConfiguredDefaultProviderSource {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentConfig => "agent-config",
+            Self::ModelsDefault => "models.default_model",
+            Self::SingleProvider => "single-provider",
+        }
+    }
+}
+
+/// Configured default provider selection before runtime auto-detection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfiguredDefaultProvider<'a> {
+    pub provider: &'a ModelProviderConfig,
+    pub source: ConfiguredDefaultProviderSource,
 }
 
 /// Multi-agent configuration.
@@ -2228,7 +2292,186 @@ models = ["gpt-5.4", "gpt-image-1"]
             .configured_default_model()
             .expect("configured default model");
         assert_eq!(selection.model, "models-default");
-        assert_eq!(selection.source, ConfiguredDefaultModelSource::ModelsDefault);
+        assert_eq!(
+            selection.source,
+            ConfiguredDefaultModelSource::ModelsDefault
+        );
+    }
+
+    #[test]
+    fn configured_default_provider_prefers_agent_model_provider() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("openai/gpt-5.4".into());
+        config.models.providers = vec![
+            ModelProviderConfig {
+                name: "openai".into(),
+                kind: "openai".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            ModelProviderConfig {
+                name: "anthropic".into(),
+                kind: "anthropic".into(),
+                base_url: "https://api.anthropic.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("ANTHROPIC_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("claude-sonnet-4-5".into())],
+            },
+        ];
+        config.agents.list = vec![AgentConfig {
+            id: "coder".into(),
+            default: Some(true),
+            model: Some(AgentModelSelection::Id(
+                "anthropic/claude-sonnet-4-5".into(),
+            )),
+            workspace: None,
+            system_prompt: None,
+        }];
+
+        let selection = config
+            .configured_default_provider()
+            .expect("provider detection should succeed")
+            .expect("configured default provider");
+        assert_eq!(selection.provider.name, "anthropic");
+        assert_eq!(
+            selection.source,
+            ConfiguredDefaultProviderSource::AgentConfig
+        );
+    }
+
+    #[test]
+    fn configured_default_provider_uses_models_default_provider() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("openai/gpt-5.4".into());
+        config.models.providers = vec![ModelProviderConfig {
+            name: "openai".into(),
+            kind: "openai".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: None,
+            deployment_name: None,
+            api_version: None,
+            api_key_env: Some("OPENAI_API_KEY".into()),
+            model_alias: None,
+            models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+        }];
+
+        let selection = config
+            .configured_default_provider()
+            .expect("provider detection should succeed")
+            .expect("configured default provider");
+        assert_eq!(selection.provider.name, "openai");
+        assert_eq!(
+            selection.source,
+            ConfiguredDefaultProviderSource::ModelsDefault
+        );
+    }
+
+    #[test]
+    fn configured_default_provider_uses_single_provider_without_default_model() {
+        let mut config = AppConfig::default();
+        config.models.providers = vec![ModelProviderConfig {
+            name: "openai".into(),
+            kind: "openai".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: None,
+            deployment_name: None,
+            api_version: None,
+            api_key_env: Some("OPENAI_API_KEY".into()),
+            model_alias: None,
+            models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+        }];
+
+        let selection = config
+            .configured_default_provider()
+            .expect("provider detection should succeed")
+            .expect("configured default provider");
+        assert_eq!(selection.provider.name, "openai");
+        assert_eq!(
+            selection.source,
+            ConfiguredDefaultProviderSource::SingleProvider
+        );
+    }
+
+    #[test]
+    fn configured_default_provider_returns_none_for_multi_provider_without_default_model() {
+        let mut config = AppConfig::default();
+        config.models.providers = vec![
+            ModelProviderConfig {
+                name: "openai".into(),
+                kind: "openai".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            ModelProviderConfig {
+                name: "anthropic".into(),
+                kind: "anthropic".into(),
+                base_url: "https://api.anthropic.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("ANTHROPIC_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("claude-sonnet-4-5".into())],
+            },
+        ];
+
+        assert_eq!(
+            config
+                .configured_default_provider()
+                .expect("provider detection should succeed"),
+            None
+        );
+    }
+
+    #[test]
+    fn configured_default_provider_reports_unresolved_default_model() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("missing-model".into());
+        config.models.providers = vec![
+            ModelProviderConfig {
+                name: "openai".into(),
+                kind: "openai".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            ModelProviderConfig {
+                name: "anthropic".into(),
+                kind: "anthropic".into(),
+                base_url: "https://api.anthropic.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("ANTHROPIC_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("claude-sonnet-4-5".into())],
+            },
+        ];
+
+        let err = config
+            .configured_default_provider()
+            .expect_err("missing explicit default should be unresolved");
+        assert!(matches!(
+            err,
+            ModelResolutionError::UnknownModel { model } if model == "missing-model"
+        ));
     }
 
     #[test]
