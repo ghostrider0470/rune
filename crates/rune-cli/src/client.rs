@@ -15,8 +15,8 @@ use crate::output::{
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport,
-    SystemEventListResponse, GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse,
-    GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
+    GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
+    HealthResponse, HeartbeatStatusResponse, LogsQueryResponse, SystemEventListResponse,
     ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
     SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
@@ -85,6 +85,47 @@ impl GatewayClient {
             })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /api/logs`
+    pub async fn logs_query(
+        &self,
+        level: Option<&str>,
+        source: Option<&str>,
+        limit: Option<usize>,
+        since: Option<&str>,
+    ) -> Result<LogsQueryResponse> {
+        let mut query: Vec<(&str, String)> = Vec::new();
+        if let Some(level) = level {
+            query.push(("level", level.to_string()));
+        }
+        if let Some(source) = source {
+            query.push(("source", source.to_string()));
+        }
+        if let Some(limit) = limit {
+            query.push(("limit", limit.to_string()));
+        }
+        if let Some(since) = since {
+            query.push(("since", since.to_string()));
+        }
+
+        let resp = self
+            .http
+            .get(self.url("/api/logs"))
+            .query(&query)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            resp.json::<LogsQueryResponse>()
+                .await
+                .context("invalid JSON from /api/logs")
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
         }
     }
 
@@ -2688,6 +2729,43 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let resp = client.cron_status().await.unwrap();
         assert_eq!(resp.total_jobs, 1);
+    }
+
+    #[tokio::test]
+    async fn logs_query_passes_filters_and_parses_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/logs"))
+            .and(query_param("level", "warn"))
+            .and(query_param("source", "gateway"))
+            .and(query_param("limit", "25"))
+            .and(query_param("since", "2026-03-20T09:00:00Z"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "entries": [
+                    {
+                        "timestamp": "2026-03-20T09:30:00Z",
+                        "level": "warn",
+                        "message": "gateway restart pending"
+                    }
+                ],
+                "message": "1 log entry returned"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .logs_query(
+                Some("warn"),
+                Some("gateway"),
+                Some(25),
+                Some("2026-03-20T09:00:00Z"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.entries.len(), 1);
+        assert_eq!(resp.entries[0]["level"], "warn");
+        assert_eq!(resp.message, "1 log entry returned");
     }
 
     #[tokio::test]

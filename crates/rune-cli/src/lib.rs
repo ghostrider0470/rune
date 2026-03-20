@@ -906,6 +906,22 @@ pub async fn run(cli: Cli) -> Result<()> {
             let result = client.health().await?;
             println!("{}", render(&result, format));
         }
+        Command::Logs {
+            level,
+            source,
+            limit,
+            since,
+        } => {
+            let result = client
+                .logs_query(
+                    level.as_deref(),
+                    source.as_deref(),
+                    limit,
+                    since.as_deref(),
+                )
+                .await?;
+            println!("{}", render(&result, format));
+        }
         Command::Doctor => {
             let ws_root = dirs::home_dir()
                 .map(|h| h.join(".rune/workspace"))
