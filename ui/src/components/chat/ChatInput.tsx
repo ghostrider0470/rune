@@ -180,7 +180,7 @@ export function ChatInput({
               key={`${attachment.name}-${attachment.size}-${attachment.lastModified}-${index}`}
               file={attachment}
               onRemove={() => handleRemoveAttachment(index)}
-              className="max-w-sm"
+              className="w-full sm:max-w-sm"
             />
           ))}
         </div>
@@ -202,18 +202,7 @@ export function ChatInput({
           onChange={handleFileSelection}
           disabled={disabled}
         />
-        <div className="flex items-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => attachmentInputRef.current?.click()}
-            disabled={disabled || attachments.length >= maxAttachments}
-            className="mb-1 h-11 w-11 shrink-0 rounded-2xl text-muted-foreground"
-            aria-label="Attach image"
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <textarea
               ref={textareaRef}
@@ -225,21 +214,26 @@ export function ChatInput({
               disabled={disabled}
               rows={1}
               className={cn(
-                "flex-1 resize-none bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed",
+                "flex-1 resize-none bg-transparent px-3 py-2.5 text-[15px] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed sm:text-sm",
               )}
               style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
             />
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-1 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 text-[11px] text-muted-foreground sm:px-3">
               <span className="inline-flex items-center gap-1">
                 <ImagePlus className="h-3 w-3" />
                 Paste or attach images
               </span>
-              <span className="inline-flex items-center gap-1">
+              <span className="hidden items-center gap-1 sm:inline-flex">
                 <CornerDownLeft className="h-3 w-3" />
                 Enter sends · Shift + Enter newline
               </span>
               {attachments.length > 0 && (
-                <span className="w-full text-[10px] text-muted-foreground">
+                <span className="w-full text-[10px] text-muted-foreground sm:hidden">
+                  {attachments.length}/{maxAttachments} image attachment{attachments.length === 1 ? "" : "s"} ready.
+                </span>
+              )}
+              {attachments.length > 0 && (
+                <span className="hidden w-full text-[10px] text-muted-foreground sm:block">
                   {attachments.length}/{maxAttachments} image attachment{attachments.length === 1 ? "" : "s"} queued for this send.
                 </span>
               )}
@@ -251,18 +245,35 @@ export function ChatInput({
               )}
             </div>
           </div>
-          <Button
-            onClick={handleSend}
-            disabled={sendDisabled}
-            size="icon"
-            className="mb-1 h-11 w-11 shrink-0 rounded-2xl"
-          >
-            {disabled ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </Button>
+          <div className="flex items-center justify-between gap-2 sm:mb-1 sm:shrink-0 sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => attachmentInputRef.current?.click()}
+              disabled={disabled || attachments.length >= maxAttachments}
+              className="h-10 rounded-2xl px-3 text-muted-foreground sm:h-11 sm:w-11 sm:px-0"
+              aria-label="Attach image"
+            >
+              <Paperclip className="h-4 w-4" />
+              <span className="ml-1.5 text-xs sm:hidden">Attach</span>
+            </Button>
+            <Button
+              onClick={handleSend}
+              disabled={sendDisabled}
+              size="sm"
+              className="h-10 min-w-[7rem] flex-1 rounded-2xl px-4 sm:h-11 sm:w-11 sm:flex-none sm:min-w-0 sm:px-0"
+            >
+              {disabled ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Send className="h-4 w-4" />
+                  <span className="ml-1.5 text-sm sm:hidden">Send</span>
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

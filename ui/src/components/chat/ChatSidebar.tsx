@@ -35,6 +35,7 @@ interface ChatSidebarProps {
   selectedToolEntry?: TranscriptEntry | null;
   selectedToolPair?: TranscriptEntry | null;
   onCloseInspector?: () => void;
+  compactHeader?: boolean;
 }
 
 function statusBadgeVariant(
@@ -226,6 +227,7 @@ export function ChatSidebar({
   selectedToolEntry,
   selectedToolPair,
   onCloseInspector,
+  compactHeader = false,
 }: ChatSidebarProps) {
   const [search, setSearch] = useState("");
 
@@ -254,6 +256,11 @@ export function ChatSidebar({
     };
   }, [sessions]);
 
+  const activeSession = useMemo(
+    () => sessions?.find((session) => session.id === activeSessionId),
+    [activeSessionId, sessions],
+  );
+
   if (mode === "inspector") {
     return (
       <div
@@ -278,7 +285,12 @@ export function ChatSidebar({
         className,
       )}
     >
-      <div className="border-b border-border/70 bg-gradient-to-br from-background via-background to-primary/5 px-4 py-4">
+      <div
+        className={cn(
+          "border-b border-border/70 bg-gradient-to-br from-background via-background to-primary/5 px-4 py-4",
+          compactHeader && "px-3 py-3",
+        )}
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -287,9 +299,13 @@ export function ChatSidebar({
                 Queue
               </Badge>
             </div>
-            <h2 className="mt-3 text-sm font-semibold">Session control</h2>
+            <h2 className="mt-3 text-sm font-semibold">
+              {compactHeader ? "Switch sessions" : "Session control"}
+            </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Jump between live work, inspect model context, and open a fresh thread fast.
+              {compactHeader
+                ? "Keep the active thread in view and jump without losing place."
+                : "Jump between live work, inspect model context, and open a fresh thread fast."}
             </p>
           </div>
           <Button
@@ -304,23 +320,37 @@ export function ChatSidebar({
           </Button>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Total</p>
-            <p className="mt-1 text-sm font-semibold">{summary.total}</p>
+        {compactHeader ? (
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="rounded-full border border-border/70 bg-background/80 px-2.5 py-1">
+              {summary.total} sessions
+            </span>
+            <span className="rounded-full border border-border/70 bg-background/80 px-2.5 py-1">
+              {summary.active} active
+            </span>
+            <span className="rounded-full border border-border/70 bg-background/80 px-2.5 py-1">
+              {summary.withModels} models
+            </span>
           </div>
-          <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Active</p>
-            <p className="mt-1 text-sm font-semibold">{summary.active}</p>
+        ) : (
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Total</p>
+              <p className="mt-1 text-sm font-semibold">{summary.total}</p>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Active</p>
+              <p className="mt-1 text-sm font-semibold">{summary.active}</p>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Models</p>
+              <p className="mt-1 text-sm font-semibold">{summary.withModels}</p>
+            </div>
           </div>
-          <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Models</p>
-            <p className="mt-1 text-sm font-semibold">{summary.withModels}</p>
-          </div>
-        </div>
+        )}
       </div>
 
-      <div className="px-4 py-3">
+      <div className={cn("px-4 py-3", compactHeader && "px-3 py-2.5")}>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -332,9 +362,32 @@ export function ChatSidebar({
         </div>
       </div>
 
+      {compactHeader && activeSession && (
+        <div className="px-3 pb-2">
+          <div className="rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                Current session
+              </p>
+              <Badge variant={statusBadgeVariant(activeSession.status)} className="text-[10px]">
+                {activeSession.status}
+              </Badge>
+            </div>
+            <code className="mt-1 block truncate text-xs font-medium text-foreground">
+              {activeSession.id}
+            </code>
+            {activeSession.preview && (
+              <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                {activeSession.preview}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       <Separator />
 
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
+      <div className={cn("flex-1 overflow-y-auto px-2 pb-2", compactHeader && "px-1.5 pb-1.5")}>
         {isLoading ? (
           <div className="space-y-2 p-2">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -355,6 +408,7 @@ export function ChatSidebar({
                   onClick={() => onSelectSession?.(session.id)}
                   className={cn(
                     "group flex w-full flex-col gap-2 rounded-2xl border px-3 py-3 text-left transition-all",
+                    compactHeader && "gap-1.5 px-3 py-2.5",
                     isSessionActive
                       ? "border-primary/40 bg-primary/10 text-foreground shadow-[0_12px_30px_rgba(249,115,22,0.12)]"
                       : "border-border/70 bg-background/70 hover:border-primary/25 hover:bg-primary/5",
@@ -380,7 +434,12 @@ export function ChatSidebar({
                           session.last_activity_at ?? session.updated_at ?? session.created_at,
                         )}
                       </p>
-                      <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground/90">
+                      <p
+                        className={cn(
+                          "mt-2 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground/90",
+                          compactHeader && "mt-1.5 line-clamp-3",
+                        )}
+                      >
                         {session.preview}
                       </p>
                     </div>
