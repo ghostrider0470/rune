@@ -2037,6 +2037,92 @@ impl fmt::Display for ConfigMutationResponse {
     }
 }
 
+/// Result of asking the gateway to reload its config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigReloadResponse {
+    pub reloaded: bool,
+    pub note: Option<String>,
+}
+
+impl fmt::Display for ConfigReloadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.reloaded {
+            write!(f, "Configuration reloaded successfully")?;
+        } else {
+            write!(f, "Configuration reload failed")?;
+        }
+        if let Some(note) = &self.note {
+            write!(f, "\n  Note: {note}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Diff between the on-disk config and the live running config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigDiffResponse {
+    pub has_changes: bool,
+    pub diff: Vec<ConfigDiffEntry>,
+}
+
+/// A single key that differs between disk and live config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigDiffEntry {
+    pub key: String,
+    pub disk_value: Option<serde_json::Value>,
+    pub live_value: Option<serde_json::Value>,
+}
+
+impl fmt::Display for ConfigDiffResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.has_changes {
+            return write!(f, "No differences between disk and live config.");
+        }
+        writeln!(f, "Config diff (disk vs live):")?;
+        for entry in &self.diff {
+            let disk = entry
+                .disk_value
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_default())
+                .unwrap_or_else(|| "(absent)".into());
+            let live = entry
+                .live_value
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_default())
+                .unwrap_or_else(|| "(absent)".into());
+            writeln!(f, "  {}: {} -> {}", entry.key, disk, live)?;
+        }
+        Ok(())
+    }
+}
+
+/// Resolved RUNE__* environment variable overrides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigEnvResponse {
+    pub overrides: Vec<ConfigEnvEntry>,
+}
+
+/// A single RUNE__* env var override.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigEnvEntry {
+    pub variable: String,
+    pub value: String,
+    pub config_key: String,
+}
+
+impl fmt::Display for ConfigEnvResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.overrides.is_empty() {
+            return write!(f, "No RUNE__* environment variable overrides active.");
+        }
+        writeln!(f, "Active RUNE__* environment overrides:")?;
+        for entry in &self.overrides {
+            writeln!(f, "  {} = {} (-> {})", entry.variable, entry.value, entry.config_key)?;
+        }
+        Ok(())
+    }
+}
+
 /// Live config snapshot returned by the gateway `/config` surface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayConfigResponse {
@@ -6056,5 +6142,317 @@ impl fmt::Display for HookMutationResponse {
         let icon = if self.success { "✓" } else { "✗" };
         writeln!(f, "{icon} Hook '{}' — {}", self.hook, self.action)?;
         write!(f, "  {}", self.detail)
+    }
+}
+
+// ── Lifecycle (setup/backup/update/reset) ─────────────────────────
+
+/// Response for `setup`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupResponse {
+    pub success: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for SetupResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.detail)
+    }
+}
+
+/// Response for `backup create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupCreateResponse {
+    pub success: bool,
+    pub backup_id: String,
+    pub detail: String,
+}
+
+impl fmt::Display for BackupCreateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {} (id: {})", self.detail, self.backup_id)
+    }
+}
+
+/// Summary of a single backup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupSummary {
+    pub id: String,
+    pub label: Option<String>,
+    pub created_at: String,
+    pub size_bytes: Option<u64>,
+}
+
+impl fmt::Display for BackupSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.id)?;
+        if let Some(ref label) = self.label {
+            write!(f, " ({label})")?;
+        }
+        write!(f, " created={}", self.created_at)?;
+        if let Some(size) = self.size_bytes {
+            write!(f, " size={size}B")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `backup list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupListResponse {
+    pub backups: Vec<BackupSummary>,
+}
+
+impl fmt::Display for BackupListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.backups.is_empty() {
+            return write!(f, "No backups found.");
+        }
+        for b in &self.backups {
+            writeln!(f, "  {b}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `backup restore`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupRestoreResponse {
+    pub success: bool,
+    pub backup_id: String,
+    pub detail: String,
+}
+
+impl fmt::Display for BackupRestoreResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {} (backup: {})", self.detail, self.backup_id)
+    }
+}
+
+/// Response for `update check`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCheckResponse {
+    pub available: bool,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub detail: String,
+}
+
+impl fmt::Display for UpdateCheckResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.available {
+            write!(
+                f,
+                "Update available: {} → {}",
+                self.current_version,
+                self.latest_version.as_deref().unwrap_or("unknown")
+            )
+        } else {
+            write!(f, "Up to date ({})", self.current_version)
+        }
+    }
+}
+
+/// Response for `update apply`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateApplyResponse {
+    pub success: bool,
+    pub version: String,
+    pub detail: String,
+}
+
+impl fmt::Display for UpdateApplyResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {} (v{})", self.detail, self.version)
+    }
+}
+
+/// Response for `update status`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateStatusResponse {
+    pub current_version: String,
+    pub update_channel: String,
+    pub last_check: Option<String>,
+}
+
+impl fmt::Display for UpdateStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "version={} channel={}", self.current_version, self.update_channel)?;
+        if let Some(ref last) = self.last_check {
+            write!(f, " last_check={last}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `reset`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetResponse {
+    pub success: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for ResetResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.detail)
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_output_tests {
+    use super::*;
+
+    #[test]
+    fn setup_response_display() {
+        let r = SetupResponse { success: true, detail: "Setup complete".into() };
+        assert!(r.to_string().contains("✓"));
+        assert!(r.to_string().contains("Setup complete"));
+    }
+
+    #[test]
+    fn backup_create_response_display() {
+        let r = BackupCreateResponse { success: true, backup_id: "bk-1".into(), detail: "Backup created".into() };
+        let s = r.to_string();
+        assert!(s.contains("bk-1"));
+        assert!(s.contains("✓"));
+    }
+
+    #[test]
+    fn backup_list_response_display_empty() {
+        let r = BackupListResponse { backups: vec![] };
+        assert_eq!(r.to_string(), "No backups found.");
+    }
+
+    #[test]
+    fn backup_list_response_display() {
+        let r = BackupListResponse {
+            backups: vec![BackupSummary {
+                id: "bk-1".into(),
+                label: Some("nightly".into()),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                size_bytes: Some(1024),
+            }],
+        };
+        let s = r.to_string();
+        assert!(s.contains("bk-1"));
+        assert!(s.contains("nightly"));
+    }
+
+    #[test]
+    fn backup_restore_response_display() {
+        let r = BackupRestoreResponse { success: true, backup_id: "bk-1".into(), detail: "Restored".into() };
+        assert!(r.to_string().contains("✓"));
+    }
+
+    #[test]
+    fn update_check_available_display() {
+        let r = UpdateCheckResponse { available: true, current_version: "0.1.0".into(), latest_version: Some("0.2.0".into()), detail: "New version".into() };
+        let s = r.to_string();
+        assert!(s.contains("0.1.0"));
+        assert!(s.contains("0.2.0"));
+    }
+
+    #[test]
+    fn update_check_up_to_date_display() {
+        let r = UpdateCheckResponse { available: false, current_version: "0.2.0".into(), latest_version: None, detail: "Up to date".into() };
+        assert!(r.to_string().contains("Up to date"));
+    }
+
+    #[test]
+    fn update_apply_response_display() {
+        let r = UpdateApplyResponse { success: true, version: "0.2.0".into(), detail: "Updated".into() };
+        assert!(r.to_string().contains("✓"));
+    }
+
+    #[test]
+    fn update_status_response_display() {
+        let r = UpdateStatusResponse { current_version: "0.2.0".into(), update_channel: "stable".into(), last_check: Some("2026-01-01".into()) };
+        let s = r.to_string();
+        assert!(s.contains("stable"));
+        assert!(s.contains("0.2.0"));
+    }
+
+    #[test]
+    fn reset_response_display() {
+        let r = ResetResponse { success: true, detail: "All state cleared".into() };
+        assert!(r.to_string().contains("✓"));
+    }
+}
+
+#[cfg(test)]
+mod config_admin_output_tests {
+    use super::*;
+
+    #[test]
+    fn config_reload_display_success() {
+        let resp = ConfigReloadResponse {
+            reloaded: true,
+            note: Some("2 keys changed".into()),
+        };
+        let s = format!("{resp}");
+        assert!(s.contains("reloaded successfully"));
+        assert!(s.contains("2 keys changed"));
+    }
+
+    #[test]
+    fn config_reload_display_failure() {
+        let resp = ConfigReloadResponse {
+            reloaded: false,
+            note: None,
+        };
+        let s = format!("{resp}");
+        assert!(s.contains("reload failed"));
+    }
+
+    #[test]
+    fn config_diff_no_changes() {
+        let resp = ConfigDiffResponse {
+            has_changes: false,
+            diff: vec![],
+        };
+        let s = format!("{resp}");
+        assert!(s.contains("No differences"));
+    }
+
+    #[test]
+    fn config_diff_with_changes() {
+        let resp = ConfigDiffResponse {
+            has_changes: true,
+            diff: vec![ConfigDiffEntry {
+                key: "gateway.port".into(),
+                disk_value: Some(serde_json::json!(9090)),
+                live_value: Some(serde_json::json!(8787)),
+            }],
+        };
+        let s = format!("{resp}");
+        assert!(s.contains("gateway.port"));
+        assert!(s.contains("9090"));
+        assert!(s.contains("8787"));
+    }
+
+    #[test]
+    fn config_env_empty() {
+        let resp = ConfigEnvResponse { overrides: vec![] };
+        let s = format!("{resp}");
+        assert!(s.contains("No RUNE__*"));
+    }
+
+    #[test]
+    fn config_env_with_overrides() {
+        let resp = ConfigEnvResponse {
+            overrides: vec![ConfigEnvEntry {
+                variable: "RUNE__GATEWAY__PORT".into(),
+                value: "9090".into(),
+                config_key: "gateway.port".into(),
+            }],
+        };
+        let s = format!("{resp}");
+        assert!(s.contains("RUNE__GATEWAY__PORT"));
+        assert!(s.contains("gateway.port"));
     }
 }

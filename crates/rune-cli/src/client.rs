@@ -29,6 +29,8 @@ use crate::output::{
     AgentRunResponse, AgentResultResponse,
     AcpSendResponse, AcpInboxResponse, AcpInboxMessage, AcpAckResponse,
     SessionTreeNode, SessionTreeResponse, SkillCheckResponse, SkillInfoResponse,
+    SetupResponse, BackupCreateResponse, BackupListResponse, BackupRestoreResponse,
+    UpdateCheckResponse, UpdateApplyResponse, UpdateStatusResponse, ResetResponse,
     SkillListResponse, SkillSummary, StatusResponse,
 };
 
@@ -2892,94 +2894,6 @@ impl GatewayClient {
     }
 
 
-    /// `GET /api/logs/tail`
-    pub async fn logs_tail(
-        &self,
-        level: Option<&str>,
-        source: Option<&str>,
-        follow: bool,
-        lines: usize,
-    ) -> Result<crate::output::LogsTailResponse> {
-        let mut query: Vec<(&str, String)> = vec![("lines", lines.to_string())];
-        if follow { query.push(("follow", "true".to_string())); }
-        if let Some(l) = level { query.push(("level", l.to_string())); }
-        if let Some(s) = source { query.push(("source", s.to_string())); }
-        let resp = self.http.get(self.url("/api/logs/tail")).query(&query).send().await.context("failed to reach gateway")?;
-        if resp.status().is_success() {
-            resp.json::<crate::output::LogsTailResponse>().await.context("invalid JSON from /api/logs/tail")
-        } else {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            bail!("Gateway returned HTTP {status}: {body}")
-        }
-    }
-
-    /// `GET /api/logs/search`
-    pub async fn logs_search(
-        &self,
-        query_text: &str,
-        level: Option<&str>,
-        source: Option<&str>,
-        limit: usize,
-    ) -> Result<crate::output::LogsSearchResponse> {
-        let mut query: Vec<(&str, String)> = vec![("q", query_text.to_string()), ("limit", limit.to_string())];
-        if let Some(l) = level { query.push(("level", l.to_string())); }
-        if let Some(s) = source { query.push(("source", s.to_string())); }
-        let resp = self.http.get(self.url("/api/logs/search")).query(&query).send().await.context("failed to reach gateway")?;
-        if resp.status().is_success() {
-            resp.json::<crate::output::LogsSearchResponse>().await.context("invalid JSON from /api/logs/search")
-        } else {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            bail!("Gateway returned HTTP {status}: {body}")
-        }
-    }
-
-    /// `POST /api/logs/export`
-    pub async fn logs_export(
-        &self,
-        format: &str,
-        level: Option<&str>,
-        source: Option<&str>,
-        since: Option<&str>,
-        until: Option<&str>,
-        limit: Option<usize>,
-        output: Option<&str>,
-    ) -> Result<crate::output::LogsExportResponse> {
-        let mut body = serde_json::json!({ "format": format });
-        if let Some(l) = level { body["level"] = serde_json::json!(l); }
-        if let Some(s) = source { body["source"] = serde_json::json!(s); }
-        if let Some(s) = since { body["since"] = serde_json::json!(s); }
-        if let Some(u) = until { body["until"] = serde_json::json!(u); }
-        if let Some(n) = limit { body["limit"] = serde_json::json!(n); }
-        if let Some(o) = output { body["output"] = serde_json::json!(o); }
-        let resp = self.http.post(self.url("/api/logs/export")).json(&body).send().await.context("failed to reach gateway")?;
-        if resp.status().is_success() {
-            resp.json::<crate::output::LogsExportResponse>().await.context("invalid JSON from /api/logs/export")
-        } else {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            bail!("Gateway returned HTTP {status}: {text}")
-        }
-    }
-
-}
-
-fn local_config_path() -> std::path::PathBuf {
-    if let Some(config_path) = std::env::var_os("RUNE_CONFIG") {
-        return std::path::PathBuf::from(config_path);
-    }
-
-    let profile = std::env::var("RUNE_PROFILE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-
-    match profile.as_deref() {
-        Some("dev") => std::path::PathBuf::from("config.dev.toml"),
-        Some(profile) => std::path::PathBuf::from(format!("config.{profile}.toml")),
-        None => std::path::PathBuf::from("config.toml"),
-    }
 }
 
 fn load_local_config_document() -> Result<(std::path::PathBuf, DocumentMut)> {
@@ -5357,38 +5271,158 @@ mod logs_breadth_tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+}
+
+#[cfg(test)]
+mod config_admin_tests {
+    use super::*;
+    use wiremock::{matchers, Mock, MockServer, ResponseTemplate};
+
     #[tokio::test]
-    async fn logs_tail_parses_response() {
-        let s = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/api/logs/tail"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "entries": [{"timestamp":"T1","level":"INFO","message":"hello"}],
-                "source": "gateway"
-            }))).mount(&s).await;
-        let r = GatewayClient::new(&s.uri()).logs_tail(None, None, false, 50).await.unwrap();
-        assert_eq!(r.source, "gateway");
-        assert_eq!(r.entries.len(), 1);
+    async fn config_reload_ok() {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/config/reload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "reloaded": true,
+                "note": "ok"
+            })))
+            .mount(&mock)
+            .await;
+        let client = GatewayClient::new(mock.uri());
+        let resp = client.config_reload().await.unwrap();
+        assert!(resp.reloaded);
     }
 
     #[tokio::test]
-    async fn logs_search_parses_response() {
-        let s = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/api/logs/search"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "query": "err", "entries": [{"timestamp":"T1","level":"ERROR","message":"err found"}], "total": 1
-            }))).mount(&s).await;
-        let r = GatewayClient::new(&s.uri()).logs_search("err", None, None, 50).await.unwrap();
-        assert_eq!(r.total, 1);
+    async fn config_diff_ok() {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path("/config/diff"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "has_changes": false,
+                "diff": []
+            })))
+            .mount(&mock)
+            .await;
+        let client = GatewayClient::new(mock.uri());
+        let resp = client.config_diff().await.unwrap();
+        assert!(!resp.has_changes);
     }
 
     #[tokio::test]
-    async fn logs_export_parses_response() {
-        let s = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/api/logs/export"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "success": true, "path": "/tmp/out.json", "message": "Exported 10 entries"
-            }))).mount(&s).await;
-        let r = GatewayClient::new(&s.uri()).logs_export("json", None, None, None, None, None, None).await.unwrap();
+    async fn config_env_ok() {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path("/config/env"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "overrides": [{
+                    "variable": "RUNE__GATEWAY__PORT",
+                    "value": "9090",
+                    "config_key": "gateway.port"
+                }]
+            })))
+            .mount(&mock)
+            .await;
+        let client = GatewayClient::new(mock.uri());
+        let resp = client.config_env().await.unwrap();
+        assert_eq!(resp.overrides.len(), 1);
+        assert_eq!(resp.overrides[0].variable, "RUNE__GATEWAY__PORT");
+    }
+}
+
+
+#[cfg(test)]
+mod lifecycle_client_tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn setup_returns_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/setup"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true, "detail": "Setup complete"})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.setup().await.unwrap();
+        assert!(r.success);
+    }
+
+    #[tokio::test]
+    async fn backup_create_returns_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/backups"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true, "backup_id": "bk-42", "detail": "Backup created"})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.backup_create(Some("nightly")).await.unwrap();
+        assert_eq!(r.backup_id, "bk-42");
+    }
+
+    #[tokio::test]
+    async fn backup_list_returns_vec() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/backups"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"backups": []})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.backup_list().await.unwrap();
+        assert!(r.backups.is_empty());
+    }
+
+    #[tokio::test]
+    async fn backup_restore_returns_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/backups/bk-1/restore"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true, "backup_id": "bk-1", "detail": "Restored"})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.backup_restore("bk-1").await.unwrap();
+        assert!(r.success);
+    }
+
+    #[tokio::test]
+    async fn update_check_returns_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/update/check"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"available": true, "current_version": "0.1.0", "latest_version": "0.2.0", "detail": "Update available"})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.update_check().await.unwrap();
+        assert!(r.available);
+    }
+
+    #[tokio::test]
+    async fn update_apply_returns_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/update/apply"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true, "version": "0.2.0", "detail": "Updated"})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.update_apply().await.unwrap();
+        assert!(r.success);
+    }
+
+    #[tokio::test]
+    async fn update_status_returns_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/update/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"current_version": "0.2.0", "update_channel": "stable", "last_check": "2026-01-01"})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.update_status().await.unwrap();
+        assert_eq!(r.update_channel, "stable");
+    }
+
+    #[tokio::test]
+    async fn reset_returns_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/reset"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"success": true, "detail": "All state cleared"})))
+            .mount(&server).await;
+        let client = GatewayClient::new(&server.uri());
+        let r = client.reset().await.unwrap();
         assert!(r.success);
     }
 }
