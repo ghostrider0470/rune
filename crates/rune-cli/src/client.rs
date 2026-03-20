@@ -35,8 +35,8 @@ use crate::output::{
 /// HTTP client that talks to the Rune gateway API.
 #[derive(Debug, Clone)]
 pub struct GatewayClient {
-    base_url: String,
-    http: Client,
+    pub(crate) base_url: String,
+    pub(crate) http: Client,
 }
 
 impl GatewayClient {
@@ -49,7 +49,7 @@ impl GatewayClient {
         }
     }
 
-    fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base_url)
     }
 
