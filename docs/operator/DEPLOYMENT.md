@@ -733,3 +733,133 @@ The safest container strategy is:
 7. avoid redesigning the runtime around Cosmos DB or Azure SQL unless a specific hosted requirement justifies it
 
 That gives first-class Docker support, Azure compatibility, and the best chance of remaining behaviorally identical to OpenClaw while staying portable.
+
+---
+
+## 13. Zero-config startup coherence (issue #61)
+
+#### 1. Scope
+
+This slice covers only:
+
+- startup config/env precedence
+- local standalone path remapping
+- Docker path preservation
+- zero-config Ollama bootstrap
+- operator-visible startup diagnostics
+
+It does not introduce a setup wizard, new provider abstractions, or multi-provider redesign.
+
+---
+
+#### 2. Startup precedence
+
+Rune resolves startup inputs in this order:
+
+1. `--config <path>`
+2. `RUNE_CONFIG`
+3. built-in defaults plus `RUNE_*` environment overrides
+
+Operator-visible startup logs must show:
+
+- which config source won
+- the resolved config path when one exists
+- the requested runtime mode and the resolved runtime mode
+
+---
+
+#### 3. Local versus Docker path contract
+
+#### 3.1 Bare-host zero-config
+
+When all of these are true:
+
+- `mode = "auto"`
+- no `database.database_url` is configured
+- Docker/Kubernetes runtime signals are absent
+- paths are still at the built-in Docker-first defaults
+
+Rune must resolve startup as standalone local mode and remap paths to:
+
+- `~/.rune/db`
+- `~/.rune/sessions`
+- `~/.rune/memory`
+- `~/.rune/media`
+- `~/.rune/skills`
+- `~/.rune/logs`
+- `~/.rune/backups`
+- `~/.rune/config`
+- `~/.rune/secrets`
+
+This is the zero-config local quick-start contract.
+
+#### 3.2 Docker or server-oriented startup
+
+Rune must preserve the Docker/server layout when either of these is true:
+
+- `database.database_url` is configured
+- Docker/Kubernetes runtime signals are present
+- the operator explicitly points paths at `/data/...`
+
+The canonical server/container paths remain:
+
+- `/data/db`
+- `/data/sessions`
+- `/data/memory`
+- `/data/media`
+- `/data/skills`
+- `/data/logs`
+- `/data/backups`
+- `/config`
+- `/secrets`
+
+Startup logs must show whether the active path profile is:
+
+- `docker-default`
+- `standalone-home`
+- `custom`
+
+---
+
+#### 4. Zero-config Ollama contract
+
+When `models.providers` is empty, Rune uses zero-config model bootstrap:
+
+1. probe `OLLAMA_HOST` when set
+2. otherwise probe `http://localhost:11434`
+3. when Ollama is reachable, use it as the default provider
+4. when pulled models exist, auto-select a default model
+5. when no models are pulled, start without a default model and print actionable guidance
+6. when Ollama is unreachable, fall back to the echo provider
+
+When `models.providers` is non-empty, explicit provider config wins and zero-config Ollama auto-detect is disabled even if `OLLAMA_HOST` is set.
+
+If `models.default_model` is set while Rune is using zero-config Ollama bootstrap, that configured default must win over the Ollama auto-pick.
+
+---
+
+#### 5. Operator-visible startup diagnostics
+
+Startup logging must make these decisions inspectable without reading source code:
+
+- config source: CLI, `RUNE_CONFIG`, or defaults/env
+- requested mode versus resolved mode
+- active path profile and state root
+- storage backend selection
+- model bootstrap mode: explicit providers or zero-config Ollama
+- `OLLAMA_HOST` value when relevant
+- default model source: agent config, `models.default_model`, or Ollama auto-pick
+
+If `OLLAMA_HOST` is set but unreachable, startup must warn explicitly that Rune is falling back instead of silently behaving like localhost probing.
+
+---
+
+#### 9. Failure behavior
+
+#### 9.1 Path validation
+
+Required persistent paths must be checked at startup with a real write probe, not only metadata inspection.
+
+Missing or unwritable parity-critical paths must produce explicit warnings or failures that name the path and reason.
+
+This section is the contract referenced by runtime path validation code.

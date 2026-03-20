@@ -629,3 +629,67 @@ The rewrite cannot honestly be described as functionally identical until every p
 - `known-divergence` with an explicit approved compatibility exception
 
 If evidence is partial, the claim must remain: parity-seeking, not parity-complete.
+
+---
+
+## 16. Zero-config startup coherence (issue #61)
+
+#### 1. Config and environment coherence
+
+#### Contract
+
+Rune startup must behave predictably across file config, environment overrides, and zero-config local defaults.
+
+#### Invariants
+
+- `--config` overrides `RUNE_CONFIG`
+- `RUNE_CONFIG` overrides built-in defaults
+- `RUNE_*` environment variables override file values in the loaded config
+- explicit `models.providers` disables zero-config Ollama auto-detect
+- empty `models.providers` enables zero-config Ollama probing
+- `models.default_model` overrides the Ollama auto-picked model when both are present
+- bare-host `mode = "auto"` with untouched Docker-default paths resolves to standalone local mode
+- Docker/Kubernetes or explicit server signals preserve server-oriented path layout
+
+#### Operator evidence
+
+Startup logs must surface:
+
+- config source
+- requested mode and resolved mode
+- path profile
+- model bootstrap mode
+- `OLLAMA_HOST` relevance
+- default model source
+
+---
+
+#### 2. Zero-config local runtime
+
+#### Contract
+
+A first local boot with no custom config must start in a coherent standalone shape.
+
+#### Required behavior
+
+- default Docker-first paths are remapped to `~/.rune/*` on a bare host
+- required local directories are auto-created for standalone mode
+- path validation remains explicit and operator-visible
+- zero-config Ollama probing uses `OLLAMA_HOST` when provided, otherwise localhost
+
+#### Failure behavior
+
+- unreachable `OLLAMA_HOST` must warn explicitly before fallback
+- reachable Ollama with no pulled models must emit actionable operator guidance
+- missing or unwritable required paths must surface clear path-specific diagnostics
+
+---
+
+#### 3. Non-goals
+
+This slice does not include:
+
+- guided setup flows
+- secret management redesign
+- multi-provider fallback redesign
+- generalized environment-to-provider mapping beyond the current local Ollama path
