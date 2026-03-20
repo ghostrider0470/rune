@@ -1,8 +1,8 @@
 # CLI Parity Audit Matrix
 
 **Issue:** #74 — CLI surface parity sweep
-**Generated:** 2026-03-19
-**Source:** PARITY-INVENTORY.md §4.2 (OpenClaw census) cross-referenced against `rune-cli/src/cli.rs` on main at `b12c6fe`.
+**Generated:** 2026-03-20
+**Source:** PARITY-INVENTORY.md §4.2 (OpenClaw census) cross-referenced against `rune-cli/src/cli.rs` on main at `3c3c2bc`.
 
 ---
 
@@ -58,9 +58,9 @@
 
 | OpenClaw family | Rune equivalent | Status | Subcommand coverage | Tracking |
 |-----------------|----------------|--------|---------------------|----------|
-| `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack` shipped | #74 |
+| `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack`, `list-reactions` shipped | #74 |
 | `agent` | — | **Not started** | Direct agent-turn invocation | #70 |
-| `agents` | — | **Not started** | Agent listing/management | #70 |
+| `agents` | `rune agents` | **Partial** | `list`, `show`, `status`, `tree`, `templates`, `start --template` shipped. Missing broader orchestration/admin parity. | #63/#70 |
 | `acp` | — | **Not started** | ACP bridge/client | #70 |
 | `devices` | — | **Not started** | `list`, `remove`, `clear`, `approve`, `reject`, `rotate`, `revoke` | — |
 | `pairing` | — | **Not started** | `list`, `approve` | — |
@@ -79,8 +79,8 @@
 ### Tier 1 summary
 
 - **Shipped:** 0
-- **Partial:** 1 (`message` — core verbs + voice shipped, breadth verbs remaining)
-- **Not started:** 16
+- **Partial:** 2 (`message` — breadth verbs remain; `agents` — broader orchestration/admin parity remains)
+- **Not started:** 15
 
 ---
 
@@ -131,9 +131,9 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 | `broadcast` | `rune message broadcast` | **Shipped** | #147 |
 | `thread` | `rune message thread list/reply` | **Shipped** | #151 |
 | `voice` | `rune message voice send/status` | **Shipped** | #155 |
-| `tag` | `rune message tag add/remove/list` | **Shipped** | — |
-| `ack` | `rune message ack` | **Shipped** | — |
-| `reactions` | — | **Not started** | Listing reactions on a message |
+| `tag` | `rune message tag add/remove/list` | **Shipped** | #157 |
+| `ack` | `rune message ack` | **Shipped** | #162 |
+| `reactions` | `rune message list-reactions` | **Shipped** | #163 |
 | `poll` | — | **Not started** | Poll creation/management |
 | `channel` | — | **Not started** | Channel-scoped message operations |
 | `event` | — | **Not started** | Message event subscriptions |
@@ -150,11 +150,11 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 | Tier | Total families | Shipped | Partial | Not started | N/A |
 |------|---------------|---------|---------|-------------|-----|
 | 0 — Release blockers | 20 | 14 | 1 | 5 | 0 |
-| 1 — Must-follow | 17 | 0 | 1 | 16 | 0 |
+| 1 — Must-follow | 17 | 0 | 2 | 15 | 0 |
 | 2 — Breadth | 9 | 0 | 0 | 8 | 1 |
-| **Total** | **46** | **14** | **2** | **29** | **1** |
+| **Total** | **46** | **14** | **3** | **28** | **1** |
 
-**Parity coverage: 14 shipped + 2 partial out of 46 families (30% shipped, 35% with partial credit).**
+**Parity coverage: 14 shipped + 3 partial out of 46 families (30% shipped, 37% with partial credit).**
 
 ---
 
@@ -171,7 +171,7 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 6. `channels` — add `add`, `remove`, `login`, `logout` verbs (#41)
 
 ### Medium-term (Tier 1, highest value)
-7. `agent` / `agents` / `acp` — agent orchestration CLI (#70)
+7. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` surfaces (#70)
 8. `skills` / `plugins` / `hooks` — extension lifecycle (#68)
 9. `backup` — backup/restore workflow (#67)
 10. `devices` / `pairing` / `node` / `nodes` — multi-node surface (no issue yet)
@@ -184,6 +184,6 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 |-----------|--------|
 | Every OpenClaw CLI family has a Rune decision | **Done** — this matrix |
 | Shell completion generation for bash, zsh, fish | **Shipped** — PR #143 |
-| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system` shipped; `logs`, `secrets` not started |
+| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, and substantial `message` / `agents` operator surfaces shipped; `logs`, `secrets` not started |
 | Lifecycle families have working equivalents | **Not started** — `setup`, `update`, `uninstall`, `reset` all missing |
 | Audit matrix produced | **Done** — this document |
