@@ -2,7 +2,7 @@
 
 **Issue:** #74 — CLI surface parity sweep
 **Generated:** 2026-03-20
-**Source:** PARITY-INVENTORY.md §4.2 (OpenClaw census) cross-referenced against `rune-cli/src/cli.rs` on main at `3c3c2bc`.
+**Source:** PARITY-INVENTORY.md §4.2 (OpenClaw census) cross-referenced against `rune-cli/src/cli.rs` on main at `e60cdba` and follow-on merged surfaces through `3c62e0a`.
 
 ---
 
@@ -36,21 +36,21 @@
 | `memory` | `rune memory` | **Shipped** | `status`, `search`, `get` | — |
 | `approvals` | `rune approvals` | **Shipped** | `list`, `decide`, `policies`, `get`, `set`, `clear` | #42 |
 | `sessions` | `rune sessions` | **Shipped** | `list`, `show`, `status` | #38 |
-| `config` | `rune config` | **Shipped** | `show`, `file`, `get`, `set`, `unset`, `validate` | #40/#30 |
+| `config` | `rune config` + `rune gateway config` | **Partial** | local `show`, `file`, `get`, `set`, `unset`, `validate` shipped; live gateway `config show/apply` shipped. Interactive `configure` still missing. | #40/#30 |
 | `configure` | — | **Not started** | Interactive setup wizard — no Rune surface yet | #61 |
 | `secrets` | — | **Not started** | `reload`, `audit`, `configure`, `apply` — no Rune surface yet | #67 |
 | `security` | — | **Not started** | `audit` — no Rune surface yet | #64 |
 | `system` | `rune system` | **Shipped** | `event inject`, `event schedule`, `event list`, `heartbeat presence/last/enable/disable/status` | #43 |
 | `sandbox` | — | **Not started** | `list`, `recreate`, `explain` — no Rune surface yet | #64 |
-| `logs` | — | **Not started** | `view`, `follow`, `filter` — no Rune surface yet | #40 |
+| `logs` | `rune logs` + `rune gateway logs` | **Partial** | query/list surface with `--level`, `--source`, `--limit`, `--since` shipped against current gateway stub. Follow/tail and richer filtering still missing. | #40 |
 | `dashboard` | `rune dashboard` | **Shipped** | Compact operator summary | #65 |
 | `completion` | `rune completion` | **Shipped** | `generate` for bash/zsh/fish/elvish/powershell | #74 (PR #143) |
 
 ### Tier 0 summary
 
-- **Shipped:** 14 / 20 families
-- **Partial:** 1 (`channels` — missing mutation verbs)
-- **Not started:** 5 (`configure`, `secrets`, `security`, `sandbox`, `logs`)
+- **Shipped:** 13 / 20 families
+- **Partial:** 3 (`channels` — missing mutation verbs; `config` — interactive configure still missing; `logs` — query surface landed, follow/tail breadth still missing)
+- **Not started:** 4 (`configure`, `secrets`, `security`, `sandbox`)
 
 ---
 
@@ -66,7 +66,7 @@
 | `pairing` | — | **Not started** | `list`, `approve` | — |
 | `node` | — | **Not started** | `run`, `status`, `install`, `uninstall`, `stop`, `restart` | — |
 | `nodes` | — | **Not started** | 20+ subcommands (remote exec, camera, screen, canvas, location) | — |
-| `skills` | — | **Not started** | `list`, `info`, `check` | #68 |
+| `skills` | `rune skills` | **Partial** | `list`, `info`, `check`, `enable`, `disable` shipped. Plugins/hooks lifecycle and broader extension management still missing. | #71 |
 | `plugins` | — | **Not started** | `list`, `info`, `enable`, `disable`, `install`, `update`, `doctor` | #68 |
 | `hooks` | — | **Not started** | `list`, `info`, `check`, `enable`, `disable`, `install`, `update` | #68 |
 | `webhooks` | — | **Not started** | `setup`, `run` | — |
@@ -79,8 +79,8 @@
 ### Tier 1 summary
 
 - **Shipped:** 0
-- **Partial:** 2 (`message` — breadth verbs remain; `agents` — broader orchestration/admin parity remains)
-- **Not started:** 15
+- **Partial:** 3 (`message` — breadth verbs remain; `agents` — broader orchestration/admin parity remains; `skills` — plugins/hooks lifecycle still missing)
+- **Not started:** 14
 
 ---
 
@@ -149,12 +149,12 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 
 | Tier | Total families | Shipped | Partial | Not started | N/A |
 |------|---------------|---------|---------|-------------|-----|
-| 0 — Release blockers | 20 | 14 | 1 | 5 | 0 |
-| 1 — Must-follow | 17 | 0 | 2 | 15 | 0 |
+| 0 — Release blockers | 20 | 13 | 3 | 4 | 0 |
+| 1 — Must-follow | 17 | 0 | 3 | 14 | 0 |
 | 2 — Breadth | 9 | 0 | 0 | 8 | 1 |
-| **Total** | **46** | **14** | **3** | **28** | **1** |
+| **Total** | **46** | **13** | **6** | **26** | **1** |
 
-**Parity coverage: 14 shipped + 3 partial out of 46 families (30% shipped, 37% with partial credit).**
+**Parity coverage: 13 shipped + 6 partial out of 46 families (28% fully shipped, 41% with partial credit).**
 
 ---
 
@@ -165,16 +165,17 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 2. `secrets` — secret management surface (#67)
 3. `security` — security audit surface (#64)
 4. `sandbox` — sandbox inspection (#64)
-5. `logs` — log viewing/following (#40)
 
 ### Near-term (Tier 0, partial)
+5. `logs` — add follow/tail/richer filtering on top of the shipped query surface (#40)
 6. `channels` — add `add`, `remove`, `login`, `logout` verbs (#41)
+7. `config` — bridge from shipped local/gateway config surfaces to true interactive configure parity (#40/#61)
 
 ### Medium-term (Tier 1, highest value)
-7. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` surfaces (#70)
-8. `skills` / `plugins` / `hooks` — extension lifecycle (#68)
-9. `backup` — backup/restore workflow (#67)
-10. `devices` / `pairing` / `node` / `nodes` — multi-node surface (no issue yet)
+8. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` surfaces (#70)
+9. `skills` / `plugins` / `hooks` — complete extension lifecycle beyond the shipped `skills` family core (#71/#68)
+10. `backup` — backup/restore workflow (#67)
+11. `devices` / `pairing` / `node` / `nodes` — multi-node surface (no issue yet)
 
 ---
 
@@ -184,6 +185,6 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 |-----------|--------|
 | Every OpenClaw CLI family has a Rune decision | **Done** — this matrix |
 | Shell completion generation for bash, zsh, fish | **Shipped** — PR #143 |
-| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, and substantial `message` / `agents` operator surfaces shipped; `logs`, `secrets` not started |
+| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, substantial `message` / `agents` surfaces, plus first gateway-backed `logs`/`doctor` admin surfaces shipped; `secrets` still not started |
 | Lifecycle families have working equivalents | **Not started** — `setup`, `update`, `uninstall`, `reset` all missing |
 | Audit matrix produced | **Done** — this document |
