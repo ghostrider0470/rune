@@ -274,16 +274,16 @@ export function ChatThread({
         ref={containerRef}
         onScroll={checkScrollPosition}
         className={cn(
-          "flex h-full flex-col gap-4 overflow-y-auto py-4",
-          focusMode ? "px-4 sm:px-8 lg:px-12" : "px-3 sm:px-4",
+          "flex h-full flex-col gap-3 overflow-y-auto py-3 scroll-pb-28 sm:gap-4 sm:py-4 sm:scroll-pb-6",
+          focusMode ? "px-3 sm:px-8 lg:px-12" : "px-2.5 sm:px-4",
         )}
       >
         {groups.map((group, gi) => {
           if (group.type === "date_divider") {
             return (
-              <div key={`date-${gi}`} className="flex items-center gap-3 px-1 py-1">
+              <div key={`date-${gi}`} className="flex items-center gap-2 px-0.5 py-1 sm:gap-3 sm:px-1">
                 <Separator className="flex-1 bg-border/60" />
-                <span className="rounded-full border border-border/70 bg-background/85 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                <span className="rounded-full border border-border/70 bg-background/85 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground sm:px-3 sm:text-[10px]">
                   {group.dateLabel}
                 </span>
                 <Separator className="flex-1 bg-border/60" />
@@ -297,10 +297,10 @@ export function ChatThread({
           if (group.type === "message") {
             const entry = group.entries[0];
             return (
-              <div key={entry.id} className="space-y-2">
+              <div key={entry.id} className="space-y-1.5 sm:space-y-2">
                 <div
                   className={cn(
-                    "flex px-1",
+                    "hidden px-1 sm:flex",
                     normalizeTranscriptKind(entry.kind) === "user" ? "justify-end" : "justify-start",
                   )}
                 >
@@ -323,7 +323,7 @@ export function ChatThread({
 
           if (group.type === "tool_pair") {
             return (
-              <div key={`tool-group-${gi}`} className="space-y-2 px-1 sm:px-2">
+              <div key={`tool-group-${gi}`} className="space-y-1.5 px-0.5 sm:space-y-2 sm:px-2">
                 <Badge
                   variant="outline"
                   className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
@@ -356,7 +356,7 @@ export function ChatThread({
           }
 
           return (
-            <div key={`other-${gi}`} className="space-y-2">
+            <div key={`other-${gi}`} className="space-y-1.5 sm:space-y-2">
               <Badge
                 variant="outline"
                 className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
@@ -379,7 +379,7 @@ export function ChatThread({
       </div>
 
       {hasNewMessages && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 sm:bottom-4">
           <Button
             variant="secondary"
             size="sm"

@@ -279,8 +279,8 @@ function ChatPage() {
   return (
     <div className="space-y-4">
       <section className="overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-background via-background to-primary/5 shadow-[0_24px_80px_rgba(249,115,22,0.10)]">
-        <div className="grid gap-5 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8 lg:py-6">
-          <div className="space-y-4">
+        <div className="grid gap-4 px-4 py-4 sm:px-6 sm:py-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8 lg:py-6">
+          <div className="space-y-3 sm:space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline" className="border-primary/25 bg-primary/10 text-primary">
                 <Sparkles className="mr-1 h-3 w-3" />
@@ -313,13 +313,16 @@ function ChatPage() {
               )}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5 sm:space-y-2">
               <p className={designSystem.typography.display.eyebrow}>Admin Chat</p>
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                <h1 className="text-xl font-semibold tracking-tight sm:text-3xl">
                   Run sessions like an ops console, not a toy inbox.
                 </h1>
-                <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">
+                <p className="mt-2 text-sm text-muted-foreground sm:hidden">
+                  Keep the active transcript readable, switch sessions quickly, and reply without leaving the thread.
+                </p>
+                <p className="mt-2 hidden max-w-2xl text-sm text-muted-foreground sm:block sm:text-base">
                   Keep the active transcript, session queue, and runtime signal in one place.
                   Fast switching, live updates, and admin-first context without copying OpenClaw’s layout.
                 </p>
@@ -327,8 +330,8 @@ function ChatPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-            <Card className="border-primary/20 bg-background/75 py-0 shadow-none backdrop-blur">
+          <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:px-0 sm:pb-0 lg:grid-cols-1 xl:grid-cols-3">
+            <Card className="min-w-[15rem] border-primary/20 bg-background/75 py-0 shadow-none backdrop-blur sm:min-w-0">
               <CardContent className="px-4 py-4">
                 <div className="flex items-center gap-3">
                   <div className="rounded-2xl bg-primary/10 p-2 text-primary">
@@ -346,7 +349,7 @@ function ChatPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-primary/20 bg-background/75 py-0 shadow-none backdrop-blur">
+            <Card className="min-w-[15rem] border-primary/20 bg-background/75 py-0 shadow-none backdrop-blur sm:min-w-0">
               <CardContent className="px-4 py-4">
                 <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                   Transcript load
@@ -358,7 +361,7 @@ function ChatPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-primary/20 bg-background/75 py-0 shadow-none backdrop-blur">
+            <Card className="min-w-[15rem] border-primary/20 bg-background/75 py-0 shadow-none backdrop-blur sm:min-w-0">
               <CardContent className="px-4 py-4">
                 <div className="flex items-center gap-3">
                   <div className="rounded-2xl bg-accent/10 p-2 text-accent">
@@ -438,7 +441,7 @@ function ChatPage() {
                     Sessions
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-[320px] border-r p-0">
+                <SheetContent side="left" className="w-[min(100vw,24rem)] border-r p-0">
                   <SheetHeader className="border-b px-4 py-4">
                     <SheetTitle>Session queue</SheetTitle>
                   </SheetHeader>
@@ -450,6 +453,7 @@ function ChatPage() {
                     onCreateSession={handleCreateSession}
                     isCreating={createSession.isPending}
                     className="border-r-0"
+                    compactHeader
                   />
                 </SheetContent>
               </Sheet>
@@ -459,11 +463,13 @@ function ChatPage() {
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-sm font-semibold sm:text-base">Live transcript</h2>
-                      <Badge variant="outline" className="font-mono text-[10px]">
-                        {activeSessionId}
+                      <Badge variant="outline" className="max-w-[14rem] font-mono text-[10px] sm:max-w-full">
+                        <span className="block truncate">
+                          {activeSessionId}
+                        </span>
                       </Badge>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:text-xs">
                       {activeSession?.channel && <span>Channel: {activeSession.channel}</span>}
                       {typeof activeSession?.turn_count === "number" && (
                         <span>{activeSession.turn_count} turns</span>
@@ -481,7 +487,7 @@ function ChatPage() {
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
                 <div className="hidden items-center gap-3 rounded-2xl border border-border/70 bg-background/70 px-3 py-2 lg:flex">
                   <Label htmlFor="chat-focus-mode" className="gap-1.5 text-[11px] text-muted-foreground">
                     <Focus className="h-3.5 w-3.5" />
@@ -520,12 +526,13 @@ function ChatPage() {
                 {activeSessionId ? (
                   <Button
                     variant="ghost"
-                    size="icon-sm"
+                    size="sm"
                     onClick={() => void refetchTranscript()}
                     aria-label="Refresh transcript"
-                    className={transcriptFetching ? "animate-spin" : undefined}
+                    className="gap-2 rounded-xl"
                   >
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className={transcriptFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                    <span className="lg:hidden">Refresh</span>
                   </Button>
                 ) : null}
                 <Button
