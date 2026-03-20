@@ -315,6 +315,11 @@ pub enum SessionsAction {
         /// Session ID to use as tree root.
         id: String,
     },
+    /// Export a session as a JSON bundle (detail + transcript).
+    Export {
+        /// Session ID to export.
+        id: String,
+    },
     /// Delete a single session and its transcript history.
     Delete {
         /// Session ID to delete.

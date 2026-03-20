@@ -1705,6 +1705,78 @@ impl fmt::Display for SessionCleanupResponse {
     }
 }
 
+// ── Session export ────────────────────────────────────────────────────────────
+
+/// A single transcript entry returned by the gateway.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptEntry {
+    pub id: String,
+    pub turn_id: Option<String>,
+    pub seq: i32,
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub created_at: String,
+}
+
+impl fmt::Display for TranscriptEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let turn = self.turn_id.as_deref().unwrap_or("-");
+        write!(f, "  [{:>3}] {:<20} turn={}", self.seq, self.kind, turn)?;
+        // For user/assistant messages show a content preview.
+        match self.kind.as_str() {
+            "user_message" => {
+                if let Some(msg) = self.payload["message"].as_str() {
+                    let preview: String = msg.chars().take(80).collect();
+                    write!(f, "  {preview}")?;
+                    if msg.len() > 80 {
+                        write!(f, "…")?;
+                    }
+                }
+            }
+            "assistant_message" => {
+                if let Some(content) = self.payload["content"].as_str() {
+                    let preview: String = content.chars().take(80).collect();
+                    write!(f, "  {preview}")?;
+                    if content.len() > 80 {
+                        write!(f, "…")?;
+                    }
+                }
+            }
+            "tool_request" => {
+                if let Some(name) = self.payload["tool_name"].as_str() {
+                    write!(f, "  tool={name}")?;
+                }
+            }
+            "tool_result" => {
+                let is_err = self.payload["is_error"].as_bool().unwrap_or(false);
+                if is_err {
+                    write!(f, "  (error)")?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+/// Full session export bundle: session detail + transcript.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionExportBundle {
+    pub session: SessionDetailResponse,
+    pub transcript: Vec<TranscriptEntry>,
+}
+
+impl fmt::Display for SessionExportBundle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.session)?;
+        writeln!(f, "  Transcript ({} items):", self.transcript.len())?;
+        for entry in &self.transcript {
+            writeln!(f, "{entry}")?;
+        }
+        Ok(())
+    }
+}
+
 /// Scheduler status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronStatusResponse {

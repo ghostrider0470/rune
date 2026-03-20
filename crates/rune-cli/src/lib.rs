@@ -1113,6 +1113,19 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.sessions_tree(&id).await?;
                 println!("{}", render(&result, format));
             }
+            SessionsAction::Export { id } => {
+                use crate::output::SessionExportBundle;
+
+                let session = client.sessions_show(&id).await?;
+                let transcript = client.sessions_transcript(&id).await?;
+                let bundle = SessionExportBundle {
+                    session,
+                    transcript,
+                };
+                // Export always emits JSON for machine consumption,
+                // but respects --json flag for human-readable summary.
+                println!("{}", render(&bundle, format));
+            }
             SessionsAction::Delete { id } => {
                 let result = client.session_delete(&id).await?;
                 println!("{}", render(&result, format));

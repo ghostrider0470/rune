@@ -1882,6 +1882,28 @@ impl GatewayClient {
         }
     }
 
+    /// `GET /sessions/:id/transcript` — fetch full session transcript.
+    pub async fn sessions_transcript(&self, id: &str) -> Result<Vec<crate::output::TranscriptEntry>> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/sessions/{id}/transcript")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let entries: Vec<crate::output::TranscriptEntry> = resp
+                .json()
+                .await
+                .context("invalid JSON from /sessions/:id/transcript")?;
+            Ok(entries)
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Session '{id}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
     /// `GET /sessions?kind=subagent` — list subagent sessions.
     pub async fn agents_list(
         &self,
