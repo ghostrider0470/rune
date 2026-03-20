@@ -1237,11 +1237,11 @@ A compliant backup workflow must preserve or explicitly account for:
 
 Backup workflows must be:
 
-- **documented**  operator can tell what is included and what is intentionally excluded
-- **restorable**  output is suitable for reconstructing runtime state
-- **image-independent**  no reliance on hidden image-layer state or container archaeology
-- **mode-aware**  local embedded-PostgreSQL, mounted Docker, and managed-PostgreSQL deployments can differ in mechanism but not in operator clarity
-- **secret-safe**  secret values never appear in archive manifests, logs, doctor output, or status surfaces
+- **documented** - operator can tell what is included and what is intentionally excluded
+- **restorable** - output is suitable for reconstructing runtime state
+- **image-independent** - no reliance on hidden image-layer state or container archaeology
+- **mode-aware** - local embedded-PostgreSQL, mounted Docker, and managed-PostgreSQL deployments can differ in mechanism but not in operator clarity
+- **secret-safe** - secret values never appear in archive manifests, logs, doctor output, or status surfaces
 
 ### 15.4.3 Restore behavior expectations
 
@@ -1252,24 +1252,32 @@ A restore workflow must, at minimum, be able to reconstruct enough durable state
 - scheduler/job state and next-run derivation
 - pending approvals and related operator auditability
 - config overlays and path layout expectations
+- logs/exports when the operator explicitly treated them as part of the retained recovery set
 
-Where a restore cannot fully recreate a subsystem (for example, external provider-managed data), the limitation must be stated explicitly in operator docs.
+Restore is a durable-state recovery contract, not a promise to resurrect every live runtime handle in place.
+Live child-process attachment, PTY continuity, or in-flight turn continuation may be lost across restore unless explicitly implemented and documented.
+
+Where a restore cannot fully recreate a subsystem (for example, external provider-managed data), the limitation must be stated explicitly in operator docs together with the required provider-native recovery step.
 
 ### 15.4.4 Minimum operator evidence
 
 The project should provide enough operator-facing documentation and/or commands that a reviewer can verify:
 
+- which operator workflow is shipped today (documented runbook/native tooling versus dedicated CLI)
 - what to snapshot or export before upgrade
 - where backup artifacts live (`/data/backups` or equivalent)
 - how local paths map to Docker-mounted paths
 - what preconditions are required for a clean restore
 - what post-restore checks to run (`doctor`, health/status, scheduler state sanity)
+- which degraded-recovery cases are expected (for example, provider-managed state, live process handles, or in-flight work)
 
-### 15.4.5 CLI workflow contract
+### 15.4.5 Target CLI workflow contract (`rune backup`, not yet shipped)
 
-The `rune backup` command family is the primary operator interface for snapshot and recovery workflows. These commands must implement the behavioral expectations defined in §15.4.1–§15.4.4.
+The currently shipped operator-facing interface is the documented workflow in deployment/operator docs plus filesystem- and database-native tooling.
+The `rune backup` command family remains the intended future primary interface for snapshot and recovery workflows.
+When it ships, these commands must implement the behavioral expectations defined in §15.4.1–§15.4.4.
 
-#### Expected subcommands
+#### Planned subcommands
 
 | Subcommand | Purpose |
 |---|---|

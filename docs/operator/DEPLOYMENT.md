@@ -542,13 +542,17 @@ Not recommended as default deployment targets for the parity-first container arc
 
 ## 12. Backup and restore expectations
 
-Container deployment must make backup/restore straightforward. See [PROTOCOLS.md §15.4](../parity/PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the full behavioral contract and CLI workflow spec.
+Container deployment must make backup/restore straightforward.
+The shipped operator-facing slice today is the documented workflow below plus filesystem- and database-native tooling.
+The dedicated `rune backup` command family remains a parity target rather than a shipped requirement; see [PROTOCOLS.md §15.4](../parity/PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the full workflow and target CLI contract.
 
 ## 12.1 What must be backup-friendly
 
 - database files or managed DB dumps
 - memory documents
 - session/transcript artifacts
+- scheduler/reminder state and related run history
+- approval state and operator audit records
 - skills/plugins bundles
 - configuration overlays
 - secrets references/config, excluding secret values where policy requires external secret storage
@@ -558,12 +562,14 @@ Container deployment must make backup/restore straightforward. See [PROTOCOLS.md
 
 ### Local-first Docker
 
+- stop or quiesce the runtime before capture when consistency requires it
 - filesystem snapshot of mounted paths
 - PostgreSQL-consistent backup/export for `/data/db` when running embedded PostgreSQL
 - optional archive bundles into `/data/backups`
 
 ### Hosted Azure with mounted filesystem
 
+- stop or quiesce the runtime before capture when consistency requires it
 - volume/share snapshot where available
 - PostgreSQL backups if managed DB is used
 - Blob Storage replication for backup archives
@@ -572,17 +578,63 @@ Container deployment must make backup/restore straightforward. See [PROTOCOLS.md
 
 A restore should reconstruct the runtime without needing image-layer recovery or undocumented hidden paths.
 
-## 12.4 Minimum workflow contract
+## 12.4 Operator backup workflow
 
-Any documented Rune backup/restore workflow should make these steps explicit:
+Operators should follow one explicit workflow regardless of whether the capture mechanism is a filesystem snapshot, database dump, or future `rune backup` archive:
 
-1. **Quiesce or coordinate writes** where required (for example, ensure embedded PostgreSQL export/snapshot consistency and avoid mid-write filesystem capture).
-2. **Capture all required durable domains**: DB state, sessions, memory, media when retained, skills, logs/exports as policy requires, config overlays, and backup staging outputs.
-3. **Exclude secret values from backup metadata** while preserving secret references/config needed to reconnect the runtime after restore.
-4. **Restore into the same logical path layout** (`~/.rune/*` locally or `/data/*`, `/config`, `/secrets` in Docker).
-5. **Run post-restore verification**: `rune doctor`, health/status checks, scheduler/job sanity, and session/transcript inspectability checks.
+1. **Identify the deployment mode and data owners** before capture.
+   - Decide whether `/data/db` is authoritative or whether PostgreSQL/object storage are managed externally.
+2. **Quiesce or coordinate writes** before capture.
+   - For embedded PostgreSQL or filesystem snapshots, stop the runtime or otherwise guarantee a consistent checkpoint/snapshot boundary.
+3. **Capture every required durable domain**.
+   - Include DB state, sessions, memory, media when retained, skills, logs/exports as policy requires, config overlays, and `/data/backups` when prior archives are part of the recovery posture.
+   - Preserve secret references/config needed to reconnect after restore, but never secret values.
+4. **Record what the artifact contains and excludes**.
+   - Operators need a manifest or equivalent notes naming capture time, Rune version, included domains, and excluded domains with reason.
+
+## 12.5 Operator restore workflow
+
+1. **Restore into the same logical layout the runtime expects**.
+   - Use `~/.rune/*` locally or `/data/*`, `/config`, and `/secrets` in Docker. Do not restore state into image-layer-only paths.
+2. **Restore provider-managed and filesystem-managed domains through their native mechanisms**.
+   - Managed PostgreSQL, Blob Storage, or other provider-owned data must be restored from provider-native snapshots/replication rather than guessed from local filesystem artifacts.
+3. **Recreate secret material separately when secrets are externally managed**.
+   - Backups preserve secret references/config, not secret values.
+4. **Bring the runtime back only after durable state is in place**.
+   - Restore must not overwrite a live instance silently or race with active writers.
 
 If a deployment mode uses managed PostgreSQL or external object storage, the operator docs must state which parts are restored from provider-native snapshots versus local filesystem artifacts.
+
+## 12.6 Post-restore verification
+
+Run these checks after every restore:
+
+1. `rune doctor`
+2. health/status checks to confirm the runtime is alive, reachable, and pointed at the expected mounts/services
+3. scheduler/reminder inspection to confirm jobs, run history, and next-run derivation look sane
+4. session/transcript inspection to confirm recent history is readable
+5. approval/audit inspection to confirm pending approvals and durable audit trails remain visible
+6. memory/skills/media spot checks for the deployment-specific domains that were restored
+
+## 12.7 Recovery expectations and limits
+
+Backup/restore is expected to recover operator-visible durable state:
+
+- sessions and transcripts
+- memory and curated workspace state
+- scheduler/reminder definitions, run history, and next-run derivation
+- pending approvals and related auditability
+- config overlays and path layout assumptions
+- logs/exports when the operator included them in the capture set
+
+Backup/restore is **not** required to resurrect purely live runtime state:
+
+- attached PTY sessions or live child-process handles
+- in-flight turn execution in the middle of a request
+- transient caches or temporary scratch files
+- provider-managed data that was not included in a provider-native snapshot/export
+
+When a subsystem cannot be fully recreated, the limitation must be stated explicitly in the runbook and verified during post-restore checks.
 
 ---
 

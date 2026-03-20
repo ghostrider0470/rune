@@ -450,6 +450,7 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - same logical paths exist across host and container modes
 - local-first mode remains reference behavior
 - Azure support is real but optional, not architecture-capturing
+- recovery expectations are explicit: restore recovers durable operator-visible state, not hidden image-layer state or undocumented live runtime handles
 
 ### Required persisted state domains
 
@@ -471,12 +472,15 @@ See [DEPLOYMENT.md §5.1](../operator/DEPLOYMENT.md#51-local--docker-path-equiva
 - deployment docs and config model
 - health/readiness endpoints
 - backup/restore workflows
+- operator runbook for backup, restore, and post-restore verification
 
 ### Failure behavior expectations
 
 - missing mounts/config fail fast and clearly
 - read-only or degraded storage modes surface explicit errors
-- backup/restore workflows are documented and testable (see [PROTOCOLS.md §15.4](PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the full contract and CLI workflow spec)
+- backup/restore workflows are documented and testable (see [PROTOCOLS.md §15.4](PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the full contract and target CLI workflow spec)
+- the current shipped recovery interface is explicit even before the dedicated `rune backup` CLI lands
+- degraded-recovery cases are declared explicitly instead of being discovered during an incident
 
 #### Read-only filesystem detection
 
@@ -505,9 +509,10 @@ See [PROTOCOLS.md §3.7](PROTOCOLS.md#secrets-never-logged-invariant) for the fu
 ### Minimum parity evidence
 
 - local Docker deployment with mounted state
-- backup workflow documentation naming included durable-state domains and exclusions (see [PROTOCOLS.md §15.4.5](PROTOCOLS.md#1545-cli-workflow-contract))
-- restore workflow documentation naming prerequisites and post-restore verification checks (see [PROTOCOLS.md §15.4.5](PROTOCOLS.md#1545-cli-workflow-contract))
+- backup workflow documentation naming included durable-state domains, exclusions, and whether the shipped path is runbook/native tooling or a dedicated CLI (see [PROTOCOLS.md §15.4](PROTOCOLS.md#154-backup-and-restore-workflow-contract))
+- restore workflow documentation naming prerequisites, same-layout restore rules, and post-restore verification checks (see [PROTOCOLS.md §15.4](PROTOCOLS.md#154-backup-and-restore-workflow-contract))
 - restart-preservation documentation naming which state must survive container restart and which post-restart checks operators should run
+- degraded-recovery documentation naming what is not expected to survive restore in place (for example, live PTY/process attachment or unmanaged provider-side state)
 - restart durability tests
 - PostgreSQL-backed Azure-hosted mode tests
 - Azure Files/Blob mapping validation for intended domains
