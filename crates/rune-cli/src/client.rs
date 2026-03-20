@@ -19,7 +19,8 @@ use crate::output::{
     ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
     SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
-    SessionTreeNode, SessionTreeResponse, SkillListResponse, SkillSummary, StatusResponse,
+    SessionTreeNode, SessionTreeResponse, SkillCheckResponse, SkillListResponse, SkillSummary,
+    StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -215,6 +216,24 @@ impl GatewayClient {
                 .await
                 .context("invalid JSON from /skills")?;
             Ok(SkillListResponse { skills })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /skills/reload`
+    pub async fn skills_check(&self) -> Result<SkillCheckResponse> {
+        let resp = self
+            .http
+            .post(self.url("/skills/reload"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            resp.json::<SkillCheckResponse>()
+                .await
+                .context("invalid JSON from /skills/reload")
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2794,6 +2813,28 @@ mod tests {
         assert_eq!(resp.skills[1].name, "beta");
         assert!(!resp.skills[1].enabled);
         assert!(resp.skills[1].binary_path.is_none());
+    }
+
+    #[tokio::test]
+    async fn skills_check_parses_reload_summary() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/skills/reload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "discovered": 4,
+                "loaded": 3,
+                "removed": 1
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.skills_check().await.unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.discovered, 4);
+        assert_eq!(resp.loaded, 3);
+        assert_eq!(resp.removed, 1);
     }
 
     #[tokio::test]

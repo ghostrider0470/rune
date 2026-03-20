@@ -26,8 +26,7 @@ use cli::{
     AgentsAction, ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell,
     ConfigAction, CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
     MessageTagAction, MessageThreadAction, MessageVoiceAction, ModelsAction, RemindersAction,
-    SessionsAction,
-    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
+    SessionsAction, SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -969,6 +968,10 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Skills { action } => match action {
             SkillsAction::List => {
                 let result = client.skills_list().await?;
+                println!("{}", render(&result, format));
+            }
+            SkillsAction::Check => {
+                let result = client.skills_check().await?;
                 println!("{}", render(&result, format));
             }
         },

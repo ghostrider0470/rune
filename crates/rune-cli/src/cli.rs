@@ -461,6 +461,8 @@ pub enum ModelsAction {
 pub enum SkillsAction {
     /// List installed skills discovered by the gateway.
     List,
+    /// Re-scan the skills directory and report load/remove counts.
+    Check,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1007,6 +1009,17 @@ mod tests {
             cli.command,
             Command::Skills {
                 action: SkillsAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_skills_check() {
+        let cli = Cli::try_parse_from(["rune", "skills", "check"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Skills {
+                action: SkillsAction::Check
             }
         ));
     }
