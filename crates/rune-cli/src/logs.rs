@@ -85,7 +85,7 @@ impl GatewayClient {
             query.push(("source", s.to_string()));
         }
         let resp = self
-            .http()
+            .http
             .get(self.url("/api/logs/tail"))
             .query(&query)
             .send()
@@ -119,7 +119,7 @@ impl GatewayClient {
             query.push(("source", s.to_string()));
         }
         let resp = self
-            .http()
+            .http
             .get(self.url("/api/logs/search"))
             .query(&query)
             .send()
@@ -167,7 +167,7 @@ impl GatewayClient {
             body["output"] = serde_json::json!(o);
         }
         let resp = self
-            .http()
+            .http
             .post(self.url("/api/logs/export"))
             .json(&body)
             .send()

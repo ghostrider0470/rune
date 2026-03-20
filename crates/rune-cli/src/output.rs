@@ -1339,7 +1339,7 @@ impl fmt::Display for LogsQueryResponse {
     }
 }
 
-fn format_log_entry(entry: &serde_json::Value) -> String {
+pub(crate) fn format_log_entry(entry: &serde_json::Value) -> String {
     let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_str);
     let level = entry.get("level").and_then(serde_json::Value::as_str);
     let source = entry.get("source").and_then(serde_json::Value::as_str);
