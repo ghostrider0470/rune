@@ -2891,7 +2891,54 @@ impl GatewayClient {
         }
     }
 
+    // ── Config admin (#30) ──────────────────────────────────────
+    pub async fn config_reload(&self) -> Result<crate::output::ConfigReloadResponse> {
+        let r = self.http.post(self.url("/config/reload")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn config_diff(&self) -> Result<crate::output::ConfigDiffResponse> {
+        let r = self.http.get(self.url("/config/diff")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn config_env(&self) -> Result<crate::output::ConfigEnvResponse> {
+        let r = self.http.get(self.url("/config/env")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
+    // ── Lifecycle (#74, #70) ────────────────────────────────────
+    pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
+        let r = self.http.post(self.url("/setup")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn backup_create(&self, label: Option<&str>) -> Result<crate::output::BackupCreateResponse> {
+        let mut b = json!({}); if let Some(l) = label { b["label"] = json!(l); }
+        let r = self.http.post(self.url("/backups")).json(&b).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn backup_list(&self) -> Result<crate::output::BackupListResponse> {
+        let r = self.http.get(self.url("/backups")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn backup_restore(&self, id: &str) -> Result<crate::output::BackupRestoreResponse> {
+        let r = self.http.post(self.url(&format!("/backups/{id}/restore"))).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn update_check(&self) -> Result<crate::output::UpdateCheckResponse> {
+        let r = self.http.get(self.url("/update/check")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn update_apply(&self) -> Result<crate::output::UpdateApplyResponse> {
+        let r = self.http.post(self.url("/update/apply")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn update_status(&self) -> Result<crate::output::UpdateStatusResponse> {
+        let r = self.http.get(self.url("/update/status")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn reset(&self) -> Result<crate::output::ResetResponse> {
+        let r = self.http.post(self.url("/reset")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 }
 
 fn local_config_path() -> std::path::PathBuf {

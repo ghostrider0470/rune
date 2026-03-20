@@ -1965,6 +1965,47 @@ impl fmt::Display for ConfigValidationResult {
     }
 }
 
+// ── Config admin responses (#30) ──────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigReloadResponse { pub success: bool, pub detail: String }
+impl fmt::Display for ConfigReloadResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigDiffResponse { pub changed: bool, pub diff: String }
+impl fmt::Display for ConfigDiffResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.changed { write!(f, "{}", self.diff) } else { write!(f, "No differences.") } } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigEnvResponse { pub overrides: Vec<ConfigEnvOverride> }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigEnvOverride { pub key: String, pub value: String, pub source: String }
+impl fmt::Display for ConfigEnvResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.overrides.is_empty() { return write!(f, "No environment overrides active."); } for o in &self.overrides { writeln!(f, "  {}: {} ({})", o.key, o.value, o.source)?; } Ok(()) } }
+
+// ── Lifecycle responses (#74, #70) ────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupResponse { pub success: bool, pub detail: String }
+impl fmt::Display for SetupResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupCreateResponse { pub success: bool, pub backup_id: String, pub detail: String }
+impl fmt::Display for BackupCreateResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "✓ Backup {} created: {}", self.backup_id, self.detail) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupSummary { pub id: String, pub label: Option<String>, pub created_at: String, pub size_bytes: Option<u64> }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupListResponse { pub backups: Vec<BackupSummary> }
+impl fmt::Display for BackupListResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.backups.is_empty() { return write!(f, "No backups found."); } for b in &self.backups { write!(f, "  {} ({})", b.id, b.created_at)?; if let Some(ref l) = b.label { write!(f, " [{l}]")?; } writeln!(f)?; } Ok(()) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupRestoreResponse { pub success: bool, pub backup_id: String, pub detail: String }
+impl fmt::Display for BackupRestoreResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} Restore {}: {}", self.backup_id, self.detail) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCheckResponse { pub available: bool, pub current_version: String, pub latest_version: Option<String>, pub detail: String }
+impl fmt::Display for UpdateCheckResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.available { write!(f, "Update available: {} → {}", self.current_version, self.latest_version.as_deref().unwrap_or("?")) } else { write!(f, "✓ Up to date ({})", self.current_version) } } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateApplyResponse { pub success: bool, pub detail: String }
+impl fmt::Display for UpdateApplyResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateStatusResponse { pub current_version: String, pub detail: String }
+impl fmt::Display for UpdateStatusResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} — {}", self.current_version, self.detail) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetResponse { pub success: bool, pub detail: String }
+impl fmt::Display for ResetResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+
 /// Location of the local config file used for mutations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigFileResponse {

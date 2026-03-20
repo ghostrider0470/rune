@@ -203,6 +203,24 @@ pub enum Command {
         #[command(subcommand)]
         action: HooksAction,
     },
+    /// Run first-time setup wizard.
+    Setup,
+    /// Manage backups of durable state.
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
+    },
+    /// Manage gateway updates.
+    Update {
+        #[command(subcommand)]
+        action: UpdateAction,
+    },
+    /// Factory-reset all state (requires confirmation).
+    Reset {
+        /// Confirm the destructive reset operation.
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 /// Direct agent-turn invocation actions.
@@ -1319,6 +1337,12 @@ pub enum ConfigAction {
         #[arg(short, long)]
         file: Option<String>,
     },
+    /// Ask the gateway to reload its configuration from disk.
+    Reload,
+    /// Show the diff between the on-disk config and the live running config.
+    Diff,
+    /// Show all resolved RUNE__* environment variable overrides.
+    Env,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1350,6 +1374,37 @@ pub enum SecretsAction {
         /// JSON file path, or `-` to read from stdin.
         input: String,
     },
+}
+
+
+#[derive(Debug, Subcommand)]
+pub enum BackupAction {
+    /// Create a backup of all durable state.
+    Create {
+        /// Optional human-readable label for the backup.
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// List available backups.
+    List,
+    /// Restore from a specific backup.
+    Restore {
+        /// Backup identifier to restore from.
+        id: String,
+        /// Confirm the restore operation.
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum UpdateAction {
+    /// Check for available updates.
+    Check,
+    /// Apply a pending update.
+    Apply,
+    /// Show current update status.
+    Status,
 }
 
 #[cfg(test)]
@@ -2764,6 +2819,40 @@ mod tests {
             } => assert_eq!(file.as_deref(), Some("custom.toml")),
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+
+    #[test]
+    fn parse_config_reload() {
+        let cli = Cli::try_parse_from(["rune", "config", "reload"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Config {
+                action: ConfigAction::Reload
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_config_diff() {
+        let cli = Cli::try_parse_from(["rune", "config", "diff"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Config {
+                action: ConfigAction::Diff
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_config_env() {
+        let cli = Cli::try_parse_from(["rune", "config", "env"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Config {
+                action: ConfigAction::Env
+            }
+        ));
     }
 
     #[test]
@@ -4348,6 +4437,81 @@ mod subagent_cli_tests {
             Command::Acp { action: AcpAction::Ack { message_id, session } } => {
                 assert_eq!(message_id, "m1"); assert_eq!(session, "a");
             }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_setup() {
+        let cli = Cli::try_parse_from(["rune", "setup"]).unwrap();
+        assert!(matches!(cli.command, Command::Setup));
+    }
+
+    #[test]
+    fn parse_backup_create() {
+        let cli = Cli::try_parse_from(["rune", "backup", "create"]).unwrap();
+        assert!(matches!(cli.command, Command::Backup { action: BackupAction::Create { label: None } }));
+    }
+
+    #[test]
+    fn parse_backup_create_with_label() {
+        let cli = Cli::try_parse_from(["rune", "backup", "create", "--label", "nightly"]).unwrap();
+        match cli.command {
+            Command::Backup { action: BackupAction::Create { label } } => assert_eq!(label.as_deref(), Some("nightly")),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_backup_list() {
+        let cli = Cli::try_parse_from(["rune", "backup", "list"]).unwrap();
+        assert!(matches!(cli.command, Command::Backup { action: BackupAction::List }));
+    }
+
+    #[test]
+    fn parse_backup_restore() {
+        let cli = Cli::try_parse_from(["rune", "backup", "restore", "bk-001", "--confirm"]).unwrap();
+        match cli.command {
+            Command::Backup { action: BackupAction::Restore { id, confirm } } => {
+                assert_eq!(id, "bk-001");
+                assert!(confirm);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_update_check() {
+        let cli = Cli::try_parse_from(["rune", "update", "check"]).unwrap();
+        assert!(matches!(cli.command, Command::Update { action: UpdateAction::Check }));
+    }
+
+    #[test]
+    fn parse_update_apply() {
+        let cli = Cli::try_parse_from(["rune", "update", "apply"]).unwrap();
+        assert!(matches!(cli.command, Command::Update { action: UpdateAction::Apply }));
+    }
+
+    #[test]
+    fn parse_update_status() {
+        let cli = Cli::try_parse_from(["rune", "update", "status"]).unwrap();
+        assert!(matches!(cli.command, Command::Update { action: UpdateAction::Status }));
+    }
+
+    #[test]
+    fn parse_reset_with_confirm() {
+        let cli = Cli::try_parse_from(["rune", "reset", "--confirm"]).unwrap();
+        match cli.command {
+            Command::Reset { confirm } => assert!(confirm),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_reset_no_confirm() {
+        let cli = Cli::try_parse_from(["rune", "reset"]).unwrap();
+        match cli.command {
+            Command::Reset { confirm } => assert!(!confirm),
             other => panic!("unexpected: {other:?}"),
         }
     }

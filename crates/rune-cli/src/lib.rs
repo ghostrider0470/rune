@@ -31,6 +31,7 @@ use cli::{
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
     ModelsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
+    BackupAction, UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -2005,6 +2006,18 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = validate_config(file.as_deref());
                 println!("{}", render(&result, format));
             }
+            ConfigAction::Reload => {
+                let result = client.config_reload().await?;
+                println!("{}", render(&result, format));
+            }
+            ConfigAction::Diff => {
+                let result = client.config_diff().await?;
+                println!("{}", render(&result, format));
+            }
+            ConfigAction::Env => {
+                let result = client.config_env().await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Security { action } => match action {
             SecurityAction::Audit => {
@@ -2145,6 +2158,48 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::Setup => {
+            let result = client.setup().await?;
+            println!("{}", render(&result, format));
+        }
+        Command::Backup { action } => match action {
+            BackupAction::Create { label } => {
+                let result = client.backup_create(label.as_deref()).await?;
+                println!("{}", render(&result, format));
+            }
+            BackupAction::List => {
+                let result = client.backup_list().await?;
+                println!("{}", render(&result, format));
+            }
+            BackupAction::Restore { id, confirm } => {
+                if !confirm {
+                    anyhow::bail!("--confirm is required to restore a backup");
+                }
+                let result = client.backup_restore(&id).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Update { action } => match action {
+            UpdateAction::Check => {
+                let result = client.update_check().await?;
+                println!("{}", render(&result, format));
+            }
+            UpdateAction::Apply => {
+                let result = client.update_apply().await?;
+                println!("{}", render(&result, format));
+            }
+            UpdateAction::Status => {
+                let result = client.update_status().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Reset { confirm } => {
+            if !confirm {
+                anyhow::bail!("--confirm is required to reset the workspace");
+            }
+            let result = client.reset().await?;
+            println!("{}", render(&result, format));
+        }
     }
 
     Ok(())
