@@ -23,12 +23,13 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    AgentsAction, ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell,
+    AcpAction, AgentAction, AgentsAction, ApprovalsAction, ChannelsAction, Command,
+    CompletionAction, CompletionShell,
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, RemindersAction, SessionsAction, SkillsAction, SystemAction, SystemEventAction,
-    SystemHeartbeatAction,
+    ModelsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
+    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -1407,6 +1408,26 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = TemplateListResponse { templates };
                 println!("{}", render(&result, format));
             }
+            AgentsAction::Spawn {
+                parent,
+                mode,
+                policy,
+                task,
+                provider,
+            } => {
+                let result = client
+                    .agent_spawn(&parent, &mode, &policy, &task, provider.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Steer { id, message } => {
+                let result = client.agent_steer(&id, &message).await?;
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Kill { id, reason } => {
+                let result = client.agent_kill(&id, reason.as_deref()).await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Channels { action } => {
             let channels = channel_details();
@@ -1920,6 +1941,81 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             ConfigAction::Validate { file } => {
                 let result = validate_config(file.as_deref());
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Security { action } => match action {
+            SecurityAction::Audit => {
+                let result = client.security_audit().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Sandbox { action } => match action {
+            SandboxAction::List => {
+                let result = client.sandbox_list().await?;
+                println!("{}", render(&result, format));
+            }
+            SandboxAction::Recreate => {
+                let result = client.sandbox_recreate().await?;
+                println!("{}", render(&result, format));
+            }
+            SandboxAction::Explain => {
+                let result = client.sandbox_explain().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Secrets { action } => match action {
+            SecretsAction::Reload => {
+                let result = client.secrets_reload().await?;
+                println!("{}", render(&result, format));
+            }
+            SecretsAction::Audit => {
+                let result = client.secrets_audit().await?;
+                println!("{}", render(&result, format));
+            }
+            SecretsAction::Configure => {
+                let result = client.secrets_configure().await?;
+                println!("{}", render(&result, format));
+            }
+            SecretsAction::Apply { input } => {
+                let manifest = read_gateway_config_input(&input)?;
+                let result = client.secrets_apply(manifest).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Configure => {
+            let result = client.configure().await?;
+            println!("{}", render(&result, format));
+        }
+        Command::Agent { action } => match action {
+            AgentAction::Run {
+                session,
+                message,
+                max_turns,
+                wait,
+            } => {
+                let result = client.agent_run(&session, &message, max_turns, wait).await?;
+                println!("{}", render(&result, format));
+            }
+            AgentAction::Result { session, turn } => {
+                let result = client.agent_result(&session, &turn).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Acp { action } => match action {
+            AcpAction::Send { from, to, payload } => {
+                let result = client.acp_send(&from, &to, &payload).await?;
+                println!("{}", render(&result, format));
+            }
+            AcpAction::Inbox { session } => {
+                let result = client.acp_inbox(&session).await?;
+                println!("{}", render(&result, format));
+            }
+            AcpAction::Ack {
+                message_id,
+                session,
+            } => {
+                let result = client.acp_ack(&message_id, &session).await?;
                 println!("{}", render(&result, format));
             }
         },

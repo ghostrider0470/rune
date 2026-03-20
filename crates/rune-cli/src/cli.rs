@@ -157,6 +157,94 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Run security audits and inspect security posture.
+    Security {
+        #[command(subcommand)]
+        action: SecurityAction,
+    },
+    /// Inspect and manage filesystem sandbox boundaries.
+    Sandbox {
+        #[command(subcommand)]
+        action: SandboxAction,
+    },
+    /// Manage runtime secrets lifecycle.
+    Secrets {
+        #[command(subcommand)]
+        action: SecretsAction,
+    },
+    /// Run the interactive setup wizard.
+    Configure,
+    /// Direct agent-turn invocation — send a single instruction to a session.
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+    /// Agent Communication Protocol (ACP) bridge commands.
+    Acp {
+        #[command(subcommand)]
+        action: AcpAction,
+    },
+}
+
+/// Direct agent-turn invocation actions.
+#[derive(Debug, Subcommand)]
+pub enum AgentAction {
+    /// Send a single instruction to a session and return the response.
+    Run {
+        /// Session ID to send the instruction to.
+        #[arg(long)]
+        session: String,
+        /// The instruction text to send.
+        #[arg(long)]
+        message: String,
+        /// Maximum turns to allow before returning.
+        #[arg(long, default_value_t = 1)]
+        max_turns: u32,
+        /// Wait for the agent turn to complete before returning.
+        #[arg(long, default_value_t = true)]
+        wait: bool,
+    },
+    /// Check the result of a previously submitted agent turn.
+    Result {
+        /// Session ID to check.
+        #[arg(long)]
+        session: String,
+        /// Turn ID to retrieve.
+        #[arg(long)]
+        turn: String,
+    },
+}
+
+/// ACP bridge actions for inter-agent communication.
+#[derive(Debug, Subcommand)]
+pub enum AcpAction {
+    /// Send an ACP message to a target agent session.
+    Send {
+        /// Source session ID.
+        #[arg(long)]
+        from: String,
+        /// Target session ID.
+        #[arg(long)]
+        to: String,
+        /// Message payload (JSON string).
+        #[arg(long)]
+        payload: String,
+    },
+    /// List pending ACP messages for a session.
+    Inbox {
+        /// Session ID to check.
+        #[arg(long)]
+        session: String,
+    },
+    /// Acknowledge/consume an ACP message.
+    Ack {
+        /// Message ID to acknowledge.
+        #[arg(long)]
+        message_id: String,
+        /// Session ID that owns the message.
+        #[arg(long)]
+        session: String,
+    },
 }
 
 #[derive(Debug, Clone, Args)]
@@ -478,6 +566,40 @@ pub enum AgentsAction {
         /// Template slug to launch (e.g. "coding-agent").
         #[arg(long)]
         template: String,
+    },
+    /// Spawn a new subagent session linked to a parent.
+    Spawn {
+        /// Parent session ID that owns this subagent.
+        #[arg(long)]
+        parent: String,
+        /// Agent mode (e.g. "coding", "research", "operator").
+        #[arg(long, default_value = "default")]
+        mode: String,
+        /// Approval policy for the child session.
+        #[arg(long, default_value = "inherit")]
+        policy: String,
+        /// Initial task description for the subagent.
+        #[arg(long)]
+        task: String,
+        /// Model provider override for the child session.
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Send a follow-up instruction to a running subagent.
+    Steer {
+        /// Subagent session ID to steer.
+        id: String,
+        /// Follow-up instruction text.
+        #[arg(long)]
+        message: String,
+    },
+    /// Terminate a running subagent session.
+    Kill {
+        /// Subagent session ID to kill.
+        id: String,
+        /// Optional reason for termination.
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
@@ -1067,6 +1189,37 @@ pub enum ConfigAction {
         /// Path to config file (default: rune.toml).
         #[arg(short, long)]
         file: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SecurityAction {
+    /// Run a security audit against the gateway.
+    Audit,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SandboxAction {
+    /// List active sandbox boundaries and their status.
+    List,
+    /// Recreate sandbox boundaries from the current configuration.
+    Recreate,
+    /// Explain the current sandbox policy in human-readable form.
+    Explain,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SecretsAction {
+    /// Reload secrets from the configured secret store.
+    Reload,
+    /// Audit secret usage and detect stale or unused secrets.
+    Audit,
+    /// Show the current secret store configuration (redacted).
+    Configure,
+    /// Apply a secrets manifest from a JSON file or stdin (`-`).
+    Apply {
+        /// JSON file path, or `-` to read from stdin.
+        input: String,
     },
 }
 
@@ -3773,5 +3926,118 @@ mod tests {
             Cli::try_parse_from(["rune", "message", "list-reactions", "--channel", "slack"])
                 .is_err()
         );
+    }
+
+    // ── Security ──────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_security_audit() {
+        let cli = Cli::try_parse_from(["rune", "security", "audit"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Security {
+                action: SecurityAction::Audit
+            }
+        ));
+    }
+
+    // ── Sandbox ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_sandbox_list() {
+        let cli = Cli::try_parse_from(["rune", "sandbox", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sandbox {
+                action: SandboxAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sandbox_recreate() {
+        let cli = Cli::try_parse_from(["rune", "sandbox", "recreate"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sandbox {
+                action: SandboxAction::Recreate
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sandbox_explain() {
+        let cli = Cli::try_parse_from(["rune", "sandbox", "explain"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sandbox {
+                action: SandboxAction::Explain
+            }
+        ));
+    }
+
+    // ── Secrets ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_secrets_reload() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "reload"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Reload
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_secrets_audit() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "audit"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Audit
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_secrets_configure() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "configure"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Configure
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_secrets_apply() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "apply", "secrets.json"]).unwrap();
+        match cli.command {
+            Command::Secrets {
+                action: SecretsAction::Apply { input },
+            } => assert_eq!(input, "secrets.json"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_secrets_apply_stdin() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "apply", "-"]).unwrap();
+        match cli.command {
+            Command::Secrets {
+                action: SecretsAction::Apply { input },
+            } => assert_eq!(input, "-"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    // ── Configure ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_configure() {
+        let cli = Cli::try_parse_from(["rune", "configure"]).unwrap();
+        assert!(matches!(cli.command, Command::Configure));
     }
 }
