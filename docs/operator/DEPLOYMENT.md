@@ -825,14 +825,20 @@ Startup logs must show whether the active path profile is:
 
 When `models.providers` is empty, Rune uses zero-config model bootstrap:
 
-1. probe `OLLAMA_HOST` when set
+1. normalize `OLLAMA_HOST` into an effective Ollama base URL when set
 2. otherwise probe `http://localhost:11434`
 3. when Ollama is reachable, use it as the default provider
 4. when pulled models exist, auto-select a default model
 5. when no models are pulled, start without a default model and print actionable guidance
 6. when Ollama is unreachable, fall back to the echo provider
 
-When `models.providers` is non-empty, explicit provider config wins and zero-config Ollama auto-detect is disabled even if `OLLAMA_HOST` is set.
+Accepted `OLLAMA_HOST` forms mirror Ollama itself:
+
+- `http://host:port` or `https://host:port`
+- `host:port` which maps to `http://host:port`
+- `host` which maps to `http://host:11434`
+
+When `models.providers` is non-empty, explicit provider config wins and zero-config Ollama auto-detect is disabled even if `OLLAMA_HOST` is set. Startup diagnostics should reflect that the env var is ignored rather than treating it as an active probe target.
 
 If `models.default_model` is set while Rune is using zero-config Ollama bootstrap, that configured default must win over the Ollama auto-pick.
 
@@ -856,7 +862,8 @@ Startup logging must make these decisions inspectable without reading source cod
 - active path profile and state root
 - storage backend selection
 - model bootstrap mode: explicit providers or zero-config Ollama
-- `OLLAMA_HOST` value when relevant
+- raw `OLLAMA_HOST` value when present
+- effective zero-config Ollama probe target when relevant
 - configured providers summary
 - configured default model and its source before runtime probing
 - configured default provider and its source before runtime probing when detectable
@@ -865,7 +872,7 @@ Startup logging must make these decisions inspectable without reading source cod
 - resolved default provider and its source after runtime provider selection
 - default model source: agent config, `models.default_model`, or Ollama auto-pick
 
-If `OLLAMA_HOST` is set but unreachable, startup must warn explicitly that Rune is falling back instead of silently behaving like localhost probing.
+If `OLLAMA_HOST` is set but unreachable, startup must warn explicitly that Rune is falling back, and must name the normalized probe target instead of silently behaving like localhost probing.
 
 If explicit provider construction fails at startup, Rune must report `echo-fallback` as the resolved provider mode rather than logging the configured provider inventory as if it were active.
 

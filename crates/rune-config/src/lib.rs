@@ -563,6 +563,19 @@ impl ModelsConfig {
             .collect()
     }
 
+    /// Return the effective Ollama base URL for zero-config startup probing.
+    ///
+    /// When explicit providers are configured, zero-config Ollama probing is
+    /// disabled and this returns `None`.
+    #[must_use]
+    pub fn zero_config_ollama_base_url(&self, ollama_host: Option<&str>) -> Option<String> {
+        if self.bootstrap() != ModelBootstrap::ZeroConfigOllama {
+            return None;
+        }
+
+        Some(normalize_zero_config_ollama_host(ollama_host))
+    }
+
     /// Return every configured model in canonical `provider/model` form.
     #[must_use]
     pub fn inventory(&self) -> Vec<ModelInventoryEntry<'_>> {
@@ -675,6 +688,26 @@ impl ModelsConfig {
             model: model_ref.to_string(),
         })
     }
+}
+
+fn normalize_zero_config_ollama_host(ollama_host: Option<&str>) -> String {
+    let Some(value) = ollama_host
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.trim_end_matches('/'))
+    else {
+        return "http://localhost:11434".to_string();
+    };
+
+    if value.starts_with("http://") || value.starts_with("https://") {
+        return value.to_string();
+    }
+
+    if value.contains(':') {
+        return format!("http://{value}");
+    }
+
+    format!("http://{value}:11434")
 }
 
 /// Named ordered fallback chain metadata.
@@ -2229,6 +2262,56 @@ models = ["gpt-5.4", "gpt-image-1"]
         };
 
         assert_eq!(config.bootstrap(), ModelBootstrap::ExplicitProviders);
+    }
+
+    #[test]
+    fn zero_config_ollama_base_url_defaults_to_localhost() {
+        let config = ModelsConfig::default();
+
+        assert_eq!(
+            config.zero_config_ollama_base_url(None),
+            Some("http://localhost:11434".into())
+        );
+    }
+
+    #[test]
+    fn zero_config_ollama_base_url_normalizes_bare_env_host() {
+        let config = ModelsConfig::default();
+
+        assert_eq!(
+            config.zero_config_ollama_base_url(Some("  ollama-box/  ")),
+            Some("http://ollama-box:11434".into())
+        );
+    }
+
+    #[test]
+    fn zero_config_ollama_base_url_strips_trailing_slash_from_full_url() {
+        let config = ModelsConfig::default();
+
+        assert_eq!(
+            config.zero_config_ollama_base_url(Some("https://ollama.example.com:443/")),
+            Some("https://ollama.example.com:443".into())
+        );
+    }
+
+    #[test]
+    fn zero_config_ollama_base_url_is_disabled_when_explicit_providers_exist() {
+        let config = ModelsConfig {
+            providers: vec![ModelProviderConfig {
+                name: "openai".into(),
+                kind: "openai".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(config.zero_config_ollama_base_url(Some("ollama-box")), None);
     }
 
     #[test]
