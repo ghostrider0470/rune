@@ -662,6 +662,19 @@ pub enum MessageAction {
         #[arg(long)]
         session: Option<String>,
     },
+    /// List emoji reactions on a message.
+    #[command(name = "list-reactions")]
+    ListReactions {
+        /// ID of the message to list reactions for.
+        #[arg(long)]
+        message_id: String,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -3375,5 +3388,76 @@ mod tests {
             Cli::try_parse_from(["rune", "message", "ack", "--channel", "slack"]).is_err()
         );
         assert!(Cli::try_parse_from(["rune", "message", "ack"]).is_err());
+    }
+
+    // ── Message list-reactions (#74) ────────────────────────────────
+
+    #[test]
+    fn parse_message_list_reactions_minimal() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "list-reactions",
+            "--message-id",
+            "msg-42",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::ListReactions {
+                        message_id,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-42");
+                assert_eq!(channel, None);
+                assert_eq!(session, None);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_list_reactions_with_channel_and_session() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "list-reactions",
+            "--message-id",
+            "msg-99",
+            "--channel",
+            "discord",
+            "--session",
+            "sess-7",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::ListReactions {
+                        message_id,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-99");
+                assert_eq!(channel.as_deref(), Some("discord"));
+                assert_eq!(session.as_deref(), Some("sess-7"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_list_reactions_requires_message_id() {
+        assert!(
+            Cli::try_parse_from(["rune", "message", "list-reactions"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["rune", "message", "list-reactions", "--channel", "slack"])
+                .is_err()
+        );
     }
 }

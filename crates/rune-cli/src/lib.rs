@@ -1526,6 +1526,20 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .await?;
                 println!("{}", render(&result, format));
             }
+            MessageAction::ListReactions {
+                message_id,
+                channel,
+                session,
+            } => {
+                let result = client
+                    .message_list_reactions(
+                        &message_id,
+                        channel.as_deref(),
+                        session.as_deref(),
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
             MessageAction::Tag { action } => match action {
                 MessageTagAction::Add {
                     message_id,

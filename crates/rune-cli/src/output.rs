@@ -2385,6 +2385,50 @@ impl fmt::Display for MessageAckResponse {
     }
 }
 
+/// A single reaction on a message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactionDetail {
+    pub emoji: String,
+    pub count: u64,
+    pub users: Vec<String>,
+}
+
+/// Response for `message list-reactions`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageReactionListResponse {
+    pub message_id: String,
+    pub reactions: Vec<ReactionDetail>,
+}
+
+impl fmt::Display for MessageReactionListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.reactions.is_empty() {
+            return write!(f, "No reactions on message {}", self.message_id);
+        }
+        write!(
+            f,
+            "Message {}: {} reaction{}",
+            self.message_id,
+            self.reactions.len(),
+            if self.reactions.len() == 1 { "" } else { "s" },
+        )?;
+        for r in &self.reactions {
+            if r.users.is_empty() {
+                write!(f, "\n  {} ×{}", r.emoji, r.count)?;
+            } else {
+                write!(
+                    f,
+                    "\n  {} ×{} ({})",
+                    r.emoji,
+                    r.count,
+                    r.users.join(", "),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {
@@ -4019,6 +4063,79 @@ mod tests {
         assert_eq!(v["message_id"], "msg-42");
         assert_eq!(v["tags"][0], "urgent");
         assert_eq!(v["tags"][1], "followup");
+    }
+
+    // ── MessageReactionListResponse ─────────────────────────────────
+
+    #[test]
+    fn render_message_reaction_list_empty() {
+        let r = MessageReactionListResponse {
+            message_id: "msg-42".into(),
+            reactions: vec![],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert_eq!(out, "No reactions on message msg-42");
+    }
+
+    #[test]
+    fn render_message_reaction_list_with_reactions() {
+        let r = MessageReactionListResponse {
+            message_id: "msg-42".into(),
+            reactions: vec![
+                ReactionDetail {
+                    emoji: "👍".into(),
+                    count: 3,
+                    users: vec!["alice".into(), "bob".into(), "carol".into()],
+                },
+                ReactionDetail {
+                    emoji: "❤️".into(),
+                    count: 1,
+                    users: vec!["dave".into()],
+                },
+            ],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Message msg-42: 2 reactions"));
+        assert!(out.contains("👍 ×3"));
+        assert!(out.contains("alice, bob, carol"));
+        assert!(out.contains("❤️ ×1"));
+        assert!(out.contains("dave"));
+    }
+
+    #[test]
+    fn render_message_reaction_list_single_grammar() {
+        let r = MessageReactionListResponse {
+            message_id: "msg-99".into(),
+            reactions: vec![ReactionDetail {
+                emoji: "🎉".into(),
+                count: 5,
+                users: vec![],
+            }],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("1 reaction"));
+        assert!(!out.contains("reactions"));
+        assert!(out.contains("🎉 ×5"));
+        // No users → no parenthetical
+        assert!(!out.contains("("));
+    }
+
+    #[test]
+    fn render_message_reaction_list_json() {
+        let r = MessageReactionListResponse {
+            message_id: "msg-42".into(),
+            reactions: vec![ReactionDetail {
+                emoji: "👍".into(),
+                count: 2,
+                users: vec!["alice".into(), "bob".into()],
+            }],
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["message_id"], "msg-42");
+        assert_eq!(v["reactions"][0]["emoji"], "👍");
+        assert_eq!(v["reactions"][0]["count"], 2);
+        assert_eq!(v["reactions"][0]["users"][0], "alice");
     }
 
     // ── MessageThreadListResponse ──────────────────────────────────
