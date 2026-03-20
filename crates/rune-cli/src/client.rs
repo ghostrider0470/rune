@@ -1965,6 +1965,27 @@ impl GatewayClient {
         }
     }
 
+    /// `DELETE /sessions/:id` — delete a session and its transcript history.
+    pub async fn session_delete(&self, id: &str) -> Result<ActionResult> {
+        let resp = self
+            .http
+            .delete(self.url(&format!("/sessions/{id}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Session '{id}' not found.");
+        }
+        Ok(ActionResult {
+            success: resp.status().is_success(),
+            message: if resp.status().is_success() {
+                format!("Session {id} deleted")
+            } else {
+                format!("Gateway returned HTTP {}", resp.status())
+            },
+        })
+    }
+
     /// `GET /sessions/:id/tree`
     pub async fn sessions_tree(&self, id: &str) -> Result<SessionTreeResponse> {
         let resp = self
