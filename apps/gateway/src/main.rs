@@ -23,7 +23,9 @@ use tokio::signal;
 use tracing::{error, info, warn};
 
 use rune_channels::TelegramAdapter;
-use rune_config::{AppConfig, MemoryLevel, RuntimeMode, StorageBackend};
+use rune_config::{
+    AppConfig, MemoryLevel, ModelBootstrap, PathsProfile, RuntimeMode, StorageBackend,
+};
 use rune_core::ToolCategory;
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
@@ -63,6 +65,7 @@ use rune_tools::{ToolCall, ToolDefinition, ToolError, ToolExecutor, ToolRegistry
 
 const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
 const OPENAI_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
+const OLLAMA_HOST_ENV: &str = "OLLAMA_HOST";
 const MEMORY_INDEX_POLL_INTERVAL_SECS_ENV: &str = "RUNE_MEMORY_INDEX_POLL_INTERVAL_SECS";
 const DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS: u64 = 5;
 
@@ -86,7 +89,7 @@ async fn main() -> Result<()> {
     config.adjust_paths_for_mode(&resolved_mode);
 
     init_logging(&config.logging);
-    emit_startup_banner(&config, config_path);
+    emit_startup_banner(&config, &flags, &resolved_mode);
 
     // Auto-create missing directories in Standalone mode so that `rune` boots
     // without manual `mkdir` (zero-config, issue #61).
@@ -141,13 +144,37 @@ async fn main() -> Result<()> {
 /// small.  We parse the handful of supported flags manually.
 struct StartupFlags {
     config_path: Option<PathBuf>,
+    config_source: ConfigPathSource,
     yolo: bool,
     no_sandbox: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfigPathSource {
+    Cli,
+    Env,
+    Defaults,
+}
+
+impl ConfigPathSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Env => "env:RUNE_CONFIG",
+            Self::Defaults => "defaults+env",
+        }
+    }
+}
+
+struct DefaultModelSelection {
+    model: String,
+    source: &'static str,
 }
 
 fn parse_startup_flags() -> StartupFlags {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut config_path: Option<PathBuf> = None;
+    let mut config_source = ConfigPathSource::Defaults;
     let mut yolo = false;
     let mut no_sandbox = false;
 
@@ -157,6 +184,7 @@ fn parse_startup_flags() -> StartupFlags {
             "--config" => {
                 if i + 1 < args.len() {
                     config_path = Some(PathBuf::from(&args[i + 1]));
+                    config_source = ConfigPathSource::Cli;
                     i += 2;
                     continue;
                 }
@@ -170,11 +198,15 @@ fn parse_startup_flags() -> StartupFlags {
 
     // Fall back to RUNE_CONFIG env var when --config is not passed.
     if config_path.is_none() {
-        config_path = std::env::var_os("RUNE_CONFIG").map(PathBuf::from);
+        if let Some(path) = std::env::var_os("RUNE_CONFIG").map(PathBuf::from) {
+            config_path = Some(path);
+            config_source = ConfigPathSource::Env;
+        }
     }
 
     StartupFlags {
         config_path,
+        config_source,
         yolo,
         no_sandbox,
     }
@@ -185,7 +217,7 @@ fn display_config_path(path: Option<&Path>) -> String {
         .unwrap_or_else(|| "<defaults+env>".to_string())
 }
 
-fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
+fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: &RuntimeMode) {
     let store_backend = match config.database.backend {
         StorageBackend::Sqlite => "sqlite",
         StorageBackend::Postgres => {
@@ -203,35 +235,108 @@ fn emit_startup_banner(config: &AppConfig, config_path: Option<&Path>) {
             }
         }
     };
+    let config_path = flags.config_path.as_deref();
+    let ollama_host = trimmed_env_var(OLLAMA_HOST_ENV);
+    let state_root = state_root_display(config);
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
         host = %config.gateway.host,
         port = config.gateway.port,
+        config_source = flags.config_source.as_str(),
         config_path = %display_config_path(config_path),
+        requested_mode = config.mode.as_str(),
+        resolved_mode = resolved_mode.as_str(),
+        paths_profile = config.paths.profile().as_str(),
+        state_root = %state_root,
         store_backend,
-        model_backend = if config.models.providers.is_empty() { "auto-detect (probing Ollama…)" } else { "configured" },
+        model_bootstrap = config.models.bootstrap().as_str(),
+        ollama_host = ollama_host.as_deref().unwrap_or("<default>"),
         approval_mode = config.approval.mode.as_str(),
         security_posture = config.security.posture(),
         "starting rune gateway"
     );
 
+    if config.models.bootstrap() == ModelBootstrap::ZeroConfigOllama {
+        if let Some(model) = config.models.default_model.as_deref() {
+            info!(
+                model = model,
+                "models.default_model is set — Rune will prefer it over the Ollama auto-pick if zero-config Ollama is available"
+            );
+        }
+    } else if let Some(ollama_host) = ollama_host {
+        info!(
+            ollama_host = %ollama_host,
+            "OLLAMA_HOST is set but explicit model providers are configured, so zero-config Ollama auto-detect is disabled"
+        );
+    }
+
     // First-use vs. acknowledged bypass warning (issue #64).
     if let Some(posture) = rune_config::BypassPosture::detect(config) {
-        let ack = rune_config::BypassAcknowledgment::from_home()
-            .unwrap_or_else(|| {
-                rune_config::BypassAcknowledgment::new(std::path::Path::new("/tmp/.rune-config"))
-            });
+        let ack = rune_config::BypassAcknowledgment::from_home().unwrap_or_else(|| {
+            rune_config::BypassAcknowledgment::new(std::path::Path::new("/tmp/.rune-config"))
+        });
 
         if ack.is_acknowledged() {
             let reminder = posture.acknowledged_reminder();
-            info!(bypass = reminder, "trusted-environment bypass active (previously acknowledged)");
+            info!(
+                bypass = reminder,
+                "trusted-environment bypass active (previously acknowledged)"
+            );
         } else {
             let warning = posture.first_use_warning();
             eprintln!("{warning}");
             warn!(warning = %warning, "trusted-environment bypass active — NOT YET ACKNOWLEDGED");
         }
     }
+}
+
+fn trimmed_env_var(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn state_root_display(config: &AppConfig) -> String {
+    match config.paths.profile() {
+        PathsProfile::DockerDefault => "/data (+ /config, /secrets)".to_string(),
+        PathsProfile::StandaloneHome | PathsProfile::Custom => config
+            .paths
+            .db_dir
+            .parent()
+            .unwrap_or(Path::new("."))
+            .display()
+            .to_string(),
+    }
+}
+
+fn select_default_model(
+    config: &AppConfig,
+    auto_default_model: Option<String>,
+) -> Option<DefaultModelSelection> {
+    if let Some(model) = config
+        .agents
+        .default_agent()
+        .and_then(|agent| config.agents.effective_model(agent))
+    {
+        return Some(DefaultModelSelection {
+            model: model.to_string(),
+            source: "agent-config",
+        });
+    }
+
+    if let Some(model) = config.models.default_model.as_ref() {
+        return Some(DefaultModelSelection {
+            model: model.clone(),
+            source: "models.default_model",
+        });
+    }
+
+    auto_default_model.map(|model| DefaultModelSelection {
+        model,
+        source: "ollama-auto",
+    })
 }
 
 /// Build all services, returning an optional `EmbeddedPg` handle that
@@ -362,18 +467,15 @@ async fn build_services(
         Arc::new(NoOpCompaction),
     );
 
-    // Resolve default model: agent config → models.default_model → auto-detected Ollama model
-    let default_model = config
-        .agents
-        .default_agent()
-        .and_then(|a| config.agents.effective_model(a))
-        .map(String::from)
-        .or_else(|| config.models.default_model.clone())
-        .or(auto_default_model);
+    let default_model = select_default_model(&config, auto_default_model);
 
-    if let Some(ref model) = default_model {
-        turn_executor = turn_executor.with_default_model(model);
-        info!(model = %model, "default model configured");
+    if let Some(selection) = default_model {
+        turn_executor = turn_executor.with_default_model(&selection.model);
+        info!(
+            model = %selection.model,
+            source = selection.source,
+            "default model configured"
+        );
     }
 
     turn_executor = turn_executor.with_lane_queue(lane_queue.clone());
@@ -2037,27 +2139,34 @@ impl SubagentManager for LiveSubagentManager {
 /// element is `Some` only when Ollama was auto-detected **and** at least one
 /// model is available — callers should use it as a fallback when no explicit
 /// `default_model` is configured.
-async fn build_model_provider(
-    config: &AppConfig,
-) -> (Arc<dyn ModelProvider>, Option<String>) {
+async fn build_model_provider(config: &AppConfig) -> (Arc<dyn ModelProvider>, Option<String>) {
+    let ollama_host = trimmed_env_var(OLLAMA_HOST_ENV);
+
     if !config.models.providers.is_empty() {
-        let provider: Arc<dyn ModelProvider> =
-            match RoutedModelProvider::from_models_config(&config.models) {
-                Ok(provider) => Arc::new(provider),
-                Err(error) => {
-                    warn!(error = %error, "failed to build routed model provider, falling back to echo");
-                    Arc::new(EchoModelProvider)
-                }
-            };
+        let provider: Arc<dyn ModelProvider> = match RoutedModelProvider::from_models_config(
+            &config.models,
+        ) {
+            Ok(provider) => Arc::new(provider),
+            Err(error) => {
+                warn!(error = %error, "failed to build routed model provider, falling back to echo");
+                Arc::new(EchoModelProvider)
+            }
+        };
         return (provider, None);
     }
 
-    // Zero-config Ollama auto-detection (issue #61): honour OLLAMA_HOST
-    // for non-default endpoints, then fall back to localhost:11434.
-    info!("no model providers configured — probing for local Ollama…");
+    let probe_target = ollama_host.as_deref().unwrap_or("http://localhost:11434");
+    info!(
+        probe_target,
+        "no model providers configured — probing zero-config Ollama"
+    );
     match rune_models::OllamaProvider::probe_env().await {
         Some(provider) => {
-            info!(url = %provider.url(), "Ollama detected — using as default provider");
+            info!(
+                ollama_base = %provider.base_url(),
+                url = %provider.url(),
+                "Ollama detected — using as default provider"
+            );
 
             // Auto-select the best pulled model as the default (issue #61).
             let auto_model = provider.pick_default_model().await;
@@ -2077,7 +2186,16 @@ async fn build_model_provider(
             (Arc::new(provider), auto_model)
         }
         None => {
-            info!("no Ollama found — using echo fallback (configure a provider in config.toml or set OLLAMA_HOST)");
+            if let Some(ollama_host) = ollama_host {
+                warn!(
+                    ollama_host = %ollama_host,
+                    "OLLAMA_HOST is set but Rune could not reach Ollama there — using echo fallback"
+                );
+            } else {
+                info!(
+                    "no Ollama found — using echo fallback (configure a provider in config.toml or set OLLAMA_HOST)"
+                );
+            }
             (Arc::new(EchoModelProvider), None)
         }
     }
@@ -2093,6 +2211,44 @@ mod tests {
     use rune_store::StoreError;
     use rune_store::models::{KeywordSearchRow, VectorSearchRow};
     use rune_tools::memory_index::EmbeddingProvider;
+
+    #[test]
+    fn select_default_model_prefers_agent_over_config_and_auto() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("models-default".into());
+        config.agents.list = vec![rune_config::AgentConfig {
+            id: "coder".into(),
+            default: Some(true),
+            model: Some(rune_config::AgentModelSelection::Id("agent-default".into())),
+            workspace: None,
+            system_prompt: None,
+        }];
+
+        let selection =
+            select_default_model(&config, Some("ollama-auto".into())).expect("selection");
+        assert_eq!(selection.model, "agent-default");
+        assert_eq!(selection.source, "agent-config");
+    }
+
+    #[test]
+    fn select_default_model_uses_models_default_before_auto_pick() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("models-default".into());
+
+        let selection =
+            select_default_model(&config, Some("ollama-auto".into())).expect("selection");
+        assert_eq!(selection.model, "models-default");
+        assert_eq!(selection.source, "models.default_model");
+    }
+
+    #[test]
+    fn select_default_model_falls_back_to_ollama_auto_pick() {
+        let config = AppConfig::default();
+
+        let selection = select_default_model(&config, Some("llama3.2".into())).expect("selection");
+        assert_eq!(selection.model, "llama3.2");
+        assert_eq!(selection.source, "ollama-auto");
+    }
 
     #[tokio::test]
     async fn build_memory_tool_executor_uses_file_mode_local_scan() {

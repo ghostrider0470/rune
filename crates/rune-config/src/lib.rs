@@ -187,18 +187,7 @@ impl AppConfig {
             return; // user overrode, don't touch
         }
         if let Some(home) = home_dir() {
-            let r = home.join(".rune");
-            self.paths = PathsConfig {
-                db_dir: r.join("db"),
-                sessions_dir: r.join("sessions"),
-                memory_dir: r.join("memory"),
-                media_dir: r.join("media"),
-                skills_dir: r.join("skills"),
-                logs_dir: r.join("logs"),
-                backups_dir: r.join("backups"),
-                config_dir: r.join("config"),
-                secrets_dir: r.join("secrets"),
-            };
+            self.paths = standalone_paths_root(&home);
         }
     }
 }
@@ -207,6 +196,21 @@ fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+}
+
+fn standalone_paths_root(home: &Path) -> PathsConfig {
+    let root = home.join(".rune");
+    PathsConfig {
+        db_dir: root.join("db"),
+        sessions_dir: root.join("sessions"),
+        memory_dir: root.join("memory"),
+        media_dir: root.join("media"),
+        skills_dir: root.join("skills"),
+        logs_dir: root.join("logs"),
+        backups_dir: root.join("backups"),
+        config_dir: root.join("config"),
+        secrets_dir: root.join("secrets"),
+    }
 }
 
 /// Attempt to create and remove a probe file to verify actual writability.
@@ -305,9 +309,12 @@ impl Default for GatewayConfig {
 
 /// Which runtime mode the process is operating in.
 ///
-/// `Auto` (the default) heuristically resolves to `Server` when a database URL
-/// is set, Docker/Kubernetes is detected, or paths begin with `/data`.
-/// Otherwise resolves to `Standalone`.
+/// `Auto` (the default) resolves to `Standalone` for bare-host first use even
+/// when the config is still at Docker-first defaults. The gateway then remaps
+/// those defaults to `~/.rune/*` during startup.
+///
+/// `Auto` resolves to `Server` when a database URL is set, Docker/Kubernetes
+/// is detected, or the operator explicitly points path roots at `/data`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeMode {
@@ -320,6 +327,14 @@ pub enum RuntimeMode {
 impl RuntimeMode {
     /// Resolve `Auto` to a concrete mode based on config and environment signals.
     pub fn resolve(&self, config: &AppConfig) -> RuntimeMode {
+        self.resolve_with_runtime_signals(config, runtime_server_signals_present())
+    }
+
+    fn resolve_with_runtime_signals(
+        &self,
+        config: &AppConfig,
+        runtime_server_signals_present: bool,
+    ) -> RuntimeMode {
         match self {
             RuntimeMode::Standalone => RuntimeMode::Standalone,
             RuntimeMode::Server => RuntimeMode::Server,
@@ -327,12 +342,13 @@ impl RuntimeMode {
                 if config.database.database_url.is_some() {
                     return RuntimeMode::Server;
                 }
-                if config.paths.db_dir.starts_with("/data") {
+                if runtime_server_signals_present {
                     return RuntimeMode::Server;
                 }
-                if std::path::Path::new("/.dockerenv").exists()
-                    || std::env::var("KUBERNETES_SERVICE_HOST").is_ok()
-                {
+                if config.paths == PathsConfig::default() {
+                    return RuntimeMode::Standalone;
+                }
+                if config.paths.db_dir.starts_with("/data") {
                     return RuntimeMode::Server;
                 }
                 RuntimeMode::Standalone
@@ -347,6 +363,10 @@ impl RuntimeMode {
             RuntimeMode::Server => "server",
         }
     }
+}
+
+fn runtime_server_signals_present() -> bool {
+    std::path::Path::new("/.dockerenv").exists() || std::env::var("KUBERNETES_SERVICE_HOST").is_ok()
 }
 
 /// Which storage backend to use.
@@ -465,6 +485,15 @@ pub struct ModelsConfig {
 }
 
 impl ModelsConfig {
+    #[must_use]
+    pub fn bootstrap(&self) -> ModelBootstrap {
+        if self.providers.is_empty() {
+            ModelBootstrap::ZeroConfigOllama
+        } else {
+            ModelBootstrap::ExplicitProviders
+        }
+    }
+
     /// Return every configured model in canonical `provider/model` form.
     #[must_use]
     pub fn inventory(&self) -> Vec<ModelInventoryEntry<'_>> {
@@ -921,6 +950,61 @@ impl Default for PathsConfig {
     }
 }
 
+/// High-level path layout profile surfaced in startup diagnostics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PathsProfile {
+    DockerDefault,
+    StandaloneHome,
+    Custom,
+}
+
+impl PathsProfile {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DockerDefault => "docker-default",
+            Self::StandaloneHome => "standalone-home",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+impl PathsConfig {
+    #[must_use]
+    pub fn profile(&self) -> PathsProfile {
+        if *self == PathsConfig::default() {
+            return PathsProfile::DockerDefault;
+        }
+
+        if let Some(home) = home_dir() {
+            if *self == standalone_paths_root(&home) {
+                return PathsProfile::StandaloneHome;
+            }
+        }
+
+        PathsProfile::Custom
+    }
+}
+
+/// How models bootstrap at startup before any request is executed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelBootstrap {
+    ExplicitProviders,
+    ZeroConfigOllama,
+}
+
+impl ModelBootstrap {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitProviders => "explicit-providers",
+            Self::ZeroConfigOllama => "zero-config-ollama",
+        }
+    }
+}
+
 /// Multi-agent configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AgentsConfig {
@@ -1163,10 +1247,7 @@ impl BypassAcknowledgment {
         }
         std::fs::write(
             &self.sentinel_path,
-            format!(
-                "Bypass risk acknowledged at {:?}\n",
-                SystemTime::now()
-            ),
+            format!("Bypass risk acknowledged at {:?}\n", SystemTime::now()),
         )
     }
 
@@ -1212,18 +1293,24 @@ impl BypassPosture {
     /// Full warning message shown on first use.
     pub fn first_use_warning(self) -> &'static str {
         match self {
-            Self::FullUnrestricted => "\
+            Self::FullUnrestricted => {
+                "\
 WARNING: Rune is starting in unrestricted mode (--yolo + --no-sandbox).
 All tool approvals are auto-bypassed and sandbox boundaries are disabled.
-Only use this in trusted environments (local dev, air-gapped infra).",
-            Self::YoloOnly => "\
+Only use this in trusted environments (local dev, air-gapped infra)."
+            }
+            Self::YoloOnly => {
+                "\
 WARNING: Rune is starting with approval bypass enabled (--yolo).
 All tool calls will be auto-approved without operator confirmation.
-Only use this in trusted environments.",
-            Self::NoSandboxOnly => "\
+Only use this in trusted environments."
+            }
+            Self::NoSandboxOnly => {
+                "\
 WARNING: Rune is starting with sandbox disabled (--no-sandbox).
 Workspace boundary enforcement is off — agents can access the full filesystem.
-Only use this in trusted environments.",
+Only use this in trusted environments."
+            }
         }
     }
 
@@ -2000,6 +2087,27 @@ models = ["gpt-5.4", "gpt-image-1"]
         assert!(config.models.fallbacks.is_empty());
         assert!(config.models.image_fallbacks.is_empty());
         assert!(config.models.auth_orders.is_empty());
+        assert_eq!(config.models.bootstrap(), ModelBootstrap::ZeroConfigOllama);
+    }
+
+    #[test]
+    fn models_bootstrap_detects_explicit_provider_config() {
+        let config = ModelsConfig {
+            providers: vec![ModelProviderConfig {
+                name: "openai".into(),
+                kind: "openai".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("gpt-5.4".into())],
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(config.bootstrap(), ModelBootstrap::ExplicitProviders);
     }
 
     #[test]
@@ -2092,22 +2200,23 @@ models = ["gpt-5.4", "gpt-image-1"]
     fn runtime_mode_auto_resolves_server_with_database_url() {
         let mut config = AppConfig::default();
         config.database.database_url = Some("postgres://localhost/rune".into());
-        // paths are Docker-default (/data), but database_url triggers server first
-        let resolved = config.mode.resolve(&config);
+        let resolved = config.mode.resolve_with_runtime_signals(&config, false);
         assert_eq!(resolved, RuntimeMode::Server);
     }
 
     #[test]
-    fn runtime_mode_auto_resolves_standalone_without_signals() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::remove_var("KUBERNETES_SERVICE_HOST");
-        }
-        let mut config = AppConfig::default();
-        // Override paths to non-Docker to avoid the /data heuristic
-        config.paths.db_dir = PathBuf::from("/tmp/rune-test/db");
-        let resolved = config.mode.resolve(&config);
+    fn runtime_mode_auto_resolves_standalone_for_bare_host_defaults() {
+        let config = AppConfig::default();
+        let resolved = config.mode.resolve_with_runtime_signals(&config, false);
         assert_eq!(resolved, RuntimeMode::Standalone);
+    }
+
+    #[test]
+    fn runtime_mode_auto_resolves_server_for_custom_data_mounts() {
+        let mut config = AppConfig::default();
+        config.paths.db_dir = PathBuf::from("/data/custom/db");
+        let resolved = config.mode.resolve_with_runtime_signals(&config, false);
+        assert_eq!(resolved, RuntimeMode::Server);
     }
 
     #[test]
@@ -2129,6 +2238,22 @@ models = ["gpt-5.4", "gpt-image-1"]
         );
         unsafe {
             // Restore — don't leak into other tests
+            std::env::remove_var("HOME");
+        }
+    }
+
+    #[test]
+    fn paths_profile_detects_standalone_home_layout() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("HOME", "/home/testuser");
+        }
+
+        let mut config = AppConfig::default();
+        config.adjust_paths_for_mode(&RuntimeMode::Standalone);
+        assert_eq!(config.paths.profile(), PathsProfile::StandaloneHome);
+
+        unsafe {
             std::env::remove_var("HOME");
         }
     }
@@ -2241,9 +2366,11 @@ models = ["gpt-5.4", "gpt-image-1"]
         };
 
         // A model that appears only as a fallback (not primary) should not match.
-        assert!(config
-            .fallback_chain_for("anthropic/claude-opus-4-6")
-            .is_none());
+        assert!(
+            config
+                .fallback_chain_for("anthropic/claude-opus-4-6")
+                .is_none()
+        );
     }
 
     #[test]
@@ -2468,16 +2595,28 @@ mode = "auto-exec"
 
     #[test]
     fn security_posture_labels() {
-        let standard = SecurityConfig { sandbox: true, trust_spells: false };
+        let standard = SecurityConfig {
+            sandbox: true,
+            trust_spells: false,
+        };
         assert_eq!(standard.posture(), "standard");
 
-        let trust = SecurityConfig { sandbox: true, trust_spells: true };
+        let trust = SecurityConfig {
+            sandbox: true,
+            trust_spells: true,
+        };
         assert_eq!(trust.posture(), "trust-spells");
 
-        let no_sandbox = SecurityConfig { sandbox: false, trust_spells: false };
+        let no_sandbox = SecurityConfig {
+            sandbox: false,
+            trust_spells: false,
+        };
         assert_eq!(no_sandbox.posture(), "no-sandbox");
 
-        let unrestricted = SecurityConfig { sandbox: false, trust_spells: true };
+        let unrestricted = SecurityConfig {
+            sandbox: false,
+            trust_spells: true,
+        };
         assert_eq!(unrestricted.posture(), "unrestricted");
     }
 
@@ -2619,14 +2758,20 @@ mode = "auto-exec"
     fn bypass_posture_detect_yolo_only() {
         let mut config = AppConfig::default();
         config.approval.mode = ApprovalMode::Yolo;
-        assert_eq!(BypassPosture::detect(&config), Some(BypassPosture::YoloOnly));
+        assert_eq!(
+            BypassPosture::detect(&config),
+            Some(BypassPosture::YoloOnly)
+        );
     }
 
     #[test]
     fn bypass_posture_detect_no_sandbox_only() {
         let mut config = AppConfig::default();
         config.security.sandbox = false;
-        assert_eq!(BypassPosture::detect(&config), Some(BypassPosture::NoSandboxOnly));
+        assert_eq!(
+            BypassPosture::detect(&config),
+            Some(BypassPosture::NoSandboxOnly)
+        );
     }
 
     #[test]
@@ -2634,7 +2779,10 @@ mode = "auto-exec"
         let mut config = AppConfig::default();
         config.approval.mode = ApprovalMode::Yolo;
         config.security.sandbox = false;
-        assert_eq!(BypassPosture::detect(&config), Some(BypassPosture::FullUnrestricted));
+        assert_eq!(
+            BypassPosture::detect(&config),
+            Some(BypassPosture::FullUnrestricted)
+        );
     }
 
     #[test]
