@@ -542,7 +542,7 @@ Not recommended as default deployment targets for the parity-first container arc
 
 ## 12. Backup and restore expectations
 
-Container deployment must make backup/restore straightforward.
+Container deployment must make backup/restore straightforward. See [PROTOCOLS.md §15.4](../parity/PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the full behavioral contract and CLI workflow spec.
 
 ## 12.1 What must be backup-friendly
 
