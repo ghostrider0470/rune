@@ -661,7 +661,8 @@ Startup logs must surface:
 - requested mode and resolved mode
 - path profile
 - model bootstrap mode
-- `OLLAMA_HOST` relevance
+- raw `OLLAMA_HOST` when present plus whether it is relevant
+- effective zero-config Ollama probe target when relevant
 - configured providers summary
 - configured default model and source
 - configured default provider and source when detectable
@@ -682,11 +683,11 @@ A first local boot with no custom config must start in a coherent standalone sha
 - default Docker-first paths are remapped to `~/.rune/*` on a bare host
 - required local directories are auto-created for standalone mode
 - path validation remains explicit and operator-visible
-- zero-config Ollama probing uses `OLLAMA_HOST` when provided, otherwise localhost
+- zero-config Ollama probing uses the normalized `OLLAMA_HOST` target when provided, otherwise localhost
 
 #### Failure behavior
 
-- unreachable `OLLAMA_HOST` must warn explicitly before fallback
+- unreachable `OLLAMA_HOST` must warn explicitly before fallback and include the normalized probe target
 - reachable Ollama with no pulled models must emit actionable operator guidance
 - explicit provider build failure must surface as `echo-fallback` in runtime provider resolution
 - missing or unwritable required paths must surface clear path-specific diagnostics

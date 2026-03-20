@@ -259,6 +259,7 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
     };
     let config_path = flags.config_path.as_deref();
     let ollama_host = trimmed_env_var(OLLAMA_HOST_ENV);
+    let ollama_probe_target = zero_config_ollama_probe_target(config);
     let state_root = state_root_display(config);
 
     info!(
@@ -273,7 +274,8 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
         state_root = %state_root,
         store_backend,
         model_bootstrap = config.models.bootstrap().as_str(),
-        ollama_host = ollama_host.as_deref().unwrap_or("<default>"),
+        ollama_host = ollama_host.as_deref().unwrap_or("<unset>"),
+        ollama_probe_target = ollama_probe_target.as_deref().unwrap_or("<disabled>"),
         approval_mode = config.approval.mode.as_str(),
         security_posture = config.security.posture(),
         "starting rune gateway"
@@ -331,6 +333,13 @@ fn state_root_display(config: &AppConfig) -> String {
             .display()
             .to_string(),
     }
+}
+
+fn zero_config_ollama_probe_target(config: &AppConfig) -> Option<String> {
+    let ollama_host = trimmed_env_var(OLLAMA_HOST_ENV);
+    config
+        .models
+        .zero_config_ollama_base_url(ollama_host.as_deref())
 }
 
 fn select_default_model(
@@ -402,9 +411,8 @@ fn emit_startup_model_resolution(
     let configured_default_provider = configured_default_provider(config);
     let provider_detail = match provider_resolution {
         StartupProviderResolution::ExplicitProviders => configured_provider_summary(config),
-        StartupProviderResolution::ZeroConfigOllama => {
-            trimmed_env_var(OLLAMA_HOST_ENV).unwrap_or_else(|| "http://localhost:11434".to_string())
-        }
+        StartupProviderResolution::ZeroConfigOllama => zero_config_ollama_probe_target(config)
+            .unwrap_or_else(|| "http://localhost:11434".to_string()),
         StartupProviderResolution::EchoFallback => "echo".to_string(),
     };
     let default_provider = resolved_default_provider(config, provider_resolution);
@@ -2261,14 +2269,23 @@ async fn build_model_provider(
         return (provider, None, StartupProviderResolution::ExplicitProviders);
     }
 
-    let probe_target = ollama_host.as_deref().unwrap_or("http://localhost:11434");
+    let probe_target = config
+        .models
+        .zero_config_ollama_base_url(ollama_host.as_deref())
+        .unwrap_or_else(|| "http://localhost:11434".to_string());
     info!(
-        probe_target,
+        probe_target = %probe_target,
         "no model providers configured — probing zero-config Ollama"
     );
-    match rune_models::OllamaProvider::probe_env().await {
+    let detected = if ollama_host.is_some() {
+        rune_models::OllamaProvider::probe_url(&probe_target).await
+    } else {
+        rune_models::OllamaProvider::probe_local().await
+    };
+    match detected {
         Some(provider) => {
             info!(
+                probe_target = %probe_target,
                 ollama_base = %provider.base_url(),
                 url = %provider.url(),
                 "Ollama detected — using as default provider"
@@ -2299,10 +2316,12 @@ async fn build_model_provider(
             if let Some(ollama_host) = ollama_host {
                 warn!(
                     ollama_host = %ollama_host,
+                    probe_target = %probe_target,
                     "OLLAMA_HOST is set but Rune could not reach Ollama there — using echo fallback"
                 );
             } else {
                 info!(
+                    probe_target = %probe_target,
                     "no Ollama found — using echo fallback (configure a provider in config.toml or set OLLAMA_HOST)"
                 );
             }
@@ -2325,6 +2344,11 @@ mod tests {
     use rune_store::StoreError;
     use rune_store::models::{KeywordSearchRow, VectorSearchRow};
     use rune_tools::memory_index::EmbeddingProvider;
+
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
 
     #[test]
     fn select_default_model_prefers_agent_over_config_and_auto() {
@@ -2430,6 +2454,52 @@ mod tests {
 
         assert_eq!(selection.provider, "echo");
         assert_eq!(selection.source, "echo-fallback");
+    }
+
+    #[test]
+    fn zero_config_ollama_probe_target_reads_and_normalizes_env() {
+        let _guard = env_lock().lock().expect("env lock");
+        unsafe {
+            std::env::set_var(OLLAMA_HOST_ENV, "  ollama-box/  ");
+        }
+
+        let probe_target = zero_config_ollama_probe_target(&AppConfig::default());
+
+        assert_eq!(probe_target.as_deref(), Some("http://ollama-box:11434"));
+        unsafe {
+            std::env::remove_var(OLLAMA_HOST_ENV);
+        }
+    }
+
+    #[test]
+    fn zero_config_ollama_probe_target_is_disabled_by_explicit_providers() {
+        let _guard = env_lock().lock().expect("env lock");
+        unsafe {
+            std::env::set_var(OLLAMA_HOST_ENV, "ollama-box");
+        }
+
+        let config = AppConfig {
+            models: rune_config::ModelsConfig {
+                providers: vec![rune_config::ModelProviderConfig {
+                    name: "openai".into(),
+                    kind: "openai".into(),
+                    base_url: "https://api.openai.com/v1".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("OPENAI_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![rune_config::ConfiguredModel::Id("gpt-5.4".into())],
+                }],
+                ..Default::default()
+            },
+            ..AppConfig::default()
+        };
+
+        assert_eq!(zero_config_ollama_probe_target(&config), None);
+        unsafe {
+            std::env::remove_var(OLLAMA_HOST_ENV);
+        }
     }
 
     #[test]

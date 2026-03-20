@@ -237,7 +237,9 @@ impl OllamaProvider {
     /// `OLLAMA_HOST` follows Ollama's own convention — it may be a bare
     /// `host:port`, a full `http://host:port` URL, or just a host name.
     /// A scheme is prepended when missing and the default port is appended
-    /// when absent.
+    /// when absent. This normalization matches Rune's zero-config startup
+    /// diagnostics so the reported probe target and the actual probe stay in
+    /// sync.
     pub async fn probe_env() -> Option<Self> {
         match std::env::var("OLLAMA_HOST") {
             Ok(val) if !val.trim().is_empty() => {
@@ -377,7 +379,10 @@ mod tests {
     async fn probe_unreachable_returns_none() {
         // Port 19999 should not have an Ollama instance.
         let result = OllamaProvider::probe_url("http://127.0.0.1:19999").await;
-        assert!(result.is_none(), "probe of unreachable host should return None");
+        assert!(
+            result.is_none(),
+            "probe of unreachable host should return None"
+        );
     }
 
     // --- normalize_ollama_host tests ---
@@ -423,6 +428,14 @@ mod tests {
     }
 
     #[test]
+    fn normalize_bare_hostname_with_trailing_slash_appends_default_port() {
+        assert_eq!(
+            normalize_ollama_host("ollama-server/"),
+            "http://ollama-server:11434"
+        );
+    }
+
+    #[test]
     fn normalize_bare_ip_appends_default_port() {
         assert_eq!(
             normalize_ollama_host("192.168.1.100"),
@@ -442,7 +455,9 @@ mod tests {
     async fn probe_env_falls_back_to_local_when_unset() {
         // Ensure OLLAMA_HOST is not set, then probe_env should behave like
         // probe_local (i.e. return None on CI where nothing listens on 11434).
-        unsafe { std::env::remove_var("OLLAMA_HOST"); }
+        unsafe {
+            std::env::remove_var("OLLAMA_HOST");
+        }
         let result = OllamaProvider::probe_env().await;
         // We can't assert Some because Ollama may not be running, but the
         // code path should not panic.
@@ -453,10 +468,17 @@ mod tests {
     async fn probe_env_uses_ollama_host_when_set() {
         // Point OLLAMA_HOST at an unreachable address — should return None
         // without panicking, proving the env var was read.
-        unsafe { std::env::set_var("OLLAMA_HOST", "http://127.0.0.1:19999"); }
+        unsafe {
+            std::env::set_var("OLLAMA_HOST", "http://127.0.0.1:19999");
+        }
         let result = OllamaProvider::probe_env().await;
-        assert!(result.is_none(), "unreachable OLLAMA_HOST should return None");
-        unsafe { std::env::remove_var("OLLAMA_HOST"); }
+        assert!(
+            result.is_none(),
+            "unreachable OLLAMA_HOST should return None"
+        );
+        unsafe {
+            std::env::remove_var("OLLAMA_HOST");
+        }
     }
 
     // --- rank_preferred_model tests ---
@@ -536,16 +558,28 @@ mod tests {
     fn guidance_contains_pull_commands() {
         let provider = OllamaProvider::new();
         let guidance = provider.empty_model_guidance();
-        assert!(guidance.contains("ollama pull llama3.2"), "should suggest llama3.2");
-        assert!(guidance.contains("ollama pull llama3.1:8b"), "should suggest llama3.1:8b");
-        assert!(guidance.contains("ollama pull qwen2.5:7b"), "should suggest qwen2.5:7b");
+        assert!(
+            guidance.contains("ollama pull llama3.2"),
+            "should suggest llama3.2"
+        );
+        assert!(
+            guidance.contains("ollama pull llama3.1:8b"),
+            "should suggest llama3.1:8b"
+        );
+        assert!(
+            guidance.contains("ollama pull qwen2.5:7b"),
+            "should suggest qwen2.5:7b"
+        );
     }
 
     #[test]
     fn guidance_mentions_restart() {
         let provider = OllamaProvider::new();
         let guidance = provider.empty_model_guidance();
-        assert!(guidance.contains("restart Rune"), "should mention restarting Rune");
+        assert!(
+            guidance.contains("restart Rune"),
+            "should mention restarting Rune"
+        );
     }
 
     #[test]
