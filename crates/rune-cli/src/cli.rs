@@ -154,6 +154,12 @@ pub enum Command {
         /// Directory to initialize (defaults to current directory).
         #[arg(default_value = ".")]
         path: String,
+        /// Template slug to bootstrap from (e.g. "coding-agent").
+        #[arg(long)]
+        template: Option<String>,
+        /// Skip interactive prompts and use defaults.
+        #[arg(long)]
+        non_interactive: bool,
     },
     /// Manage configuration.
     Config {

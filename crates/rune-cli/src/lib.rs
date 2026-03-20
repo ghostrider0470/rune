@@ -755,11 +755,16 @@ fn model_alias_details() -> ModelAliasesResponse {
     ModelAliasesResponse { aliases }
 }
 
-async fn init_workspace(path: &std::path::Path) -> Result<()> {
+async fn init_workspace(
+    path: &std::path::Path,
+    template: Option<&str>,
+    _non_interactive: bool,
+) -> Result<()> {
     tokio::fs::create_dir_all(path)
         .await
         .with_context(|| format!("cannot create directory: {}", path.display()))?;
     tokio::fs::create_dir_all(path.join("memory")).await?;
+    tokio::fs::create_dir_all(path.join("templates")).await?;
 
     let files: &[(&str, &str)] = &[
         (
@@ -793,6 +798,43 @@ async fn init_workspace(path: &std::path::Path) -> Result<()> {
             println!("  ✓ Created {name}");
         } else {
             println!("  ○ {name} already exists, skipping");
+        }
+    }
+
+    // Bootstrap from template if specified
+    if let Some(slug) = template {
+        let tpl = rune_core::builtin_template_by_slug(slug)
+            .ok_or_else(|| anyhow::anyhow!(
+                "unknown template \"{slug}\". Run `rune agents templates` to see available templates."
+            ))?;
+        let spells_toml: Vec<String> = tpl.spells.iter().map(|s| format!("\"{s}\"")).collect();
+        let config_content = format!(
+            "# Auto-generated from template: {}\n\n[agent]\nmode = \"{}\"\nspells = [{}]\n",
+            tpl.name, tpl.mode, spells_toml.join(", ")
+        );
+        let config_path = path.join("config.toml");
+        if !config_path.exists() {
+            tokio::fs::write(&config_path, &config_content).await?;
+            created += 1;
+            println!("  ✓ Created config.toml (from template: {})", tpl.name);
+        } else {
+            println!("  ○ config.toml already exists, skipping template");
+        }
+    }
+
+    // Discover workspace-local templates
+    let templates_dir = path.join("templates");
+    if templates_dir.is_dir() {
+        let mut count = 0u32;
+        let mut entries = tokio::fs::read_dir(&templates_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let p = entry.path();
+            if p.extension().map_or(false, |e| e == "toml") {
+                count += 1;
+            }
+        }
+        if count > 0 {
+            println!("  ℹ Found {count} workspace template(s) in templates/");
         }
     }
 
@@ -1044,7 +1086,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             };
             println!("{}", render(&dashboard, format));
         }
-        Command::Init { path } => {
+        Command::Init { path, template, non_interactive } => {
             let target = std::path::Path::new(&path);
             init_workspace(target).await?;
         }
