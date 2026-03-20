@@ -1136,7 +1136,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                     .sessions
                     .into_iter()
                     .filter(|s| {
-                        status.as_ref().map_or(true, |f| s.status.eq_ignore_ascii_case(f))
+                        status
+                            .as_ref()
+                            .is_none_or(|f| s.status.eq_ignore_ascii_case(f))
                     })
                     .collect();
 
