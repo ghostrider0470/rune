@@ -65,7 +65,7 @@ If those are not proven, Azure compatibility is not done.
 
 Must support, at minimum:
 
-- Azure OpenAI endpoint shapes
+- Azure OpenAI endpoint shapes and request/body conventions
 - Azure AI Foundry-hosted model access patterns where relevant
 - Azure deployment-name semantics instead of only generic model IDs
 - Azure API versioning requirements
@@ -84,6 +84,8 @@ Provider config must support:
 
 The provider layer must not assume that `model = gpt-4.x` is sufficient.
 In Azure, deployment identity is operationally important and must be represented directly.
+That matters most for Azure OpenAI, where `deployment_name` is part of the request path and cannot be collapsed into a generic model field.
+Azure AI Foundry must also remain distinct from Azure OpenAI when its OpenAI-path APIs expect a normal `model` field instead of Azure OpenAI deployment-path semantics.
 
 ## 3.2 Minimum Azure request-construction contract
 
@@ -95,9 +97,22 @@ The provider abstraction must be able to express, at minimum:
 - auth mode selection such as API key vs token-bearing flows where later needed
 - Azure-specific headers and request quirks without leaking them into non-Azure providers
 
+Current parity-critical wire-shape expectations are:
+
+- **Azure OpenAI:** construct paths like `{base_url}/openai/deployments/{deployment_name}/chat/completions?api-version={api_version}`
+- **Azure OpenAI:** send `api-key` header auth by default and do not assume `Authorization: Bearer ...`
+- **Azure OpenAI:** omit the `model` field from the JSON body because deployment identity lives in the URL path
+- **Azure OpenAI:** preserve Azure request-body conventions such as `max_tokens`
+- **Azure AI Foundry (OpenAI-path):** construct paths like `{base_url}/openai/v1/chat/completions` without Azure OpenAI deployment-path routing
+- **Azure AI Foundry (OpenAI-path):** keep the logical `model` in the request body and use the provider's required Azure header conventions
+- **Azure AI Foundry (non-OpenAI families):** allow family-specific Azure headers such as version headers where the upstream contract requires them
+
 At a minimum, the rewrite should be able to snapshot-test these dimensions:
 
-- chat/completions-style request path construction
+- Azure OpenAI chat/completions request path construction with deployment name + API version separation
+- Azure OpenAI body construction rules, especially omission of `model`
+- Azure OpenAI auth/header construction, especially `api-key` vs `Authorization`
+- Azure AI Foundry OpenAI-path request construction with `model` retained in the body
 - responses API or equivalent request path construction where supported
 - image/multimodal request construction if that surface is supported
 - timeout/retry classification for Azure-specific transient failures
@@ -221,10 +236,11 @@ No critical state should depend on ephemeral writable container layers.
 The rewrite must preserve equivalent Azure-relevant configuration coverage for at least:
 
 ### Model/provider config
-- Azure endpoint
-- Azure deployment name
-- Azure API version
-- Azure auth mode
+- Azure resource endpoint / base URL
+- Azure deployment name where the provider uses deployment-path routing
+- Azure logical model name where the provider keeps model identity in the request body
+- Azure API version where required by the provider surface
+- Azure auth mode / header mode
 - Azure API key or token reference
 - optional Azure custom headers
 - request timeout and retry policy
@@ -447,6 +463,7 @@ Blob Storage is a good fit in **hosted Azure mode** for:
 - snapshot bundles and logs retention
 
 It should not replace the canonical local workspace/memory file semantics unless the runtime explicitly introduces a consistent sync/export layer.
+Do not treat Blob Storage as the canonical replacement for directories like `/data/memory` or `/config`.
 
 ### Verdict
 
@@ -477,17 +494,18 @@ Azure Files is the most relevant Azure-native option for preserving a mount-frie
 
 Good uses:
 
-- memory files
-- skills bundles
-- exports/backups
-- logs
-- attachments/media if throughput is acceptable
-- session/transcript files if file-based parity is important
+- `/data/memory`
+- `/data/skills`
+- `/data/logs`
+- `/data/backups`
+- `/config`
+- `/data/sessions` if session files remain file-based
+- `/data/media` if throughput is acceptable
 
 Use caution for:
 
-- embedded PostgreSQL primary data directory
-- high-churn search indexes
+- `/data/db` when embedded PostgreSQL is expected to absorb heavy write bursts over network-backed storage
+- high-churn search index paths
 - write-heavy hot-path runtime metadata
 
 For those, local node/container persistent disk or managed relational DB is usually better.
@@ -538,8 +556,8 @@ This mode should preserve the same logical layout while adopting managed Azure s
 
 ### Recommended stack
 
-- **Operational DB:** embedded PostgreSQL on mounted persistent storage, or Azure Database for PostgreSQL if managed DB is preferred
-- **Mount-friendly durable files:** Azure Files
+- **Operational DB:** embedded PostgreSQL on reliable persistent volume for conservative single-instance mode, or Azure Database for PostgreSQL if managed DB is preferred
+- **Mount-friendly durable files:** Azure Files or persistent volumes
 - **Object/archive storage:** Azure Blob Storage
 - **Secrets:** Azure Key Vault references or injected env/file secrets
 - **Search:** keep embedded first unless scale proves otherwise
@@ -553,7 +571,7 @@ This mode should preserve the same logical layout while adopting managed Azure s
 
 ### Notes
 
-If the embedded PostgreSQL fallback is used in hosted Azure mode, place it on reliable persistent storage with clear backup expectations. For stronger multi-instance or server-grade durability, Azure Database for PostgreSQL is the better managed step up.
+If the embedded PostgreSQL fallback is used in hosted Azure mode, place it on reliable persistent storage with clear backup expectations. Network-backed storage for embedded PostgreSQL still needs validation for latency, fsync behavior, backup posture, and restart semantics. For stronger multi-instance or server-grade durability, Azure Database for PostgreSQL is the better managed step up.
 
 ---
 
