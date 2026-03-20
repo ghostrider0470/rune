@@ -386,6 +386,12 @@ pub enum AgentsAction {
         #[arg(long, default_value_t = 500)]
         limit: u64,
     },
+    /// List available pre-built agent templates.
+    Templates {
+        /// Filter templates by category (developer, operator, personal).
+        #[arg(long)]
+        category: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1387,15 +1393,8 @@ mod tests {
 
     #[test]
     fn parse_system_event_inject_defaults() {
-        let cli = Cli::try_parse_from([
-            "rune",
-            "system",
-            "event",
-            "inject",
-            "--text",
-            "ping",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "system", "event", "inject", "--text", "ping"]).unwrap();
         match cli.command {
             Command::System {
                 action:
@@ -1513,14 +1512,8 @@ mod tests {
 
     #[test]
     fn parse_system_event_list_include_disabled() {
-        let cli = Cli::try_parse_from([
-            "rune",
-            "system",
-            "event",
-            "list",
-            "--include-disabled",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "system", "event", "list", "--include-disabled"]).unwrap();
         match cli.command {
             Command::System {
                 action:
@@ -1837,8 +1830,7 @@ mod tests {
 
     #[test]
     fn parse_sessions_list_kind_filter() {
-        let cli =
-            Cli::try_parse_from(["rune", "sessions", "list", "--kind", "subagent"]).unwrap();
+        let cli = Cli::try_parse_from(["rune", "sessions", "list", "--kind", "subagent"]).unwrap();
         match cli.command {
             Command::Sessions {
                 action: SessionsAction::List { kind, .. },
@@ -1851,8 +1843,7 @@ mod tests {
 
     #[test]
     fn parse_sessions_list_parent_filter() {
-        let cli =
-            Cli::try_parse_from(["rune", "sessions", "list", "--parent", "abc-123"]).unwrap();
+        let cli = Cli::try_parse_from(["rune", "sessions", "list", "--parent", "abc-123"]).unwrap();
         match cli.command {
             Command::Sessions {
                 action: SessionsAction::List { parent, .. },
@@ -1912,10 +1903,9 @@ mod tests {
 
     #[test]
     fn parse_agents_list_with_filters() {
-        let cli = Cli::try_parse_from([
-            "rune", "agents", "list", "--active", "15", "--limit", "50",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "agents", "list", "--active", "15", "--limit", "50"])
+                .unwrap();
         match cli.command {
             Command::Agents {
                 action:
@@ -1973,6 +1963,29 @@ mod tests {
             } => {
                 assert_eq!(limit, 200);
             }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_templates() {
+        let cli = Cli::try_parse_from(["rune", "agents", "templates"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Agents {
+                action: AgentsAction::Templates { category: None }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_agents_templates_with_category() {
+        let cli = Cli::try_parse_from(["rune", "agents", "templates", "--category", "developer"])
+            .unwrap();
+        match &cli.command {
+            Command::Agents {
+                action: AgentsAction::Templates { category },
+            } => assert_eq!(category.as_deref(), Some("developer")),
             other => panic!("unexpected command: {other:?}"),
         }
     }
@@ -2095,8 +2108,7 @@ mod tests {
     #[test]
     fn parse_completion_generate_all_shells() {
         for shell_name in ["bash", "zsh", "fish", "elvish", "power-shell"] {
-            let cli =
-                Cli::try_parse_from(["rune", "completion", "generate", shell_name]).unwrap();
+            let cli = Cli::try_parse_from(["rune", "completion", "generate", shell_name]).unwrap();
             assert!(
                 matches!(
                     cli.command,
@@ -2464,13 +2476,9 @@ mod tests {
     #[test]
     fn message_send_requires_channel_and_text() {
         // Missing --text
-        assert!(
-            Cli::try_parse_from(["rune", "message", "send", "--channel", "telegram"]).is_err()
-        );
+        assert!(Cli::try_parse_from(["rune", "message", "send", "--channel", "telegram"]).is_err());
         // Missing --channel
-        assert!(
-            Cli::try_parse_from(["rune", "message", "send", "--text", "hello"]).is_err()
-        );
+        assert!(Cli::try_parse_from(["rune", "message", "send", "--text", "hello"]).is_err());
         // Missing both
         assert!(Cli::try_parse_from(["rune", "message", "send"]).is_err());
     }
@@ -2511,8 +2519,7 @@ mod tests {
 
     #[test]
     fn parse_message_search_defaults() {
-        let cli =
-            Cli::try_parse_from(["rune", "message", "search", "hello world"]).unwrap();
+        let cli = Cli::try_parse_from(["rune", "message", "search", "hello world"]).unwrap();
         match cli.command {
             Command::Message {
                 action:
@@ -2570,14 +2577,8 @@ mod tests {
 
     #[test]
     fn parse_message_broadcast_no_channels() {
-        let cli = Cli::try_parse_from([
-            "rune",
-            "message",
-            "broadcast",
-            "--text",
-            "Hello everyone",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["rune", "message", "broadcast", "--text", "Hello everyone"])
+            .unwrap();
         match cli.command {
             Command::Message {
                 action:
@@ -2614,10 +2615,7 @@ mod tests {
         .unwrap();
         match cli.command {
             Command::Message {
-                action:
-                    MessageAction::Broadcast {
-                        channels, ..
-                    },
+                action: MessageAction::Broadcast { channels, .. },
             } => {
                 assert_eq!(channels, vec!["telegram"]);
             }
@@ -2875,22 +2873,10 @@ mod tests {
     #[test]
     fn message_react_requires_message_id_and_emoji() {
         assert!(Cli::try_parse_from(["rune", "message", "react"]).is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "react",
-            "--message-id",
-            "msg-1",
-        ])
-        .is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "react",
-            "--emoji",
-            "👍",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from(["rune", "message", "react", "--message-id", "msg-1",]).is_err()
+        );
+        assert!(Cli::try_parse_from(["rune", "message", "react", "--emoji", "👍",]).is_err());
     }
 
     #[test]
@@ -2956,22 +2942,12 @@ mod tests {
     #[test]
     fn message_delete_requires_message_id_and_channel() {
         assert!(Cli::try_parse_from(["rune", "message", "delete"]).is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "delete",
-            "--message-id",
-            "msg-1",
-        ])
-        .is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "delete",
-            "--channel",
-            "telegram",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from(["rune", "message", "delete", "--message-id", "msg-1",]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["rune", "message", "delete", "--channel", "telegram",]).is_err()
+        );
     }
 
     // ── Message read (#74) ──────────────────────────────────────────
@@ -3039,22 +3015,12 @@ mod tests {
     #[test]
     fn message_read_requires_message_id_and_channel() {
         assert!(Cli::try_parse_from(["rune", "message", "read"]).is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "read",
-            "--message-id",
-            "msg-1",
-        ])
-        .is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "read",
-            "--channel",
-            "telegram",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from(["rune", "message", "read", "--message-id", "msg-1",]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["rune", "message", "read", "--channel", "telegram",]).is_err()
+        );
     }
 
     // ── Message thread (#74) ────────────────────────────────────────
@@ -3100,15 +3066,9 @@ mod tests {
 
     #[test]
     fn parse_message_thread_list_defaults() {
-        let cli = Cli::try_parse_from([
-            "rune",
-            "message",
-            "thread",
-            "list",
-            "--thread-id",
-            "thr-1",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "message", "thread", "list", "--thread-id", "thr-1"])
+                .unwrap();
         match cli.command {
             Command::Message {
                 action:
@@ -3133,9 +3093,7 @@ mod tests {
 
     #[test]
     fn message_thread_list_requires_thread_id() {
-        assert!(
-            Cli::try_parse_from(["rune", "message", "thread", "list"]).is_err()
-        );
+        assert!(Cli::try_parse_from(["rune", "message", "thread", "list"]).is_err());
     }
 
     #[test]
@@ -3216,9 +3174,7 @@ mod tests {
 
     #[test]
     fn message_thread_reply_requires_thread_id_channel_text() {
-        assert!(
-            Cli::try_parse_from(["rune", "message", "thread", "reply"]).is_err()
-        );
+        assert!(Cli::try_parse_from(["rune", "message", "thread", "reply"]).is_err());
         assert!(Cli::try_parse_from([
             "rune",
             "message",
@@ -3334,17 +3290,10 @@ mod tests {
         assert!(
             Cli::try_parse_from(["rune", "message", "voice", "send", "--text", "hello"]).is_err()
         );
-        assert!(
-            Cli::try_parse_from([
-                "rune",
-                "message",
-                "voice",
-                "send",
-                "--channel",
-                "telegram",
-            ])
-            .is_err()
-        );
+        assert!(Cli::try_parse_from(
+            ["rune", "message", "voice", "send", "--channel", "telegram",]
+        )
+        .is_err());
         assert!(Cli::try_parse_from(["rune", "message", "voice", "send"]).is_err());
     }
 
@@ -3423,12 +3372,8 @@ mod tests {
 
     #[test]
     fn message_ack_requires_message_id_and_channel() {
-        assert!(
-            Cli::try_parse_from(["rune", "message", "ack", "--message-id", "msg-1"]).is_err()
-        );
-        assert!(
-            Cli::try_parse_from(["rune", "message", "ack", "--channel", "slack"]).is_err()
-        );
+        assert!(Cli::try_parse_from(["rune", "message", "ack", "--message-id", "msg-1"]).is_err());
+        assert!(Cli::try_parse_from(["rune", "message", "ack", "--channel", "slack"]).is_err());
         assert!(Cli::try_parse_from(["rune", "message", "ack"]).is_err());
     }
 
@@ -3494,9 +3439,7 @@ mod tests {
 
     #[test]
     fn message_list_reactions_requires_message_id() {
-        assert!(
-            Cli::try_parse_from(["rune", "message", "list-reactions"]).is_err()
-        );
+        assert!(Cli::try_parse_from(["rune", "message", "list-reactions"]).is_err());
         assert!(
             Cli::try_parse_from(["rune", "message", "list-reactions", "--channel", "slack"])
                 .is_err()

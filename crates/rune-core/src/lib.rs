@@ -492,6 +492,150 @@ impl FromStr for SessionStatus {
     }
 }
 
+// ── Agent templates ──────────────────────────────────────────────
+
+/// Coarse category for grouping agent templates in listings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplateCategory {
+    Developer,
+    Operator,
+    Personal,
+}
+
+impl TemplateCategory {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Developer => "developer",
+            Self::Operator => "operator",
+            Self::Personal => "personal",
+        }
+    }
+}
+
+impl fmt::Display for TemplateCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for TemplateCategory {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "developer" => Ok(Self::Developer),
+            "operator" => Ok(Self::Operator),
+            "personal" => Ok(Self::Personal),
+            other => Err(CoreError::Validation {
+                message: format!("unknown template category: {other}"),
+            }),
+        }
+    }
+}
+
+/// A pre-built agent template that ships with the binary.
+///
+/// Only `Serialize` is derived — these are static definitions compiled into the
+/// binary and never deserialized from external input.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AgentTemplate {
+    /// URL-safe slug used as the `--template` value (e.g. `coding-agent`).
+    pub slug: &'static str,
+    /// Human-readable name.
+    pub name: &'static str,
+    /// One-line description shown in listings.
+    pub description: &'static str,
+    /// Category grouping for display.
+    pub category: TemplateCategory,
+    /// The agent mode this template activates.
+    pub mode: &'static str,
+    /// Spells (tool bundles) included in this template.
+    pub spells: &'static [&'static str],
+}
+
+/// Return the set of agent templates that ship built-in with the binary.
+///
+/// These are static definitions — no I/O, no config resolution.  The gateway
+/// may layer workspace-local templates on top when the full template system
+/// lands.
+#[must_use]
+pub fn builtin_agent_templates() -> &'static [AgentTemplate] {
+    &[
+        AgentTemplate {
+            slug: "coding-agent",
+            name: "Coding Agent",
+            description: "Implements features from issue descriptions",
+            category: TemplateCategory::Developer,
+            mode: "coder",
+            spells: &["file-tools", "exec-tools", "git-tools", "test-runner"],
+        },
+        AgentTemplate {
+            slug: "code-review-agent",
+            name: "Code Review Agent",
+            description: "Reviews PRs and suggests improvements",
+            category: TemplateCategory::Developer,
+            mode: "architect",
+            spells: &["file-tools", "git-tools", "code-analysis"],
+        },
+        AgentTemplate {
+            slug: "debug-agent",
+            name: "Debug Agent",
+            description: "Investigates failures and traces errors",
+            category: TemplateCategory::Developer,
+            mode: "debugger",
+            spells: &["file-tools", "exec-tools", "log-search"],
+        },
+        AgentTemplate {
+            slug: "devops-agent",
+            name: "DevOps Agent",
+            description: "Manages CI/CD, infrastructure, and releases",
+            category: TemplateCategory::Developer,
+            mode: "coder",
+            spells: &["file-tools", "exec-tools", "deploy-tools"],
+        },
+        AgentTemplate {
+            slug: "monitor-agent",
+            name: "Monitor Agent",
+            description: "Watches runtime health and alerts on anomalies",
+            category: TemplateCategory::Operator,
+            mode: "ask",
+            spells: &["status-tools", "health-check"],
+        },
+        AgentTemplate {
+            slug: "triage-agent",
+            name: "Triage Agent",
+            description: "Receives support messages, categorizes, and routes",
+            category: TemplateCategory::Operator,
+            mode: "architect",
+            spells: &["channel-tools", "routing-tools"],
+        },
+        AgentTemplate {
+            slug: "research-agent",
+            name: "Research Agent",
+            description: "Deep research with source attribution",
+            category: TemplateCategory::Personal,
+            mode: "architect",
+            spells: &["browser-tools", "search-tools"],
+        },
+        AgentTemplate {
+            slug: "daily-assistant",
+            name: "Daily Assistant",
+            description: "Manages reminders, daily notes, and proactive checks",
+            category: TemplateCategory::Personal,
+            mode: "orchestrator",
+            spells: &["cron-tools", "heartbeat-tools"],
+        },
+    ]
+}
+
+/// Look up a built-in template by slug.
+#[must_use]
+pub fn builtin_template_by_slug(slug: &str) -> Option<&'static AgentTemplate> {
+    builtin_agent_templates().iter().find(|t| t.slug == slug)
+}
+
 /// Typed core-domain failures that should remain transport-agnostic.
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -695,11 +839,9 @@ mod tests {
     #[test]
     fn fsm_created_to_ready() {
         assert!(SessionStatus::Created.can_transition_to(&SessionStatus::Ready));
-        assert!(
-            SessionStatus::Created
-                .transition(SessionStatus::Ready)
-                .is_ok()
-        );
+        assert!(SessionStatus::Created
+            .transition(SessionStatus::Ready)
+            .is_ok());
     }
 
     #[test]
@@ -779,11 +921,9 @@ mod tests {
         assert!(!SessionStatus::Created.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Completed.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Ready.can_transition_to(&SessionStatus::Completed));
-        assert!(
-            SessionStatus::Created
-                .transition(SessionStatus::Running)
-                .is_err()
-        );
+        assert!(SessionStatus::Created
+            .transition(SessionStatus::Running)
+            .is_err());
     }
 
     // ── TriggerKind ──────────────────────────────────────────────
@@ -858,5 +998,90 @@ mod tests {
             assert_eq!(parsed.as_str(), s);
             assert_eq!(parsed.to_string(), s);
         }
+    }
+
+    // ── Agent templates ──────────────────────────────────────────
+
+    #[test]
+    fn template_category_roundtrips_via_str() {
+        for (s, expected) in [
+            ("developer", TemplateCategory::Developer),
+            ("operator", TemplateCategory::Operator),
+            ("personal", TemplateCategory::Personal),
+        ] {
+            let parsed: TemplateCategory = s.parse().unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.as_str(), s);
+            assert_eq!(parsed.to_string(), s);
+        }
+    }
+
+    #[test]
+    fn template_category_serde_roundtrip() {
+        let cat = TemplateCategory::Developer;
+        let json = serde_json::to_string(&cat).unwrap();
+        assert_eq!(json, "\"developer\"");
+        let back: TemplateCategory = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cat);
+    }
+
+    #[test]
+    fn template_category_rejects_unknown() {
+        assert!("unknown_category".parse::<TemplateCategory>().is_err());
+    }
+
+    #[test]
+    fn builtin_templates_ship_at_least_four() {
+        let templates = builtin_agent_templates();
+        assert!(
+            templates.len() >= 4,
+            "issue #63 requires at least 4 built-in templates, got {}",
+            templates.len()
+        );
+    }
+
+    #[test]
+    fn builtin_template_slugs_are_unique() {
+        let templates = builtin_agent_templates();
+        let mut slugs: Vec<&str> = templates.iter().map(|t| t.slug).collect();
+        slugs.sort();
+        slugs.dedup();
+        assert_eq!(
+            slugs.len(),
+            templates.len(),
+            "duplicate template slugs detected"
+        );
+    }
+
+    #[test]
+    fn builtin_template_lookup_by_slug() {
+        assert!(builtin_template_by_slug("coding-agent").is_some());
+        assert!(builtin_template_by_slug("nonexistent").is_none());
+    }
+
+    #[test]
+    fn builtin_templates_have_all_three_categories() {
+        let templates = builtin_agent_templates();
+        let has_dev = templates
+            .iter()
+            .any(|t| t.category == TemplateCategory::Developer);
+        let has_ops = templates
+            .iter()
+            .any(|t| t.category == TemplateCategory::Operator);
+        let has_personal = templates
+            .iter()
+            .any(|t| t.category == TemplateCategory::Personal);
+        assert!(has_dev, "missing developer templates");
+        assert!(has_ops, "missing operator templates");
+        assert!(has_personal, "missing personal templates");
+    }
+
+    #[test]
+    fn agent_template_serde_roundtrip() {
+        let template = &builtin_agent_templates()[0];
+        let json = serde_json::to_value(template).unwrap();
+        assert_eq!(json["slug"], template.slug);
+        assert_eq!(json["name"], template.name);
+        assert!(json["spells"].is_array());
     }
 }
