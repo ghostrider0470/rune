@@ -16,11 +16,18 @@ use crate::output::{
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorReport, GatewayCallResponse,
     GatewayConfigResponse, GatewayDiscoverResponse, GatewayProbeResponse,
-    GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse, LogsQueryResponse,
+    GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
+    LogsQueryResponse,
     SystemEventListResponse,
     ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
     SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
+    SandboxExplainResponse, SandboxListResponse, SandboxRecreateResponse,
+    SecretsApplyResponse, SecretsAuditResponse, SecretsConfigureResponse, SecretsReloadResponse,
+    SecurityAuditResponse, ConfigureResponse,
+    AgentSpawnResponse, AgentSteerResponse, AgentKillResponse,
+    AgentRunResponse, AgentResultResponse,
+    AcpSendResponse, AcpInboxResponse, AcpInboxMessage, AcpAckResponse,
     SessionTreeNode, SessionTreeResponse, SkillCheckResponse, SkillInfoResponse,
     SkillListResponse, SkillSummary, StatusResponse,
 };
@@ -28,8 +35,8 @@ use crate::output::{
 /// HTTP client that talks to the Rune gateway API.
 #[derive(Debug, Clone)]
 pub struct GatewayClient {
-    base_url: String,
-    http: Client,
+    pub(crate) base_url: String,
+    pub(crate) http: Client,
 }
 
 impl GatewayClient {
@@ -42,7 +49,7 @@ impl GatewayClient {
         }
     }
 
-    fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base_url)
     }
 
@@ -2455,6 +2462,436 @@ impl GatewayClient {
             bail!("Gateway returned HTTP {}", resp.status());
         }
     }
+
+    // ── Security ──────────────────────────────────────────────────
+
+    /// `POST /security/audit` — run a security audit.
+    pub async fn security_audit(&self) -> Result<SecurityAuditResponse> {
+        let resp = self
+            .http
+            .post(self.url("/security/audit"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /security/audit")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    // ── Sandbox ───────────────────────────────────────────────────
+
+    /// `GET /sandbox` — list sandbox boundaries.
+    pub async fn sandbox_list(&self) -> Result<SandboxListResponse> {
+        let resp = self
+            .http
+            .get(self.url("/sandbox"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /sandbox")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /sandbox/recreate` — recreate sandbox boundaries.
+    pub async fn sandbox_recreate(&self) -> Result<SandboxRecreateResponse> {
+        let resp = self
+            .http
+            .post(self.url("/sandbox/recreate"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /sandbox/recreate")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /sandbox/explain` — explain current sandbox policy.
+    pub async fn sandbox_explain(&self) -> Result<SandboxExplainResponse> {
+        let resp = self
+            .http
+            .get(self.url("/sandbox/explain"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /sandbox/explain")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    // ── Secrets ───────────────────────────────────────────────────
+
+    /// `POST /secrets/reload` — reload secrets from the secret store.
+    pub async fn secrets_reload(&self) -> Result<SecretsReloadResponse> {
+        let resp = self
+            .http
+            .post(self.url("/secrets/reload"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /secrets/reload")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /secrets/audit` — audit secret usage.
+    pub async fn secrets_audit(&self) -> Result<SecretsAuditResponse> {
+        let resp = self
+            .http
+            .post(self.url("/secrets/audit"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /secrets/audit")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /secrets/configure` — show secret store configuration.
+    pub async fn secrets_configure(&self) -> Result<SecretsConfigureResponse> {
+        let resp = self
+            .http
+            .get(self.url("/secrets/configure"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /secrets/configure")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /secrets/apply` — apply a secrets manifest.
+    pub async fn secrets_apply(&self, manifest: serde_json::Value) -> Result<SecretsApplyResponse> {
+        let resp = self
+            .http
+            .post(self.url("/secrets/apply"))
+            .json(&manifest)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /secrets/apply")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    // ── Configure ─────────────────────────────────────────────────
+
+    /// `POST /configure` — run the setup wizard via the gateway.
+    pub async fn configure(&self) -> Result<ConfigureResponse> {
+        let resp = self
+            .http
+            .post(self.url("/configure"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            Ok(resp.json().await.context("invalid JSON from /configure")?)
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    // ── Subagent lifecycle ───────────────────────────────────────────
+
+    /// `POST /agents/spawn` — spawn a child subagent session.
+    pub async fn agent_spawn(
+        &self,
+        parent: &str,
+        mode: &str,
+        policy: &str,
+        task: &str,
+        provider: Option<&str>,
+    ) -> Result<AgentSpawnResponse> {
+        let mut body = json!({
+            "parent_session_id": parent,
+            "mode": mode,
+            "policy": policy,
+            "task": task,
+        });
+        if let Some(p) = provider {
+            body["provider"] = json!(p);
+        }
+        let resp = self
+            .http
+            .post(self.url("/agents/spawn"))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /agents/spawn")?;
+            Ok(AgentSpawnResponse {
+                session_id: v["session_id"].as_str().unwrap_or("?").to_string(),
+                parent_session_id: v["parent_session_id"]
+                    .as_str()
+                    .unwrap_or(parent)
+                    .to_string(),
+                mode: v["mode"].as_str().unwrap_or(mode).to_string(),
+                policy: v["policy"].as_str().unwrap_or(policy).to_string(),
+                status: v["status"].as_str().unwrap_or("spawned").to_string(),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /agents/:id/steer` — send follow-up instruction to a running subagent.
+    pub async fn agent_steer(&self, id: &str, message: &str) -> Result<AgentSteerResponse> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/agents/{id}/steer")))
+            .json(&json!({ "message": message }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /agents/:id/steer")?;
+            Ok(AgentSteerResponse {
+                session_id: id.to_string(),
+                accepted: v["accepted"].as_bool().unwrap_or(true),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("instruction delivered")
+                    .to_string(),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Agent session '{id}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /agents/:id/kill` — terminate a running subagent session.
+    pub async fn agent_kill(&self, id: &str, reason: Option<&str>) -> Result<AgentKillResponse> {
+        let mut body = json!({});
+        if let Some(r) = reason {
+            body["reason"] = json!(r);
+        }
+        let resp = self
+            .http
+            .post(self.url(&format!("/agents/{id}/kill")))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /agents/:id/kill")?;
+            Ok(AgentKillResponse {
+                session_id: id.to_string(),
+                killed: v["killed"].as_bool().unwrap_or(true),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("session terminated")
+                    .to_string(),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Agent session '{id}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    // ── Agent turn invocation ────────────────────────────────────────
+
+    /// `POST /agents/:id/run` — send a single instruction to a session.
+    pub async fn agent_run(
+        &self,
+        session: &str,
+        message: &str,
+        max_turns: u32,
+        wait: bool,
+    ) -> Result<AgentRunResponse> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/agents/{session}/run")))
+            .json(&json!({
+                "message": message,
+                "max_turns": max_turns,
+                "wait": wait,
+            }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /agents/:id/run")?;
+            Ok(AgentRunResponse {
+                session_id: session.to_string(),
+                turn_id: v["turn_id"].as_str().unwrap_or("?").to_string(),
+                status: v["status"].as_str().unwrap_or("completed").to_string(),
+                output: v["output"].as_str().map(String::from),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Session '{session}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /agents/:id/turns/:turn_id` — retrieve a turn result.
+    pub async fn agent_result(
+        &self,
+        session: &str,
+        turn: &str,
+    ) -> Result<AgentResultResponse> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/agents/{session}/turns/{turn}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /agents/:id/turns/:turn_id")?;
+            Ok(AgentResultResponse {
+                session_id: session.to_string(),
+                turn_id: turn.to_string(),
+                status: v["status"].as_str().unwrap_or("unknown").to_string(),
+                output: v["output"].as_str().map(String::from),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Turn '{turn}' not found in session '{session}'.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    // ── ACP bridge ───────────────────────────────────────────────────
+
+    /// `POST /acp/send` — send an ACP message between sessions.
+    pub async fn acp_send(
+        &self,
+        from: &str,
+        to: &str,
+        payload: &str,
+    ) -> Result<AcpSendResponse> {
+        let payload_value: serde_json::Value =
+            serde_json::from_str(payload).context("invalid JSON payload for ACP send")?;
+        let resp = self
+            .http
+            .post(self.url("/acp/send"))
+            .json(&json!({
+                "from": from,
+                "to": to,
+                "payload": payload_value,
+            }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /acp/send")?;
+            Ok(AcpSendResponse {
+                message_id: v["message_id"].as_str().unwrap_or("?").to_string(),
+                from: from.to_string(),
+                to: to.to_string(),
+                delivered: v["delivered"].as_bool().unwrap_or(false),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /acp/inbox?session=:id` — list pending ACP messages.
+    pub async fn acp_inbox(&self, session: &str) -> Result<AcpInboxResponse> {
+        let resp = self
+            .http
+            .get(self.url("/acp/inbox"))
+            .query(&[("session", session)])
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /acp/inbox")?;
+            let messages = v
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|m| AcpInboxMessage {
+                            message_id: m["message_id"]
+                                .as_str()
+                                .unwrap_or("?")
+                                .to_string(),
+                            from: m["from"].as_str().unwrap_or("?").to_string(),
+                            received_at: m["received_at"]
+                                .as_str()
+                                .unwrap_or("?")
+                                .to_string(),
+                            payload: m["payload"].clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(AcpInboxResponse {
+                session_id: session.to_string(),
+                messages,
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /acp/ack` — acknowledge an ACP message.
+    pub async fn acp_ack(&self, message_id: &str, session: &str) -> Result<AcpAckResponse> {
+        let resp = self
+            .http
+            .post(self.url("/acp/ack"))
+            .json(&json!({
+                "message_id": message_id,
+                "session": session,
+            }))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /acp/ack")?;
+            Ok(AcpAckResponse {
+                message_id: message_id.to_string(),
+                acknowledged: v["acknowledged"].as_bool().unwrap_or(true),
+            })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+
 }
 
 fn local_config_path() -> std::path::PathBuf {
@@ -4404,4 +4841,443 @@ mod tests {
         assert!(resp.detail.contains("404"));
         assert!(resp.detail.contains("Thread not found"));
     }
+
+    // ── Security ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn security_audit_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/security/audit"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "passed": true,
+                "checks": [{"name": "sandbox", "status": "pass", "detail": "enabled"}],
+                "summary": "all checks passed"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.security_audit().await.unwrap();
+        assert!(resp.passed);
+        assert_eq!(resp.checks.len(), 1);
+        assert_eq!(resp.checks[0].name, "sandbox");
+    }
+
+    #[tokio::test]
+    async fn security_audit_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/security/audit"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        assert!(client.security_audit().await.is_err());
+    }
+
+    // ── Sandbox ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn sandbox_list_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sandbox"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "boundaries": [
+                    {"path": "/workspace", "mode": "read-write", "active": true}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.sandbox_list().await.unwrap();
+        assert_eq!(resp.boundaries.len(), 1);
+        assert!(resp.boundaries[0].active);
+    }
+
+    #[tokio::test]
+    async fn sandbox_recreate_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/sandbox/recreate"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "detail": "Sandbox boundaries recreated."
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.sandbox_recreate().await.unwrap();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn sandbox_explain_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/sandbox/explain"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "explanation": "Agent is confined to /workspace."
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.sandbox_explain().await.unwrap();
+        assert!(resp.explanation.contains("/workspace"));
+    }
+
+    // ── Secrets ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn secrets_reload_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/secrets/reload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "reloaded": 3,
+                "detail": "Secrets reloaded."
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.secrets_reload().await.unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.reloaded, 3);
+    }
+
+    #[tokio::test]
+    async fn secrets_audit_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/secrets/audit"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "total": 5,
+                "stale": 1,
+                "unused": 2,
+                "entries": [
+                    {"key": "OPENAI_API_KEY", "status": "active", "last_used": "2026-03-19"}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.secrets_audit().await.unwrap();
+        assert_eq!(resp.total, 5);
+        assert_eq!(resp.entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn secrets_configure_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets/configure"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "store_kind": "env",
+                "detail": "Environment variable secret store"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.secrets_configure().await.unwrap();
+        assert_eq!(resp.store_kind, "env");
+    }
+
+    #[tokio::test]
+    async fn secrets_apply_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/secrets/apply"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "applied": 2,
+                "detail": "Manifest applied."
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .secrets_apply(json!({"secrets": []}))
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.applied, 2);
+    }
+
+    #[tokio::test]
+    async fn secrets_apply_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/secrets/apply"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("Invalid manifest"))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        assert!(client.secrets_apply(json!({})).await.is_err());
+    }
+
+    // ── Configure ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn configure_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/configure"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "detail": "Setup wizard completed."
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.configure().await.unwrap();
+        assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn configure_gateway_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/configure"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        assert!(client.configure().await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod subagent_tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn agent_spawn_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/spawn"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"session_id":"child-1","parent_session_id":"sess-1","mode":"coding","policy":"inherit","status":"spawned"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_spawn("sess-1","coding","inherit","test",None).await.unwrap();
+        assert_eq!(r.session_id, "child-1");
+        assert_eq!(r.parent_session_id, "sess-1");
+    }
+
+    #[tokio::test]
+    async fn agent_steer_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/child-1/steer"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"accepted":true,"detail":"ok"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_steer("child-1","focus").await.unwrap();
+        assert!(r.accepted);
+    }
+
+    #[tokio::test]
+    async fn agent_steer_404() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/x/steer"))
+            .respond_with(ResponseTemplate::new(404)).mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        assert!(c.agent_steer("x","hi").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn agent_kill_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/child-1/kill"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"killed":true,"detail":"done"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_kill("child-1",Some("timeout")).await.unwrap();
+        assert!(r.killed);
+    }
+
+    #[tokio::test]
+    async fn agent_run_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/agents/s1/run"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"turn_id":"t1","status":"completed","output":"ok"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_run("s1","go",1,true).await.unwrap();
+        assert_eq!(r.turn_id, "t1");
+    }
+
+    #[tokio::test]
+    async fn agent_result_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/agents/s1/turns/t1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status":"completed","output":"res"})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.agent_result("s1","t1").await.unwrap();
+        assert_eq!(r.output.as_deref(), Some("res"));
+    }
+
+    #[tokio::test]
+    async fn acp_send_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/acp/send"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"m1","delivered":true})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.acp_send("a","b",r#"{"x":1}"#).await.unwrap();
+        assert!(r.delivered);
+    }
+
+    #[tokio::test]
+    async fn acp_inbox_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/acp/inbox"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"message_id":"m1","from":"b","received_at":"2026-03-20T10:00:00Z","payload":{}}])))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.acp_inbox("a").await.unwrap();
+        assert_eq!(r.messages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn acp_ack_ok() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/acp/ack"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"acknowledged":true})))
+            .mount(&server).await;
+        let c = GatewayClient::new(&server.uri());
+        let r = c.acp_ack("m1","a").await.unwrap();
+        assert!(r.acknowledged);
+    }
+}
+
+// ── Plugins lifecycle ───────────────────────────────────────────
+
+impl GatewayClient {
+    /// `GET /plugins` — list installed plugins.
+    pub async fn plugins_list(&self) -> Result<crate::output::PluginListResponse> {
+        let resp = self.http.get(self.url("/plugins")).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /plugins")?;
+            let plugins = v["plugins"].as_array().unwrap_or(&vec![]).iter().map(|p| crate::output::PluginSummary {
+                name: p["name"].as_str().unwrap_or("?").to_string(),
+                version: p["version"].as_str().unwrap_or("0.0.0").to_string(),
+                enabled: p["enabled"].as_bool().unwrap_or(false),
+                description: p["description"].as_str().unwrap_or("").to_string(),
+            }).collect();
+            Ok(crate::output::PluginListResponse { plugins })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /plugins/:name` — show plugin details.
+    pub async fn plugins_info(&self, name: &str) -> Result<crate::output::PluginInfoResponse> {
+        let resp = self.http.get(self.url(&format!("/plugins/{name}"))).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /plugins/:name")?;
+            Ok(crate::output::PluginInfoResponse {
+                name: v["name"].as_str().unwrap_or("?").to_string(),
+                version: v["version"].as_str().unwrap_or("0.0.0").to_string(),
+                enabled: v["enabled"].as_bool().unwrap_or(false),
+                description: v["description"].as_str().unwrap_or("").to_string(),
+                source: v["source"].as_str().unwrap_or("unknown").to_string(),
+                manifest_valid: v["manifest_valid"].as_bool().unwrap_or(true),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND { bail!("Plugin '{name}' not found."); }
+        else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `POST /plugins/:action` — plugin lifecycle mutation.
+    pub async fn plugins_mutate(&self, action: &str, name_or_source: &str) -> Result<crate::output::PluginMutationResponse> {
+        let resp = self.http.post(self.url(&format!("/plugins/{action}")))
+            .json(&serde_json::json!({"name": name_or_source}))
+            .send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from POST /plugins/:action")?;
+            Ok(crate::output::PluginMutationResponse {
+                success: v["success"].as_bool().unwrap_or(true),
+                plugin: v["plugin"].as_str().unwrap_or(name_or_source).to_string(),
+                action: action.to_string(),
+                detail: v["detail"].as_str().unwrap_or("done").to_string(),
+            })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /hooks` — list configured hooks.
+    pub async fn hooks_list(&self) -> Result<crate::output::HookListResponse> {
+        let resp = self.http.get(self.url("/hooks")).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks")?;
+            let hooks = v["hooks"].as_array().unwrap_or(&vec![]).iter().map(|h| crate::output::HookSummary {
+                name: h["name"].as_str().unwrap_or("?").to_string(),
+                event: h["event"].as_str().unwrap_or("?").to_string(),
+                enabled: h["enabled"].as_bool().unwrap_or(false),
+                description: h["description"].as_str().unwrap_or("").to_string(),
+            }).collect();
+            Ok(crate::output::HookListResponse { hooks })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /hooks/:name` — show hook details.
+    pub async fn hooks_info(&self, name: &str) -> Result<crate::output::HookInfoResponse> {
+        let resp = self.http.get(self.url(&format!("/hooks/{name}"))).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks/:name")?;
+            Ok(crate::output::HookInfoResponse {
+                name: v["name"].as_str().unwrap_or("?").to_string(),
+                event: v["event"].as_str().unwrap_or("?").to_string(),
+                enabled: v["enabled"].as_bool().unwrap_or(false),
+                description: v["description"].as_str().unwrap_or("").to_string(),
+                source: v["source"].as_str().unwrap_or("unknown").to_string(),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND { bail!("Hook '{name}' not found."); }
+        else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /hooks/check` — validate hook configuration.
+    pub async fn hooks_check(&self) -> Result<crate::output::HookCheckResponse> {
+        let resp = self.http.get(self.url("/hooks/check")).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks/check")?;
+            Ok(crate::output::HookCheckResponse {
+                total: v["total"].as_u64().unwrap_or(0) as usize,
+                valid: v["valid"].as_u64().unwrap_or(0) as usize,
+                invalid: v["invalid"].as_u64().unwrap_or(0) as usize,
+                detail: v["detail"].as_str().unwrap_or("check complete").to_string(),
+            })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `POST /hooks/:action` — hook lifecycle mutation.
+    pub async fn hooks_mutate(&self, action: &str, name_or_source: &str) -> Result<crate::output::HookMutationResponse> {
+        let resp = self.http.post(self.url(&format!("/hooks/{action}")))
+            .json(&serde_json::json!({"name": name_or_source}))
+            .send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from POST /hooks/:action")?;
+            Ok(crate::output::HookMutationResponse {
+                success: v["success"].as_bool().unwrap_or(true),
+                hook: v["hook"].as_str().unwrap_or(name_or_source).to_string(),
+                action: action.to_string(),
+                detail: v["detail"].as_str().unwrap_or("done").to_string(),
+            })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+
+
+
 }

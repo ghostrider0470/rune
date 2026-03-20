@@ -522,6 +522,192 @@ impl fmt::Display for TemplateStartResponse {
     }
 }
 
+/// Response for `rune agents spawn`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSpawnResponse {
+    pub session_id: String,
+    pub parent_session_id: String,
+    pub mode: String,
+    pub policy: String,
+    pub status: String,
+}
+
+impl fmt::Display for AgentSpawnResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Subagent spawned.")?;
+        writeln!(f, "  Session: {}", self.session_id)?;
+        writeln!(f, "  Parent:  {}", self.parent_session_id)?;
+        writeln!(f, "  Mode:    {}", self.mode)?;
+        writeln!(f, "  Policy:  {}", self.policy)?;
+        write!(f, "  Status:  {}", self.status)
+    }
+}
+
+/// Response for `rune agents steer`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSteerResponse {
+    pub session_id: String,
+    pub accepted: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for AgentSteerResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.accepted {
+            writeln!(f, "Instruction delivered to {}.", self.session_id)?;
+        } else {
+            writeln!(f, "Steer rejected for {}.", self.session_id)?;
+        }
+        write!(f, "  {}", self.detail)
+    }
+}
+
+/// Response for `rune agents kill`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentKillResponse {
+    pub session_id: String,
+    pub killed: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for AgentKillResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.killed {
+            writeln!(f, "Subagent {} terminated.", self.session_id)?;
+        } else {
+            writeln!(f, "Kill failed for {}.", self.session_id)?;
+        }
+        write!(f, "  {}", self.detail)
+    }
+}
+
+/// Response for `rune agent run`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRunResponse {
+    pub session_id: String,
+    pub turn_id: String,
+    pub status: String,
+    pub output: Option<String>,
+}
+
+impl fmt::Display for AgentRunResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Agent turn completed.")?;
+        writeln!(f, "  Session: {}", self.session_id)?;
+        writeln!(f, "  Turn:    {}", self.turn_id)?;
+        writeln!(f, "  Status:  {}", self.status)?;
+        if let Some(ref output) = self.output {
+            write!(f, "  Output:  {output}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `rune agent result`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentResultResponse {
+    pub session_id: String,
+    pub turn_id: String,
+    pub status: String,
+    pub output: Option<String>,
+}
+
+impl fmt::Display for AgentResultResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Turn result:")?;
+        writeln!(f, "  Session: {}", self.session_id)?;
+        writeln!(f, "  Turn:    {}", self.turn_id)?;
+        writeln!(f, "  Status:  {}", self.status)?;
+        if let Some(ref output) = self.output {
+            write!(f, "  Output:  {output}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `rune acp send`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpSendResponse {
+    pub message_id: String,
+    pub from: String,
+    pub to: String,
+    pub delivered: bool,
+}
+
+impl fmt::Display for AcpSendResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "ACP message sent.")?;
+        writeln!(f, "  Message: {}", self.message_id)?;
+        writeln!(f, "  From:    {}", self.from)?;
+        writeln!(f, "  To:      {}", self.to)?;
+        write!(
+            f,
+            "  Status:  {}",
+            if self.delivered {
+                "delivered"
+            } else {
+                "queued"
+            }
+        )
+    }
+}
+
+/// A single ACP inbox message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpInboxMessage {
+    pub message_id: String,
+    pub from: String,
+    pub received_at: String,
+    pub payload: serde_json::Value,
+}
+
+impl fmt::Display for AcpInboxMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "  {} from={} at={}",
+            self.message_id, self.from, self.received_at
+        )
+    }
+}
+
+/// Response for `rune acp inbox`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpInboxResponse {
+    pub session_id: String,
+    pub messages: Vec<AcpInboxMessage>,
+}
+
+impl fmt::Display for AcpInboxResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.messages.is_empty() {
+            return write!(f, "No pending ACP messages for {}.", self.session_id);
+        }
+        writeln!(f, "ACP inbox for {}:", self.session_id)?;
+        for m in &self.messages {
+            writeln!(f, "{m}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `rune acp ack`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpAckResponse {
+    pub message_id: String,
+    pub acknowledged: bool,
+}
+
+impl fmt::Display for AcpAckResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.acknowledged {
+            write!(f, "Message {} acknowledged.", self.message_id)
+        } else {
+            write!(f, "Failed to acknowledge message {}.", self.message_id)
+        }
+    }
+}
+
 /// A single installed skill entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillSummary {
@@ -1029,6 +1215,110 @@ impl fmt::Display for ChannelLogsResponse {
     }
 }
 
+/// Response for `channels add`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAddResponse {
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelAddResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Channel `{}` ({}) registered (enabled={}). {}",
+            self.name, self.kind, self.enabled, self.message
+        )
+    }
+}
+
+/// Response for `channels remove`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelRemoveResponse {
+    pub name: String,
+    pub removed: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelRemoveResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.removed {
+            write!(f, "Channel `{}` removed.", self.name)
+        } else {
+            write!(f, "Channel `{}`: {}", self.name, self.message)
+        }
+    }
+}
+
+/// Response for `channels login`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelLoginResponse {
+    pub name: String,
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelLoginResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.success {
+            write!(f, "Channel `{}` logged in.", self.name)
+        } else {
+            write!(f, "Channel `{}` login failed: {}", self.name, self.message)
+        }
+    }
+}
+
+/// Response for `channels logout`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelLogoutResponse {
+    pub name: String,
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelLogoutResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.success {
+            write!(f, "Channel `{}` logged out.", self.name)
+        } else {
+            write!(
+                f,
+                "Channel `{}` logout failed: {}",
+                self.name, self.message
+            )
+        }
+    }
+}
+
+/// Response for `channels test`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelTestResponse {
+    pub name: String,
+    pub reachable: bool,
+    pub latency_ms: Option<u64>,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelTestResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.reachable {
+            write!(f, "Channel `{}`: reachable", self.name)?;
+            if let Some(ms) = self.latency_ms {
+                write!(f, " ({ms}ms)")?;
+            }
+            Ok(())
+        } else {
+            write!(
+                f,
+                "Channel `{}`: unreachable — {}",
+                self.name, self.message
+            )
+        }
+    }
+}
+
 /// Response for `logs`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogsQueryResponse {
@@ -1049,7 +1339,7 @@ impl fmt::Display for LogsQueryResponse {
     }
 }
 
-fn format_log_entry(entry: &serde_json::Value) -> String {
+pub fn format_log_entry(entry: &serde_json::Value) -> String {
     let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_str);
     let level = entry.get("level").and_then(serde_json::Value::as_str);
     let source = entry.get("source").and_then(serde_json::Value::as_str);
@@ -2937,6 +3227,258 @@ impl fmt::Display for RemindersListResponse {
             writeln!(f, "  {reminder}")?;
         }
         Ok(())
+    }
+}
+
+// ── Security ──────────────────────────────────────────────────────
+
+/// Response from `rune security audit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityAuditResponse {
+    pub passed: bool,
+    pub checks: Vec<SecurityAuditCheck>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityAuditCheck {
+    pub name: String,
+    pub status: String,
+    pub detail: String,
+}
+
+impl fmt::Display for SecurityAuditCheck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = match self.status.as_str() {
+            "pass" => "✓",
+            "warn" => "!",
+            "fail" => "✗",
+            _ => "•",
+        };
+        write!(f, "  {icon} {} [{}]: {}", self.name, self.status, self.detail)
+    }
+}
+
+impl fmt::Display for SecurityAuditResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.passed { "✓" } else { "✗" };
+        writeln!(f, "{icon} Security audit: {}", self.summary)?;
+        for check in &self.checks {
+            writeln!(f, "{check}")?;
+        }
+        Ok(())
+    }
+}
+
+// ── Sandbox ───────────────────────────────────────────────────────
+
+/// Response from `rune sandbox list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxListResponse {
+    pub boundaries: Vec<SandboxBoundary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxBoundary {
+    pub path: String,
+    pub mode: String,
+    pub active: bool,
+}
+
+impl fmt::Display for SandboxBoundary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.active { "✓" } else { "✗" };
+        write!(f, "  {icon} {} ({})", self.path, self.mode)
+    }
+}
+
+impl fmt::Display for SandboxListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.boundaries.is_empty() {
+            write!(f, "No sandbox boundaries configured.")?;
+        } else {
+            writeln!(f, "Sandbox boundaries:")?;
+            for b in &self.boundaries {
+                writeln!(f, "{b}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune sandbox recreate`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxRecreateResponse {
+    pub success: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for SandboxRecreateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.detail)
+    }
+}
+
+/// Response from `rune sandbox explain`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxExplainResponse {
+    pub explanation: String,
+}
+
+impl fmt::Display for SandboxExplainResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.explanation)
+    }
+}
+
+// ── Secrets ───────────────────────────────────────────────────────
+
+/// Response from `rune secrets reload`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsReloadResponse {
+    pub success: bool,
+    pub reloaded: usize,
+    pub detail: String,
+}
+
+impl fmt::Display for SecretsReloadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {} ({} secret(s) reloaded)", self.detail, self.reloaded)
+    }
+}
+
+/// Response from `rune secrets audit`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsAuditResponse {
+    pub total: usize,
+    pub stale: usize,
+    pub unused: usize,
+    pub entries: Vec<SecretsAuditEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsAuditEntry {
+    pub key: String,
+    pub status: String,
+    pub last_used: Option<String>,
+}
+
+impl fmt::Display for SecretsAuditEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let last = self.last_used.as_deref().unwrap_or("never");
+        write!(f, "  {} [{}] last_used={}", self.key, self.status, last)
+    }
+}
+
+impl fmt::Display for SecretsAuditResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "Secrets audit: {} total, {} stale, {} unused",
+            self.total, self.stale, self.unused
+        )?;
+        for entry in &self.entries {
+            writeln!(f, "{entry}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune secrets configure`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsConfigureResponse {
+    pub store_kind: String,
+    pub detail: String,
+}
+
+impl fmt::Display for SecretsConfigureResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Secret store: {} — {}", self.store_kind, self.detail)
+    }
+}
+
+/// Response from `rune secrets apply`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsApplyResponse {
+    pub success: bool,
+    pub applied: usize,
+    pub detail: String,
+}
+
+impl fmt::Display for SecretsApplyResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {} ({} secret(s) applied)", self.detail, self.applied)
+    }
+}
+
+// ── Configure ─────────────────────────────────────────────────────
+
+/// Response from `rune configure`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigureResponse {
+    pub success: bool,
+    pub detail: String,
+}
+
+impl fmt::Display for ConfigureResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.detail)
+    }
+}
+
+
+/// Response for `logs tail`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsTailResponse {
+    pub entries: Vec<serde_json::Value>,
+    pub source: String,
+}
+
+impl fmt::Display for LogsTailResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Log tail ({}):", self.source)?;
+        for e in &self.entries {
+            writeln!(f, "  {}", format_log_entry(e))?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `logs search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsSearchResponse {
+    pub query: String,
+    pub entries: Vec<serde_json::Value>,
+    pub total: usize,
+}
+
+impl fmt::Display for LogsSearchResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Search \"{}\": {} result(s)", self.query, self.total)?;
+        for e in &self.entries {
+            writeln!(f, "  {}", format_log_entry(e))?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `logs export`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsExportResponse {
+    pub success: bool,
+    pub path: String,
+    pub message: String,
+}
+
+impl fmt::Display for LogsExportResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "\u{2713}" } else { "\u{2717}" };
+        writeln!(f, "{icon} Export: {}", self.message)?;
+        write!(f, "  Output: {}", self.path)
     }
 }
 
@@ -5096,5 +5638,423 @@ mod tests {
         assert!(out.contains("    line one"));
         assert!(out.contains("    line two"));
         assert!(out.contains("    line three"));
+    }
+
+    // ── Security ──────────────────────────────────────────────────
+
+    #[test]
+    fn render_security_audit_pass() {
+        let resp = SecurityAuditResponse {
+            passed: true,
+            checks: vec![SecurityAuditCheck {
+                name: "sandbox".into(),
+                status: "pass".into(),
+                detail: "enabled".into(),
+            }],
+            summary: "all checks passed".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("✓ Security audit"));
+        assert!(out.contains("✓ sandbox"));
+    }
+
+    #[test]
+    fn render_security_audit_fail_json() {
+        let resp = SecurityAuditResponse {
+            passed: false,
+            checks: vec![SecurityAuditCheck {
+                name: "tls".into(),
+                status: "fail".into(),
+                detail: "not configured".into(),
+            }],
+            summary: "1 failure".into(),
+        };
+        let out = render(&resp, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["passed"], false);
+        assert_eq!(v["checks"][0]["status"], "fail");
+    }
+
+    // ── Sandbox ───────────────────────────────────────────────────
+
+    #[test]
+    fn render_sandbox_list_empty() {
+        let resp = SandboxListResponse {
+            boundaries: vec![],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("No sandbox boundaries configured"));
+    }
+
+    #[test]
+    fn render_sandbox_list_entries() {
+        let resp = SandboxListResponse {
+            boundaries: vec![SandboxBoundary {
+                path: "/workspace".into(),
+                mode: "read-write".into(),
+                active: true,
+            }],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("✓ /workspace"));
+        assert!(out.contains("read-write"));
+    }
+
+    #[test]
+    fn render_sandbox_recreate() {
+        let resp = SandboxRecreateResponse {
+            success: true,
+            detail: "Sandbox boundaries recreated.".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("recreated"));
+    }
+
+    #[test]
+    fn render_sandbox_explain() {
+        let resp = SandboxExplainResponse {
+            explanation: "Agent is confined to /workspace.".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("/workspace"));
+    }
+
+    // ── Secrets ───────────────────────────────────────────────────
+
+    #[test]
+    fn render_secrets_reload() {
+        let resp = SecretsReloadResponse {
+            success: true,
+            reloaded: 3,
+            detail: "Secrets reloaded.".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("3 secret(s) reloaded"));
+    }
+
+    #[test]
+    fn render_secrets_audit() {
+        let resp = SecretsAuditResponse {
+            total: 5,
+            stale: 1,
+            unused: 2,
+            entries: vec![SecretsAuditEntry {
+                key: "OPENAI_API_KEY".into(),
+                status: "active".into(),
+                last_used: Some("2026-03-19".into()),
+            }],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("5 total"));
+        assert!(out.contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn render_secrets_configure() {
+        let resp = SecretsConfigureResponse {
+            store_kind: "env".into(),
+            detail: "Environment variable secret store".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("Secret store: env"));
+    }
+
+    #[test]
+    fn render_secrets_apply() {
+        let resp = SecretsApplyResponse {
+            success: true,
+            applied: 2,
+            detail: "Manifest applied.".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("2 secret(s) applied"));
+    }
+
+    // ── Configure ─────────────────────────────────────────────────
+
+    #[test]
+    fn render_configure() {
+        let resp = ConfigureResponse {
+            success: true,
+            detail: "Setup wizard completed.".into(),
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("wizard completed"));
+    }
+}
+
+
+    #[test]
+    fn render_logs_tail() {
+        let r = LogsTailResponse {
+            entries: vec![serde_json::json!({"timestamp":"T1","level":"INFO","message":"hello"})],
+            source: "gateway".into(),
+        };
+        let h = render(&r, OutputFormat::Human);
+        assert!(h.contains("hello"));
+        assert!(h.contains("gateway"));
+    }
+
+    #[test]
+    fn render_logs_search() {
+        let r = LogsSearchResponse {
+            query: "err".into(),
+            entries: vec![serde_json::json!({"timestamp":"T1","level":"ERROR","message":"err found"})],
+            total: 1,
+        };
+        let h = render(&r, OutputFormat::Human);
+        assert!(h.contains("err"));
+    }
+
+    #[test]
+    fn render_logs_export() {
+        let r = LogsExportResponse {
+            success: true,
+            path: "/tmp/out.json".into(),
+            message: "Exported 10 entries".into(),
+        };
+        let h = render(&r, OutputFormat::Human);
+        assert!(h.contains("Exported"));
+    }
+
+#[cfg(test)]
+mod subagent_output_tests {
+    use super::*;
+
+    #[test]
+    fn render_agent_spawn_human() {
+        let r = AgentSpawnResponse { session_id:"c1".into(), parent_session_id:"p1".into(), mode:"coding".into(), policy:"inherit".into(), status:"spawned".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Subagent spawned.")); assert!(out.contains("c1")); assert!(out.contains("p1"));
+    }
+
+    #[test]
+    fn render_agent_spawn_json() {
+        let r = AgentSpawnResponse { session_id:"c1".into(), parent_session_id:"p1".into(), mode:"coding".into(), policy:"inherit".into(), status:"spawned".into() };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["session_id"], "c1"); assert_eq!(v["parent_session_id"], "p1");
+    }
+
+    #[test]
+    fn render_agent_steer_accepted() {
+        let r = AgentSteerResponse { session_id:"c1".into(), accepted:true, detail:"ok".into() };
+        assert!(render(&r, OutputFormat::Human).contains("Instruction delivered to c1."));
+    }
+
+    #[test]
+    fn render_agent_steer_rejected() {
+        let r = AgentSteerResponse { session_id:"c1".into(), accepted:false, detail:"no".into() };
+        assert!(render(&r, OutputFormat::Human).contains("Steer rejected"));
+    }
+
+    #[test]
+    fn render_agent_kill_ok() {
+        let r = AgentKillResponse { session_id:"c1".into(), killed:true, detail:"done".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("terminated")); assert!(out.contains("c1"));
+    }
+
+    #[test]
+    fn render_agent_kill_fail() {
+        let r = AgentKillResponse { session_id:"c1".into(), killed:false, detail:"nope".into() };
+        assert!(render(&r, OutputFormat::Human).contains("Kill failed"));
+    }
+
+    #[test]
+    fn render_agent_run_output() {
+        let r = AgentRunResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"completed".into(), output:Some("Done.".into()) };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Agent turn completed.")); assert!(out.contains("t1")); assert!(out.contains("Done."));
+    }
+
+    #[test]
+    fn render_agent_run_no_output() {
+        let r = AgentRunResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"running".into(), output:None };
+        assert!(!render(&r, OutputFormat::Human).contains("Output:"));
+    }
+
+    #[test]
+    fn render_agent_result_output() {
+        let r = AgentResultResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"completed".into(), output:Some("Res".into()) };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Turn result:")); assert!(out.contains("Res"));
+    }
+
+    #[test]
+    fn render_acp_send_delivered() {
+        let r = AcpSendResponse { message_id:"m1".into(), from:"a".into(), to:"b".into(), delivered:true };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("ACP message sent.")); assert!(out.contains("delivered"));
+    }
+
+    #[test]
+    fn render_acp_send_queued() {
+        let r = AcpSendResponse { message_id:"m1".into(), from:"a".into(), to:"b".into(), delivered:false };
+        assert!(render(&r, OutputFormat::Human).contains("queued"));
+    }
+
+    #[test]
+    fn render_acp_ack_ok() {
+        let r = AcpAckResponse { message_id:"m1".into(), acknowledged:true };
+        assert!(render(&r, OutputFormat::Human).contains("m1"));
+    }
+}
+
+/// Response for `rune plugins list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginListResponse {
+    pub plugins: Vec<PluginSummary>,
+}
+
+/// A single plugin entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSummary {
+    pub name: String,
+    pub version: String,
+    pub enabled: bool,
+    pub description: String,
+}
+
+impl fmt::Display for PluginSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status = if self.enabled { "enabled" } else { "disabled" };
+        write!(f, "  {} v{} [{}] — {}", self.name, self.version, status, self.description)
+    }
+}
+
+impl fmt::Display for PluginListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.plugins.is_empty() { return write!(f, "No plugins installed."); }
+        writeln!(f, "Installed plugins ({}):", self.plugins.len())?;
+        for p in &self.plugins { writeln!(f, "{p}")?; }
+        Ok(())
+    }
+}
+
+/// Response for `rune plugins info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginInfoResponse {
+    pub name: String,
+    pub version: String,
+    pub enabled: bool,
+    pub description: String,
+    pub source: String,
+    pub manifest_valid: bool,
+}
+
+impl fmt::Display for PluginInfoResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Plugin: {}", self.name)?;
+        writeln!(f, "  Version:  {}", self.version)?;
+        writeln!(f, "  Enabled:  {}", self.enabled)?;
+        writeln!(f, "  Source:   {}", self.source)?;
+        writeln!(f, "  Manifest: {}", if self.manifest_valid { "valid" } else { "invalid" })?;
+        write!(f, "  {}", self.description)
+    }
+}
+
+/// Response for plugin lifecycle mutations (install/uninstall/enable/disable/update/doctor).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginMutationResponse {
+    pub success: bool,
+    pub plugin: String,
+    pub action: String,
+    pub detail: String,
+}
+
+impl fmt::Display for PluginMutationResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} Plugin '{}' — {}", self.plugin, self.action)?;
+        write!(f, "  {}", self.detail)
+    }
+}
+
+/// Response for `rune hooks list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookListResponse {
+    pub hooks: Vec<HookSummary>,
+}
+
+/// A single hook entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookSummary {
+    pub name: String,
+    pub event: String,
+    pub enabled: bool,
+    pub description: String,
+}
+
+impl fmt::Display for HookSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status = if self.enabled { "enabled" } else { "disabled" };
+        write!(f, "  {} [{}] on {} — {}", self.name, status, self.event, self.description)
+    }
+}
+
+impl fmt::Display for HookListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.hooks.is_empty() { return write!(f, "No hooks configured."); }
+        writeln!(f, "Configured hooks ({}):", self.hooks.len())?;
+        for h in &self.hooks { writeln!(f, "{h}")?; }
+        Ok(())
+    }
+}
+
+/// Response for `rune hooks info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookInfoResponse {
+    pub name: String,
+    pub event: String,
+    pub enabled: bool,
+    pub description: String,
+    pub source: String,
+}
+
+impl fmt::Display for HookInfoResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Hook: {}", self.name)?;
+        writeln!(f, "  Event:   {}", self.event)?;
+        writeln!(f, "  Enabled: {}", self.enabled)?;
+        writeln!(f, "  Source:  {}", self.source)?;
+        write!(f, "  {}", self.description)
+    }
+}
+
+/// Response for `rune hooks check`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookCheckResponse {
+    pub total: usize,
+    pub valid: usize,
+    pub invalid: usize,
+    pub detail: String,
+}
+
+impl fmt::Display for HookCheckResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Hook check: {} total, {} valid, {} invalid", self.total, self.valid, self.invalid)?;
+        write!(f, "  {}", self.detail)
+    }
+}
+
+/// Response for hook lifecycle mutations (enable/disable/install/update).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookMutationResponse {
+    pub success: bool,
+    pub hook: String,
+    pub action: String,
+    pub detail: String,
+}
+
+impl fmt::Display for HookMutationResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} Hook '{}' — {}", self.hook, self.action)?;
+        write!(f, "  {}", self.detail)
     }
 }

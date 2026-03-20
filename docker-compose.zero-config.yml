@@ -1,0 +1,15 @@
+# Zero-config variant — runs Rune with SQLite, no external services required.
+# Usage: docker compose -f docker-compose.zero-config.yml up
+services:
+  rune:
+    build: .
+    ports:
+      - "8787:8787"
+    volumes:
+      - rune-data:/data
+      - ./config:/config:ro
+      - ./secrets:/secrets:ro
+    restart: unless-stopped
+
+volumes:
+  rune-data:

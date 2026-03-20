@@ -4,6 +4,7 @@ pub mod cli;
 pub mod client;
 pub mod doctor;
 pub mod memory;
+mod logs;
 pub mod output;
 
 use anyhow::{Context, Result};
@@ -23,19 +24,22 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    AgentsAction, ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell,
+    AcpAction, AgentAction, AgentsAction, ApprovalsAction, HooksAction, ChannelsAction, Command,
+    CompletionAction, CompletionShell,
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
-    GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsArgs,
+    GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, RemindersAction, SessionsAction, SkillsAction, SystemAction, SystemEventAction,
-    SystemHeartbeatAction,
+    ModelsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
+    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
 };
 use output::{
-    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
-    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
+    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse,
+    ChannelLogFile, ChannelLogsResponse,
+    ChannelResolveResponse, ChannelStatusResponse,
+    DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
     ModelFallbackChainDetail, ModelFallbacksResponse, ModelListResponse, ModelProviderDetail,
@@ -754,11 +758,16 @@ fn model_alias_details() -> ModelAliasesResponse {
     ModelAliasesResponse { aliases }
 }
 
-async fn init_workspace(path: &std::path::Path) -> Result<()> {
+async fn init_workspace(
+    path: &std::path::Path,
+    template: Option<&str>,
+    _non_interactive: bool,
+) -> Result<()> {
     tokio::fs::create_dir_all(path)
         .await
         .with_context(|| format!("cannot create directory: {}", path.display()))?;
     tokio::fs::create_dir_all(path.join("memory")).await?;
+    tokio::fs::create_dir_all(path.join("templates")).await?;
 
     let files: &[(&str, &str)] = &[
         (
@@ -792,6 +801,43 @@ async fn init_workspace(path: &std::path::Path) -> Result<()> {
             println!("  ✓ Created {name}");
         } else {
             println!("  ○ {name} already exists, skipping");
+        }
+    }
+
+    // Bootstrap from template if specified
+    if let Some(slug) = template {
+        let tpl = rune_core::builtin_template_by_slug(slug)
+            .ok_or_else(|| anyhow::anyhow!(
+                "unknown template \"{slug}\". Run `rune agents templates` to see available templates."
+            ))?;
+        let spells_toml: Vec<String> = tpl.spells.iter().map(|s| format!("\"{s}\"")).collect();
+        let config_content = format!(
+            "# Auto-generated from template: {}\n\n[agent]\nmode = \"{}\"\nspells = [{}]\n",
+            tpl.name, tpl.mode, spells_toml.join(", ")
+        );
+        let config_path = path.join("config.toml");
+        if !config_path.exists() {
+            tokio::fs::write(&config_path, &config_content).await?;
+            created += 1;
+            println!("  ✓ Created config.toml (from template: {})", tpl.name);
+        } else {
+            println!("  ○ config.toml already exists, skipping template");
+        }
+    }
+
+    // Discover workspace-local templates
+    let templates_dir = path.join("templates");
+    if templates_dir.is_dir() {
+        let mut count = 0u32;
+        let mut entries = tokio::fs::read_dir(&templates_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let p = entry.path();
+            if p.extension().map_or(false, |e| e == "toml") {
+                count += 1;
+            }
+        }
+        if count > 0 {
+            println!("  ℹ Found {count} workspace template(s) in templates/");
         }
     }
 
@@ -981,22 +1027,39 @@ pub async fn run(cli: Cli) -> Result<()> {
             let result = client.health().await?;
             println!("{}", render(&result, format));
         }
-        Command::Logs(LogsArgs {
-            level,
-            source,
-            limit,
-            since,
-        }) => {
-            let result = client
-                .logs_query(
-                    level.as_deref(),
-                    source.as_deref(),
-                    limit,
-                    since.as_deref(),
-                )
-                .await?;
-            println!("{}", render(&result, format));
-        }
+        Command::Logs { action } => match action {
+            LogsAction::Query(LogsArgs {
+                level,
+                source,
+                limit,
+                since,
+            }) => {
+                let result = client
+                    .logs_query(
+                        level.as_deref(),
+                        source.as_deref(),
+                        limit,
+                        since.as_deref(),
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            LogsAction::Tail { level, source, follow, lines } => {
+                let http = reqwest::Client::new();
+                let result = logs::tail(&cli.gateway_url, &http, level.as_deref(), source.as_deref(), follow, lines).await?;
+                println!("{}", render(&result, format));
+            }
+            LogsAction::Search { query, level, source, limit } => {
+                let http = reqwest::Client::new();
+                let result = logs::search(&cli.gateway_url, &http, &query, level.as_deref(), source.as_deref(), limit).await?;
+                println!("{}", render(&result, format));
+            }
+            LogsAction::Export { format: fmt, level, source, since, until, limit, output } => {
+                let http = reqwest::Client::new();
+                let result = logs::export(&cli.gateway_url, &http, &fmt, level.as_deref(), source.as_deref(), since.as_deref(), until.as_deref(), limit, output.as_deref()).await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Doctor { action } => {
             let result = match action.unwrap_or(DoctorAction::Run) {
                 DoctorAction::Run => client.doctor_run().await?,
@@ -1043,9 +1106,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             };
             println!("{}", render(&dashboard, format));
         }
-        Command::Init { path } => {
+        Command::Init { path, template, non_interactive } => {
             let target = std::path::Path::new(&path);
-            init_workspace(target).await?;
+            init_workspace(target, template.as_deref(), non_interactive).await?;
         }
         Command::Skills { action } => match action {
             SkillsAction::List => {
@@ -1405,6 +1468,26 @@ pub async fn run(cli: Cli) -> Result<()> {
                     })
                     .collect();
                 let result = TemplateListResponse { templates };
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Spawn {
+                parent,
+                mode,
+                policy,
+                task,
+                provider,
+            } => {
+                let result = client
+                    .agent_spawn(&parent, &mode, &policy, &task, provider.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Steer { id, message } => {
+                let result = client.agent_steer(&id, &message).await?;
+                println!("{}", render(&result, format));
+            }
+            AgentsAction::Kill { id, reason } => {
+                let result = client.agent_kill(&id, reason.as_deref()).await?;
                 println!("{}", render(&result, format));
             }
         },
@@ -1920,6 +2003,145 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             ConfigAction::Validate { file } => {
                 let result = validate_config(file.as_deref());
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Security { action } => match action {
+            SecurityAction::Audit => {
+                let result = client.security_audit().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Sandbox { action } => match action {
+            SandboxAction::List => {
+                let result = client.sandbox_list().await?;
+                println!("{}", render(&result, format));
+            }
+            SandboxAction::Recreate => {
+                let result = client.sandbox_recreate().await?;
+                println!("{}", render(&result, format));
+            }
+            SandboxAction::Explain => {
+                let result = client.sandbox_explain().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Secrets { action } => match action {
+            SecretsAction::Reload => {
+                let result = client.secrets_reload().await?;
+                println!("{}", render(&result, format));
+            }
+            SecretsAction::Audit => {
+                let result = client.secrets_audit().await?;
+                println!("{}", render(&result, format));
+            }
+            SecretsAction::Configure => {
+                let result = client.secrets_configure().await?;
+                println!("{}", render(&result, format));
+            }
+            SecretsAction::Apply { input } => {
+                let manifest = read_gateway_config_input(&input)?;
+                let result = client.secrets_apply(manifest).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Configure => {
+            let result = client.configure().await?;
+            println!("{}", render(&result, format));
+        }
+        Command::Agent { action } => match action {
+            AgentAction::Run {
+                session,
+                message,
+                max_turns,
+                wait,
+            } => {
+                let result = client.agent_run(&session, &message, max_turns, wait).await?;
+                println!("{}", render(&result, format));
+            }
+            AgentAction::Result { session, turn } => {
+                let result = client.agent_result(&session, &turn).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Acp { action } => match action {
+            AcpAction::Send { from, to, payload } => {
+                let result = client.acp_send(&from, &to, &payload).await?;
+                println!("{}", render(&result, format));
+            }
+            AcpAction::Inbox { session } => {
+                let result = client.acp_inbox(&session).await?;
+                println!("{}", render(&result, format));
+            }
+            AcpAction::Ack {
+                message_id,
+                session,
+            } => {
+                let result = client.acp_ack(&message_id, &session).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Plugins { action } => match action {
+            PluginsAction::List => {
+                let result = client.plugins_list().await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Info { name } => {
+                let result = client.plugins_info(&name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Install { source } => {
+                let result = client.plugins_mutate("install", &source).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Uninstall { name } => {
+                let result = client.plugins_mutate("uninstall", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Enable { name } => {
+                let result = client.plugins_mutate("enable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Disable { name } => {
+                let result = client.plugins_mutate("disable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Update { name } => {
+                let result = client.plugins_mutate("update", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Doctor { name } => {
+                let result = client.plugins_mutate("doctor", &name).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Hooks { action } => match action {
+            HooksAction::List => {
+                let result = client.hooks_list().await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Info { name } => {
+                let result = client.hooks_info(&name).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Check => {
+                let result = client.hooks_check().await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Enable { name } => {
+                let result = client.hooks_mutate("enable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Disable { name } => {
+                let result = client.hooks_mutate("disable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Install { source } => {
+                let result = client.hooks_mutate("install", &source).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Update { name } => {
+                let result = client.hooks_mutate("update", &name).await?;
                 println!("{}", render(&result, format));
             }
         },

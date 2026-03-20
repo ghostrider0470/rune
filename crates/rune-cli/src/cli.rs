@@ -84,8 +84,11 @@ pub enum Command {
     },
     /// Show a compact operator dashboard summary.
     Dashboard,
-    /// Query structured gateway logs.
-    Logs(LogsArgs),
+    /// Query, tail, search, and export structured gateway logs.
+    Logs {
+        #[command(subcommand)]
+        action: LogsAction,
+    },
     /// Manage cron jobs.
     Cron {
         #[command(subcommand)]
@@ -151,12 +154,168 @@ pub enum Command {
         /// Directory to initialize (defaults to current directory).
         #[arg(default_value = ".")]
         path: String,
+        /// Template slug to bootstrap from (e.g. "coding-agent").
+        #[arg(long)]
+        template: Option<String>,
+        /// Skip interactive prompts and use defaults.
+        #[arg(long)]
+        non_interactive: bool,
     },
     /// Manage configuration.
     Config {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Run security audits and inspect security posture.
+    Security {
+        #[command(subcommand)]
+        action: SecurityAction,
+    },
+    /// Inspect and manage filesystem sandbox boundaries.
+    Sandbox {
+        #[command(subcommand)]
+        action: SandboxAction,
+    },
+    /// Manage runtime secrets lifecycle.
+    Secrets {
+        #[command(subcommand)]
+        action: SecretsAction,
+    },
+    /// Run the interactive setup wizard.
+    Configure,
+    /// Direct agent-turn invocation — send a single instruction to a session.
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+    /// Agent Communication Protocol (ACP) bridge commands.
+    Acp {
+        #[command(subcommand)]
+        action: AcpAction,
+    },
+    /// Manage installed plugins (executable extensions).
+    Plugins {
+        #[command(subcommand)]
+        action: PluginsAction,
+    },
+    /// Manage lifecycle hooks (pre/post event handlers).
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
+}
+
+/// Direct agent-turn invocation actions.
+#[derive(Debug, Subcommand)]
+pub enum AgentAction {
+    /// Send a single instruction to a session and return the response.
+    Run {
+        /// Session ID to send the instruction to.
+        #[arg(long)]
+        session: String,
+        /// The instruction text to send.
+        #[arg(long)]
+        message: String,
+        /// Maximum turns to allow before returning.
+        #[arg(long, default_value_t = 1)]
+        max_turns: u32,
+        /// Wait for the agent turn to complete before returning.
+        #[arg(long, default_value_t = true)]
+        wait: bool,
+    },
+    /// Check the result of a previously submitted agent turn.
+    Result {
+        /// Session ID to check.
+        #[arg(long)]
+        session: String,
+        /// Turn ID to retrieve.
+        #[arg(long)]
+        turn: String,
+    },
+}
+
+/// ACP bridge actions for inter-agent communication.
+#[derive(Debug, Subcommand)]
+pub enum AcpAction {
+    /// Send an ACP message to a target agent session.
+    Send {
+        /// Source session ID.
+        #[arg(long)]
+        from: String,
+        /// Target session ID.
+        #[arg(long)]
+        to: String,
+        /// Message payload (JSON string).
+        #[arg(long)]
+        payload: String,
+    },
+    /// List pending ACP messages for a session.
+    Inbox {
+        /// Session ID to check.
+        #[arg(long)]
+        session: String,
+    },
+    /// Acknowledge/consume an ACP message.
+    Ack {
+        /// Message ID to acknowledge.
+        #[arg(long)]
+        message_id: String,
+        /// Session ID that owns the message.
+        #[arg(long)]
+        session: String,
+    },
+}
+
+/// Plugin lifecycle actions.
+#[derive(Debug, Subcommand)]
+pub enum PluginsAction {
+    /// List installed plugins.
+    List,
+    /// Show details for a specific plugin.
+    Info { /// Plugin name.
+        name: String },
+    /// Install a plugin from a path or URL.
+    Install { /// Plugin source (local path or URL).
+        source: String },
+    /// Uninstall a plugin.
+    Uninstall { /// Plugin name.
+        name: String },
+    /// Enable an installed plugin.
+    Enable { /// Plugin name.
+        name: String },
+    /// Disable an installed plugin.
+    Disable { /// Plugin name.
+        name: String },
+    /// Update an installed plugin.
+    Update { /// Plugin name.
+        name: String },
+    /// Run diagnostic checks on a plugin.
+    Doctor { /// Plugin name.
+        name: String },
+}
+
+/// Hook lifecycle actions.
+#[derive(Debug, Subcommand)]
+pub enum HooksAction {
+    /// List configured hooks.
+    List,
+    /// Show details for a specific hook.
+    Info { /// Hook name.
+        name: String },
+    /// Validate hook configuration and report issues.
+    Check,
+    /// Enable a configured hook.
+    Enable { /// Hook name.
+        name: String },
+    /// Disable a configured hook.
+    Disable { /// Hook name.
+        name: String },
+    /// Install a hook from a path or URL.
+    Install { /// Hook source (local path or URL).
+        source: String },
+    /// Update an installed hook.
+    Update { /// Hook name.
+        name: String },
 }
 
 #[derive(Debug, Clone, Args)]
@@ -175,6 +334,64 @@ pub struct LogsArgs {
     pub since: Option<String>,
 }
 
+#[derive(Debug, Subcommand)]
+pub enum LogsAction {
+    /// Query structured gateway logs with optional filters.
+    Query(LogsArgs),
+    /// Tail (follow) live gateway log output.
+    Tail {
+        /// Filter by log level.
+        #[arg(long)]
+        level: Option<String>,
+        /// Filter by source/component name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Enable continuous follow mode (stream new entries as they arrive).
+        #[arg(long, short)]
+        follow: bool,
+        /// Maximum number of initial entries to show before following.
+        #[arg(long, default_value_t = 50)]
+        lines: usize,
+    },
+    /// Full-text search across historical log entries.
+    Search {
+        /// Query text to search for in log content.
+        query: String,
+        /// Filter by log level.
+        #[arg(long)]
+        level: Option<String>,
+        /// Filter by source/component name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Maximum number of results to return.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Export logs to a file or stdout in a specified format.
+    Export {
+        /// Output format: `json`, `csv`, or `text`.
+        #[arg(long, default_value = "json")]
+        format: String,
+        /// Filter by log level.
+        #[arg(long)]
+        level: Option<String>,
+        /// Filter by source/component name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Lower-bound timestamp.
+        #[arg(long)]
+        since: Option<String>,
+        /// Upper-bound timestamp.
+        #[arg(long)]
+        until: Option<String>,
+        /// Maximum number of entries to export.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Output file path (default: stdout).
+        #[arg(long, short)]
+        output: Option<String>,
+    },
+}
 #[derive(Debug, Subcommand)]
 pub enum GatewayAction {
     /// Query gateway status.
@@ -478,6 +695,40 @@ pub enum AgentsAction {
         /// Template slug to launch (e.g. "coding-agent").
         #[arg(long)]
         template: String,
+    },
+    /// Spawn a new subagent session linked to a parent.
+    Spawn {
+        /// Parent session ID that owns this subagent.
+        #[arg(long)]
+        parent: String,
+        /// Agent mode (e.g. "coding", "research", "operator").
+        #[arg(long, default_value = "default")]
+        mode: String,
+        /// Approval policy for the child session.
+        #[arg(long, default_value = "inherit")]
+        policy: String,
+        /// Initial task description for the subagent.
+        #[arg(long)]
+        task: String,
+        /// Model provider override for the child session.
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Send a follow-up instruction to a running subagent.
+    Steer {
+        /// Subagent session ID to steer.
+        id: String,
+        /// Follow-up instruction text.
+        #[arg(long)]
+        message: String,
+    },
+    /// Terminate a running subagent session.
+    Kill {
+        /// Subagent session ID to kill.
+        id: String,
+        /// Optional reason for termination.
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
@@ -1070,6 +1321,37 @@ pub enum ConfigAction {
     },
 }
 
+#[derive(Debug, Subcommand)]
+pub enum SecurityAction {
+    /// Run a security audit against the gateway.
+    Audit,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SandboxAction {
+    /// List active sandbox boundaries and their status.
+    List,
+    /// Recreate sandbox boundaries from the current configuration.
+    Recreate,
+    /// Explain the current sandbox policy in human-readable form.
+    Explain,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SecretsAction {
+    /// Reload secrets from the configured secret store.
+    Reload,
+    /// Audit secret usage and detect stale or unused secrets.
+    Audit,
+    /// Show the current secret store configuration (redacted).
+    Configure,
+    /// Apply a secrets manifest from a JSON file or stdin (`-`).
+    Apply {
+        /// JSON file path, or `-` to read from stdin.
+        input: String,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1125,10 +1407,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_logs() {
+    fn parse_logs_query() {
         let cli = Cli::try_parse_from([
             "rune",
             "logs",
+            "query",
             "--level",
             "warn",
             "--source",
@@ -1140,16 +1423,106 @@ mod tests {
         ])
         .unwrap();
         match cli.command {
-            Command::Logs(LogsArgs {
-                level,
-                source,
-                limit,
-                since,
-            }) => {
+            Command::Logs {
+                action:
+                    LogsAction::Query(LogsArgs {
+                        level,
+                        source,
+                        limit,
+                        since,
+                    }),
+            } => {
                 assert_eq!(level.as_deref(), Some("warn"));
                 assert_eq!(source.as_deref(), Some("gateway"));
                 assert_eq!(limit, Some(25));
                 assert_eq!(since.as_deref(), Some("2026-03-20T09:00:00Z"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_tail() {
+        let cli =
+            Cli::try_parse_from(["rune", "logs", "tail", "--follow", "--level", "error"]).unwrap();
+        match cli.command {
+            Command::Logs {
+                action:
+                    LogsAction::Tail {
+                        level,
+                        source,
+                        follow,
+                        lines,
+                    },
+            } => {
+                assert_eq!(level.as_deref(), Some("error"));
+                assert_eq!(source, None);
+                assert!(follow);
+                assert_eq!(lines, 50);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_search() {
+        let cli = Cli::try_parse_from([
+            "rune", "logs", "search", "panic", "--level", "error", "--limit", "10",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Logs {
+                action:
+                    LogsAction::Search {
+                        query,
+                        level,
+                        source,
+                        limit,
+                    },
+            } => {
+                assert_eq!(query, "panic");
+                assert_eq!(level.as_deref(), Some("error"));
+                assert_eq!(source, None);
+                assert_eq!(limit, 10);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_export() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "logs",
+            "export",
+            "--format",
+            "csv",
+            "--since",
+            "2026-03-19",
+            "-o",
+            "out.csv",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Logs {
+                action:
+                    LogsAction::Export {
+                        format,
+                        level,
+                        source,
+                        since,
+                        until,
+                        limit,
+                        output,
+                    },
+            } => {
+                assert_eq!(format, "csv");
+                assert_eq!(level, None);
+                assert_eq!(source, None);
+                assert_eq!(since.as_deref(), Some("2026-03-19"));
+                assert_eq!(until, None);
+                assert_eq!(limit, None);
+                assert_eq!(output.as_deref(), Some("out.csv"));
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -3773,5 +4146,209 @@ mod tests {
             Cli::try_parse_from(["rune", "message", "list-reactions", "--channel", "slack"])
                 .is_err()
         );
+    }
+
+    // ── Security ──────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_security_audit() {
+        let cli = Cli::try_parse_from(["rune", "security", "audit"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Security {
+                action: SecurityAction::Audit
+            }
+        ));
+    }
+
+    // ── Sandbox ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_sandbox_list() {
+        let cli = Cli::try_parse_from(["rune", "sandbox", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sandbox {
+                action: SandboxAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sandbox_recreate() {
+        let cli = Cli::try_parse_from(["rune", "sandbox", "recreate"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sandbox {
+                action: SandboxAction::Recreate
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_sandbox_explain() {
+        let cli = Cli::try_parse_from(["rune", "sandbox", "explain"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sandbox {
+                action: SandboxAction::Explain
+            }
+        ));
+    }
+
+    // ── Secrets ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_secrets_reload() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "reload"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Reload
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_secrets_audit() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "audit"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Audit
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_secrets_configure() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "configure"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secrets {
+                action: SecretsAction::Configure
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_secrets_apply() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "apply", "secrets.json"]).unwrap();
+        match cli.command {
+            Command::Secrets {
+                action: SecretsAction::Apply { input },
+            } => assert_eq!(input, "secrets.json"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_secrets_apply_stdin() {
+        let cli = Cli::try_parse_from(["rune", "secrets", "apply", "-"]).unwrap();
+        match cli.command {
+            Command::Secrets {
+                action: SecretsAction::Apply { input },
+            } => assert_eq!(input, "-"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    // ── Configure ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_configure() {
+        let cli = Cli::try_parse_from(["rune", "configure"]).unwrap();
+        assert!(matches!(cli.command, Command::Configure));
+    }
+}
+
+#[cfg(test)]
+mod subagent_cli_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parse_agents_spawn() {
+        let cli = Cli::try_parse_from(["rune","agents","spawn","--parent","sess-1","--task","do stuff"]).unwrap();
+        match cli.command {
+            Command::Agents { action: AgentsAction::Spawn { parent, task, mode, policy, provider } } => {
+                assert_eq!(parent, "sess-1"); assert_eq!(task, "do stuff");
+                assert_eq!(mode, "default"); assert_eq!(policy, "inherit"); assert!(provider.is_none());
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_steer() {
+        let cli = Cli::try_parse_from(["rune","agents","steer","child-1","--message","focus"]).unwrap();
+        match cli.command {
+            Command::Agents { action: AgentsAction::Steer { id, message } } => {
+                assert_eq!(id, "child-1"); assert_eq!(message, "focus");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_kill() {
+        let cli = Cli::try_parse_from(["rune","agents","kill","child-1","--reason","timeout"]).unwrap();
+        match cli.command {
+            Command::Agents { action: AgentsAction::Kill { id, reason } } => {
+                assert_eq!(id, "child-1"); assert_eq!(reason.as_deref(), Some("timeout"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_run() {
+        let cli = Cli::try_parse_from(["rune","agent","run","--session","s1","--message","go"]).unwrap();
+        match cli.command {
+            Command::Agent { action: AgentAction::Run { session, message, max_turns, wait } } => {
+                assert_eq!(session, "s1"); assert_eq!(message, "go");
+                assert_eq!(max_turns, 1); assert!(wait);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_result() {
+        let cli = Cli::try_parse_from(["rune","agent","result","--session","s1","--turn","t1"]).unwrap();
+        match cli.command {
+            Command::Agent { action: AgentAction::Result { session, turn } } => {
+                assert_eq!(session, "s1"); assert_eq!(turn, "t1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_acp_send() {
+        let cli = Cli::try_parse_from(["rune","acp","send","--from","a","--to","b","--payload",r#"{"x":1}"#]).unwrap();
+        match cli.command {
+            Command::Acp { action: AcpAction::Send { from, to, payload } } => {
+                assert_eq!(from, "a"); assert_eq!(to, "b"); assert_eq!(payload, r#"{"x":1}"#);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_acp_inbox() {
+        let cli = Cli::try_parse_from(["rune","acp","inbox","--session","a"]).unwrap();
+        assert!(matches!(cli.command, Command::Acp { action: AcpAction::Inbox { .. } }));
+    }
+
+    #[test]
+    fn parse_acp_ack() {
+        let cli = Cli::try_parse_from(["rune","acp","ack","--message-id","m1","--session","a"]).unwrap();
+        match cli.command {
+            Command::Acp { action: AcpAction::Ack { message_id, session } } => {
+                assert_eq!(message_id, "m1"); assert_eq!(session, "a");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 }
