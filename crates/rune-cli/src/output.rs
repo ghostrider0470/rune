@@ -499,7 +499,11 @@ impl fmt::Display for TemplateStartResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Session started from template.")?;
         writeln!(f, "  Session:  {}", self.session_id)?;
-        writeln!(f, "  Template: {} ({})", self.template_name, self.template_slug)?;
+        writeln!(
+            f,
+            "  Template: {} ({})",
+            self.template_name, self.template_slug
+        )?;
         writeln!(f, "  Mode:     {}", self.mode)?;
         write!(f, "  Status:   {}", self.status)
     }
@@ -1007,6 +1011,31 @@ impl fmt::Display for ChannelLogsResponse {
         }
         if let Some(note) = &self.note {
             write!(f, "  Note:     {note}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `logs`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsQueryResponse {
+    pub entries: Vec<serde_json::Value>,
+    pub message: String,
+}
+
+impl fmt::Display for LogsQueryResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Logs")?;
+        writeln!(f, "  Entries: {}", self.entries.len())?;
+        write!(f, "  Message: {}", self.message)?;
+        if !self.entries.is_empty() {
+            for entry in &self.entries {
+                write!(
+                    f,
+                    "\n  - {}",
+                    serde_json::to_string(entry).unwrap_or_else(|_| entry.to_string())
+                )?;
+            }
         }
         Ok(())
     }
@@ -3535,6 +3564,34 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Channel logs"));
         assert!(out.contains("No matching log files found."));
+    }
+
+    #[test]
+    fn render_logs_query_human() {
+        let response = LogsQueryResponse {
+            entries: vec![serde_json::json!({
+                "timestamp": "2026-03-20T09:00:00Z",
+                "level": "warn",
+                "message": "gateway restart pending"
+            })],
+            message: "1 log entry returned".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Logs"));
+        assert!(out.contains("Entries: 1"));
+        assert!(out.contains("gateway restart pending"));
+    }
+
+    #[test]
+    fn render_logs_query_json() {
+        let response = LogsQueryResponse {
+            entries: vec![],
+            message: "structured log query not yet aggregated".into(),
+        };
+        let out = render(&response, OutputFormat::Json);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["entries"], serde_json::json!([]));
+        assert_eq!(value["message"], "structured log query not yet aggregated");
     }
 
     #[test]

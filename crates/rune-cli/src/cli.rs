@@ -81,6 +81,21 @@ pub enum Command {
     Doctor,
     /// Show a compact operator dashboard summary.
     Dashboard,
+    /// Query structured gateway logs.
+    Logs {
+        /// Filter by log level.
+        #[arg(long)]
+        level: Option<String>,
+        /// Filter by source/component name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Maximum number of entries to return.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Lower-bound timestamp or relative cursor understood by the gateway.
+        #[arg(long)]
+        since: Option<String>,
+    },
     /// Manage cron jobs.
     Cron {
         #[command(subcommand)]
@@ -1024,6 +1039,37 @@ mod tests {
     fn parse_dashboard() {
         let cli = Cli::try_parse_from(["rune", "dashboard"]).unwrap();
         assert!(matches!(cli.command, Command::Dashboard));
+    }
+
+    #[test]
+    fn parse_logs() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "logs",
+            "--level",
+            "warn",
+            "--source",
+            "gateway",
+            "--limit",
+            "25",
+            "--since",
+            "2026-03-20T09:00:00Z",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Logs {
+                level,
+                source,
+                limit,
+                since,
+            } => {
+                assert_eq!(level.as_deref(), Some("warn"));
+                assert_eq!(source.as_deref(), Some("gateway"));
+                assert_eq!(limit, Some(25));
+                assert_eq!(since.as_deref(), Some("2026-03-20T09:00:00Z"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]
@@ -2950,14 +2996,8 @@ mod tests {
 
     #[test]
     fn parse_message_unpin() {
-        let cli = Cli::try_parse_from([
-            "rune",
-            "message",
-            "unpin",
-            "--message-id",
-            "msg-77",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "message", "unpin", "--message-id", "msg-77"]).unwrap();
         match cli.command {
             Command::Message {
                 action:
@@ -2987,10 +3027,15 @@ mod tests {
 
     #[test]
     fn message_pin_rejects_unpin_flag() {
-        assert!(
-            Cli::try_parse_from(["rune", "message", "pin", "--message-id", "msg-77", "--unpin"])
-                .is_err()
-        );
+        assert!(Cli::try_parse_from([
+            "rune",
+            "message",
+            "pin",
+            "--message-id",
+            "msg-77",
+            "--unpin"
+        ])
+        .is_err());
     }
 
     #[test]
