@@ -24,9 +24,10 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 pub use cli::Cli;
 use cli::{
     AgentsAction, ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell,
-    ConfigAction, CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
-    MessageTagAction, MessageThreadAction, MessageVoiceAction, ModelsAction, RemindersAction,
-    SessionsAction, SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
+    ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction, LogsArgs,
+    MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
+    ModelsAction, RemindersAction, SessionsAction, SkillsAction, SystemAction,
+    SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -867,6 +868,29 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.gateway_discover().await?;
                 println!("{}", render(&result, format));
             }
+            GatewayAction::Logs(LogsArgs {
+                level,
+                source,
+                limit,
+                since,
+            }) => {
+                let result = client
+                    .logs_query(
+                        level.as_deref(),
+                        source.as_deref(),
+                        limit,
+                        since.as_deref(),
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::Doctor { action } => {
+                let result = match action.unwrap_or(DoctorAction::Run) {
+                    DoctorAction::Run => client.doctor_run().await?,
+                    DoctorAction::Results => client.doctor_results().await?,
+                };
+                println!("{}", render(&result, format));
+            }
             GatewayAction::Call {
                 method,
                 path,
@@ -906,12 +930,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             let result = client.health().await?;
             println!("{}", render(&result, format));
         }
-        Command::Logs {
+        Command::Logs(LogsArgs {
             level,
             source,
             limit,
             since,
-        } => {
+        }) => {
             let result = client
                 .logs_query(
                     level.as_deref(),
@@ -922,21 +946,12 @@ pub async fn run(cli: Cli) -> Result<()> {
                 .await?;
             println!("{}", render(&result, format));
         }
-        Command::Doctor => {
-            let ws_root = dirs::home_dir()
-                .map(|h| h.join(".rune/workspace"))
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let results =
-                doctor::run_all_checks(None, Some(&cli.gateway_url), Some(&ws_root)).await;
-            let output = doctor::format_results(&results);
-            if matches!(format, OutputFormat::Json) {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&results).unwrap_or_default()
-                );
-            } else {
-                print!("{output}");
-            }
+        Command::Doctor { action } => {
+            let result = match action.unwrap_or(DoctorAction::Run) {
+                DoctorAction::Run => client.doctor_run().await?,
+                DoctorAction::Results => client.doctor_results().await?,
+            };
+            println!("{}", render(&result, format));
         }
         Command::Dashboard => {
             let gateway = client.status().await?;

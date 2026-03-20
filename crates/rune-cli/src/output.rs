@@ -73,33 +73,46 @@ impl fmt::Display for HealthResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorCheck {
     pub name: String,
-    pub passed: bool,
-    pub detail: String,
+    pub status: String,
+    pub message: String,
 }
 
 impl fmt::Display for DoctorCheck {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let icon = if self.passed { "✓" } else { "✗" };
-        write!(f, "  {icon} {}: {}", self.name, self.detail)
+        let icon = match self.status.as_str() {
+            "pass" => "✓",
+            "warn" => "!",
+            "fail" => "✗",
+            _ => "•",
+        };
+        write!(f, "  {icon} {} [{}]: {}", self.name, self.status, self.message)
     }
 }
 
 /// Full doctor report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
+    pub overall: String,
     pub checks: Vec<DoctorCheck>,
+    pub run_at: String,
 }
 
 impl fmt::Display for DoctorReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Doctor Report")?;
         writeln!(f, "─────────────")?;
+        writeln!(f, "Overall: {}", self.overall)?;
+        writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
             writeln!(f, "{check}")?;
         }
-        let passed = self.checks.iter().filter(|c| c.passed).count();
+        let passed = self
+            .checks
+            .iter()
+            .filter(|check| check.status == "pass")
+            .count();
         let total = self.checks.len();
-        write!(f, "\n{passed}/{total} checks passed")
+        write!(f, "\nChecks: {passed}/{total} passing")
     }
 }
 
@@ -1028,17 +1041,38 @@ impl fmt::Display for LogsQueryResponse {
         writeln!(f, "Logs")?;
         writeln!(f, "  Entries: {}", self.entries.len())?;
         write!(f, "  Message: {}", self.message)?;
-        if !self.entries.is_empty() {
-            for entry in &self.entries {
-                write!(
-                    f,
-                    "\n  - {}",
-                    serde_json::to_string(entry).unwrap_or_else(|_| entry.to_string())
-                )?;
-            }
+        for entry in &self.entries {
+            let rendered = format_log_entry(entry);
+            write!(f, "\n  - {rendered}")?;
         }
         Ok(())
     }
+}
+
+fn format_log_entry(entry: &serde_json::Value) -> String {
+    let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_str);
+    let level = entry.get("level").and_then(serde_json::Value::as_str);
+    let source = entry.get("source").and_then(serde_json::Value::as_str);
+    let message = entry.get("message").and_then(serde_json::Value::as_str);
+
+    if timestamp.is_some() || level.is_some() || source.is_some() || message.is_some() {
+        let mut parts = Vec::new();
+        if let Some(timestamp) = timestamp {
+            parts.push(timestamp.to_string());
+        }
+        if let Some(level) = level {
+            parts.push(level.to_uppercase());
+        }
+        if let Some(source) = source {
+            parts.push(format!("source={source}"));
+        }
+        if let Some(message) = message {
+            parts.push(message.to_string());
+        }
+        return parts.join(" | ");
+    }
+
+    serde_json::to_string(entry).unwrap_or_else(|_| entry.to_string())
 }
 
 /// Per-provider model configuration detail.
@@ -2936,21 +2970,25 @@ mod tests {
     #[test]
     fn render_doctor_report() {
         let r = DoctorReport {
+            overall: "degraded".into(),
             checks: vec![
                 DoctorCheck {
                     name: "config".into(),
-                    passed: true,
-                    detail: "valid".into(),
+                    status: "pass".into(),
+                    message: "valid".into(),
                 },
                 DoctorCheck {
                     name: "db".into(),
-                    passed: false,
-                    detail: "unreachable".into(),
+                    status: "fail".into(),
+                    message: "unreachable".into(),
                 },
             ],
+            run_at: "2026-03-20T09:30:00Z".into(),
         };
         let out = render(&r, OutputFormat::Human);
-        assert!(out.contains("1/2 checks passed"));
+        assert!(out.contains("Overall: degraded"));
+        assert!(out.contains("Checks: 1/2 passing"));
+        assert!(out.contains("db [fail]: unreachable"));
     }
 
     #[test]
@@ -3572,6 +3610,7 @@ mod tests {
             entries: vec![serde_json::json!({
                 "timestamp": "2026-03-20T09:00:00Z",
                 "level": "warn",
+                "source": "gateway",
                 "message": "gateway restart pending"
             })],
             message: "1 log entry returned".into(),
@@ -3579,7 +3618,7 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Logs"));
         assert!(out.contains("Entries: 1"));
-        assert!(out.contains("gateway restart pending"));
+        assert!(out.contains("2026-03-20T09:00:00Z | WARN | source=gateway | gateway restart pending"));
     }
 
     #[test]
