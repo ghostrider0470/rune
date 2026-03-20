@@ -267,6 +267,64 @@ pub struct LogsArgs {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum LogsAction {
+    /// Query structured gateway logs with optional filters.
+    Query(LogsArgs),
+    /// Tail (follow) live gateway log output.
+    Tail {
+        /// Filter by log level.
+        #[arg(long)]
+        level: Option<String>,
+        /// Filter by source/component name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Enable continuous follow mode (stream new entries as they arrive).
+        #[arg(long, short)]
+        follow: bool,
+        /// Maximum number of initial entries to show before following.
+        #[arg(long, default_value_t = 50)]
+        lines: usize,
+    },
+    /// Full-text search across historical log entries.
+    Search {
+        /// Query text to search for in log content.
+        query: String,
+        /// Filter by log level.
+        #[arg(long)]
+        level: Option<String>,
+        /// Filter by source/component name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Maximum number of results to return.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Export logs to a file or stdout in a specified format.
+    Export {
+        /// Output format: `json`, `csv`, or `text`.
+        #[arg(long, default_value = "json")]
+        format: String,
+        /// Filter by log level.
+        #[arg(long)]
+        level: Option<String>,
+        /// Filter by source/component name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Lower-bound timestamp.
+        #[arg(long)]
+        since: Option<String>,
+        /// Upper-bound timestamp.
+        #[arg(long)]
+        until: Option<String>,
+        /// Maximum number of entries to export.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Output file path (default: stdout).
+        #[arg(long, short)]
+        output: Option<String>,
+    },
+}
+#[derive(Debug, Subcommand)]
 pub enum GatewayAction {
     /// Query gateway status.
     Status,
@@ -1281,10 +1339,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_logs() {
+    fn parse_logs_query() {
         let cli = Cli::try_parse_from([
             "rune",
             "logs",
+            "query",
             "--level",
             "warn",
             "--source",
@@ -1296,16 +1355,106 @@ mod tests {
         ])
         .unwrap();
         match cli.command {
-            Command::Logs(LogsArgs {
-                level,
-                source,
-                limit,
-                since,
-            }) => {
+            Command::Logs {
+                action:
+                    LogsAction::Query(LogsArgs {
+                        level,
+                        source,
+                        limit,
+                        since,
+                    }),
+            } => {
                 assert_eq!(level.as_deref(), Some("warn"));
                 assert_eq!(source.as_deref(), Some("gateway"));
                 assert_eq!(limit, Some(25));
                 assert_eq!(since.as_deref(), Some("2026-03-20T09:00:00Z"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_tail() {
+        let cli =
+            Cli::try_parse_from(["rune", "logs", "tail", "--follow", "--level", "error"]).unwrap();
+        match cli.command {
+            Command::Logs {
+                action:
+                    LogsAction::Tail {
+                        level,
+                        source,
+                        follow,
+                        lines,
+                    },
+            } => {
+                assert_eq!(level.as_deref(), Some("error"));
+                assert_eq!(source, None);
+                assert!(follow);
+                assert_eq!(lines, 50);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_search() {
+        let cli = Cli::try_parse_from([
+            "rune", "logs", "search", "panic", "--level", "error", "--limit", "10",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Logs {
+                action:
+                    LogsAction::Search {
+                        query,
+                        level,
+                        source,
+                        limit,
+                    },
+            } => {
+                assert_eq!(query, "panic");
+                assert_eq!(level.as_deref(), Some("error"));
+                assert_eq!(source, None);
+                assert_eq!(limit, 10);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_logs_export() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "logs",
+            "export",
+            "--format",
+            "csv",
+            "--since",
+            "2026-03-19",
+            "-o",
+            "out.csv",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Logs {
+                action:
+                    LogsAction::Export {
+                        format,
+                        level,
+                        source,
+                        since,
+                        until,
+                        limit,
+                        output,
+                    },
+            } => {
+                assert_eq!(format, "csv");
+                assert_eq!(level, None);
+                assert_eq!(source, None);
+                assert_eq!(since.as_deref(), Some("2026-03-19"));
+                assert_eq!(until, None);
+                assert_eq!(limit, None);
+                assert_eq!(output.as_deref(), Some("out.csv"));
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -4042,5 +4191,96 @@ mod tests {
     fn parse_configure() {
         let cli = Cli::try_parse_from(["rune", "configure"]).unwrap();
         assert!(matches!(cli.command, Command::Configure));
+    }
+}
+
+#[cfg(test)]
+mod subagent_cli_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parse_agents_spawn() {
+        let cli = Cli::try_parse_from(["rune","agents","spawn","--parent","sess-1","--task","do stuff"]).unwrap();
+        match cli.command {
+            Command::Agents { action: AgentsAction::Spawn { parent, task, mode, policy, provider } } => {
+                assert_eq!(parent, "sess-1"); assert_eq!(task, "do stuff");
+                assert_eq!(mode, "default"); assert_eq!(policy, "inherit"); assert!(provider.is_none());
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_steer() {
+        let cli = Cli::try_parse_from(["rune","agents","steer","child-1","--message","focus"]).unwrap();
+        match cli.command {
+            Command::Agents { action: AgentsAction::Steer { id, message } } => {
+                assert_eq!(id, "child-1"); assert_eq!(message, "focus");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agents_kill() {
+        let cli = Cli::try_parse_from(["rune","agents","kill","child-1","--reason","timeout"]).unwrap();
+        match cli.command {
+            Command::Agents { action: AgentsAction::Kill { id, reason } } => {
+                assert_eq!(id, "child-1"); assert_eq!(reason.as_deref(), Some("timeout"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_run() {
+        let cli = Cli::try_parse_from(["rune","agent","run","--session","s1","--message","go"]).unwrap();
+        match cli.command {
+            Command::Agent { action: AgentAction::Run { session, message, max_turns, wait } } => {
+                assert_eq!(session, "s1"); assert_eq!(message, "go");
+                assert_eq!(max_turns, 1); assert!(wait);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_result() {
+        let cli = Cli::try_parse_from(["rune","agent","result","--session","s1","--turn","t1"]).unwrap();
+        match cli.command {
+            Command::Agent { action: AgentAction::Result { session, turn } } => {
+                assert_eq!(session, "s1"); assert_eq!(turn, "t1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_acp_send() {
+        let cli = Cli::try_parse_from(["rune","acp","send","--from","a","--to","b","--payload",r#"{"x":1}"#]).unwrap();
+        match cli.command {
+            Command::Acp { action: AcpAction::Send { from, to, payload } } => {
+                assert_eq!(from, "a"); assert_eq!(to, "b"); assert_eq!(payload, r#"{"x":1}"#);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_acp_inbox() {
+        let cli = Cli::try_parse_from(["rune","acp","inbox","--session","a"]).unwrap();
+        assert!(matches!(cli.command, Command::Acp { action: AcpAction::Inbox { .. } }));
+    }
+
+    #[test]
+    fn parse_acp_ack() {
+        let cli = Cli::try_parse_from(["rune","acp","ack","--message-id","m1","--session","a"]).unwrap();
+        match cli.command {
+            Command::Acp { action: AcpAction::Ack { message_id, session } } => {
+                assert_eq!(message_id, "m1"); assert_eq!(session, "a");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 }

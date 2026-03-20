@@ -5630,3 +5630,87 @@ mod tests {
         assert!(out.contains("wizard completed"));
     }
 }
+
+#[cfg(test)]
+mod subagent_output_tests {
+    use super::*;
+
+    #[test]
+    fn render_agent_spawn_human() {
+        let r = AgentSpawnResponse { session_id:"c1".into(), parent_session_id:"p1".into(), mode:"coding".into(), policy:"inherit".into(), status:"spawned".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Subagent spawned.")); assert!(out.contains("c1")); assert!(out.contains("p1"));
+    }
+
+    #[test]
+    fn render_agent_spawn_json() {
+        let r = AgentSpawnResponse { session_id:"c1".into(), parent_session_id:"p1".into(), mode:"coding".into(), policy:"inherit".into(), status:"spawned".into() };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["session_id"], "c1"); assert_eq!(v["parent_session_id"], "p1");
+    }
+
+    #[test]
+    fn render_agent_steer_accepted() {
+        let r = AgentSteerResponse { session_id:"c1".into(), accepted:true, detail:"ok".into() };
+        assert!(render(&r, OutputFormat::Human).contains("Instruction delivered to c1."));
+    }
+
+    #[test]
+    fn render_agent_steer_rejected() {
+        let r = AgentSteerResponse { session_id:"c1".into(), accepted:false, detail:"no".into() };
+        assert!(render(&r, OutputFormat::Human).contains("Steer rejected"));
+    }
+
+    #[test]
+    fn render_agent_kill_ok() {
+        let r = AgentKillResponse { session_id:"c1".into(), killed:true, detail:"done".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("terminated")); assert!(out.contains("c1"));
+    }
+
+    #[test]
+    fn render_agent_kill_fail() {
+        let r = AgentKillResponse { session_id:"c1".into(), killed:false, detail:"nope".into() };
+        assert!(render(&r, OutputFormat::Human).contains("Kill failed"));
+    }
+
+    #[test]
+    fn render_agent_run_output() {
+        let r = AgentRunResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"completed".into(), output:Some("Done.".into()) };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Agent turn completed.")); assert!(out.contains("t1")); assert!(out.contains("Done."));
+    }
+
+    #[test]
+    fn render_agent_run_no_output() {
+        let r = AgentRunResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"running".into(), output:None };
+        assert!(!render(&r, OutputFormat::Human).contains("Output:"));
+    }
+
+    #[test]
+    fn render_agent_result_output() {
+        let r = AgentResultResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"completed".into(), output:Some("Res".into()) };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Turn result:")); assert!(out.contains("Res"));
+    }
+
+    #[test]
+    fn render_acp_send_delivered() {
+        let r = AcpSendResponse { message_id:"m1".into(), from:"a".into(), to:"b".into(), delivered:true };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("ACP message sent.")); assert!(out.contains("delivered"));
+    }
+
+    #[test]
+    fn render_acp_send_queued() {
+        let r = AcpSendResponse { message_id:"m1".into(), from:"a".into(), to:"b".into(), delivered:false };
+        assert!(render(&r, OutputFormat::Human).contains("queued"));
+    }
+
+    #[test]
+    fn render_acp_ack_ok() {
+        let r = AcpAckResponse { message_id:"m1".into(), acknowledged:true };
+        assert!(render(&r, OutputFormat::Human).contains("m1"));
+    }
+}
