@@ -5384,3 +5384,61 @@ impl GatewayClient {
     }
 
 }
+
+#[cfg(test)]
+mod config_admin_tests {
+    use super::*;
+    use wiremock::{matchers, Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn config_reload_ok() {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/config/reload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "reloaded": true,
+                "note": "ok"
+            })))
+            .mount(&mock)
+            .await;
+        let client = GatewayClient::new(mock.uri());
+        let resp = client.config_reload().await.unwrap();
+        assert!(resp.reloaded);
+    }
+
+    #[tokio::test]
+    async fn config_diff_ok() {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path("/config/diff"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "has_changes": false,
+                "diff": []
+            })))
+            .mount(&mock)
+            .await;
+        let client = GatewayClient::new(mock.uri());
+        let resp = client.config_diff().await.unwrap();
+        assert!(!resp.has_changes);
+    }
+
+    #[tokio::test]
+    async fn config_env_ok() {
+        let mock = MockServer::start().await;
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path("/config/env"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "overrides": [{
+                    "variable": "RUNE__GATEWAY__PORT",
+                    "value": "9090",
+                    "config_key": "gateway.port"
+                }]
+            })))
+            .mount(&mock)
+            .await;
+        let client = GatewayClient::new(mock.uri());
+        let resp = client.config_env().await.unwrap();
+        assert_eq!(resp.overrides.len(), 1);
+        assert_eq!(resp.overrides[0].variable, "RUNE__GATEWAY__PORT");
+    }
+}
