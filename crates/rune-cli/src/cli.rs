@@ -315,6 +315,29 @@ pub enum SessionsAction {
         /// Session ID to use as tree root.
         id: String,
     },
+    /// Delete a single session and its transcript history.
+    Delete {
+        /// Session ID to delete.
+        id: String,
+    },
+    /// Bulk-delete sessions matching filters (completed, stale, by kind).
+    Cleanup {
+        /// Only delete sessions with this status (e.g. "completed", "failed", "idle").
+        #[arg(long)]
+        status: Option<String>,
+        /// Only delete sessions of this kind (e.g. "direct", "subagent", "scheduled").
+        #[arg(long)]
+        kind: Option<String>,
+        /// Only delete sessions inactive for at least N minutes.
+        #[arg(long = "older-than")]
+        older_than_minutes: Option<u64>,
+        /// Preview which sessions would be deleted without removing them.
+        #[arg(long)]
+        dry_run: bool,
+        /// Maximum number of sessions to delete.
+        #[arg(long, default_value_t = 100)]
+        limit: u64,
+    },
 }
 
 #[derive(Debug, Subcommand)]

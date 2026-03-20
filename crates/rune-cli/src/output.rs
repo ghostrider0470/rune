@@ -1668,6 +1668,43 @@ impl fmt::Display for ActionResult {
     }
 }
 
+/// Result of a bulk session cleanup operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCleanupResponse {
+    pub deleted: usize,
+    pub failed: usize,
+    pub dry_run: bool,
+    pub sessions: Vec<SessionCleanupItem>,
+}
+
+/// Individual session affected by a cleanup operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCleanupItem {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub result: String,
+}
+
+impl fmt::Display for SessionCleanupResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.dry_run {
+            writeln!(f, "Dry run — {} session(s) would be deleted:", self.sessions.len())?;
+        } else {
+            writeln!(f, "Cleanup complete — {} deleted, {} failed", self.deleted, self.failed)?;
+        }
+        for s in &self.sessions {
+            let icon = match s.result.as_str() {
+                "deleted" => "✓",
+                "would_delete" => "~",
+                _ => "✗",
+            };
+            writeln!(f, "  {icon} {} ({}, {})", s.id, s.kind, s.status)?;
+        }
+        Ok(())
+    }
+}
+
 /// Scheduler status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronStatusResponse {

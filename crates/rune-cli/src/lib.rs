@@ -1113,6 +1113,87 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.sessions_tree(&id).await?;
                 println!("{}", render(&result, format));
             }
+            SessionsAction::Delete { id } => {
+                let result = client.session_delete(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            SessionsAction::Cleanup {
+                status,
+                kind,
+                older_than_minutes,
+                dry_run,
+                limit,
+            } => {
+                use crate::output::{SessionCleanupItem, SessionCleanupResponse};
+
+                // List sessions matching the filters.
+                let list = client
+                    .sessions_list(older_than_minutes, None, kind.as_deref(), None, limit)
+                    .await?;
+
+                // Apply client-side status filter (gateway list endpoint doesn't filter by status).
+                let candidates: Vec<_> = list
+                    .sessions
+                    .into_iter()
+                    .filter(|s| {
+                        status
+                            .as_ref()
+                            .is_none_or(|f| s.status.eq_ignore_ascii_case(f))
+                    })
+                    .collect();
+
+                if dry_run {
+                    let items: Vec<SessionCleanupItem> = candidates
+                        .iter()
+                        .map(|s| SessionCleanupItem {
+                            id: s.id.clone(),
+                            kind: s.kind.clone(),
+                            status: s.status.clone(),
+                            result: "would_delete".to_string(),
+                        })
+                        .collect();
+                    let resp = SessionCleanupResponse {
+                        deleted: 0,
+                        failed: 0,
+                        dry_run: true,
+                        sessions: items,
+                    };
+                    println!("{}", render(&resp, format));
+                } else {
+                    let mut items = Vec::new();
+                    let mut deleted = 0usize;
+                    let mut failed = 0usize;
+                    for s in &candidates {
+                        match client.session_delete(&s.id).await {
+                            Ok(r) if r.success => {
+                                deleted += 1;
+                                items.push(SessionCleanupItem {
+                                    id: s.id.clone(),
+                                    kind: s.kind.clone(),
+                                    status: s.status.clone(),
+                                    result: "deleted".to_string(),
+                                });
+                            }
+                            _ => {
+                                failed += 1;
+                                items.push(SessionCleanupItem {
+                                    id: s.id.clone(),
+                                    kind: s.kind.clone(),
+                                    status: s.status.clone(),
+                                    result: "failed".to_string(),
+                                });
+                            }
+                        }
+                    }
+                    let resp = SessionCleanupResponse {
+                        deleted,
+                        failed,
+                        dry_run: false,
+                        sessions: items,
+                    };
+                    println!("{}", render(&resp, format));
+                }
+            }
         },
         Command::Agents { action } => match action {
             AgentsAction::List {
