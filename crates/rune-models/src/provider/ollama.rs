@@ -74,6 +74,12 @@ impl OllamaProvider {
         self.inner.url()
     }
 
+    /// Returns the native Ollama API base URL without the `/v1` suffix.
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.ollama_base
+    }
+
     /// Discover locally available models via the Ollama `/api/tags` endpoint.
     ///
     /// Returns a list of model names installed on the Ollama instance.
@@ -117,6 +123,8 @@ impl OllamaProvider {
             ╭─────────────────────────────────────────────────────────────╮\n\
             │  Ollama is running at {base:<37} │\n\
             │  but no models are pulled yet.                             │\n\
+            │  Rune will start, but model requests will fail until you   │\n\
+            │  pull one or configure a different provider.               │\n\
             │                                                            │\n\
             │  Quick start — pull a model:                               │\n\
             │                                                            │\n\
@@ -124,8 +132,8 @@ impl OllamaProvider {
             │    ollama pull llama3.1:8b     (4.7 GB, stronger reasoning) │\n\
             │    ollama pull qwen2.5:7b     (4.4 GB, multilingual)       │\n\
             │                                                            │\n\
-            │  After pulling, restart Rune — it will auto-detect the     │\n\
-            │  model and configure itself.                               │\n\
+            │  After pulling, restart Rune — it will auto-select the     │\n\
+            │  model with zero additional config.                        │\n\
             ╰─────────────────────────────────────────────────────────────╯"
         )
     }
@@ -541,6 +549,16 @@ mod tests {
     }
 
     #[test]
+    fn guidance_explains_requests_will_fail_until_model_is_pulled() {
+        let provider = OllamaProvider::new();
+        let guidance = provider.empty_model_guidance();
+        assert!(
+            guidance.contains("model requests will fail"),
+            "should explain the operational consequence"
+        );
+    }
+
+    #[test]
     fn guidance_shows_custom_endpoint() {
         let provider = OllamaProvider::with_base_url("http://192.168.1.50:11434/v1");
         let guidance = provider.empty_model_guidance();
@@ -548,5 +566,11 @@ mod tests {
             guidance.contains("192.168.1.50:11434"),
             "should show the actual Ollama endpoint in guidance"
         );
+    }
+
+    #[test]
+    fn base_url_returns_native_ollama_endpoint() {
+        let provider = OllamaProvider::with_base_url("http://192.168.1.50:11434/v1");
+        assert_eq!(provider.base_url(), "http://192.168.1.50:11434");
     }
 }
