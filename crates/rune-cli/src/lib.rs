@@ -970,6 +970,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.skills_list().await?;
                 println!("{}", render(&result, format));
             }
+            SkillsAction::Info { name } => {
+                let result = client.skills_info(&name).await?;
+                println!("{}", render(&result, format));
+            }
             SkillsAction::Check => {
                 let result = client.skills_check().await?;
                 println!("{}", render(&result, format));

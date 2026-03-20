@@ -557,6 +557,27 @@ impl fmt::Display for SkillListResponse {
     }
 }
 
+/// Response for `rune skills info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillInfoResponse {
+    #[serde(flatten)]
+    pub skill: SkillSummary,
+}
+
+impl fmt::Display for SkillInfoResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Skill: {}", self.skill.name)?;
+        writeln!(f, "  Enabled: {}", self.skill.enabled)?;
+        writeln!(f, "  Description: {}", self.skill.description)?;
+        writeln!(f, "  Source: {}", self.skill.source_dir)?;
+        write!(
+            f,
+            "  Binary: {}",
+            self.skill.binary_path.as_deref().unwrap_or("-")
+        )
+    }
+}
+
 /// Response for `rune skills check`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillCheckResponse {
@@ -3181,6 +3202,44 @@ mod tests {
             parsed["skills"][0]["binary_path"],
             "/data/skills/alpha/run.sh"
         );
+    }
+
+    #[test]
+    fn render_skill_info_human() {
+        let response = SkillInfoResponse {
+            skill: SkillSummary {
+                name: "alpha".into(),
+                description: "First skill".into(),
+                enabled: true,
+                source_dir: "/data/skills/alpha".into(),
+                binary_path: Some("/data/skills/alpha/run.sh".into()),
+            },
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Skill: alpha"));
+        assert!(out.contains("Enabled: true"));
+        assert!(out.contains("Description: First skill"));
+        assert!(out.contains("Source: /data/skills/alpha"));
+        assert!(out.contains("Binary: /data/skills/alpha/run.sh"));
+    }
+
+    #[test]
+    fn render_skill_info_json() {
+        let response = SkillInfoResponse {
+            skill: SkillSummary {
+                name: "alpha".into(),
+                description: "First skill".into(),
+                enabled: true,
+                source_dir: "/data/skills/alpha".into(),
+                binary_path: Some("/data/skills/alpha/run.sh".into()),
+            },
+        };
+        let out = render(&response, OutputFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["name"], "alpha");
+        assert_eq!(parsed["enabled"], true);
+        assert_eq!(parsed["source_dir"], "/data/skills/alpha");
+        assert_eq!(parsed["binary_path"], "/data/skills/alpha/run.sh");
     }
 
     #[test]

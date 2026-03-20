@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use reqwest::Method;
+use reqwest::StatusCode;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::json;
 use toml_edit::{DocumentMut, Item, Table, Value};
@@ -19,8 +20,8 @@ use crate::output::{
     ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
     SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
-    SessionTreeNode, SessionTreeResponse, SkillCheckResponse, SkillListResponse, SkillSummary,
-    StatusResponse,
+    SessionTreeNode, SessionTreeResponse, SkillCheckResponse, SkillInfoResponse,
+    SkillListResponse, SkillSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -219,6 +220,38 @@ impl GatewayClient {
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
+    }
+
+    /// `GET /skills/{name}` with fallback-to-list if detail is unavailable.
+    pub async fn skills_info(&self, name: &str) -> Result<SkillInfoResponse> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/skills/{name}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            return resp
+                .json::<SkillInfoResponse>()
+                .await
+                .context("invalid JSON from /skills/{name}");
+        }
+
+        if !matches!(
+            resp.status(),
+            StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+        ) {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+
+        let skills = self.skills_list().await?;
+        let skill = skills
+            .skills
+            .into_iter()
+            .find(|skill| skill.name == name)
+            .ok_or_else(|| anyhow::anyhow!("skill not found: {name}"))?;
+        Ok(SkillInfoResponse { skill })
     }
 
     /// `POST /skills/reload`
@@ -2887,6 +2920,65 @@ mod tests {
         assert_eq!(resp.discovered, 4);
         assert_eq!(resp.loaded, 3);
         assert_eq!(resp.removed, 1);
+    }
+
+    #[tokio::test]
+    async fn skills_info_falls_back_to_list_when_detail_route_is_absent() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/skills/alpha"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/skills"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "name": "alpha",
+                    "description": "First skill",
+                    "enabled": true,
+                    "source_dir": "/data/skills/alpha",
+                    "binary_path": "/data/skills/alpha/run.sh"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.skills_info("alpha").await.unwrap();
+        assert_eq!(resp.skill.name, "alpha");
+        assert!(resp.skill.enabled);
+        assert_eq!(
+            resp.skill.binary_path.as_deref(),
+            Some("/data/skills/alpha/run.sh")
+        );
+    }
+
+    #[tokio::test]
+    async fn skills_info_errors_when_skill_is_missing() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/skills/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/skills"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "name": "alpha",
+                    "description": "First skill",
+                    "enabled": true,
+                    "source_dir": "/data/skills/alpha",
+                    "binary_path": "/data/skills/alpha/run.sh"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let err = client.skills_info("missing").await.unwrap_err();
+        assert!(err.to_string().contains("skill not found: missing"));
     }
 
     #[tokio::test]
