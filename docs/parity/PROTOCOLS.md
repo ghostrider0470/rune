@@ -1361,3 +1361,30 @@ This document does not require:
 - in-process plugin loading in phase 1
 
 What it does require is preservation of the behavioral contract seen by operators, channels, tools, and tests.
+
+---
+
+## Issue #73 subagent control transport gap
+
+The current client-visible `rune agents` surface supports:
+
+- `list`
+- `show`
+- `status`
+- `tree`
+- `templates`
+- `start --template`
+
+`steer` and `kill` are not parity-shipped yet.
+
+The blocker is not absence of all internal lifecycle logic. Rune already has internal subagent lifecycle/session transitions, but it does **not** yet expose a supported client-facing transport contract for interactive subagent control. Until that transport exists, parity status should be treated as:
+
+- inspectable: yes
+- startable: yes
+- steerable through a supported public transport: no
+- kill/cancel through a supported public transport: no
+
+Any future parity claim for `steer` or `kill` must include both:
+
+1. a callable client-facing transport surface, and
+2. operator-visible success/failure semantics for those actions.
