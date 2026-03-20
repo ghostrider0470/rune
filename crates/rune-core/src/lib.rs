@@ -216,6 +216,20 @@ pub enum TranscriptItem {
         session_id: SessionId,
         summary: String,
     },
+    SystemInstruction {
+        instruction: String,
+        source: String,
+    },
+    ChannelDeliveryNote {
+        channel: String,
+        direction: String,
+        summary: String,
+    },
+    CronHeartbeatNote {
+        job_id: Option<uuid::Uuid>,
+        trigger_kind: String,
+        summary: String,
+    },
 }
 
 /// What triggered a turn within a session.

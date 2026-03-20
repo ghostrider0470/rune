@@ -95,6 +95,8 @@ fn new_approval() -> NewApproval {
         reason: "dangerous tool".into(),
         presented_payload: json!({"tool": "rm"}),
         created_at: now(),
+        handle_ref: None,
+        host_ref: None,
     }
 }
 

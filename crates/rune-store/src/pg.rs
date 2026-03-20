@@ -778,6 +778,8 @@ impl ToolApprovalPolicyRepo for PgToolApprovalPolicyRepo {
             reason: tool_name.to_string(),
             presented_payload: serde_json::json!({"decision": decision}),
             created_at: now,
+            handle_ref: None,
+            host_ref: None,
         };
 
         let row: ApprovalRow = diesel::insert_into(approvals::table)

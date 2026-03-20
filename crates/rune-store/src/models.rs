@@ -211,6 +211,8 @@ pub struct ApprovalRow {
     pub decided_at: Option<DateTime<Utc>>,
     pub presented_payload: serde_json::Value,
     pub created_at: DateTime<Utc>,
+    pub handle_ref: Option<String>,
+    pub host_ref: Option<String>,
 }
 
 /// Insert payload for a new approval.
@@ -224,6 +226,8 @@ pub struct NewApproval {
     pub reason: String,
     pub presented_payload: serde_json::Value,
     pub created_at: DateTime<Utc>,
+    pub handle_ref: Option<String>,
+    pub host_ref: Option<String>,
 }
 
 // ── Tool executions ───────────────────────────────────────────────────

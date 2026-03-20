@@ -581,6 +581,8 @@ async fn approval_create_find_decide() {
             reason: "destructive operation".to_string(),
             presented_payload: serde_json::json!({"command": "rm -rf /"}),
             created_at: now,
+            handle_ref: None,
+            host_ref: None,
         })
         .await
         .unwrap();

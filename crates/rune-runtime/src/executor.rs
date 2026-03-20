@@ -664,6 +664,8 @@ impl TurnExecutor {
                                         &call.arguments,
                                     ),
                                     created_at: Utc::now(),
+                                    handle_ref: None,
+                                    host_ref: None,
                                 })
                                 .await?;
 
@@ -829,6 +831,9 @@ fn transcript_item_kind(item: &TranscriptItem) -> &'static str {
         TranscriptItem::ApprovalResponse { .. } => "approval_response",
         TranscriptItem::StatusNote { .. } => "status_note",
         TranscriptItem::SubagentResult { .. } => "subagent_result",
+        TranscriptItem::SystemInstruction { .. } => "system_instruction",
+        TranscriptItem::ChannelDeliveryNote { .. } => "channel_delivery_note",
+        TranscriptItem::CronHeartbeatNote { .. } => "cron_heartbeat_note",
     }
 }
 

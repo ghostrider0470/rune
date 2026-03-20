@@ -83,6 +83,8 @@ table! {
         decided_at -> Nullable<Timestamptz>,
         presented_payload -> Jsonb,
         created_at -> Timestamptz,
+        handle_ref -> Nullable<Text>,
+        host_ref -> Nullable<Text>,
     }
 }
 

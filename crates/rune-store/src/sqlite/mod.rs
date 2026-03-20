@@ -188,6 +188,8 @@ fn row_to_approval(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApprovalRow> {
         decided_at: parse_dt_opt(row.get(6)?),
         presented_payload: parse_json(&row.get::<_, String>(7)?),
         created_at: parse_dt(&row.get::<_, String>(8)?),
+        handle_ref: row.get(9)?,
+        host_ref: row.get(10)?,
     })
 }
 
@@ -259,7 +261,7 @@ const TRANSCRIPT_COLS: &str = "id, session_id, turn_id, seq, kind, payload, crea
 const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload_kind, delivery_mode, payload, created_at, updated_at, claimed_at";
 const JOB_RUN_COLS: &str =
     "id, job_id, started_at, finished_at, trigger_kind, status, output, created_at";
-const APPROVAL_COLS: &str = "id, subject_type, subject_id, reason, decision, decided_by, decided_at, presented_payload, created_at";
+const APPROVAL_COLS: &str = "id, subject_type, subject_id, reason, decision, decided_by, decided_at, presented_payload, created_at, handle_ref, host_ref";
 const TOOL_EXEC_COLS: &str = "id, tool_call_id, session_id, turn_id, tool_name, arguments, status, result_summary, error_summary, started_at, ended_at, approval_id, execution_mode";
 const PROCESS_HANDLE_COLS: &str =
     "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at";
@@ -920,12 +922,13 @@ impl ApprovalRepo for SqliteApprovalRepo {
     async fn create(&self, a: NewApproval) -> Result<ApprovalRow, StoreError> {
         self.conn.call(move |conn| {
             conn.execute(
-                &format!("INSERT INTO approvals ({APPROVAL_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+                &format!("INSERT INTO approvals ({APPROVAL_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
                 rusqlite::params![
                     a.id.to_string(), a.subject_type, a.subject_id.to_string(), a.reason,
                     Option::<String>::None, Option::<String>::None, Option::<String>::None,
                     serde_json::to_string(&a.presented_payload).unwrap_or_default(),
                     to_rfc3339(&a.created_at),
+                    a.handle_ref, a.host_ref,
                 ],
             )?;
             conn.prepare(&format!("SELECT {APPROVAL_COLS} FROM approvals WHERE id = ?1"))?
@@ -1075,13 +1078,14 @@ impl ToolApprovalPolicyRepo for SqliteToolApprovalPolicyRepo {
             )?;
             let id = Uuid::now_v7();
             conn.execute(
-                &format!("INSERT INTO approvals ({APPROVAL_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+                &format!("INSERT INTO approvals ({APPROVAL_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
                 rusqlite::params![
                     id.to_string(), TOOL_POLICY_SUBJECT_TYPE,
                     tool_policy_subject_id().to_string(), &tn,
                     &dec, "cli", to_rfc3339(&now),
                     serde_json::to_string(&serde_json::json!({"decision": &dec})).unwrap_or_default(),
                     to_rfc3339(&now),
+                    Option::<String>::None, Option::<String>::None,
                 ],
             )?;
             Ok(ToolApprovalPolicy { tool_name: tn, decision: dec, decided_at: now })

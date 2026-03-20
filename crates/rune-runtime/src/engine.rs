@@ -99,34 +99,12 @@ impl SessionEngine {
 
     /// Transition a session to Completed status.
     pub async fn mark_completed(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        // Running or waiting states can transition to completed
-        let row = self.session_repo.find_by_id(session_id).await?;
-        let valid_from = [
-            "running",
-            "waiting_for_tool",
-            "waiting_for_approval",
-            "waiting_for_subagent",
-        ];
-        if !valid_from.contains(&row.status.as_str()) {
-            return Err(RuntimeError::InvalidSessionState {
-                expected: "running|waiting_*".to_string(),
-                actual: row.status,
-            });
-        }
-        let updated = self
-            .session_repo
-            .update_status(session_id, "completed", Utc::now())
-            .await?;
-        Ok(updated)
+        self.checked_transition(session_id, SessionStatus::Completed).await
     }
 
     /// Transition a session to Failed status.
     pub async fn mark_failed(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        let updated = self
-            .session_repo
-            .update_status(session_id, "failed", Utc::now())
-            .await?;
-        Ok(updated)
+        self.checked_transition(session_id, SessionStatus::Failed).await
     }
 
     /// Get a session by ID.
@@ -181,6 +159,31 @@ impl SessionEngine {
             return Err(RuntimeError::SessionNotFound(session_id.to_string()));
         }
         Ok(())
+    }
+
+    async fn checked_transition(
+        &self,
+        session_id: Uuid,
+        target: SessionStatus,
+    ) -> Result<SessionRow, RuntimeError> {
+        let row = self.session_repo.find_by_id(session_id).await?;
+        let current: SessionStatus = row.status.parse().map_err(|_| {
+            RuntimeError::InvalidSessionState {
+                expected: target.as_str().to_string(),
+                actual: row.status.clone(),
+            }
+        })?;
+        if !current.can_transition_to(&target) {
+            return Err(RuntimeError::InvalidSessionState {
+                expected: target.as_str().to_string(),
+                actual: row.status,
+            });
+        }
+        let updated = self
+            .session_repo
+            .update_status(session_id, target.as_str(), Utc::now())
+            .await?;
+        Ok(updated)
     }
 
     async fn transition_session(

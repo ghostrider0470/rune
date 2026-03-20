@@ -257,6 +257,15 @@ CREATE INDEX IF NOT EXISTS idx_jobs_due_unclaimed
     WHERE claimed_at IS NULL;
 "#,
     },
+    Migration {
+        version: 5,
+        name: "approval_durability",
+        sql: r#"
+-- Add handle_ref and host_ref columns to approvals for cross-restart durability.
+ALTER TABLE approvals ADD COLUMN handle_ref TEXT;
+ALTER TABLE approvals ADD COLUMN host_ref TEXT;
+"#,
+    },
 ];
 
 /// Run all pending migrations on the given connection.

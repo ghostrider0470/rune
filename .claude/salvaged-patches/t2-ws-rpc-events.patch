@@ -1,0 +1,30 @@
+diff --git a/crates/rune-gateway/src/ws_rpc.rs b/crates/rune-gateway/src/ws_rpc.rs
+index 7d7030b..5a7fc0e 100644
+--- a/crates/rune-gateway/src/ws_rpc.rs
++++ b/crates/rune-gateway/src/ws_rpc.rs
+@@ -98,6 +98,25 @@ impl RpcDispatcher {
+             "skills.reload" => self.skills_reload().await,
+             "skills.enable" => self.skills_enable(params).await,
+             "skills.disable" => self.skills_disable(params).await,
++            "session.delete" => self.session_delete(params).await,
++            "session.patch" => self.session_patch(params).await,
++            "channel.list" => self.channel_list().await,
++            "channel.status" => self.channel_status().await,
++            "config.get" => self.config_get().await,
++            "config.update" => self.config_update(params).await,
++            "approval.list" => self.approval_list().await,
++            "approval.decide" => self.approval_decide(params).await,
++            "approval.policies" => self.approval_policies().await,
++            "approval.policy.get" => self.approval_policy_get(params).await,
++            "approval.policy.set" => self.approval_policy_set(params).await,
++            "approval.policy.clear" => self.approval_policy_clear(params).await,
++            "turn.list" => self.turn_list(params).await,
++            "turn.get" => self.turn_get(params).await,
++            "tool.list" => self.tool_list().await,
++            "tool.get" => self.tool_get(params).await,
++            "heartbeat.status" => self.heartbeat_status().await,
++            "heartbeat.enable" => self.heartbeat_enable().await,
++            "heartbeat.disable" => self.heartbeat_disable().await,
+             "health" => self.health().await,
+             "status" => self.full_status().await,
+             other => {
