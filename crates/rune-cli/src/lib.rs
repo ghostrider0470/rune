@@ -4,6 +4,7 @@ pub mod cli;
 pub mod client;
 pub mod doctor;
 pub mod memory;
+mod logs;
 pub mod output;
 
 use anyhow::{Context, Result};
