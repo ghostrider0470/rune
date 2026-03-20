@@ -2361,6 +2361,30 @@ impl fmt::Display for MessageTagListResponse {
     }
 }
 
+/// Response for `message ack` — acknowledge (mark as read/received) a message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageAckResponse {
+    pub success: bool,
+    pub message_id: String,
+    pub channel: String,
+    pub detail: String,
+}
+
+impl fmt::Display for MessageAckResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(
+            f,
+            "{icon} acknowledged message {} on {}",
+            self.message_id, self.channel,
+        )?;
+        if !self.detail.is_empty() {
+            write!(f, ": {}", self.detail)?;
+        }
+        Ok(())
+    }
+}
+
 /// One-shot reminder detail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReminderSummary {

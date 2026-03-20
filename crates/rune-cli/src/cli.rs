@@ -650,6 +650,18 @@ pub enum MessageAction {
         #[command(subcommand)]
         action: MessageTagAction,
     },
+    /// Acknowledge (mark as read/received) a message.
+    Ack {
+        /// ID of the message to acknowledge.
+        #[arg(long)]
+        message_id: String,
+        /// Channel adapter the message belongs to.
+        #[arg(long)]
+        channel: String,
+        /// Session ID the message belongs to.
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -3292,5 +3304,76 @@ mod tests {
                 }
             }
         ));
+    }
+
+    #[test]
+    fn parse_message_ack_minimal() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "ack",
+            "--message-id",
+            "msg-42",
+            "--channel",
+            "telegram",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Ack {
+                        message_id,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-42");
+                assert_eq!(channel, "telegram");
+                assert!(session.is_none());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_ack_with_session() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "message",
+            "ack",
+            "--message-id",
+            "msg-99",
+            "--channel",
+            "discord",
+            "--session",
+            "sess-abc",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Message {
+                action:
+                    MessageAction::Ack {
+                        message_id,
+                        channel,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "msg-99");
+                assert_eq!(channel, "discord");
+                assert_eq!(session.as_deref(), Some("sess-abc"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_ack_requires_message_id_and_channel() {
+        assert!(
+            Cli::try_parse_from(["rune", "message", "ack", "--message-id", "msg-1"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["rune", "message", "ack", "--channel", "slack"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["rune", "message", "ack"]).is_err());
     }
 }

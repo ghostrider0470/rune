@@ -58,7 +58,7 @@
 
 | OpenClaw family | Rune equivalent | Status | Subcommand coverage | Tracking |
 |-----------------|----------------|--------|---------------------|----------|
-| `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status` shipped | #74 |
+| `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack` shipped | #74 |
 | `agent` | — | **Not started** | Direct agent-turn invocation | #70 |
 | `agents` | — | **Not started** | Agent listing/management | #70 |
 | `acp` | — | **Not started** | ACP bridge/client | #70 |
@@ -132,6 +132,7 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 | `thread` | `rune message thread list/reply` | **Shipped** | #151 |
 | `voice` | `rune message voice send/status` | **Shipped** | #155 |
 | `tag` | `rune message tag add/remove/list` | **Shipped** | — |
+| `ack` | `rune message ack` | **Shipped** | — |
 | `reactions` | — | **Not started** | Listing reactions on a message |
 | `poll` | — | **Not started** | Poll creation/management |
 | `channel` | — | **Not started** | Channel-scoped message operations |

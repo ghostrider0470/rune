@@ -1574,6 +1574,60 @@ impl GatewayClient {
         }
     }
 
+    /// `POST /messages/{id}/ack` — acknowledge (mark as read/received) a message.
+    pub async fn message_ack(
+        &self,
+        message_id: &str,
+        channel: &str,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageAckResponse> {
+        use crate::output::MessageAckResponse;
+
+        let mut body = json!({
+            "channel": channel,
+        });
+        if let Some(s) = session {
+            body["session"] = json!(s);
+        }
+        let resp = self
+            .http
+            .post(self.url(&format!("/messages/{message_id}/ack")))
+            .json(&body)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /messages/{id}/ack")?;
+            Ok(MessageAckResponse {
+                success: true,
+                message_id: v["message_id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                channel: v["channel"]
+                    .as_str()
+                    .unwrap_or(channel)
+                    .to_string(),
+                detail: v["detail"]
+                    .as_str()
+                    .unwrap_or("Message acknowledged")
+                    .to_string(),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            Ok(MessageAckResponse {
+                success: false,
+                message_id: message_id.to_string(),
+                channel: channel.to_string(),
+                detail: format!("Gateway returned HTTP {status}: {body_text}"),
+            })
+        }
+    }
+
     /// `GET /tts/status`
     pub async fn message_voice_status(
         &self,

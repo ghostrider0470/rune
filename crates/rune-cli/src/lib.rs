@@ -1516,6 +1516,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                     println!("{}", render(&result, format));
                 }
             },
+            MessageAction::Ack {
+                message_id,
+                channel,
+                session,
+            } => {
+                let result = client
+                    .message_ack(&message_id, &channel, session.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
             MessageAction::Tag { action } => match action {
                 MessageTagAction::Add {
                     message_id,
