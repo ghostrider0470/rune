@@ -14,9 +14,9 @@ use crate::output::{
     ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
-    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport,
-    GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
-    HealthResponse, HeartbeatStatusResponse, LogsQueryResponse, SystemEventListResponse,
+    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorReport, GatewayCallResponse,
+    GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
+    HeartbeatStatusResponse, LogsQueryResponse, SystemEventListResponse,
     ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
     SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
@@ -122,6 +122,46 @@ impl GatewayClient {
             resp.json::<LogsQueryResponse>()
                 .await
                 .context("invalid JSON from /api/logs")
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
+        }
+    }
+
+    /// `POST /api/doctor/run`
+    pub async fn doctor_run(&self) -> Result<DoctorReport> {
+        let resp = self
+            .http
+            .post(self.url("/api/doctor/run"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            resp.json::<DoctorReport>()
+                .await
+                .context("invalid JSON from /api/doctor/run")
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
+        }
+    }
+
+    /// `GET /api/doctor/results`
+    pub async fn doctor_results(&self) -> Result<DoctorReport> {
+        let resp = self
+            .http
+            .get(self.url("/api/doctor/results"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            resp.json::<DoctorReport>()
+                .await
+                .context("invalid JSON from /api/doctor/results")
         } else {
             let status = resp.status();
             let body_text = resp.text().await.unwrap_or_default();
@@ -2235,44 +2275,9 @@ impl GatewayClient {
         }
     }
 
-    /// Run doctor checks: config validation + gateway connectivity + model provider reachability.
+    /// Execute a fresh doctor run via the gateway.
     pub async fn doctor(&self) -> Result<DoctorReport> {
-        let mut checks = Vec::new();
-
-        let config_check = match rune_config::AppConfig::load(None::<&str>) {
-            Ok(_) => DoctorCheck {
-                name: "config".into(),
-                passed: true,
-                detail: "Configuration loaded successfully.".into(),
-            },
-            Err(e) => DoctorCheck {
-                name: "config".into(),
-                passed: false,
-                detail: format!("Failed to load config: {e}"),
-            },
-        };
-        checks.push(config_check);
-
-        let gw_check = match self.health().await {
-            Ok(h) if h.healthy => DoctorCheck {
-                name: "gateway".into(),
-                passed: true,
-                detail: "Gateway is reachable and healthy.".into(),
-            },
-            Ok(h) => DoctorCheck {
-                name: "gateway".into(),
-                passed: false,
-                detail: h.message,
-            },
-            Err(e) => DoctorCheck {
-                name: "gateway".into(),
-                passed: false,
-                detail: format!("Cannot reach gateway: {e}"),
-            },
-        };
-        checks.push(gw_check);
-
-        Ok(DoctorReport { checks })
+        self.doctor_run().await
     }
 
     // ── Approvals ─────────────────────────────────────────────────────
@@ -2766,6 +2771,60 @@ mod tests {
         assert_eq!(resp.entries.len(), 1);
         assert_eq!(resp.entries[0]["level"], "warn");
         assert_eq!(resp.message, "1 log entry returned");
+    }
+
+    #[tokio::test]
+    async fn doctor_run_posts_and_parses_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/doctor/run"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "overall": "degraded",
+                "checks": [
+                    {
+                        "name": "auth",
+                        "status": "warn",
+                        "message": "no auth token configured"
+                    }
+                ],
+                "run_at": "2026-03-20T09:35:00Z"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.doctor_run().await.unwrap();
+        assert_eq!(resp.overall, "degraded");
+        assert_eq!(resp.checks.len(), 1);
+        assert_eq!(resp.checks[0].status, "warn");
+        assert_eq!(resp.run_at, "2026-03-20T09:35:00Z");
+    }
+
+    #[tokio::test]
+    async fn doctor_results_gets_and_parses_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/doctor/results"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "overall": "healthy",
+                "checks": [
+                    {
+                        "name": "session_store",
+                        "status": "pass",
+                        "message": "session store reachable"
+                    }
+                ],
+                "run_at": "2026-03-20T09:36:00Z"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.doctor_results().await.unwrap();
+        assert_eq!(resp.overall, "healthy");
+        assert_eq!(resp.checks[0].name, "session_store");
+        assert_eq!(resp.checks[0].status, "pass");
+        assert_eq!(resp.run_at, "2026-03-20T09:36:00Z");
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 //! Clap-based CLI definition with all subcommands.
 
-use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 /// Rune — the operator CLI for managing the Rune AI runtime.
 #[derive(Debug, Parser)]
@@ -77,25 +77,15 @@ pub enum Command {
     Status,
     /// Run a health check against the gateway.
     Health,
-    /// Run diagnostic checks (config, connectivity, etc.).
-    Doctor,
+    /// Run gateway-backed diagnostic checks and inspect recent results.
+    Doctor {
+        #[command(subcommand)]
+        action: Option<DoctorAction>,
+    },
     /// Show a compact operator dashboard summary.
     Dashboard,
     /// Query structured gateway logs.
-    Logs {
-        /// Filter by log level.
-        #[arg(long)]
-        level: Option<String>,
-        /// Filter by source/component name.
-        #[arg(long)]
-        source: Option<String>,
-        /// Maximum number of entries to return.
-        #[arg(long)]
-        limit: Option<usize>,
-        /// Lower-bound timestamp or relative cursor understood by the gateway.
-        #[arg(long)]
-        since: Option<String>,
-    },
+    Logs(LogsArgs),
     /// Manage cron jobs.
     Cron {
         #[command(subcommand)]
@@ -169,6 +159,22 @@ pub enum Command {
     },
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct LogsArgs {
+    /// Filter by log level.
+    #[arg(long)]
+    pub level: Option<String>,
+    /// Filter by source/component name.
+    #[arg(long)]
+    pub source: Option<String>,
+    /// Maximum number of entries to return.
+    #[arg(long)]
+    pub limit: Option<usize>,
+    /// Lower-bound timestamp or relative cursor understood by the gateway.
+    #[arg(long)]
+    pub since: Option<String>,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum GatewayAction {
     /// Query gateway status.
@@ -179,6 +185,13 @@ pub enum GatewayAction {
     Probe,
     /// Discover operator-facing runtime URLs and config binding details.
     Discover,
+    /// Query structured gateway logs.
+    Logs(LogsArgs),
+    /// Run gateway-backed diagnostic checks and inspect recent results.
+    Doctor {
+        #[command(subcommand)]
+        action: Option<DoctorAction>,
+    },
     /// Perform a raw gateway HTTP call.
     Call {
         /// HTTP method to use.
@@ -203,6 +216,14 @@ pub enum GatewayAction {
     Restart,
     /// Run the gateway in the foreground using the local rune-gateway binary.
     Run,
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+pub enum DoctorAction {
+    /// Execute a fresh doctor run via the gateway.
+    Run,
+    /// Fetch the most recent doctor report from the gateway.
+    Results,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1032,7 +1053,29 @@ mod tests {
     #[test]
     fn parse_doctor() {
         let cli = Cli::try_parse_from(["rune", "doctor"]).unwrap();
-        assert!(matches!(cli.command, Command::Doctor));
+        assert!(matches!(cli.command, Command::Doctor { action: None }));
+    }
+
+    #[test]
+    fn parse_doctor_run() {
+        let cli = Cli::try_parse_from(["rune", "doctor", "run"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Doctor {
+                action: Some(DoctorAction::Run)
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_doctor_results() {
+        let cli = Cli::try_parse_from(["rune", "doctor", "results"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Doctor {
+                action: Some(DoctorAction::Results)
+            }
+        ));
     }
 
     #[test]
@@ -1057,12 +1100,12 @@ mod tests {
         ])
         .unwrap();
         match cli.command {
-            Command::Logs {
+            Command::Logs(LogsArgs {
                 level,
                 source,
                 limit,
                 since,
-            } => {
+            }) => {
                 assert_eq!(level.as_deref(), Some("warn"));
                 assert_eq!(source.as_deref(), Some("gateway"));
                 assert_eq!(limit, Some(25));
@@ -1070,6 +1113,41 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_gateway_logs() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "logs", "--limit", "50"]).unwrap();
+        match cli.command {
+            Command::Gateway {
+                action:
+                    GatewayAction::Logs(LogsArgs {
+                        level,
+                        source,
+                        limit,
+                        since,
+                    }),
+            } => {
+                assert_eq!(level, None);
+                assert_eq!(source, None);
+                assert_eq!(limit, Some(50));
+                assert_eq!(since, None);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_gateway_doctor_results() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "doctor", "results"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Doctor {
+                    action: Some(DoctorAction::Results)
+                }
+            }
+        ));
     }
 
     #[test]
