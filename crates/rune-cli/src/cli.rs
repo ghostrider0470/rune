@@ -181,6 +181,16 @@ pub enum GatewayAction {
     Status,
     /// Run a health check against the gateway.
     Health,
+    /// Inspect and mutate the live gateway config surface.
+    Config {
+        #[command(subcommand)]
+        action: GatewayConfigAction,
+    },
+    /// Inspect runtime control-plane status surfaced by the gateway.
+    Runtime {
+        #[command(subcommand)]
+        action: GatewayRuntimeAction,
+    },
     /// Probe RPC/API reachability and auth separately from process status.
     Probe,
     /// Discover operator-facing runtime URLs and config binding details.
@@ -216,6 +226,36 @@ pub enum GatewayAction {
     Restart,
     /// Run the gateway in the foreground using the local rune-gateway binary.
     Run,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GatewayConfigAction {
+    /// Fetch the live gateway config with secrets redacted.
+    Show,
+    /// Replace the live gateway config from a JSON file or stdin (`-`).
+    Apply {
+        /// JSON file path, or `-` to read from stdin.
+        input: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GatewayRuntimeAction {
+    /// Inspect and control the heartbeat runner.
+    Heartbeat {
+        #[command(subcommand)]
+        action: GatewayRuntimeHeartbeatAction,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+pub enum GatewayRuntimeHeartbeatAction {
+    /// Enable the heartbeat runner.
+    Enable,
+    /// Disable the heartbeat runner.
+    Disable,
+    /// Show heartbeat runner status (enabled, interval, counters).
+    Status,
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -1249,6 +1289,49 @@ mod tests {
             cli.command,
             Command::Gateway {
                 action: GatewayAction::Health
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_config_show() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "config", "show"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Config {
+                    action: GatewayConfigAction::Show
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_config_apply() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "config", "apply", "live.json"]).unwrap();
+        match cli.command {
+            Command::Gateway {
+                action:
+                    GatewayAction::Config {
+                        action: GatewayConfigAction::Apply { input },
+                    },
+            } => assert_eq!(input, "live.json"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_gateway_runtime_heartbeat_status() {
+        let cli =
+            Cli::try_parse_from(["rune", "gateway", "runtime", "heartbeat", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::Runtime {
+                    action: GatewayRuntimeAction::Heartbeat {
+                        action: GatewayRuntimeHeartbeatAction::Status
+                    }
+                }
             }
         ));
     }

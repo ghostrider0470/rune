@@ -1747,6 +1747,33 @@ impl fmt::Display for ConfigMutationResponse {
     }
 }
 
+/// Live config snapshot returned by the gateway `/config` surface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayConfigResponse {
+    pub action: String,
+    pub config: serde_json::Value,
+    pub note: Option<String>,
+}
+
+impl fmt::Display for GatewayConfigResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let heading = if self.action == "applied" {
+            "Gateway config applied"
+        } else {
+            "Gateway config"
+        };
+        writeln!(f, "{heading}")?;
+        if let Some(note) = &self.note {
+            writeln!(f, "  Note: {note}")?;
+        }
+        write!(
+            f,
+            "{}",
+            serde_json::to_string_pretty(&self.config).unwrap_or_else(|_| "{}".to_string())
+        )
+    }
+}
+
 /// Simple action acknowledgment (gateway start/stop).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResult {
@@ -3547,6 +3574,24 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Gateway discovery"));
         assert!(out.contains("WebSocket URL: ws://127.0.0.1:8787/ws"));
+    }
+
+    #[test]
+    fn render_gateway_config() {
+        let response = GatewayConfigResponse {
+            action: "current".into(),
+            config: serde_json::json!({
+                "gateway": {
+                    "host": "127.0.0.1",
+                    "auth_token": "***redacted***"
+                }
+            }),
+            note: Some("Returned from the live gateway; secrets are redacted.".into()),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Gateway config"));
+        assert!(out.contains("Returned from the live gateway; secrets are redacted."));
+        assert!(out.contains("\"auth_token\": \"***redacted***\""));
     }
 
     #[test]

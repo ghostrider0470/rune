@@ -15,8 +15,9 @@ use crate::output::{
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorReport, GatewayCallResponse,
-    GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
-    HeartbeatStatusResponse, LogsQueryResponse, SystemEventListResponse,
+    GatewayConfigResponse, GatewayDiscoverResponse, GatewayProbeResponse,
+    GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse, LogsQueryResponse,
+    SystemEventListResponse,
     ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
     SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
@@ -85,6 +86,64 @@ impl GatewayClient {
             })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /config`
+    pub async fn gateway_config(&self) -> Result<GatewayConfigResponse> {
+        let resp = self
+            .http
+            .get(self.url("/config"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let config = resp
+                .json::<serde_json::Value>()
+                .await
+                .context("invalid JSON from /config")?;
+            Ok(GatewayConfigResponse {
+                action: "current".to_string(),
+                config,
+                note: Some("Returned from the live gateway; secrets are redacted.".to_string()),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
+        }
+    }
+
+    /// `PUT /config`
+    pub async fn gateway_config_apply(
+        &self,
+        config: serde_json::Value,
+    ) -> Result<GatewayConfigResponse> {
+        let resp = self
+            .http
+            .put(self.url("/config"))
+            .json(&config)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let config = resp
+                .json::<serde_json::Value>()
+                .await
+                .context("invalid JSON from PUT /config")?;
+            Ok(GatewayConfigResponse {
+                action: "applied".to_string(),
+                config,
+                note: Some(
+                    "Live gateway config replaced; returned config view is redacted.".to_string(),
+                ),
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body_text}");
         }
     }
 
@@ -2664,6 +2723,63 @@ mod tests {
         assert_eq!(resp.status, "running");
         assert_eq!(resp.version.as_deref(), Some("0.1.0"));
         assert_eq!(resp.uptime_seconds, Some(300));
+    }
+
+    #[tokio::test]
+    async fn gateway_config_gets_redacted_json() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/config"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "gateway": {
+                    "host": "127.0.0.1",
+                    "auth_token": "***redacted***"
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.gateway_config().await.unwrap();
+        assert_eq!(resp.action, "current");
+        assert_eq!(resp.config["gateway"]["host"], "127.0.0.1");
+        assert_eq!(resp.config["gateway"]["auth_token"], "***redacted***");
+    }
+
+    #[tokio::test]
+    async fn gateway_config_apply_puts_json_and_parses_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/config"))
+            .and(body_json(serde_json::json!({
+                "gateway": {
+                    "host": "0.0.0.0",
+                    "port": 8787
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "gateway": {
+                    "host": "0.0.0.0",
+                    "port": 8787,
+                    "auth_token": "***redacted***"
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .gateway_config_apply(serde_json::json!({
+                "gateway": {
+                    "host": "0.0.0.0",
+                    "port": 8787
+                }
+            }))
+            .await
+            .unwrap();
+        assert_eq!(resp.action, "applied");
+        assert_eq!(resp.config["gateway"]["port"], 8787);
+        assert_eq!(resp.config["gateway"]["auth_token"], "***redacted***");
     }
 
     #[test]

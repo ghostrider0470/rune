@@ -24,10 +24,11 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 pub use cli::Cli;
 use cli::{
     AgentsAction, ApprovalsAction, ChannelsAction, Command, CompletionAction, CompletionShell,
-    ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction, LogsArgs,
+    ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
+    GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, RemindersAction, SessionsAction, SkillsAction, SystemAction,
-    SystemEventAction, SystemHeartbeatAction,
+    ModelsAction, RemindersAction, SessionsAction, SkillsAction, SystemAction, SystemEventAction,
+    SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -154,6 +155,29 @@ fn print_completion(shell: CompletionShell) -> Result<()> {
         &mut std::io::stdout(),
     );
     Ok(())
+}
+
+fn read_gateway_config_input(input: &str) -> Result<serde_json::Value> {
+    let raw = if input == "-" {
+        use std::io::Read as _;
+
+        let mut stdin = String::new();
+        std::io::stdin()
+            .read_to_string(&mut stdin)
+            .context("failed to read gateway config JSON from stdin")?;
+        stdin
+    } else {
+        std::fs::read_to_string(input)
+            .with_context(|| format!("failed to read gateway config JSON from {input}"))?
+    };
+
+    serde_json::from_str(&raw).with_context(|| {
+        if input == "-" {
+            "failed to parse gateway config JSON from stdin".to_string()
+        } else {
+            format!("failed to parse gateway config JSON from {input}")
+        }
+    })
 }
 
 fn parse_reminder_duration(input: &str) -> Result<DateTime<Utc>> {
@@ -860,6 +884,33 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.gateway_health().await?;
                 println!("{}", render(&result, format));
             }
+            GatewayAction::Config { action } => match action {
+                GatewayConfigAction::Show => {
+                    let result = client.gateway_config().await?;
+                    println!("{}", render(&result, format));
+                }
+                GatewayConfigAction::Apply { input } => {
+                    let config = read_gateway_config_input(&input)?;
+                    let result = client.gateway_config_apply(config).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            GatewayAction::Runtime { action } => match action {
+                GatewayRuntimeAction::Heartbeat { action } => match action {
+                    GatewayRuntimeHeartbeatAction::Enable => {
+                        let result = client.heartbeat_enable().await?;
+                        println!("{}", render(&result, format));
+                    }
+                    GatewayRuntimeHeartbeatAction::Disable => {
+                        let result = client.heartbeat_disable().await?;
+                        println!("{}", render(&result, format));
+                    }
+                    GatewayRuntimeHeartbeatAction::Status => {
+                        let result = client.heartbeat_status().await?;
+                        println!("{}", render(&result, format));
+                    }
+                },
+            },
             GatewayAction::Probe => {
                 let result = client.gateway_probe().await?;
                 println!("{}", render(&result, format));
@@ -2095,6 +2146,21 @@ models = ["dall-e-3"]
     fn parse_reminder_duration_rejects_bad_unit() {
         let err = parse_reminder_duration("5w").unwrap_err();
         assert!(err.to_string().contains("invalid reminder duration unit"));
+    }
+
+    #[test]
+    fn read_gateway_config_input_reads_json_file() {
+        let tmp = TempDir::new().unwrap();
+        let input_path = tmp.path().join("gateway-config.json");
+        std::fs::write(
+            &input_path,
+            r#"{"gateway":{"host":"127.0.0.1","port":8787}}"#,
+        )
+        .unwrap();
+
+        let config = read_gateway_config_input(input_path.to_str().unwrap()).unwrap();
+        assert_eq!(config["gateway"]["host"], "127.0.0.1");
+        assert_eq!(config["gateway"]["port"], 8787);
     }
 
     #[test]
