@@ -848,6 +848,11 @@ Startup logging must make these decisions inspectable without reading source cod
 - storage backend selection
 - model bootstrap mode: explicit providers or zero-config Ollama
 - `OLLAMA_HOST` value when relevant
+- configured providers summary
+- configured default model and its source before runtime probing
+- resolved provider mode: explicit providers, zero-config Ollama, or echo fallback
+- resolved provider detail: configured provider names, Ollama probe target, or echo
+- resolved default provider for the chosen default model when one exists
 - default model source: agent config, `models.default_model`, or Ollama auto-pick
 
 If `OLLAMA_HOST` is set but unreachable, startup must warn explicitly that Rune is falling back instead of silently behaving like localhost probing.

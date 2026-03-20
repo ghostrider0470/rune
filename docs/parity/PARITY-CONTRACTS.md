@@ -660,6 +660,10 @@ Startup logs must surface:
 - path profile
 - model bootstrap mode
 - `OLLAMA_HOST` relevance
+- configured providers summary
+- configured default model and source
+- resolved provider mode and detail
+- resolved default provider when a default model is selected
 - default model source
 
 ---

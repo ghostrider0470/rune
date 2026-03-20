@@ -171,6 +171,23 @@ struct DefaultModelSelection {
     source: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartupProviderResolution {
+    ExplicitProviders,
+    ZeroConfigOllama,
+    EchoFallback,
+}
+
+impl StartupProviderResolution {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitProviders => "explicit-providers",
+            Self::ZeroConfigOllama => "zero-config-ollama",
+            Self::EchoFallback => "echo-fallback",
+        }
+    }
+}
+
 fn parse_startup_flags() -> StartupFlags {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut config_path: Option<PathBuf> = None;
@@ -315,21 +332,10 @@ fn select_default_model(
     config: &AppConfig,
     auto_default_model: Option<String>,
 ) -> Option<DefaultModelSelection> {
-    if let Some(model) = config
-        .agents
-        .default_agent()
-        .and_then(|agent| config.agents.effective_model(agent))
-    {
+    if let Some(selection) = config.configured_default_model() {
         return Some(DefaultModelSelection {
-            model: model.to_string(),
-            source: "agent-config",
-        });
-    }
-
-    if let Some(model) = config.models.default_model.as_ref() {
-        return Some(DefaultModelSelection {
-            model: model.clone(),
-            source: "models.default_model",
+            model: selection.model.to_string(),
+            source: selection.source.as_str(),
         });
     }
 
@@ -337,6 +343,71 @@ fn select_default_model(
         model,
         source: "ollama-auto",
     })
+}
+
+fn configured_provider_summary(config: &AppConfig) -> String {
+    let provider_names = config.models.provider_names();
+    if provider_names.is_empty() {
+        "<none>".to_string()
+    } else {
+        provider_names.join(", ")
+    }
+}
+
+fn resolved_default_provider(
+    config: &AppConfig,
+    provider_resolution: StartupProviderResolution,
+    default_model: Option<&DefaultModelSelection>,
+) -> String {
+    let Some(selection) = default_model else {
+        return "<none>".to_string();
+    };
+
+    if provider_resolution == StartupProviderResolution::ZeroConfigOllama
+        || selection.source == "ollama-auto"
+    {
+        return "ollama".to_string();
+    }
+
+    match config.models.resolve_model(&selection.model) {
+        Ok(resolved) => resolved.provider.name.clone(),
+        Err(error) => format!("<unresolved:{error}>"),
+    }
+}
+
+fn emit_startup_model_resolution(
+    config: &AppConfig,
+    provider_resolution: StartupProviderResolution,
+    default_model: Option<&DefaultModelSelection>,
+) {
+    let configured_default_model = config.configured_default_model();
+    let provider_detail = match provider_resolution {
+        StartupProviderResolution::ExplicitProviders => configured_provider_summary(config),
+        StartupProviderResolution::ZeroConfigOllama => trimmed_env_var(OLLAMA_HOST_ENV)
+            .unwrap_or_else(|| "http://localhost:11434".to_string()),
+        StartupProviderResolution::EchoFallback => "echo".to_string(),
+    };
+    let default_provider = resolved_default_provider(config, provider_resolution, default_model);
+
+    info!(
+        configured_providers = %configured_provider_summary(config),
+        configured_default_model = configured_default_model
+            .map(|selection| selection.model)
+            .unwrap_or("<none>"),
+        configured_default_model_source = configured_default_model
+            .map(|selection| selection.source.as_str())
+            .unwrap_or("none"),
+        provider_resolution = provider_resolution.as_str(),
+        provider_detail = %provider_detail,
+        default_provider = %default_provider,
+        default_model = default_model
+            .map(|selection| selection.model.as_str())
+            .unwrap_or("<none>"),
+        default_model_source = default_model
+            .map(|selection| selection.source)
+            .unwrap_or("none"),
+        "startup model routing resolved"
+    );
 }
 
 /// Build all services, returning an optional `EmbeddedPg` handle that
@@ -366,7 +437,7 @@ async fn build_services(
         SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
     );
 
-    let (model_provider, auto_default_model) = build_model_provider(&config).await;
+    let (model_provider, auto_default_model, provider_resolution) = build_model_provider(&config).await;
     let model_provider: Arc<dyn ModelProvider> = model_provider;
     let scheduler = Arc::new(Scheduler::new_with_repos(
         job_repo.clone(),
@@ -468,6 +539,7 @@ async fn build_services(
     );
 
     let default_model = select_default_model(&config, auto_default_model);
+    emit_startup_model_resolution(&config, provider_resolution, default_model.as_ref());
 
     if let Some(selection) = default_model {
         turn_executor = turn_executor.with_default_model(&selection.model);
@@ -2139,7 +2211,9 @@ impl SubagentManager for LiveSubagentManager {
 /// element is `Some` only when Ollama was auto-detected **and** at least one
 /// model is available — callers should use it as a fallback when no explicit
 /// `default_model` is configured.
-async fn build_model_provider(config: &AppConfig) -> (Arc<dyn ModelProvider>, Option<String>) {
+async fn build_model_provider(
+    config: &AppConfig,
+) -> (Arc<dyn ModelProvider>, Option<String>, StartupProviderResolution) {
     let ollama_host = trimmed_env_var(OLLAMA_HOST_ENV);
 
     if !config.models.providers.is_empty() {
@@ -2152,7 +2226,7 @@ async fn build_model_provider(config: &AppConfig) -> (Arc<dyn ModelProvider>, Op
                 Arc::new(EchoModelProvider)
             }
         };
-        return (provider, None);
+        return (provider, None, StartupProviderResolution::ExplicitProviders);
     }
 
     let probe_target = ollama_host.as_deref().unwrap_or("http://localhost:11434");
@@ -2183,7 +2257,11 @@ async fn build_model_provider(config: &AppConfig) -> (Arc<dyn ModelProvider>, Op
                 eprintln!("{guidance}");
             }
 
-            (Arc::new(provider), auto_model)
+            (
+                Arc::new(provider),
+                auto_model,
+                StartupProviderResolution::ZeroConfigOllama,
+            )
         }
         None => {
             if let Some(ollama_host) = ollama_host {
@@ -2196,7 +2274,7 @@ async fn build_model_provider(config: &AppConfig) -> (Arc<dyn ModelProvider>, Op
                     "no Ollama found — using echo fallback (configure a provider in config.toml or set OLLAMA_HOST)"
                 );
             }
-            (Arc::new(EchoModelProvider), None)
+            (Arc::new(EchoModelProvider), None, StartupProviderResolution::EchoFallback)
         }
     }
 }
@@ -2248,6 +2326,95 @@ mod tests {
         let selection = select_default_model(&config, Some("llama3.2".into())).expect("selection");
         assert_eq!(selection.model, "llama3.2");
         assert_eq!(selection.source, "ollama-auto");
+    }
+
+    #[test]
+    fn resolved_default_provider_uses_explicit_provider_inventory() {
+        let config = AppConfig {
+            models: rune_config::ModelsConfig {
+                default_model: Some("gpt-5.4".into()),
+                providers: vec![rune_config::ModelProviderConfig {
+                    name: "openai".into(),
+                    kind: "openai".into(),
+                    base_url: "https://api.openai.com/v1".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("OPENAI_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![rune_config::ConfiguredModel::Id("gpt-5.4".into())],
+                }],
+                ..Default::default()
+            },
+            ..AppConfig::default()
+        };
+        let selection =
+            select_default_model(&config, None).expect("configured explicit default model");
+
+        assert_eq!(
+            resolved_default_provider(
+                &config,
+                StartupProviderResolution::ExplicitProviders,
+                Some(&selection),
+            ),
+            "openai"
+        );
+    }
+
+    #[test]
+    fn resolved_default_provider_is_ollama_for_zero_config_defaults() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("llama3.2".into());
+        let selection =
+            select_default_model(&config, Some("llama3.2".into())).expect("configured default");
+
+        assert_eq!(
+            resolved_default_provider(
+                &config,
+                StartupProviderResolution::ZeroConfigOllama,
+                Some(&selection),
+            ),
+            "ollama"
+        );
+    }
+
+    #[test]
+    fn resolved_default_provider_reports_unresolved_explicit_models() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("missing-model".into());
+        config.models.providers = vec![
+            rune_config::ModelProviderConfig {
+                name: "openai".into(),
+                kind: "openai".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                model_alias: None,
+                models: vec![rune_config::ConfiguredModel::Id("gpt-5.4".into())],
+            },
+            rune_config::ModelProviderConfig {
+                name: "anthropic".into(),
+                kind: "anthropic".into(),
+                base_url: "https://api.anthropic.com/v1".into(),
+                api_key: None,
+                deployment_name: None,
+                api_version: None,
+                api_key_env: Some("ANTHROPIC_API_KEY".into()),
+                model_alias: None,
+                models: vec![rune_config::ConfiguredModel::Id("claude-sonnet-4-5".into())],
+            },
+        ];
+        let selection =
+            select_default_model(&config, None).expect("configured explicit default model");
+        let provider = resolved_default_provider(
+            &config,
+            StartupProviderResolution::ExplicitProviders,
+            Some(&selection),
+        );
+
+        assert!(provider.starts_with("<unresolved:"));
     }
 
     #[tokio::test]

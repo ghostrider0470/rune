@@ -190,6 +190,29 @@ impl AppConfig {
             self.paths = standalone_paths_root(&home);
         }
     }
+
+    /// Return the configured default model before any runtime auto-detection.
+    #[must_use]
+    pub fn configured_default_model(&self) -> Option<ConfiguredDefaultModel<'_>> {
+        if let Some(model) = self
+            .agents
+            .default_agent()
+            .and_then(|agent| self.agents.effective_model(agent))
+        {
+            return Some(ConfiguredDefaultModel {
+                model,
+                source: ConfiguredDefaultModelSource::AgentConfig,
+            });
+        }
+
+        self.models
+            .default_model
+            .as_deref()
+            .map(|model| ConfiguredDefaultModel {
+                model,
+                source: ConfiguredDefaultModelSource::ModelsDefault,
+            })
+    }
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -492,6 +515,15 @@ impl ModelsConfig {
         } else {
             ModelBootstrap::ExplicitProviders
         }
+    }
+
+    /// Return configured provider names in declaration order.
+    #[must_use]
+    pub fn provider_names(&self) -> Vec<&str> {
+        self.providers
+            .iter()
+            .map(|provider| provider.name.as_str())
+            .collect()
     }
 
     /// Return every configured model in canonical `provider/model` form.
@@ -1003,6 +1035,31 @@ impl ModelBootstrap {
             Self::ZeroConfigOllama => "zero-config-ollama",
         }
     }
+}
+
+/// Source of the configured default model before runtime auto-detection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfiguredDefaultModelSource {
+    AgentConfig,
+    ModelsDefault,
+}
+
+impl ConfiguredDefaultModelSource {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentConfig => "agent-config",
+            Self::ModelsDefault => "models.default_model",
+        }
+    }
+}
+
+/// Configured default model selection before runtime auto-detection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfiguredDefaultModel<'a> {
+    pub model: &'a str,
+    pub source: ConfiguredDefaultModelSource,
 }
 
 /// Multi-agent configuration.
@@ -2108,6 +2165,70 @@ models = ["gpt-5.4", "gpt-image-1"]
         };
 
         assert_eq!(config.bootstrap(), ModelBootstrap::ExplicitProviders);
+    }
+
+    #[test]
+    fn models_config_reports_provider_names_in_order() {
+        let config = ModelsConfig {
+            providers: vec![
+                ModelProviderConfig {
+                    name: "openai".into(),
+                    kind: "openai".into(),
+                    base_url: "https://api.openai.com/v1".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("OPENAI_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![],
+                },
+                ModelProviderConfig {
+                    name: "anthropic".into(),
+                    kind: "anthropic".into(),
+                    base_url: "https://api.anthropic.com/v1".into(),
+                    api_key: None,
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: Some("ANTHROPIC_API_KEY".into()),
+                    model_alias: None,
+                    models: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(config.provider_names(), vec!["openai", "anthropic"]);
+    }
+
+    #[test]
+    fn configured_default_model_prefers_agent_over_models_default() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("models-default".into());
+        config.agents.list = vec![AgentConfig {
+            id: "coder".into(),
+            default: Some(true),
+            model: Some(AgentModelSelection::Id("agent-default".into())),
+            workspace: None,
+            system_prompt: None,
+        }];
+
+        let selection = config
+            .configured_default_model()
+            .expect("configured default model");
+        assert_eq!(selection.model, "agent-default");
+        assert_eq!(selection.source, ConfiguredDefaultModelSource::AgentConfig);
+    }
+
+    #[test]
+    fn configured_default_model_uses_models_default_when_no_agent_model_exists() {
+        let mut config = AppConfig::default();
+        config.models.default_model = Some("models-default".into());
+
+        let selection = config
+            .configured_default_model()
+            .expect("configured default model");
+        assert_eq!(selection.model, "models-default");
+        assert_eq!(selection.source, ConfiguredDefaultModelSource::ModelsDefault);
     }
 
     #[test]
