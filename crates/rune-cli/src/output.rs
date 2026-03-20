@@ -557,6 +557,29 @@ impl fmt::Display for SkillListResponse {
     }
 }
 
+/// Response for `rune skills check`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillCheckResponse {
+    pub success: bool,
+    pub discovered: usize,
+    pub loaded: usize,
+    pub removed: usize,
+}
+
+impl fmt::Display for SkillCheckResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.success {
+            write!(
+                f,
+                "Skill scan complete — discovered {}, loaded {}, removed {}",
+                self.discovered, self.loaded, self.removed
+            )
+        } else {
+            write!(f, "Skill scan failed.")
+        }
+    }
+}
+
 /// First-class `/status` / `session_status` parity card for an individual session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStatusCard {
@@ -3158,6 +3181,37 @@ mod tests {
             parsed["skills"][0]["binary_path"],
             "/data/skills/alpha/run.sh"
         );
+    }
+
+    #[test]
+    fn render_skill_check_human() {
+        let response = SkillCheckResponse {
+            success: true,
+            discovered: 3,
+            loaded: 2,
+            removed: 1,
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Skill scan complete"));
+        assert!(out.contains("discovered 3"));
+        assert!(out.contains("loaded 2"));
+        assert!(out.contains("removed 1"));
+    }
+
+    #[test]
+    fn render_skill_check_json() {
+        let response = SkillCheckResponse {
+            success: true,
+            discovered: 3,
+            loaded: 2,
+            removed: 1,
+        };
+        let out = render(&response, OutputFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["success"], true);
+        assert_eq!(parsed["discovered"], 3);
+        assert_eq!(parsed["loaded"], 2);
+        assert_eq!(parsed["removed"], 1);
     }
 
     #[test]
