@@ -1574,6 +1574,69 @@ impl GatewayClient {
         }
     }
 
+    /// `GET /messages/{id}/reactions` — list emoji reactions on a message.
+    pub async fn message_list_reactions(
+        &self,
+        message_id: &str,
+        channel: Option<&str>,
+        session: Option<&str>,
+    ) -> Result<crate::output::MessageReactionListResponse> {
+        use crate::output::{MessageReactionListResponse, ReactionDetail};
+
+        let mut params: Vec<(&str, &str)> = vec![];
+        if let Some(ch) = channel {
+            params.push(("channel", ch));
+        }
+        if let Some(s) = session {
+            params.push(("session", s));
+        }
+        let resp = self
+            .http
+            .get(self.url(&format!("/messages/{message_id}/reactions")))
+            .query(&params)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from GET /messages/{id}/reactions")?;
+            let reactions = v["reactions"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|r| ReactionDetail {
+                            emoji: r["emoji"].as_str().unwrap_or("?").to_string(),
+                            count: r["count"].as_u64().unwrap_or(1),
+                            users: r["users"]
+                                .as_array()
+                                .map(|u| {
+                                    u.iter()
+                                        .filter_map(|v| v.as_str().map(String::from))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(MessageReactionListResponse {
+                message_id: v["message_id"]
+                    .as_str()
+                    .unwrap_or(message_id)
+                    .to_string(),
+                reactions,
+            })
+        } else {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "GET /messages/{message_id}/reactions returned HTTP {status}: {body_text}"
+            );
+        }
+    }
+
     /// `POST /messages/{id}/ack` — acknowledge (mark as read/received) a message.
     pub async fn message_ack(
         &self,
