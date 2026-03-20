@@ -14,7 +14,11 @@ impl OutputFormat {
     /// Create from the `--json` flag value.
     #[must_use]
     pub fn from_json_flag(json: bool) -> Self {
-        if json { Self::Json } else { Self::Human }
+        if json {
+            Self::Json
+        } else {
+            Self::Human
+        }
     }
 }
 
@@ -387,20 +391,22 @@ pub struct AgentTreeNode {
 }
 
 impl AgentTreeNode {
-    fn fmt_tree(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        prefix: &str,
-        connector: &str,
-    ) -> fmt::Result {
-        writeln!(f, "{prefix}{connector}{} [{}] ({})", self.id, self.status, self.kind)?;
-        let child_prefix = format!("{prefix}{}", if connector.is_empty() {
-            ""
-        } else if connector.starts_with('└') {
-            "    "
-        } else {
-            "│   "
-        });
+    fn fmt_tree(&self, f: &mut fmt::Formatter<'_>, prefix: &str, connector: &str) -> fmt::Result {
+        writeln!(
+            f,
+            "{prefix}{connector}{} [{}] ({})",
+            self.id, self.status, self.kind
+        )?;
+        let child_prefix = format!(
+            "{prefix}{}",
+            if connector.is_empty() {
+                ""
+            } else if connector.starts_with('└') {
+                "    "
+            } else {
+                "│   "
+            }
+        );
         for (i, child) in self.children.iter().enumerate() {
             let is_last = i == self.children.len() - 1;
             let child_connector = if is_last { "└── " } else { "├── " };
@@ -999,7 +1005,11 @@ impl fmt::Display for ModelAuthProviderDetail {
             self.provider,
             self.provider_kind,
             self.credential_source,
-            if self.credentials_ready { "ready" } else { "missing" }
+            if self.credentials_ready {
+                "ready"
+            } else {
+                "missing"
+            }
         )
     }
 }
@@ -1018,15 +1028,14 @@ impl fmt::Display for ModelAuthResponse {
         writeln!(f, "Model auth")?;
         for provider in &self.providers {
             writeln!(f, "  - {provider}")?;
-            writeln!(
-                f,
-                "    api_key configured: {}",
-                provider.api_key_configured
-            )?;
+            writeln!(f, "    api_key configured: {}", provider.api_key_configured)?;
             writeln!(
                 f,
                 "    api_key_env: {}",
-                provider.api_key_env.as_deref().unwrap_or("(default/provider-specific)")
+                provider
+                    .api_key_env
+                    .as_deref()
+                    .unwrap_or("(default/provider-specific)")
             )?;
             if !provider.auth_order.is_empty() {
                 writeln!(f, "    auth_order: {}", provider.auth_order.join(" -> "))?;
@@ -1152,7 +1161,13 @@ pub struct ModelFallbackChainDetail {
 
 impl fmt::Display for ModelFallbackChainDetail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} [{}]: {}", self.name, self.kind, self.chain.join(" -> "))
+        write!(
+            f,
+            "{} [{}]: {}",
+            self.name,
+            self.kind,
+            self.chain.join(" -> ")
+        )
     }
 }
 
@@ -1737,9 +1752,17 @@ pub struct SessionCleanupItem {
 impl fmt::Display for SessionCleanupResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.dry_run {
-            writeln!(f, "Dry run — {} session(s) would be deleted:", self.sessions.len())?;
+            writeln!(
+                f,
+                "Dry run — {} session(s) would be deleted:",
+                self.sessions.len()
+            )?;
         } else {
-            writeln!(f, "Cleanup complete — {} deleted, {} failed", self.deleted, self.failed)?;
+            writeln!(
+                f,
+                "Cleanup complete — {} deleted, {} failed",
+                self.deleted, self.failed
+            )?;
         }
         for s in &self.sessions {
             let icon = match s.result.as_str() {
@@ -1831,9 +1854,7 @@ impl fmt::Display for SessionHistoryResponse {
             let turn_label = entry.turn_id.as_deref().unwrap_or("-");
             match entry.kind.as_str() {
                 "user_message" => {
-                    let msg = entry.payload["message"]
-                        .as_str()
-                        .unwrap_or("<no message>");
+                    let msg = entry.payload["message"].as_str().unwrap_or("<no message>");
                     writeln!(f, "[{ts}] turn={turn_label}")?;
                     writeln!(f, "  ▶ User:")?;
                     for line in msg.lines() {
@@ -1841,9 +1862,7 @@ impl fmt::Display for SessionHistoryResponse {
                     }
                 }
                 "assistant_message" => {
-                    let content = entry.payload["content"]
-                        .as_str()
-                        .unwrap_or("<no content>");
+                    let content = entry.payload["content"].as_str().unwrap_or("<no content>");
                     writeln!(f, "[{ts}] turn={turn_label}")?;
                     writeln!(f, "  ◀ Assistant:")?;
                     for line in content.lines() {
@@ -1851,15 +1870,17 @@ impl fmt::Display for SessionHistoryResponse {
                     }
                 }
                 "tool_request" => {
-                    let tool = entry.payload["tool_name"]
-                        .as_str()
-                        .unwrap_or("unknown");
+                    let tool = entry.payload["tool_name"].as_str().unwrap_or("unknown");
                     writeln!(f, "[{ts}] turn={turn_label}")?;
                     writeln!(f, "  ⚙ Tool call: {tool}")?;
                 }
                 "tool_result" => {
                     let is_err = entry.payload["is_error"].as_bool().unwrap_or(false);
-                    let label = if is_err { "✗ Tool error" } else { "✓ Tool result" };
+                    let label = if is_err {
+                        "✗ Tool error"
+                    } else {
+                        "✓ Tool result"
+                    };
                     writeln!(f, "[{ts}] turn={turn_label}")?;
                     writeln!(f, "  {label}")?;
                 }
@@ -2642,13 +2663,7 @@ impl fmt::Display for MessageReactionListResponse {
             if r.users.is_empty() {
                 write!(f, "\n  {} ×{}", r.emoji, r.count)?;
             } else {
-                write!(
-                    f,
-                    "\n  {} ×{} ({})",
-                    r.emoji,
-                    r.count,
-                    r.users.join(", "),
-                )?;
+                write!(f, "\n  {} ×{} ({})", r.emoji, r.count, r.users.join(", "),)?;
             }
         }
         Ok(())
@@ -2677,7 +2692,11 @@ pub struct ReminderSummary {
 impl fmt::Display for ReminderSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let label = if self.status.is_empty() {
-            if self.delivered { "delivered" } else { "pending" }
+            if self.delivered {
+                "delivered"
+            } else {
+                "pending"
+            }
         } else {
             &self.status
         };
@@ -2925,7 +2944,10 @@ mod tests {
     #[test]
     fn render_template_list_empty() {
         let list = TemplateListResponse { templates: vec![] };
-        assert_eq!(render(&list, OutputFormat::Human), "No templates available.");
+        assert_eq!(
+            render(&list, OutputFormat::Human),
+            "No templates available."
+        );
     }
 
     #[test]
@@ -3314,7 +3336,9 @@ mod tests {
         };
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Model auth"));
-        assert!(out.contains("hamza-eastus2 [azure-openai] source=env:OPENAI_API_KEY creds=missing"));
+        assert!(
+            out.contains("hamza-eastus2 [azure-openai] source=env:OPENAI_API_KEY creds=missing")
+        );
         assert!(out.contains("auth_order: api_key -> api_key_env -> azure_cli"));
     }
 

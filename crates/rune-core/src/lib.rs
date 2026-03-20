@@ -839,11 +839,9 @@ mod tests {
     #[test]
     fn fsm_created_to_ready() {
         assert!(SessionStatus::Created.can_transition_to(&SessionStatus::Ready));
-        assert!(
-            SessionStatus::Created
-                .transition(SessionStatus::Ready)
-                .is_ok()
-        );
+        assert!(SessionStatus::Created
+            .transition(SessionStatus::Ready)
+            .is_ok());
     }
 
     #[test]
@@ -923,11 +921,9 @@ mod tests {
         assert!(!SessionStatus::Created.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Completed.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Ready.can_transition_to(&SessionStatus::Completed));
-        assert!(
-            SessionStatus::Created
-                .transition(SessionStatus::Running)
-                .is_err()
-        );
+        assert!(SessionStatus::Created
+            .transition(SessionStatus::Running)
+            .is_err());
     }
 
     // ── TriggerKind ──────────────────────────────────────────────
@@ -1066,9 +1062,15 @@ mod tests {
     #[test]
     fn builtin_templates_have_all_three_categories() {
         let templates = builtin_agent_templates();
-        let has_dev = templates.iter().any(|t| t.category == TemplateCategory::Developer);
-        let has_ops = templates.iter().any(|t| t.category == TemplateCategory::Operator);
-        let has_personal = templates.iter().any(|t| t.category == TemplateCategory::Personal);
+        let has_dev = templates
+            .iter()
+            .any(|t| t.category == TemplateCategory::Developer);
+        let has_ops = templates
+            .iter()
+            .any(|t| t.category == TemplateCategory::Operator);
+        let has_personal = templates
+            .iter()
+            .any(|t| t.category == TemplateCategory::Personal);
         assert!(has_dev, "missing developer templates");
         assert!(has_ops, "missing operator templates");
         assert!(has_personal, "missing personal templates");
