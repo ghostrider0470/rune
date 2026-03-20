@@ -505,6 +505,58 @@ impl fmt::Display for TemplateStartResponse {
     }
 }
 
+/// A single installed skill entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillSummary {
+    pub name: String,
+    pub description: String,
+    pub enabled: bool,
+    pub source_dir: String,
+    pub binary_path: Option<String>,
+}
+
+impl fmt::Display for SkillSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "{} [{}]",
+            self.name,
+            if self.enabled { "enabled" } else { "disabled" }
+        )?;
+        writeln!(f, "  Description: {}", self.description)?;
+        writeln!(f, "  Source: {}", self.source_dir)?;
+        write!(
+            f,
+            "  Binary: {}",
+            self.binary_path.as_deref().unwrap_or("-")
+        )
+    }
+}
+
+/// Response for `rune skills list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillListResponse {
+    pub skills: Vec<SkillSummary>,
+}
+
+impl fmt::Display for SkillListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.skills.is_empty() {
+            return write!(f, "No skills found.");
+        }
+
+        for (idx, skill) in self.skills.iter().enumerate() {
+            if idx > 0 {
+                writeln!(f)?;
+                writeln!(f)?;
+            }
+            write!(f, "{skill}")?;
+        }
+
+        Ok(())
+    }
+}
+
 /// First-class `/status` / `session_status` parity card for an individual session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionStatusCard {
@@ -3050,6 +3102,62 @@ mod tests {
         assert_eq!(parsed["session_id"], "abc-123");
         assert_eq!(parsed["template_slug"], "coding-agent");
         assert_eq!(parsed["mode"], "coder");
+    }
+
+    #[test]
+    fn render_skill_list_empty() {
+        let response = SkillListResponse { skills: vec![] };
+        assert_eq!(render(&response, OutputFormat::Human), "No skills found.");
+    }
+
+    #[test]
+    fn render_skill_list_human() {
+        let response = SkillListResponse {
+            skills: vec![
+                SkillSummary {
+                    name: "alpha".into(),
+                    description: "First skill".into(),
+                    enabled: true,
+                    source_dir: "/data/skills/alpha".into(),
+                    binary_path: Some("/data/skills/alpha/run.sh".into()),
+                },
+                SkillSummary {
+                    name: "beta".into(),
+                    description: "Second skill".into(),
+                    enabled: false,
+                    source_dir: "/data/skills/beta".into(),
+                    binary_path: None,
+                },
+            ],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("alpha [enabled]"));
+        assert!(out.contains("beta [disabled]"));
+        assert!(out.contains("Description: First skill"));
+        assert!(out.contains("Source: /data/skills/alpha"));
+        assert!(out.contains("Binary: /data/skills/alpha/run.sh"));
+        assert!(out.contains("Binary: -"));
+    }
+
+    #[test]
+    fn render_skill_list_json() {
+        let response = SkillListResponse {
+            skills: vec![SkillSummary {
+                name: "alpha".into(),
+                description: "First skill".into(),
+                enabled: true,
+                source_dir: "/data/skills/alpha".into(),
+                binary_path: Some("/data/skills/alpha/run.sh".into()),
+            }],
+        };
+        let out = render(&response, OutputFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["skills"][0]["name"], "alpha");
+        assert_eq!(parsed["skills"][0]["enabled"], true);
+        assert_eq!(
+            parsed["skills"][0]["binary_path"],
+            "/data/skills/alpha/run.sh"
+        );
     }
 
     #[test]

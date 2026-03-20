@@ -13,12 +13,13 @@ use crate::output::{
     ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
     ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
     ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
-    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport, SystemEventListResponse,
-    GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse,
-    HealthResponse, HeartbeatStatusResponse, ModelScanProviderResult, ModelScanResponse,
-    MessageSearchHit, MessageSearchResponse, MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail, SessionDetailResponse,
-    SessionListResponse, SessionStatusCard, SessionSummary, SessionTreeNode,
-    SessionTreeResponse, StatusResponse,
+    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorCheck, DoctorReport,
+    SystemEventListResponse, GatewayCallResponse, GatewayDiscoverResponse, GatewayProbeResponse,
+    GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
+    ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
+    MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
+    SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
+    SessionTreeNode, SessionTreeResponse, SkillListResponse, SkillSummary, StatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -194,6 +195,26 @@ impl GatewayClient {
                 })
                 .collect();
             Ok(ModelScanResponse { providers })
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `GET /skills`
+    pub async fn skills_list(&self) -> Result<SkillListResponse> {
+        let resp = self
+            .http
+            .get(self.url("/skills"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if resp.status().is_success() {
+            let skills = resp
+                .json::<Vec<SkillSummary>>()
+                .await
+                .context("invalid JSON from /skills")?;
+            Ok(SkillListResponse { skills })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2735,6 +2756,44 @@ mod tests {
         assert_eq!(resp.providers[0].provider, "ollama-local");
         assert_eq!(resp.providers[0].models[0].name, "llama3.2:latest");
         assert_eq!(resp.providers[0].models[0].size, Some(12345));
+    }
+
+    #[tokio::test]
+    async fn skills_list_parses_entries() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/skills"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {
+                    "name": "alpha",
+                    "description": "First skill",
+                    "enabled": true,
+                    "source_dir": "/data/skills/alpha",
+                    "binary_path": "/data/skills/alpha/run.sh"
+                },
+                {
+                    "name": "beta",
+                    "description": "Second skill",
+                    "enabled": false,
+                    "source_dir": "/data/skills/beta",
+                    "binary_path": null
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.skills_list().await.unwrap();
+        assert_eq!(resp.skills.len(), 2);
+        assert_eq!(resp.skills[0].name, "alpha");
+        assert!(resp.skills[0].enabled);
+        assert_eq!(
+            resp.skills[0].binary_path.as_deref(),
+            Some("/data/skills/alpha/run.sh")
+        );
+        assert_eq!(resp.skills[1].name, "beta");
+        assert!(!resp.skills[1].enabled);
+        assert!(resp.skills[1].binary_path.is_none());
     }
 
     #[tokio::test]
