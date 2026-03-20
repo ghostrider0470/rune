@@ -648,8 +648,10 @@ Rune startup must behave predictably across file config, environment overrides, 
 - explicit `models.providers` disables zero-config Ollama auto-detect
 - empty `models.providers` enables zero-config Ollama probing
 - `models.default_model` overrides the Ollama auto-picked model when both are present
+- explicit default-provider detection follows: default agent model, then `models.default_model`, then single explicit provider when only one exists
 - bare-host `mode = "auto"` with untouched Docker-default paths resolves to standalone local mode
 - Docker/Kubernetes or explicit server signals preserve server-oriented path layout
+- unresolved explicit default-model references stay unresolved in diagnostics; Rune does not guess a provider
 
 #### Operator evidence
 
@@ -662,8 +664,9 @@ Startup logs must surface:
 - `OLLAMA_HOST` relevance
 - configured providers summary
 - configured default model and source
+- configured default provider and source when detectable
 - resolved provider mode and detail
-- resolved default provider when a default model is selected
+- resolved default provider and source after runtime provider selection
 - default model source
 
 ---
@@ -685,6 +688,7 @@ A first local boot with no custom config must start in a coherent standalone sha
 
 - unreachable `OLLAMA_HOST` must warn explicitly before fallback
 - reachable Ollama with no pulled models must emit actionable operator guidance
+- explicit provider build failure must surface as `echo-fallback` in runtime provider resolution
 - missing or unwritable required paths must surface clear path-specific diagnostics
 
 ---

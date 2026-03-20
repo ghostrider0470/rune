@@ -836,6 +836,15 @@ When `models.providers` is non-empty, explicit provider config wins and zero-con
 
 If `models.default_model` is set while Rune is using zero-config Ollama bootstrap, that configured default must win over the Ollama auto-pick.
 
+When explicit providers are configured, Rune should detect a configured default provider in this order:
+
+1. resolve the default agent model when one exists
+2. otherwise resolve `models.default_model` when it exists
+3. otherwise, when exactly one provider is configured, treat that provider as the configured default provider even before a default model is chosen
+4. otherwise leave the configured default provider unset
+
+If an explicit default model cannot be resolved against the configured provider inventory, startup diagnostics must surface that as unresolved instead of silently inventing a provider.
+
 ---
 
 #### 5. Operator-visible startup diagnostics
@@ -850,12 +859,15 @@ Startup logging must make these decisions inspectable without reading source cod
 - `OLLAMA_HOST` value when relevant
 - configured providers summary
 - configured default model and its source before runtime probing
+- configured default provider and its source before runtime probing when detectable
 - resolved provider mode: explicit providers, zero-config Ollama, or echo fallback
 - resolved provider detail: configured provider names, Ollama probe target, or echo
-- resolved default provider for the chosen default model when one exists
+- resolved default provider and its source after runtime provider selection
 - default model source: agent config, `models.default_model`, or Ollama auto-pick
 
 If `OLLAMA_HOST` is set but unreachable, startup must warn explicitly that Rune is falling back instead of silently behaving like localhost probing.
+
+If explicit provider construction fails at startup, Rune must report `echo-fallback` as the resolved provider mode rather than logging the configured provider inventory as if it were active.
 
 ---
 
