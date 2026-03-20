@@ -3476,7 +3476,7 @@ pub struct LogsExportResponse {
 
 impl fmt::Display for LogsExportResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let icon = if self.success { "\u2713" } else { "\u2717" };
+        let icon = if self.success { "\u{2713}" } else { "\u{2717}" };
         writeln!(f, "{icon} Export: {}", self.message)?;
         write!(f, "  Output: {}", self.path)
     }

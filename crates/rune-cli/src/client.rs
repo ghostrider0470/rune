@@ -5348,11 +5348,20 @@ impl GatewayClient {
         } else { bail!("Gateway returned HTTP {}", resp.status()); }
     }
 
+}
+
+#[cfg(test)]
+mod logs_breadth_tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
     #[tokio::test]
     async fn logs_tail_parses_response() {
         let s = MockServer::start().await;
         Mock::given(method("GET")).and(path("/api/logs/tail"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "entries": [{"timestamp":"T1","level":"INFO","message":"hello"}],
                 "source": "gateway"
             }))).mount(&s).await;
@@ -5365,7 +5374,7 @@ impl GatewayClient {
     async fn logs_search_parses_response() {
         let s = MockServer::start().await;
         Mock::given(method("GET")).and(path("/api/logs/search"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "query": "err", "entries": [{"timestamp":"T1","level":"ERROR","message":"err found"}], "total": 1
             }))).mount(&s).await;
         let r = GatewayClient::new(&s.uri()).logs_search("err", None, None, 50).await.unwrap();
@@ -5376,13 +5385,12 @@ impl GatewayClient {
     async fn logs_export_parses_response() {
         let s = MockServer::start().await;
         Mock::given(method("POST")).and(path("/api/logs/export"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "success": true, "path": "/tmp/out.json", "message": "Exported 10 entries"
             }))).mount(&s).await;
         let r = GatewayClient::new(&s.uri()).logs_export("json", None, None, None, None, None, None).await.unwrap();
         assert!(r.success);
     }
-
 }
 
 #[cfg(test)]

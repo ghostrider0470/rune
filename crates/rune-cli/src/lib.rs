@@ -23,13 +23,13 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    AcpAction, AgentAction, AgentsAction, ApprovalsAction, HooksAction, ChannelsAction, Command,
+    AcpAction, AgentAction, AgentsAction, ApprovalsAction, BackupAction, HooksAction, ChannelsAction, Command,
     CompletionAction, CompletionShell,
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
     ModelsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
-    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
+    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction, PluginsAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -1068,7 +1068,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Init { path } => {
             let target = std::path::Path::new(&path);
-            init_workspace(target, template.as_deref(), non_interactive).await?;
+            init_workspace(target).await?;
         }
         Command::Skills { action } => match action {
             SkillsAction::List => {
@@ -1482,88 +1482,6 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 ChannelsAction::Logs { channel, limit } => {
                     let result = channel_logs(channel.as_deref(), limit);
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Add { name, kind, enable } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = if known {
-                        ChannelAddResponse {
-                            name,
-                            kind,
-                            enabled: false,
-                            message: "Channel with that name already exists.".to_string(),
-                        }
-                    } else {
-                        ChannelAddResponse {
-                            name,
-                            kind,
-                            enabled: enable,
-                            message: "Registered (restart gateway to activate).".to_string(),
-                        }
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Remove { name } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = ChannelRemoveResponse {
-                        name: name.clone(),
-                        removed: known,
-                        message: if known {
-                            "Removed (restart gateway to apply).".to_string()
-                        } else {
-                            format!("No channel named `{name}` found.")
-                        },
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Login { name } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = ChannelLoginResponse {
-                        name: name.clone(),
-                        success: known,
-                        message: if known {
-                            "Login accepted (credential stored).".to_string()
-                        } else {
-                            format!("No channel named `{name}` found.")
-                        },
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Logout { name } => {
-                    let known = channels.iter().any(|c| c.name == name);
-                    let result = ChannelLogoutResponse {
-                        name: name.clone(),
-                        success: known,
-                        message: if known {
-                            "Logged out (credential cleared).".to_string()
-                        } else {
-                            format!("No channel named `{name}` found.")
-                        },
-                    };
-                    println!("{}", render(&result, format));
-                }
-                ChannelsAction::Test { name } => {
-                    let channel = channels.iter().find(|c| c.name == name);
-                    let result = match channel {
-                        Some(ch) if ch.status == "ready" => ChannelTestResponse {
-                            name,
-                            reachable: true,
-                            latency_ms: Some(0),
-                            message: "Channel is ready.".to_string(),
-                        },
-                        Some(_) => ChannelTestResponse {
-                            name,
-                            reachable: false,
-                            latency_ms: None,
-                            message: "Channel exists but is not ready.".to_string(),
-                        },
-                        None => ChannelTestResponse {
-                            name,
-                            reachable: false,
-                            latency_ms: None,
-                            message: "No such channel configured.".to_string(),
-                        },
-                    };
                     println!("{}", render(&result, format));
                 }
             }
@@ -2047,6 +1965,18 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = validate_config(file.as_deref());
                 println!("{}", render(&result, format));
             }
+            ConfigAction::Reload => {
+                let result = client.config_reload().await?;
+                println!("{}", render(&result, format));
+            }
+            ConfigAction::Diff => {
+                let result = client.config_diff().await?;
+                println!("{}", render(&result, format));
+            }
+            ConfigAction::Env => {
+                let result = client.config_env().await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Security { action } => match action {
             SecurityAction::Audit => {
@@ -2187,6 +2117,48 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::Setup => {
+            let result = client.setup().await?;
+            println!("{}", render(&result, format));
+        }
+        Command::Backup { action } => match action {
+            BackupAction::Create { label } => {
+                let result = client.backup_create(label.as_deref()).await?;
+                println!("{}", render(&result, format));
+            }
+            BackupAction::List => {
+                let result = client.backup_list().await?;
+                println!("{}", render(&result, format));
+            }
+            BackupAction::Restore { id, confirm } => {
+                if !confirm {
+                    anyhow::bail!("Backup restore requires --confirm flag.");
+                }
+                let result = client.backup_restore(&id).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Update { action } => match action {
+            UpdateAction::Check => {
+                let result = client.update_check().await?;
+                println!("{}", render(&result, format));
+            }
+            UpdateAction::Apply => {
+                let result = client.update_apply().await?;
+                println!("{}", render(&result, format));
+            }
+            UpdateAction::Status => {
+                let result = client.update_status().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Reset { confirm } => {
+            if !confirm {
+                anyhow::bail!("Factory reset requires --confirm flag.");
+            }
+            let result = client.reset().await?;
+            println!("{}", render(&result, format));
+        }
     }
 
     Ok(())
