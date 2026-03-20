@@ -1759,6 +1759,75 @@ impl fmt::Display for TranscriptEntry {
     }
 }
 
+// ── Session history ──────────────────────────────────────────────────────────
+
+/// Response for `rune sessions history` — a focused, filterable transcript view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionHistoryResponse {
+    pub session_id: String,
+    pub total_entries: usize,
+    pub shown_entries: usize,
+    pub entries: Vec<TranscriptEntry>,
+}
+
+impl fmt::Display for SessionHistoryResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "Session history: {} (showing {}/{})",
+            self.session_id, self.shown_entries, self.total_entries
+        )?;
+        writeln!(f, "{}", "─".repeat(72))?;
+        for entry in &self.entries {
+            let ts = &entry.created_at;
+            let turn_label = entry.turn_id.as_deref().unwrap_or("-");
+            match entry.kind.as_str() {
+                "user_message" => {
+                    let msg = entry.payload["message"]
+                        .as_str()
+                        .unwrap_or("<no message>");
+                    writeln!(f, "[{ts}] turn={turn_label}")?;
+                    writeln!(f, "  ▶ User:")?;
+                    for line in msg.lines() {
+                        writeln!(f, "    {line}")?;
+                    }
+                }
+                "assistant_message" => {
+                    let content = entry.payload["content"]
+                        .as_str()
+                        .unwrap_or("<no content>");
+                    writeln!(f, "[{ts}] turn={turn_label}")?;
+                    writeln!(f, "  ◀ Assistant:")?;
+                    for line in content.lines() {
+                        writeln!(f, "    {line}")?;
+                    }
+                }
+                "tool_request" => {
+                    let tool = entry.payload["tool_name"]
+                        .as_str()
+                        .unwrap_or("unknown");
+                    writeln!(f, "[{ts}] turn={turn_label}")?;
+                    writeln!(f, "  ⚙ Tool call: {tool}")?;
+                }
+                "tool_result" => {
+                    let is_err = entry.payload["is_error"].as_bool().unwrap_or(false);
+                    let label = if is_err { "✗ Tool error" } else { "✓ Tool result" };
+                    writeln!(f, "[{ts}] turn={turn_label}")?;
+                    writeln!(f, "  {label}")?;
+                }
+                other => {
+                    writeln!(f, "[{ts}] turn={turn_label}")?;
+                    writeln!(f, "  ({other})")?;
+                }
+            }
+        }
+        if self.shown_entries == 0 {
+            writeln!(f, "  (no matching entries)")?;
+        }
+        write!(f, "{}", "─".repeat(72))
+    }
+}
+
 /// Full session export bundle: session detail + transcript.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionExportBundle {
@@ -4370,5 +4439,120 @@ mod tests {
         assert_eq!(v["thread_id"], "thr-42");
         assert_eq!(v["message_id"], "msg-new-1");
         assert_eq!(v["detail"], "Reply sent");
+    }
+
+    // ── Session history tests ────────────────────────────────────────────
+
+    fn make_transcript_entry(seq: i32, kind: &str, turn_id: Option<&str>) -> TranscriptEntry {
+        let payload = match kind {
+            "user_message" => serde_json::json!({"message": "Hello world"}),
+            "assistant_message" => serde_json::json!({"content": "Hi there"}),
+            "tool_request" => serde_json::json!({"tool_name": "read_file"}),
+            "tool_result" => serde_json::json!({"is_error": false}),
+            _ => serde_json::json!({}),
+        };
+        TranscriptEntry {
+            id: format!("entry-{seq}"),
+            turn_id: turn_id.map(String::from),
+            seq,
+            kind: kind.to_string(),
+            payload,
+            created_at: "2026-03-20T01:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn render_session_history_human_mixed() {
+        let resp = SessionHistoryResponse {
+            session_id: "sess-abc".into(),
+            total_entries: 4,
+            shown_entries: 4,
+            entries: vec![
+                make_transcript_entry(1, "user_message", Some("t1")),
+                make_transcript_entry(2, "assistant_message", Some("t1")),
+                make_transcript_entry(3, "tool_request", Some("t2")),
+                make_transcript_entry(4, "tool_result", Some("t2")),
+            ],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("Session history: sess-abc (showing 4/4)"));
+        assert!(out.contains("▶ User:"));
+        assert!(out.contains("Hello world"));
+        assert!(out.contains("◀ Assistant:"));
+        assert!(out.contains("Hi there"));
+        assert!(out.contains("⚙ Tool call: read_file"));
+        assert!(out.contains("✓ Tool result"));
+    }
+
+    #[test]
+    fn render_session_history_empty() {
+        let resp = SessionHistoryResponse {
+            session_id: "sess-empty".into(),
+            total_entries: 10,
+            shown_entries: 0,
+            entries: vec![],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("showing 0/10"));
+        assert!(out.contains("(no matching entries)"));
+    }
+
+    #[test]
+    fn render_session_history_json() {
+        let resp = SessionHistoryResponse {
+            session_id: "sess-j".into(),
+            total_entries: 1,
+            shown_entries: 1,
+            entries: vec![make_transcript_entry(1, "user_message", Some("t1"))],
+        };
+        let out = render(&resp, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["session_id"], "sess-j");
+        assert_eq!(v["total_entries"], 1);
+        assert_eq!(v["shown_entries"], 1);
+        assert_eq!(v["entries"][0]["kind"], "user_message");
+    }
+
+    #[test]
+    fn render_session_history_tool_error() {
+        let mut entry = make_transcript_entry(1, "tool_result", Some("t1"));
+        entry.payload = serde_json::json!({"is_error": true});
+        let resp = SessionHistoryResponse {
+            session_id: "sess-err".into(),
+            total_entries: 1,
+            shown_entries: 1,
+            entries: vec![entry],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("✗ Tool error"));
+    }
+
+    #[test]
+    fn render_session_history_unknown_kind() {
+        let resp = SessionHistoryResponse {
+            session_id: "sess-u".into(),
+            total_entries: 1,
+            shown_entries: 1,
+            entries: vec![make_transcript_entry(1, "system_event", None)],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("(system_event)"));
+        assert!(out.contains("turn=-"));
+    }
+
+    #[test]
+    fn render_session_history_multiline_user_message() {
+        let mut entry = make_transcript_entry(1, "user_message", Some("t1"));
+        entry.payload = serde_json::json!({"message": "line one\nline two\nline three"});
+        let resp = SessionHistoryResponse {
+            session_id: "sess-ml".into(),
+            total_entries: 1,
+            shown_entries: 1,
+            entries: vec![entry],
+        };
+        let out = render(&resp, OutputFormat::Human);
+        assert!(out.contains("    line one"));
+        assert!(out.contains("    line two"));
+        assert!(out.contains("    line three"));
     }
 }
