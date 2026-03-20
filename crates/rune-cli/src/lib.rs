@@ -27,7 +27,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, GatewayAction, MemoryAction, MessageAction,
     MessageTagAction, MessageThreadAction, MessageVoiceAction, ModelsAction, RemindersAction,
     SessionsAction,
-    SystemAction, SystemEventAction, SystemHeartbeatAction,
+    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -966,6 +966,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             let target = std::path::Path::new(&path);
             init_workspace(target).await?;
         }
+        Command::Skills { action } => match action {
+            SkillsAction::List => {
+                let result = client.skills_list().await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Completion { action } => match action {
             CompletionAction::Generate { shell } => {
                 print_completion(shell)?;
@@ -2103,7 +2109,7 @@ models = ["gpt-5.4"]
         let script = generate_completion_string(cli::CompletionShell::Bash);
         assert!(!script.is_empty(), "bash completion script must not be empty");
         // The script should reference key top-level subcommands.
-        for cmd in ["gateway", "status", "completion", "config", "doctor"] {
+        for cmd in ["gateway", "status", "completion", "config", "doctor", "skills"] {
             assert!(
                 script.contains(cmd),
                 "bash completion missing subcommand `{cmd}`",
@@ -2115,7 +2121,7 @@ models = ["gpt-5.4"]
     fn zsh_completion_contains_subcommands() {
         let script = generate_completion_string(cli::CompletionShell::Zsh);
         assert!(!script.is_empty(), "zsh completion script must not be empty");
-        for cmd in ["gateway", "status", "completion", "config", "doctor"] {
+        for cmd in ["gateway", "status", "completion", "config", "doctor", "skills"] {
             assert!(
                 script.contains(cmd),
                 "zsh completion missing subcommand `{cmd}`",
@@ -2127,7 +2133,7 @@ models = ["gpt-5.4"]
     fn fish_completion_contains_subcommands() {
         let script = generate_completion_string(cli::CompletionShell::Fish);
         assert!(!script.is_empty(), "fish completion script must not be empty");
-        for cmd in ["gateway", "status", "completion", "config", "doctor"] {
+        for cmd in ["gateway", "status", "completion", "config", "doctor", "skills"] {
             assert!(
                 script.contains(cmd),
                 "fish completion missing subcommand `{cmd}`",

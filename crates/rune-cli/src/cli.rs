@@ -106,6 +106,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ModelsAction,
     },
+    /// Inspect installed prompt skills.
+    Skills {
+        #[command(subcommand)]
+        action: SkillsAction,
+    },
     /// Inspect workspace memory files and retrieval state.
     Memory {
         #[command(subcommand)]
@@ -450,6 +455,12 @@ pub enum ModelsAction {
     ImageFallbacks,
     /// Scan locally reachable providers (for example Ollama) for available models.
     Scan,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SkillsAction {
+    /// List installed skills discovered by the gateway.
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -987,6 +998,17 @@ mod tests {
     fn parse_dashboard() {
         let cli = Cli::try_parse_from(["rune", "dashboard"]).unwrap();
         assert!(matches!(cli.command, Command::Dashboard));
+    }
+
+    #[test]
+    fn parse_skills_list() {
+        let cli = Cli::try_parse_from(["rune", "skills", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Skills {
+                action: SkillsAction::List
+            }
+        ));
     }
 
     #[test]
