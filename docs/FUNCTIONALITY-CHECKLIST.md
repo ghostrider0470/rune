@@ -128,6 +128,7 @@ Implementation note (2026-03-19): the operator CLI now exposes the `models` comm
 - [ ] `hooks` command family
 - [ ] `webhooks` helpers
 - [ ] `backup` command family
+  - 2026-03-20 docs alignment: operator-facing backup/restore workflow is documented in `docs/operator/DEPLOYMENT.md` and `docs/parity/PROTOCOLS.md`, but the dedicated `rune backup create|restore|list` CLI remains intentionally unchecked until it ships.
 - [ ] `update` command family
 - [ ] `setup` / `onboard` / `uninstall`
 
@@ -367,8 +368,11 @@ Implementation note (2026-03-13): `completion generate <shell>` now emits real s
 - [ ] structured logs
 - [ ] metrics/tracing
 - [x] backup/export
+  - 2026-03-20 docs slice: the shipped operator workflow now explicitly defines quiesce/capture steps, durable-state domains, exclusions, and mode-aware use of filesystem/database-native tooling. This is documentation parity for backup/export, not a claim that the dedicated `backup` CLI family is shipped.
 - [x] restore/migration workflow
+  - 2026-03-20 docs slice: restore guidance now explicitly requires same-layout recovery, provider-native restore steps for managed services, post-restore verification (`rune doctor`, health/status, scheduler/transcript/approval sanity), and declared degraded-recovery limits.
 - [x] restart preservation workflow
+  - 2026-03-20 docs slice: operator docs now make restart/restore expectations explicit for sessions, memory, scheduler state, approvals/audit trails, and other durable state while calling out that live PTY/process attachment and in-flight work are not promised to resume in place.
 - [ ] update path
 - [ ] doctor/diagnostics
 - [ ] doctor interactive repair flow
