@@ -2067,7 +2067,10 @@ async fn build_model_provider(
                 // Surface prominent, actionable guidance so zero-config
                 // users know exactly what to do next (issue #61).
                 let guidance = provider.empty_model_guidance();
-                warn!("Ollama is running but has no models pulled");
+                warn!(
+                    ollama_base = %provider.base_url(),
+                    "Ollama is running but has no models pulled; Rune will start without a default model"
+                );
                 eprintln!("{guidance}");
             }
 
