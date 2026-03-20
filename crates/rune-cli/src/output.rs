@@ -1215,6 +1215,110 @@ impl fmt::Display for ChannelLogsResponse {
     }
 }
 
+/// Response for `channels add`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAddResponse {
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelAddResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Channel `{}` ({}) registered (enabled={}). {}",
+            self.name, self.kind, self.enabled, self.message
+        )
+    }
+}
+
+/// Response for `channels remove`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelRemoveResponse {
+    pub name: String,
+    pub removed: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelRemoveResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.removed {
+            write!(f, "Channel `{}` removed.", self.name)
+        } else {
+            write!(f, "Channel `{}`: {}", self.name, self.message)
+        }
+    }
+}
+
+/// Response for `channels login`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelLoginResponse {
+    pub name: String,
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelLoginResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.success {
+            write!(f, "Channel `{}` logged in.", self.name)
+        } else {
+            write!(f, "Channel `{}` login failed: {}", self.name, self.message)
+        }
+    }
+}
+
+/// Response for `channels logout`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelLogoutResponse {
+    pub name: String,
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelLogoutResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.success {
+            write!(f, "Channel `{}` logged out.", self.name)
+        } else {
+            write!(
+                f,
+                "Channel `{}` logout failed: {}",
+                self.name, self.message
+            )
+        }
+    }
+}
+
+/// Response for `channels test`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelTestResponse {
+    pub name: String,
+    pub reachable: bool,
+    pub latency_ms: Option<u64>,
+    pub message: String,
+}
+
+impl fmt::Display for ChannelTestResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.reachable {
+            write!(f, "Channel `{}`: reachable", self.name)?;
+            if let Some(ms) = self.latency_ms {
+                write!(f, " ({ms}ms)")?;
+            }
+            Ok(())
+        } else {
+            write!(
+                f,
+                "Channel `{}`: unreachable — {}",
+                self.name, self.message
+            )
+        }
+    }
+}
+
 /// Response for `logs`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogsQueryResponse {
@@ -3323,6 +3427,58 @@ impl fmt::Display for ConfigureResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let icon = if self.success { "✓" } else { "✗" };
         write!(f, "{icon} {}", self.detail)
+    }
+}
+
+
+/// Response for `logs tail`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsTailResponse {
+    pub entries: Vec<serde_json::Value>,
+    pub source: String,
+}
+
+impl fmt::Display for LogsTailResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Log tail ({}):", self.source)?;
+        for e in &self.entries {
+            writeln!(f, "  {}", format_log_entry(e))?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `logs search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsSearchResponse {
+    pub query: String,
+    pub entries: Vec<serde_json::Value>,
+    pub total: usize,
+}
+
+impl fmt::Display for LogsSearchResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Search \"{}\": {} result(s)", self.query, self.total)?;
+        for e in &self.entries {
+            writeln!(f, "  {}", format_log_entry(e))?;
+        }
+        Ok(())
+    }
+}
+
+/// Response for `logs export`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsExportResponse {
+    pub success: bool,
+    pub path: String,
+    pub message: String,
+}
+
+impl fmt::Display for LogsExportResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "\u2713" } else { "\u2717" };
+        writeln!(f, "{icon} Export: {}", self.message)?;
+        write!(f, "  Output: {}", self.path)
     }
 }
 
@@ -5630,6 +5786,40 @@ mod tests {
         assert!(out.contains("wizard completed"));
     }
 }
+
+
+    #[test]
+    fn render_logs_tail() {
+        let r = LogsTailResponse {
+            entries: vec![serde_json::json!({"timestamp":"T1","level":"INFO","message":"hello"})],
+            source: "gateway".into(),
+        };
+        let h = render(&r, OutputFormat::Human);
+        assert!(h.contains("hello"));
+        assert!(h.contains("gateway"));
+    }
+
+    #[test]
+    fn render_logs_search() {
+        let r = LogsSearchResponse {
+            query: "err".into(),
+            entries: vec![serde_json::json!({"timestamp":"T1","level":"ERROR","message":"err found"})],
+            total: 1,
+        };
+        let h = render(&r, OutputFormat::Human);
+        assert!(h.contains("err"));
+    }
+
+    #[test]
+    fn render_logs_export() {
+        let r = LogsExportResponse {
+            success: true,
+            path: "/tmp/out.json".into(),
+            message: "Exported 10 entries".into(),
+        };
+        let h = render(&r, OutputFormat::Human);
+        assert!(h.contains("Exported"));
+    }
 
 #[cfg(test)]
 mod subagent_output_tests {

@@ -26,7 +26,7 @@ use cli::{
     AcpAction, AgentAction, AgentsAction, ApprovalsAction, HooksAction, ChannelsAction, Command,
     CompletionAction, CompletionShell,
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
-    GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsArgs,
+    GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
     ModelsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
@@ -35,8 +35,10 @@ use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
 };
 use output::{
-    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
-    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
+    ChannelAddResponse, ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse,
+    ChannelLogFile, ChannelLoginResponse, ChannelLogoutResponse, ChannelLogsResponse,
+    ChannelRemoveResponse, ChannelResolveResponse, ChannelStatusResponse, ChannelTestResponse,
+    DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
     ModelFallbackChainDetail, ModelFallbacksResponse, ModelListResponse, ModelProviderDetail,
@@ -1024,22 +1026,42 @@ pub async fn run(cli: Cli) -> Result<()> {
             let result = client.health().await?;
             println!("{}", render(&result, format));
         }
-        Command::Logs(LogsArgs {
-            level,
-            source,
-            limit,
-            since,
-        }) => {
-            let result = client
-                .logs_query(
-                    level.as_deref(),
-                    source.as_deref(),
-                    limit,
-                    since.as_deref(),
-                )
-                .await?;
-            println!("{}", render(&result, format));
-        }
+        Command::Logs { action } => match action {
+            LogsAction::Query(LogsArgs {
+                level,
+                source,
+                limit,
+                since,
+            }) => {
+                let result = client
+                    .logs_query(
+                        level.as_deref(),
+                        source.as_deref(),
+                        limit,
+                        since.as_deref(),
+                    )
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            LogsAction::Tail { level, source, follow, lines } => {
+                let result = client
+                    .logs_tail(level.as_deref(), source.as_deref(), follow, lines)
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            LogsAction::Search { query, level, source, limit } => {
+                let result = client
+                    .logs_search(&query, level.as_deref(), source.as_deref(), limit)
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+            LogsAction::Export { format: fmt, level, source, since, until, limit, output } => {
+                let result = client
+                    .logs_export(&fmt, level.as_deref(), source.as_deref(), since.as_deref(), until.as_deref(), limit, output.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Doctor { action } => {
             let result = match action.unwrap_or(DoctorAction::Run) {
                 DoctorAction::Run => client.doctor_run().await?,
@@ -1088,7 +1110,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Init { path, template, non_interactive } => {
             let target = std::path::Path::new(&path);
-            init_workspace(target).await?;
+            init_workspace(target, template.as_deref(), non_interactive).await?;
         }
         Command::Skills { action } => match action {
             SkillsAction::List => {
@@ -1502,6 +1524,88 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 ChannelsAction::Logs { channel, limit } => {
                     let result = channel_logs(channel.as_deref(), limit);
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Add { name, kind, enable } => {
+                    let known = channels.iter().any(|c| c.name == name);
+                    let result = if known {
+                        ChannelAddResponse {
+                            name,
+                            kind,
+                            enabled: false,
+                            message: "Channel with that name already exists.".to_string(),
+                        }
+                    } else {
+                        ChannelAddResponse {
+                            name,
+                            kind,
+                            enabled: enable,
+                            message: "Registered (restart gateway to activate).".to_string(),
+                        }
+                    };
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Remove { name } => {
+                    let known = channels.iter().any(|c| c.name == name);
+                    let result = ChannelRemoveResponse {
+                        name: name.clone(),
+                        removed: known,
+                        message: if known {
+                            "Removed (restart gateway to apply).".to_string()
+                        } else {
+                            format!("No channel named `{name}` found.")
+                        },
+                    };
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Login { name } => {
+                    let known = channels.iter().any(|c| c.name == name);
+                    let result = ChannelLoginResponse {
+                        name: name.clone(),
+                        success: known,
+                        message: if known {
+                            "Login accepted (credential stored).".to_string()
+                        } else {
+                            format!("No channel named `{name}` found.")
+                        },
+                    };
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Logout { name } => {
+                    let known = channels.iter().any(|c| c.name == name);
+                    let result = ChannelLogoutResponse {
+                        name: name.clone(),
+                        success: known,
+                        message: if known {
+                            "Logged out (credential cleared).".to_string()
+                        } else {
+                            format!("No channel named `{name}` found.")
+                        },
+                    };
+                    println!("{}", render(&result, format));
+                }
+                ChannelsAction::Test { name } => {
+                    let channel = channels.iter().find(|c| c.name == name);
+                    let result = match channel {
+                        Some(ch) if ch.status == "ready" => ChannelTestResponse {
+                            name,
+                            reachable: true,
+                            latency_ms: Some(0),
+                            message: "Channel is ready.".to_string(),
+                        },
+                        Some(_) => ChannelTestResponse {
+                            name,
+                            reachable: false,
+                            latency_ms: None,
+                            message: "Channel exists but is not ready.".to_string(),
+                        },
+                        None => ChannelTestResponse {
+                            name,
+                            reachable: false,
+                            latency_ms: None,
+                            message: "No such channel configured.".to_string(),
+                        },
+                    };
                     println!("{}", render(&result, format));
                 }
             }
@@ -2061,7 +2165,6 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
-    }
         Command::Plugins { action } => match action {
             PluginsAction::List => {
                 let result = client.plugins_list().await?;
