@@ -60,7 +60,7 @@
 |-----------------|----------------|--------|---------------------|----------|
 | `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack`, `list-reactions` shipped | #74 |
 | `agent` | — | **Not started** | Direct agent-turn invocation | #70 |
-| `agents` | `rune agents` | **Partial** | `list`, `show`, `status`, `tree`, `templates`, `start --template` shipped. Missing broader orchestration/admin parity. | #63/#70 |
+| `agents` | `rune agents` | **Partial** | `list`, `show`, `status`, `tree`, `templates`, `start --template` shipped. `steer`/`kill` remain blocked because no client-facing transport surface exists yet to send those control actions, even though internal lifecycle/session logic already exists. | #63/#70 |
 | `acp` | — | **Not started** | ACP bridge/client | #70 |
 | `devices` | — | **Not started** | `list`, `remove`, `clear`, `approve`, `reject`, `rotate`, `revoke` | — |
 | `pairing` | — | **Not started** | `list`, `approve` | — |
@@ -79,7 +79,7 @@
 ### Tier 1 summary
 
 - **Shipped:** 0
-- **Partial:** 3 (`message` — breadth verbs remain; `agents` — broader orchestration/admin parity remains; `skills` — plugins/hooks lifecycle still missing)
+- **Partial:** 3 (`message` — breadth verbs remain; `agents` — inspect/start flows ship but `steer`/`kill` are still blocked on missing client-facing transport; `skills` — plugins/hooks lifecycle still missing)
 - **Not started:** 14
 
 ---
@@ -172,7 +172,7 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 7. `config` — bridge from shipped local/gateway config surfaces to true interactive configure parity (#40/#61)
 
 ### Medium-term (Tier 1, highest value)
-8. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` surfaces (#70)
+8. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` inspect/start surfaces, including the missing client-facing transport needed for `steer` / `kill` parity (#70)
 9. `skills` / `plugins` / `hooks` — complete extension lifecycle beyond the shipped `skills` family core (#71/#68)
 10. `backup` — backup/restore workflow (#67)
 11. `devices` / `pairing` / `node` / `nodes` — multi-node surface (no issue yet)
@@ -185,6 +185,6 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 |-----------|--------|
 | Every OpenClaw CLI family has a Rune decision | **Done** — this matrix |
 | Shell completion generation for bash, zsh, fish | **Shipped** — PR #143 |
-| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, substantial `message` / `agents` surfaces, plus first gateway-backed `logs`/`doctor` admin surfaces shipped; `secrets` still not started |
+| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, substantial `message` surfaces, and `agents` inspect/start flows shipped, plus first gateway-backed `logs`/`doctor` admin surfaces; subagent `steer` / `kill` still lack a client-facing transport and `secrets` is still not started |
 | Lifecycle families have working equivalents | **Not started** — `setup`, `update`, `uninstall`, `reset` all missing |
 | Audit matrix produced | **Done** — this document |

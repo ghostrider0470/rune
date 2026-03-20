@@ -604,6 +604,21 @@ None — built-in templates are compiled into the binary. Session state is persi
 
 `implemented` — template listing and `start --template` launch path wired end-to-end.
 
+### Current parity boundary
+
+The currently shipped `rune agents` operator surface is:
+
+- `list`
+- `show`
+- `status`
+- `tree`
+- `templates`
+- `start --template`
+
+That surface is intentionally narrower than full subagent-control parity.
+Internal lifecycle/session logic for descendant agents exists, but Rune does not yet expose a client-facing transport contract for subagent `steer` or `kill` actions.
+Until that transport surface exists on the public CLI/API/event path, `steer` and `kill` remain blocked and must not be described as shipped parity.
+
 ---
 
 ## 14. Evidence checklist template
