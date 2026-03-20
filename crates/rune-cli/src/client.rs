@@ -2894,6 +2894,78 @@ impl GatewayClient {
     }
 
 
+
+    /// `GET /api/logs/tail`
+    pub async fn logs_tail(
+        &self,
+        level: Option<&str>,
+        source: Option<&str>,
+        follow: bool,
+        lines: usize,
+    ) -> Result<crate::output::LogsTailResponse> {
+        let mut query: Vec<(&str, String)> = vec![("lines", lines.to_string())];
+        if follow { query.push(("follow", "true".to_string())); }
+        if let Some(l) = level { query.push(("level", l.to_string())); }
+        if let Some(s) = source { query.push(("source", s.to_string())); }
+        let resp = self.http.get(self.url("/api/logs/tail")).query(&query).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            resp.json::<crate::output::LogsTailResponse>().await.context("invalid JSON from /api/logs/tail")
+        } else {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body}")
+        }
+    }
+
+    /// `GET /api/logs/search`
+    pub async fn logs_search(
+        &self,
+        query_text: &str,
+        level: Option<&str>,
+        source: Option<&str>,
+        limit: usize,
+    ) -> Result<crate::output::LogsSearchResponse> {
+        let mut query: Vec<(&str, String)> = vec![("q", query_text.to_string()), ("limit", limit.to_string())];
+        if let Some(l) = level { query.push(("level", l.to_string())); }
+        if let Some(s) = source { query.push(("source", s.to_string())); }
+        let resp = self.http.get(self.url("/api/logs/search")).query(&query).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            resp.json::<crate::output::LogsSearchResponse>().await.context("invalid JSON from /api/logs/search")
+        } else {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {body}")
+        }
+    }
+
+    /// `POST /api/logs/export`
+    pub async fn logs_export(
+        &self,
+        format: &str,
+        level: Option<&str>,
+        source: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+        limit: Option<usize>,
+        output: Option<&str>,
+    ) -> Result<crate::output::LogsExportResponse> {
+        let mut body = serde_json::json!({ "format": format });
+        if let Some(l) = level { body["level"] = serde_json::json!(l); }
+        if let Some(s) = source { body["source"] = serde_json::json!(s); }
+        if let Some(s) = since { body["since"] = serde_json::json!(s); }
+        if let Some(u) = until { body["until"] = serde_json::json!(u); }
+        if let Some(n) = limit { body["limit"] = serde_json::json!(n); }
+        if let Some(o) = output { body["output"] = serde_json::json!(o); }
+        let resp = self.http.post(self.url("/api/logs/export")).json(&body).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            resp.json::<crate::output::LogsExportResponse>().await.context("invalid JSON from /api/logs/export")
+        } else {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            bail!("Gateway returned HTTP {status}: {text}")
+        }
+    }
+
 }
 
 fn load_local_config_document() -> Result<(std::path::PathBuf, DocumentMut)> {
