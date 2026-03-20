@@ -1339,7 +1339,7 @@ impl fmt::Display for LogsQueryResponse {
     }
 }
 
-fn format_log_entry(entry: &serde_json::Value) -> String {
+pub fn format_log_entry(entry: &serde_json::Value) -> String {
     let timestamp = entry.get("timestamp").and_then(serde_json::Value::as_str);
     let level = entry.get("level").and_then(serde_json::Value::as_str);
     let source = entry.get("source").and_then(serde_json::Value::as_str);
@@ -3476,7 +3476,7 @@ pub struct LogsExportResponse {
 
 impl fmt::Display for LogsExportResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let icon = if self.success { "\u2713" } else { "\u2717" };
+        let icon = if self.success { "\u{2713}" } else { "\u{2717}" };
         writeln!(f, "{icon} Export: {}", self.message)?;
         write!(f, "  Output: {}", self.path)
     }
