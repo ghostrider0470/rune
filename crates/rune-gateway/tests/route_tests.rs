@@ -4558,7 +4558,10 @@ enabled: false
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "skill_not_found");
+    assert_eq!(json["message"], "skill not found: missing");
 
     let response = app
         .oneshot(
@@ -4568,7 +4571,71 @@ enabled: false
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "skill_not_found");
+    assert_eq!(json["message"], "skill not found: missing");
+}
+
+#[tokio::test]
+async fn skills_detail_route_returns_skill_and_missing_error() {
+    let mut config = AppConfig::default();
+    let skills_dir =
+        std::env::temp_dir().join(format!("rune-gw-skill-detail-{}", Uuid::now_v7()));
+    std::fs::create_dir_all(skills_dir.join("alpha")).unwrap();
+    std::fs::write(
+        skills_dir.join("alpha/SKILL.md"),
+        r#"---
+name: alpha
+description: Alpha skill
+binary: ./run-alpha.sh
+enabled: true
+---
+
+# Alpha
+"#,
+    )
+    .unwrap();
+    config.paths.skills_dir = skills_dir.clone();
+
+    let app = build_test_app_with_config(config, None);
+
+    let response = app
+        .clone()
+        .oneshot(Request::post("/skills/reload").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/skills/alpha").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["name"], "alpha");
+    assert_eq!(json["description"], "Alpha skill");
+    assert_eq!(json["enabled"], true);
+    assert_eq!(json["source_dir"], skills_dir.join("alpha").display().to_string());
+    assert!(
+        json["binary_path"]
+            .as_str()
+            .unwrap()
+            .contains("run-alpha.sh")
+    );
+
+    let response = app
+        .oneshot(Request::get("/skills/missing").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "skill_not_found");
+    assert_eq!(json["message"], "skill not found: missing");
+    assert_eq!(json["retriable"], false);
+    assert_eq!(json["approval_required"], false);
+    assert!(json["request_id"].as_str().is_some());
 }
 
 #[tokio::test]

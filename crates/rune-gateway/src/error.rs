@@ -23,6 +23,10 @@ pub enum GatewayError {
     #[error("session not found: {0}")]
     SessionNotFound(String),
 
+    /// Skill not found.
+    #[error("skill not found: {0}")]
+    SkillNotFound(String),
+
     /// Job not found.
     #[error("job not found: {0}")]
     JobNotFound(String),
@@ -54,6 +58,13 @@ impl IntoResponse for GatewayError {
             Self::SessionNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "session_not_found",
+                false,
+                false,
+                self.to_string(),
+            ),
+            Self::SkillNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                "skill_not_found",
                 false,
                 false,
                 self.to_string(),
