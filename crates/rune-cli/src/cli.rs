@@ -187,6 +187,16 @@ pub enum Command {
         #[command(subcommand)]
         action: AcpAction,
     },
+    /// Manage installed plugins (executable extensions).
+    Plugins {
+        #[command(subcommand)]
+        action: PluginsAction,
+    },
+    /// Manage lifecycle hooks (pre/post event handlers).
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
 }
 
 /// Direct agent-turn invocation actions.
@@ -248,6 +258,58 @@ pub enum AcpAction {
         #[arg(long)]
         session: String,
     },
+}
+
+/// Plugin lifecycle actions.
+#[derive(Debug, Subcommand)]
+pub enum PluginsAction {
+    /// List installed plugins.
+    List,
+    /// Show details for a specific plugin.
+    Info { /// Plugin name.
+        name: String },
+    /// Install a plugin from a path or URL.
+    Install { /// Plugin source (local path or URL).
+        source: String },
+    /// Uninstall a plugin.
+    Uninstall { /// Plugin name.
+        name: String },
+    /// Enable an installed plugin.
+    Enable { /// Plugin name.
+        name: String },
+    /// Disable an installed plugin.
+    Disable { /// Plugin name.
+        name: String },
+    /// Update an installed plugin.
+    Update { /// Plugin name.
+        name: String },
+    /// Run diagnostic checks on a plugin.
+    Doctor { /// Plugin name.
+        name: String },
+}
+
+/// Hook lifecycle actions.
+#[derive(Debug, Subcommand)]
+pub enum HooksAction {
+    /// List configured hooks.
+    List,
+    /// Show details for a specific hook.
+    Info { /// Hook name.
+        name: String },
+    /// Validate hook configuration and report issues.
+    Check,
+    /// Enable a configured hook.
+    Enable { /// Hook name.
+        name: String },
+    /// Disable a configured hook.
+    Disable { /// Hook name.
+        name: String },
+    /// Install a hook from a path or URL.
+    Install { /// Hook source (local path or URL).
+        source: String },
+    /// Update an installed hook.
+    Update { /// Hook name.
+        name: String },
 }
 
 #[derive(Debug, Clone, Args)]

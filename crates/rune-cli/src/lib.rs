@@ -23,13 +23,13 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    AcpAction, AgentAction, AgentsAction, ApprovalsAction, ChannelsAction, Command,
+    AcpAction, AgentAction, AgentsAction, ApprovalsAction, HooksAction, ChannelsAction, Command,
     CompletionAction, CompletionShell,
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
     ModelsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
-    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
+    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -2016,6 +2016,71 @@ pub async fn run(cli: Cli) -> Result<()> {
                 session,
             } => {
                 let result = client.acp_ack(&message_id, &session).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+    }
+        Command::Plugins { action } => match action {
+            PluginsAction::List => {
+                let result = client.plugins_list().await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Info { name } => {
+                let result = client.plugins_info(&name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Install { source } => {
+                let result = client.plugins_mutate("install", &source).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Uninstall { name } => {
+                let result = client.plugins_mutate("uninstall", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Enable { name } => {
+                let result = client.plugins_mutate("enable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Disable { name } => {
+                let result = client.plugins_mutate("disable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Update { name } => {
+                let result = client.plugins_mutate("update", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            PluginsAction::Doctor { name } => {
+                let result = client.plugins_mutate("doctor", &name).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Hooks { action } => match action {
+            HooksAction::List => {
+                let result = client.hooks_list().await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Info { name } => {
+                let result = client.hooks_info(&name).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Check => {
+                let result = client.hooks_check().await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Enable { name } => {
+                let result = client.hooks_mutate("enable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Disable { name } => {
+                let result = client.hooks_mutate("disable", &name).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Install { source } => {
+                let result = client.hooks_mutate("install", &source).await?;
+                println!("{}", render(&result, format));
+            }
+            HooksAction::Update { name } => {
+                let result = client.hooks_mutate("update", &name).await?;
                 println!("{}", render(&result, format));
             }
         },

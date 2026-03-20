@@ -17,7 +17,7 @@ use crate::output::{
     CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorReport, GatewayCallResponse,
     GatewayConfigResponse, GatewayDiscoverResponse, GatewayProbeResponse,
     GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
-    LogsExportResponse, LogsQueryResponse, LogsSearchResponse, LogsTailResponse,
+    LogsQueryResponse,
     SystemEventListResponse,
     ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
     MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
@@ -5160,5 +5160,118 @@ mod subagent_tests {
         let c = GatewayClient::new(&server.uri());
         let r = c.acp_ack("m1","a").await.unwrap();
         assert!(r.acknowledged);
+    }
+}
+
+// ── Plugins lifecycle ───────────────────────────────────────────
+
+impl GatewayClient {
+    /// `GET /plugins` — list installed plugins.
+    pub async fn plugins_list(&self) -> Result<crate::output::PluginListResponse> {
+        let resp = self.http.get(self.url("/plugins")).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /plugins")?;
+            let plugins = v["plugins"].as_array().unwrap_or(&vec![]).iter().map(|p| crate::output::PluginSummary {
+                name: p["name"].as_str().unwrap_or("?").to_string(),
+                version: p["version"].as_str().unwrap_or("0.0.0").to_string(),
+                enabled: p["enabled"].as_bool().unwrap_or(false),
+                description: p["description"].as_str().unwrap_or("").to_string(),
+            }).collect();
+            Ok(crate::output::PluginListResponse { plugins })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /plugins/:name` — show plugin details.
+    pub async fn plugins_info(&self, name: &str) -> Result<crate::output::PluginInfoResponse> {
+        let resp = self.http.get(self.url(&format!("/plugins/{name}"))).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /plugins/:name")?;
+            Ok(crate::output::PluginInfoResponse {
+                name: v["name"].as_str().unwrap_or("?").to_string(),
+                version: v["version"].as_str().unwrap_or("0.0.0").to_string(),
+                enabled: v["enabled"].as_bool().unwrap_or(false),
+                description: v["description"].as_str().unwrap_or("").to_string(),
+                source: v["source"].as_str().unwrap_or("unknown").to_string(),
+                manifest_valid: v["manifest_valid"].as_bool().unwrap_or(true),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND { bail!("Plugin '{name}' not found."); }
+        else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `POST /plugins/:action` — plugin lifecycle mutation.
+    pub async fn plugins_mutate(&self, action: &str, name_or_source: &str) -> Result<crate::output::PluginMutationResponse> {
+        let resp = self.http.post(self.url(&format!("/plugins/{action}")))
+            .json(&serde_json::json!({"name": name_or_source}))
+            .send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from POST /plugins/:action")?;
+            Ok(crate::output::PluginMutationResponse {
+                success: v["success"].as_bool().unwrap_or(true),
+                plugin: v["plugin"].as_str().unwrap_or(name_or_source).to_string(),
+                action: action.to_string(),
+                detail: v["detail"].as_str().unwrap_or("done").to_string(),
+            })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /hooks` — list configured hooks.
+    pub async fn hooks_list(&self) -> Result<crate::output::HookListResponse> {
+        let resp = self.http.get(self.url("/hooks")).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks")?;
+            let hooks = v["hooks"].as_array().unwrap_or(&vec![]).iter().map(|h| crate::output::HookSummary {
+                name: h["name"].as_str().unwrap_or("?").to_string(),
+                event: h["event"].as_str().unwrap_or("?").to_string(),
+                enabled: h["enabled"].as_bool().unwrap_or(false),
+                description: h["description"].as_str().unwrap_or("").to_string(),
+            }).collect();
+            Ok(crate::output::HookListResponse { hooks })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /hooks/:name` — show hook details.
+    pub async fn hooks_info(&self, name: &str) -> Result<crate::output::HookInfoResponse> {
+        let resp = self.http.get(self.url(&format!("/hooks/{name}"))).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks/:name")?;
+            Ok(crate::output::HookInfoResponse {
+                name: v["name"].as_str().unwrap_or("?").to_string(),
+                event: v["event"].as_str().unwrap_or("?").to_string(),
+                enabled: v["enabled"].as_bool().unwrap_or(false),
+                description: v["description"].as_str().unwrap_or("").to_string(),
+                source: v["source"].as_str().unwrap_or("unknown").to_string(),
+            })
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND { bail!("Hook '{name}' not found."); }
+        else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `GET /hooks/check` — validate hook configuration.
+    pub async fn hooks_check(&self) -> Result<crate::output::HookCheckResponse> {
+        let resp = self.http.get(self.url("/hooks/check")).send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks/check")?;
+            Ok(crate::output::HookCheckResponse {
+                total: v["total"].as_u64().unwrap_or(0) as usize,
+                valid: v["valid"].as_u64().unwrap_or(0) as usize,
+                invalid: v["invalid"].as_u64().unwrap_or(0) as usize,
+                detail: v["detail"].as_str().unwrap_or("check complete").to_string(),
+            })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+    }
+
+    /// `POST /hooks/:action` — hook lifecycle mutation.
+    pub async fn hooks_mutate(&self, action: &str, name_or_source: &str) -> Result<crate::output::HookMutationResponse> {
+        let resp = self.http.post(self.url(&format!("/hooks/{action}")))
+            .json(&serde_json::json!({"name": name_or_source}))
+            .send().await.context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp.json().await.context("invalid JSON from POST /hooks/:action")?;
+            Ok(crate::output::HookMutationResponse {
+                success: v["success"].as_bool().unwrap_or(true),
+                hook: v["hook"].as_str().unwrap_or(name_or_source).to_string(),
+                action: action.to_string(),
+                detail: v["detail"].as_str().unwrap_or("done").to_string(),
+            })
+        } else { bail!("Gateway returned HTTP {}", resp.status()); }
     }
 }

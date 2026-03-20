@@ -5714,3 +5714,157 @@ mod subagent_output_tests {
         assert!(render(&r, OutputFormat::Human).contains("m1"));
     }
 }
+
+/// Response for `rune plugins list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginListResponse {
+    pub plugins: Vec<PluginSummary>,
+}
+
+/// A single plugin entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSummary {
+    pub name: String,
+    pub version: String,
+    pub enabled: bool,
+    pub description: String,
+}
+
+impl fmt::Display for PluginSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status = if self.enabled { "enabled" } else { "disabled" };
+        write!(f, "  {} v{} [{}] — {}", self.name, self.version, status, self.description)
+    }
+}
+
+impl fmt::Display for PluginListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.plugins.is_empty() { return write!(f, "No plugins installed."); }
+        writeln!(f, "Installed plugins ({}):", self.plugins.len())?;
+        for p in &self.plugins { writeln!(f, "{p}")?; }
+        Ok(())
+    }
+}
+
+/// Response for `rune plugins info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginInfoResponse {
+    pub name: String,
+    pub version: String,
+    pub enabled: bool,
+    pub description: String,
+    pub source: String,
+    pub manifest_valid: bool,
+}
+
+impl fmt::Display for PluginInfoResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Plugin: {}", self.name)?;
+        writeln!(f, "  Version:  {}", self.version)?;
+        writeln!(f, "  Enabled:  {}", self.enabled)?;
+        writeln!(f, "  Source:   {}", self.source)?;
+        writeln!(f, "  Manifest: {}", if self.manifest_valid { "valid" } else { "invalid" })?;
+        write!(f, "  {}", self.description)
+    }
+}
+
+/// Response for plugin lifecycle mutations (install/uninstall/enable/disable/update/doctor).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginMutationResponse {
+    pub success: bool,
+    pub plugin: String,
+    pub action: String,
+    pub detail: String,
+}
+
+impl fmt::Display for PluginMutationResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} Plugin '{}' — {}", self.plugin, self.action)?;
+        write!(f, "  {}", self.detail)
+    }
+}
+
+/// Response for `rune hooks list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookListResponse {
+    pub hooks: Vec<HookSummary>,
+}
+
+/// A single hook entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookSummary {
+    pub name: String,
+    pub event: String,
+    pub enabled: bool,
+    pub description: String,
+}
+
+impl fmt::Display for HookSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status = if self.enabled { "enabled" } else { "disabled" };
+        write!(f, "  {} [{}] on {} — {}", self.name, status, self.event, self.description)
+    }
+}
+
+impl fmt::Display for HookListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.hooks.is_empty() { return write!(f, "No hooks configured."); }
+        writeln!(f, "Configured hooks ({}):", self.hooks.len())?;
+        for h in &self.hooks { writeln!(f, "{h}")?; }
+        Ok(())
+    }
+}
+
+/// Response for `rune hooks info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookInfoResponse {
+    pub name: String,
+    pub event: String,
+    pub enabled: bool,
+    pub description: String,
+    pub source: String,
+}
+
+impl fmt::Display for HookInfoResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Hook: {}", self.name)?;
+        writeln!(f, "  Event:   {}", self.event)?;
+        writeln!(f, "  Enabled: {}", self.enabled)?;
+        writeln!(f, "  Source:  {}", self.source)?;
+        write!(f, "  {}", self.description)
+    }
+}
+
+/// Response for `rune hooks check`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookCheckResponse {
+    pub total: usize,
+    pub valid: usize,
+    pub invalid: usize,
+    pub detail: String,
+}
+
+impl fmt::Display for HookCheckResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Hook check: {} total, {} valid, {} invalid", self.total, self.valid, self.invalid)?;
+        write!(f, "  {}", self.detail)
+    }
+}
+
+/// Response for hook lifecycle mutations (enable/disable/install/update).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookMutationResponse {
+    pub success: bool,
+    pub hook: String,
+    pub action: String,
+    pub detail: String,
+}
+
+impl fmt::Display for HookMutationResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} Hook '{}' — {}", self.hook, self.action)?;
+        write!(f, "  {}", self.detail)
+    }
+}
