@@ -143,6 +143,84 @@ Reminders resolve to one of four terminal states: `pending`, `delivered`, `cance
 
 ---
 
+## `completion` command family
+
+Shell completion script generation for tab-completing Rune commands, subcommands, and flags.
+
+### Shipped subcommands
+
+| Subcommand | Purpose | Status |
+|---|---|---|
+| `rune completion generate <shell>` | Print a shell completion script to stdout | Shipped |
+
+Supported shells: `bash`, `zsh`, `fish`, `elvish`, `power-shell`.
+
+### Installing completions
+
+Shell completions are generated at runtime via `clap_complete` and printed to stdout. Pipe the output to the appropriate file for your shell.
+
+#### Bash
+
+```bash
+# Per-user (create directory if needed):
+mkdir -p ~/.local/share/bash-completion/completions
+rune completion generate bash > ~/.local/share/bash-completion/completions/rune
+
+# Or system-wide (requires root):
+rune completion generate bash | sudo tee /etc/bash_completion.d/rune > /dev/null
+
+# Reload in current session:
+source ~/.local/share/bash-completion/completions/rune
+```
+
+#### Zsh
+
+```bash
+# Ensure a custom completions directory is in your fpath.
+# Add this to ~/.zshrc if not already present:
+#   fpath=(~/.zsh/completions $fpath)
+#   autoload -Uz compinit && compinit
+
+mkdir -p ~/.zsh/completions
+rune completion generate zsh > ~/.zsh/completions/_rune
+
+# Rebuild completion cache and reload:
+rm -f ~/.zcompdump && compinit
+```
+
+#### Fish
+
+```bash
+mkdir -p ~/.config/fish/completions
+rune completion generate fish > ~/.config/fish/completions/rune.fish
+# Fish picks up new completion files automatically — no reload needed.
+```
+
+#### PowerShell
+
+```powershell
+# Print the script and review it:
+rune completion generate power-shell
+
+# To auto-load, append to your PowerShell profile:
+rune completion generate power-shell >> $PROFILE
+# Then restart PowerShell or dot-source the profile:
+. $PROFILE
+```
+
+#### Elvish
+
+```bash
+# Add to ~/.config/elvish/rc.elv or pipe to a file sourced at startup:
+rune completion generate elvish >> ~/.config/elvish/rc.elv
+```
+
+### Re-generating after upgrades
+
+Completion scripts are generated from the CLI definition at the installed binary's version. After upgrading Rune, re-run the `generate` command to pick up new subcommands and flags.
+
+---
+
 ## `backup` command family
 
 Operator surface for durable-state snapshot and recovery workflows.

@@ -46,6 +46,17 @@ After Rune starts, check:
 - status/health surfaces through the gateway
 - local logs/console output for startup failures
 
+## Shell completions
+
+Enable tab-completion for all Rune commands and flags:
+
+```bash
+# Example for bash — see full shell matrix in the CLI reference:
+rune completion generate bash > ~/.local/share/bash-completion/completions/rune
+```
+
+For zsh, fish, elvish, and PowerShell installation instructions, see [`../reference/CLI.md` § completion command family](../reference/CLI.md#completion-command-family).
+
 ## If you want more than local bring-up
 
 Use these next:
