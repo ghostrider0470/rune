@@ -94,6 +94,8 @@ impl RpcDispatcher {
             "cron.get" => self.cron_get(params).await,
             "cron.status" => self.cron_status(params).await,
             "runtime.lanes" => self.runtime_lanes().await,
+            "agent.steer" => self.agent_steer(params).await,
+            "agent.kill" => self.agent_kill(params).await,
             "skills.list" => self.skills_list().await,
             "skills.reload" => self.skills_reload().await,
             "skills.enable" => self.skills_enable(params).await,
@@ -504,6 +506,115 @@ impl RpcDispatcher {
             "session_id": params.session_id,
             "component_id": params.component_id,
             "action_target": params.action_target,
+        }))
+    }
+
+    // ── Agent (subagent) control methods ───────────────────────────────────
+
+    /// Steer a running subagent. Params: `session_id` (required), `message` (required).
+    async fn agent_steer(&self, params: Value) -> Result<Value, RpcError> {
+        let session_id = require_uuid(&params, "session_id")?;
+        let message = require_string(&params, "message")?;
+
+        let session = self
+            .state
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
+
+        let now = chrono::Utc::now();
+        let note = format!("[steer] operator instruction injected: {message}");
+
+        self.state
+            .transcript_repo
+            .append(rune_store::models::NewTranscriptItem {
+                id: Uuid::now_v7(),
+                session_id,
+                turn_id: None,
+                seq: 0,
+                kind: "status_note".into(),
+                payload: json!({ "content": note }),
+                created_at: now,
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        let mut metadata = session.metadata.clone();
+        metadata["subagent_lifecycle"] = json!("steered");
+        metadata["subagent_runtime_status"] = json!("running");
+        metadata["subagent_runtime_attached"] = json!(true);
+        metadata["subagent_status_updated_at"] = json!(now.to_rfc3339());
+        metadata["subagent_last_note"] = json!(note);
+
+        self.state
+            .session_repo
+            .update_metadata(session_id, metadata, now)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        Ok(json!({
+            "session_id": session_id.to_string(),
+            "accepted": true,
+            "detail": format!("steering instruction delivered to session {session_id}"),
+        }))
+    }
+
+    /// Kill/cancel a running subagent. Params: `session_id` (required), `reason` (optional).
+    async fn agent_kill(&self, params: Value) -> Result<Value, RpcError> {
+        let session_id = require_uuid(&params, "session_id")?;
+        let reason = params
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("operator-initiated");
+
+        let session = self
+            .state
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
+
+        let now = chrono::Utc::now();
+        let note = format!("[kill] session cancelled: {reason}");
+
+        self.state
+            .session_repo
+            .update_status(session_id, "cancelled", now)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        self.state
+            .transcript_repo
+            .append(rune_store::models::NewTranscriptItem {
+                id: Uuid::now_v7(),
+                session_id,
+                turn_id: None,
+                seq: 0,
+                kind: "status_note".into(),
+                payload: json!({ "content": note }),
+                created_at: now,
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        let mut metadata = session.metadata.clone();
+        metadata["subagent_lifecycle"] = json!("cancelled");
+        metadata["subagent_runtime_status"] = json!("stopped");
+        metadata["subagent_runtime_attached"] = json!(false);
+        metadata["subagent_status_updated_at"] = json!(now.to_rfc3339());
+        metadata["subagent_last_note"] = json!(note);
+
+        self.state
+            .session_repo
+            .update_metadata(session_id, metadata, now)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        Ok(json!({
+            "session_id": session_id.to_string(),
+            "killed": true,
+            "detail": format!("session {session_id} cancelled: {reason}"),
         }))
     }
 
