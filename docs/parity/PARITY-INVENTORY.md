@@ -674,6 +674,25 @@ Important distinction:
 - `docs`, `completion`, `setup`, `configure`, `onboard`, and `update` are not runtime-core in the same way as sessions/tools/gateway
 - but they are still parity-relevant because they shape how operators discover, bootstrap, repair, and trust the system
 
+### Microsoft 365 (`ms365`)
+
+First parity slice: read-only mail and calendar surfaces.
+
+Observed subcommands:
+
+- `ms365 mail unread` — list unread messages from the authenticated mailbox
+- `ms365 calendar upcoming` — list upcoming calendar events
+
+Required concepts:
+- mailbox folder selection (`--folder`)
+- result limiting (`--limit`)
+- calendar look-ahead window (`--hours`)
+- JSON and human-readable output
+
+Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
+
+Status: CLI/API shape implemented (issue #206). Gateway endpoint and Graph integration deferred.
+
 ---
 
 ## 5. Gateway, daemon, and control-plane parity inventory

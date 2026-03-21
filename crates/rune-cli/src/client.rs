@@ -2927,6 +2927,20 @@ impl GatewayClient {
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
 
+    // ── Microsoft 365 (#206) ────────────────────────────────────
+    pub async fn ms365_mail_unread(&self, limit: u32, folder: &str) -> Result<crate::output::Ms365MailUnreadResponse> {
+        let r = self.http.get(self.url("/ms365/mail/unread"))
+            .query(&[("limit", limit.to_string()), ("folder", folder.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_calendar_upcoming(&self, limit: u32, hours: u32) -> Result<crate::output::Ms365CalendarUpcomingResponse> {
+        let r = self.http.get(self.url("/ms365/calendar/upcoming"))
+            .query(&[("limit", limit.to_string()), ("hours", hours.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
         let r = self.http.post(self.url("/setup")).send().await.context("gateway")?;

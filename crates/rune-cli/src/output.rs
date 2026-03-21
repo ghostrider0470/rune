@@ -3322,6 +3322,86 @@ impl fmt::Display for SecurityAuditResponse {
     }
 }
 
+// ── Microsoft 365 ─────────────────────────────────────────────────
+
+/// A single unread mail message summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailMessage {
+    pub id: String,
+    pub subject: String,
+    pub from: String,
+    pub received_at: String,
+    pub preview: String,
+}
+
+impl fmt::Display for Ms365MailMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "  {} | {} | {}", self.received_at, self.from, self.subject)
+    }
+}
+
+/// Response from `rune ms365 mail unread`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailUnreadResponse {
+    pub messages: Vec<Ms365MailMessage>,
+    pub total: u32,
+    pub folder: String,
+}
+
+impl fmt::Display for Ms365MailUnreadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Unread mail in {}: {} message(s)", self.folder, self.total)?;
+        if self.messages.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for msg in &self.messages {
+                writeln!(f, "{msg}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A single upcoming calendar event summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365CalendarEvent {
+    pub id: String,
+    pub subject: String,
+    pub organizer: String,
+    pub start: String,
+    pub end: String,
+    pub location: Option<String>,
+}
+
+impl fmt::Display for Ms365CalendarEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let loc = self.location.as_deref().unwrap_or("-");
+        write!(f, "  {} - {} | {} | {}", self.start, self.end, self.subject, loc)
+    }
+}
+
+/// Response from `rune ms365 calendar upcoming`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365CalendarUpcomingResponse {
+    pub events: Vec<Ms365CalendarEvent>,
+    pub total: u32,
+    pub window_hours: u32,
+}
+
+impl fmt::Display for Ms365CalendarUpcomingResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Upcoming events (next {}h): {} event(s)", self.window_hours, self.total)?;
+        if self.events.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for ev in &self.events {
+                writeln!(f, "{ev}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 // ── Sandbox ───────────────────────────────────────────────────────
 
 /// Response from `rune sandbox list`.
