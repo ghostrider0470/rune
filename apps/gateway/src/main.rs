@@ -107,9 +107,19 @@ async fn main() -> Result<()> {
         }
     }
 
-    let (services, _embedded_pg, _session_loop) = build_services(config).await?;
+    let (services, _embedded_pg, session_loop) = build_services(config).await?;
     let handle = start(services).await.context("failed to start gateway")?;
 
+    // Start the session loop (channel listener) if a channel is configured.
+    if let Some(loop_handle) = session_loop {
+        let loop_handle = Arc::new(loop_handle);
+        let lh = loop_handle.clone();
+        tokio::spawn(async move {
+            if let Err(e) = lh.run().await {
+                tracing::error!(error = %e, "session loop exited with error");
+            }
+        });
+    }
 
     shutdown_signal().await;
     info!("shutdown signal received");
