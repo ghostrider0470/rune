@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rune WebChat</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e1e4ed;
+    --text-muted: #8b8fa3;
+    --accent: #6c7bf7;
+    --accent-hover: #8490f9;
+    --user-bg: #2a3050;
+    --assistant-bg: #1e2130;
+    --error: #e5534b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  #status {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #status .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--error);
+  }
+  #status.connected .dot { background: #3fb950; }
+  #transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bg);
+    border-bottom-right-radius: 2px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--assistant-bg);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 2px;
+  }
+  .msg.system {
+    align-self: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: italic;
+  }
+  #input-area {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    background: var(--surface);
+  }
+  #input-area textarea {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    min-height: 42px;
+    max-height: 120px;
+  }
+  #input-area textarea:focus { border-color: var(--accent); }
+  #input-area button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0 20px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #input-area button:hover { background: var(--accent-hover); }
+  #input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rune WebChat</h1>
+  <div id="status"><span class="dot"></span><span id="status-text">Connecting...</span></div>
+</header>
+<div id="transcript"></div>
+<div id="input-area">
+  <textarea id="msg" rows="1" placeholder="Type a message..." autofocus></textarea>
+  <button id="send-btn" disabled>Send</button>
+</div>
+<script>
+(function() {
+  const transcript = document.getElementById('transcript');
+  const msgInput   = document.getElementById('msg');
+  const sendBtn    = document.getElementById('send-btn');
+  const statusEl   = document.getElementById('status');
+  const statusText = document.getElementById('status-text');
+
+  let ws = null;
+  let sessionId = null;
+  let reqCounter = 0;
+  const pendingRpc = {};
+
+  function setStatus(connected, text) {
+    statusEl.className = connected ? 'connected' : '';
+    statusText.textContent = text;
+    sendBtn.disabled = !connected || !sessionId;
+  }
+
+  function appendMsg(role, text) {
+    const el = document.createElement('div');
+    el.className = 'msg ' + role;
+    el.textContent = text;
+    transcript.appendChild(el);
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  function rpc(method, params) {
+    return new Promise((resolve, reject) => {
+      const id = String(++reqCounter);
+      pendingRpc[id] = { resolve, reject };
+      ws.send(JSON.stringify({ type: 'req', id, method, params: params || {} }));
+    });
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+    ws.onopen = async function() {
+      setStatus(true, 'Connected');
+      try {
+        const res = await rpc('session.create', { kind: 'direct', channel_ref: 'webchat' });
+        sessionId = res.id;
+        sendBtn.disabled = false;
+        // Subscribe to events for this session.
+        ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
+        appendMsg('system', 'Session started.');
+      } catch(e) {
+        appendMsg('system', 'Failed to create session: ' + (e.message || e));
+      }
+    };
+
+    ws.onmessage = function(ev) {
+      let frame;
+      try { frame = JSON.parse(ev.data); } catch(_) { return; }
+
+      if (frame.type === 'res') {
+        const p = pendingRpc[frame.id];
+        if (p) {
+          delete pendingRpc[frame.id];
+          if (frame.ok) p.resolve(frame.payload);
+          else p.reject(frame.error);
+        }
+      } else if (frame.type === 'event') {
+        handleEvent(frame);
+      }
+    };
+
+    ws.onclose = function() {
+      setStatus(false, 'Disconnected. Reconnecting...');
+      sessionId = null;
+      sendBtn.disabled = true;
+      setTimeout(connect, 2000);
+    };
+
+    ws.onerror = function() {
+      ws.close();
+    };
+  }
+
+  function handleEvent(frame) {
+    const p = frame.payload || {};
+    const kind = frame.kind || p.kind || '';
+    // Show assistant text from turn_complete or transcript_append events.
+    if (kind === 'turn_complete' || kind === 'turn_finished') {
+      const text = p.assistant_text || p.response || p.text || '';
+      if (text) appendMsg('assistant', text);
+    } else if (kind === 'transcript_append' && p.role === 'assistant') {
+      if (p.content) appendMsg('assistant', p.content);
+    }
+  }
+
+  async function send() {
+    const text = msgInput.value.trim();
+    if (!text || !sessionId) return;
+    msgInput.value = '';
+    autoResize();
+    appendMsg('user', text);
+    sendBtn.disabled = true;
+    try {
+      const res = await rpc('session.send', { session_id: sessionId, content: text });
+      // If the response contains inline assistant text, show it.
+      if (res && res.assistant_text) {
+        appendMsg('assistant', res.assistant_text);
+      }
+    } catch(e) {
+      appendMsg('system', 'Error: ' + (e.message || JSON.stringify(e)));
+    }
+    sendBtn.disabled = false;
+  }
+
+  function autoResize() {
+    msgInput.style.height = 'auto';
+    msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+  }
+
+  sendBtn.addEventListener('click', send);
+  msgInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+  msgInput.addEventListener('input', autoResize);
+
+  connect();
+})();
+</script>
+</body>
+</html>

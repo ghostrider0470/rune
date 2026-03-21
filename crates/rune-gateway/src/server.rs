@@ -35,6 +35,7 @@ use crate::pairing::DeviceRegistry;
 use crate::routes;
 use crate::state::{AppState, SessionEvent};
 use crate::supervisor::{BackgroundSupervisor, SupervisorDeps};
+use crate::webchat;
 use crate::ws;
 
 /// Handle returned by [`start`] to allow callers to await server completion.
@@ -249,6 +250,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let public_routes = Router::new()
         .route("/health", get(routes::health))
+        .route("/chat", get(webchat::webchat_handler))
         .route("/ws", get(ws::ws_handler))
         .route("/assets/{path}", get(routes::branded_asset))
         .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
