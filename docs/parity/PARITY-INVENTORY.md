@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through fifth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, and users/org directory inspection.
+First through seventh parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, and To-Do lists/tasks.
 
 Observed subcommands:
 
@@ -691,6 +691,12 @@ Observed subcommands:
 - `ms365 users me` — show authenticated user's profile
 - `ms365 users list` — list users in the organization directory
 - `ms365 users read --id <user_id>` — read a single user's profile by ID or UPN
+- `ms365 planner plans` — list Planner plans accessible to the authenticated user
+- `ms365 planner tasks --plan-id <id>` — list tasks in a Planner plan
+- `ms365 planner task-read --id <id>` — read a single Planner task by ID
+- `ms365 todo lists` — list Microsoft To-Do task lists
+- `ms365 todo tasks --list-id <id>` — list tasks in a To-Do list
+- `ms365 todo task-read --list-id <id> --id <id>` — read a single To-Do task by ID
 
 Required concepts:
 - auth/config readiness inspection (tenant, client, scopes, token validity)
@@ -700,12 +706,14 @@ Required concepts:
 - OneDrive folder path browsing (`--path`)
 - single-item read-detail by ID (`--id`)
 - users/org directory inspection (me, list, read by ID/UPN)
-- operator-friendly rich output (headers, attendees, body preview, file metadata, user profiles)
+- Planner plan discovery and task enumeration by plan ID
+- To-Do list discovery and task enumeration by list ID
+- operator-friendly rich output (headers, attendees, body preview, file metadata, user profiles, task progress)
 - JSON and human-readable output
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–5). Gateway endpoint and Graph integration deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–7). Gateway endpoint and Graph integration deferred.
 
 ---
 

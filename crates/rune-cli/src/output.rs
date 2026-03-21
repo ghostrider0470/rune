@@ -3855,6 +3855,126 @@ impl fmt::Display for Ms365PlannerTaskReadResponse {
     }
 }
 
+// ── Microsoft 365 To-Do ──────────────────────────────────────────
+
+/// A single To-Do task list summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoList {
+    pub id: String,
+    pub display_name: String,
+    pub is_owner: bool,
+    pub is_shared: bool,
+}
+
+impl fmt::Display for Ms365TodoList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let shared = if self.is_shared { " (shared)" } else { "" };
+        write!(f, "  {}{shared}", self.display_name)
+    }
+}
+
+/// Response from `rune ms365 todo lists`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoListsResponse {
+    pub lists: Vec<Ms365TodoList>,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365TodoListsResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "To-Do lists: {} list(s)", self.total)?;
+        if self.lists.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for l in &self.lists {
+                writeln!(f, "{l}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Summary task entry for To-Do task list responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoTaskSummary {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub importance: String,
+    pub due_date: Option<String>,
+}
+
+impl fmt::Display for Ms365TodoTaskSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let due = self.due_date.as_deref().unwrap_or("no due date");
+        write!(f, "  [{}] {} — {}, {due}", self.status, self.title, self.importance)
+    }
+}
+
+/// Response from `rune ms365 todo tasks`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoTasksResponse {
+    pub tasks: Vec<Ms365TodoTaskSummary>,
+    pub list_id: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365TodoTasksResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "To-Do list {} — {} task(s)", self.list_id, self.total)?;
+        if self.tasks.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for t in &self.tasks {
+                writeln!(f, "{t}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 todo task-read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoTaskReadResponse {
+    pub id: String,
+    pub title: String,
+    pub list_id: String,
+    pub status: String,
+    pub importance: String,
+    pub is_reminder_on: bool,
+    pub due_date: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: Option<String>,
+    pub body_preview: Option<String>,
+}
+
+impl fmt::Display for Ms365TodoTaskReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "── To-Do: {} ──", self.title)?;
+        writeln!(f, "  ID:         {}", self.id)?;
+        writeln!(f, "  List:       {}", self.list_id)?;
+        writeln!(f, "  Status:     {}", self.status)?;
+        writeln!(f, "  Importance: {}", self.importance)?;
+        writeln!(f, "  Reminder:   {}", if self.is_reminder_on { "yes" } else { "no" })?;
+        if let Some(ref due) = self.due_date {
+            writeln!(f, "  Due:        {due}")?;
+        }
+        if let Some(ref completed) = self.completed_at {
+            writeln!(f, "  Completed:  {completed}")?;
+        }
+        if let Some(ref created) = self.created_at {
+            writeln!(f, "  Created:    {created}")?;
+        }
+        if let Some(ref body) = self.body_preview {
+            if !body.is_empty() {
+                writeln!(f)?;
+                writeln!(f, "{body}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
