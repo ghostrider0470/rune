@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use chrono::{TimeZone, Utc};
 use reqwest::Client;
+use reqwest::multipart::{Form, Part};
 use rune_core::{AttachmentRef, ChannelId};
 use serde::Deserialize;
 use tracing::debug;
@@ -302,6 +303,77 @@ impl TelegramAdapter {
             })?;
 
         Ok((bytes.to_vec(), file_path))
+    }
+
+
+
+    /// Send synthesized audio back to Telegram as either a voice note bubble or audio file.
+    pub async fn send_audio_bytes(
+        &self,
+        chat_id: &str,
+        audio: &[u8],
+        reply_to: Option<&str>,
+        as_voice: bool,
+        caption: Option<&str>,
+    ) -> Result<DeliveryReceipt, ChannelError> {
+        let endpoint = if as_voice { "sendVoice" } else { "sendAudio" };
+        let url = format!("{}/{}", self.base_url, endpoint);
+
+        let filename = if as_voice { "voice.mp3" } else { "audio.mp3" };
+        let field_name = if as_voice { "voice" } else { "audio" };
+        let file_part = Part::bytes(audio.to_vec())
+            .file_name(filename.to_string())
+            .mime_str("audio/mpeg")
+            .map_err(|e| ChannelError::Provider {
+                message: format!("failed to build audio multipart: {e}"),
+            })?;
+
+        let mut form = Form::new()
+            .text("chat_id", chat_id.to_string())
+            .part(field_name.to_string(), file_part);
+
+        if let Some(reply_id) = reply_to {
+            if let Ok(id) = reply_id.parse::<i64>() {
+                form = form.text(
+                    "reply_parameters",
+                    serde_json::json!({ "message_id": id }).to_string(),
+                );
+            }
+        }
+
+        if let Some(caption) = caption.filter(|c| !c.is_empty()) {
+            form = form.text("caption", caption.to_string());
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| ChannelError::Provider {
+                message: format!("failed to send audio: {e}"),
+            })?;
+
+        let body: TelegramResponse<TelegramMessage> =
+            response.json().await.map_err(|e| ChannelError::Provider {
+                message: format!("failed to parse audio send response: {e}"),
+            })?;
+
+        if !body.ok {
+            return Err(ChannelError::Provider {
+                message: body.description.unwrap_or_else(|| "audio send failed".into()),
+            });
+        }
+
+        let msg = body.result.ok_or_else(|| ChannelError::Provider {
+            message: "no message in audio send response".into(),
+        })?;
+
+        Ok(DeliveryReceipt {
+            provider_message_id: msg.message_id.to_string(),
+            delivered_at: Utc::now(),
+        })
     }
 
     /// Send a message via Telegram Bot API.

@@ -3181,6 +3181,10 @@ pub struct TtsSynthesizeRequest {
     pub text: String,
     pub voice: Option<String>,
     pub model: Option<String>,
+    pub channel: Option<String>,
+    pub chat_id: Option<String>,
+    pub reply_to: Option<String>,
+    pub as_voice: Option<bool>,
 }
 
 pub async fn tts_synthesize(
@@ -3198,6 +3202,40 @@ pub async fn tts_synthesize(
         _ => engine.convert(&body.text).await,
     }
     .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    if body.channel.as_deref() == Some("telegram") {
+        let chat_id = body
+            .chat_id
+            .as_deref()
+            .ok_or_else(|| GatewayError::BadRequest("chat_id is required for Telegram TTS delivery".to_string()))?;
+        let bot_token = state
+            .config
+            .read()
+            .await
+            .channels
+            .telegram_token
+            .clone()
+            .ok_or_else(|| GatewayError::BadRequest("Telegram not configured".to_string()))?;
+        let adapter: rune_channels::TelegramAdapter = crate::telegram_adapter_from_token(&bot_token);
+        let receipt = adapter
+            .send_audio_bytes(
+                chat_id,
+                &audio,
+                body.reply_to.as_deref(),
+                body.as_voice.unwrap_or(true),
+                None,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+        return Ok(Json(json!({
+            "delivered": true,
+            "provider_message_id": receipt.provider_message_id,
+            "bytes": audio.len(),
+            "channel": "telegram"
+        }))
+        .into_response());
+    }
 
     Ok((
         StatusCode::OK,

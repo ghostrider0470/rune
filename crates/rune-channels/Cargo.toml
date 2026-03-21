@@ -10,7 +10,7 @@ async-trait.workspace = true
 chrono.workspace = true
 hex.workspace = true
 hmac = "0.12"
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "multipart"] }
 rune-config = { path = "../rune-config" }
 rune-core = { path = "../rune-core" }
 serde.workspace = true
