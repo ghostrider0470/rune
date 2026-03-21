@@ -3618,6 +3618,75 @@ impl fmt::Display for Ms365MailForwardResponse {
     }
 }
 
+// ── Microsoft 365 Mail Attachments ────────────────────────────────
+
+/// Summary of a single mail attachment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailAttachmentSummary {
+    pub id: String,
+    pub name: String,
+    pub content_type: String,
+    pub size: u64,
+    pub is_inline: bool,
+}
+
+impl fmt::Display for Ms365MailAttachmentSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inline = if self.is_inline { " (inline)" } else { "" };
+        write!(f, "  {} — {} [{}]{}", self.name, format_bytes(self.size), self.content_type, inline)
+    }
+}
+
+/// Response from `rune ms365 mail attachments`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailAttachmentsResponse {
+    pub attachments: Vec<Ms365MailAttachmentSummary>,
+    pub message_id: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365MailAttachmentsResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Message {} — {} attachment(s)", self.message_id, self.total)?;
+        for att in &self.attachments {
+            writeln!(f, "{att}")?;
+            writeln!(f, "    id: {}", att.id)?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 mail attachment-read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailAttachmentReadResponse {
+    pub id: String,
+    pub name: String,
+    pub content_type: String,
+    pub size: u64,
+    pub is_inline: bool,
+    pub message_id: String,
+    pub last_modified: Option<String>,
+    pub content_id: Option<String>,
+}
+
+impl fmt::Display for Ms365MailAttachmentReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "── Attachment: {} ──", self.name)?;
+        writeln!(f, "  ID:           {}", self.id)?;
+        writeln!(f, "  Message:      {}", self.message_id)?;
+        writeln!(f, "  Type:         {}", self.content_type)?;
+        writeln!(f, "  Size:         {}", format_bytes(self.size))?;
+        writeln!(f, "  Inline:       {}", if self.is_inline { "yes" } else { "no" })?;
+        if let Some(ref modified) = self.last_modified {
+            writeln!(f, "  Modified:     {modified}")?;
+        }
+        if let Some(ref cid) = self.content_id {
+            writeln!(f, "  Content-ID:   {cid}")?;
+        }
+        Ok(())
+    }
+}
+
 // ── Microsoft 365 Files ───────────────────────────────────────────
 
 /// A single OneDrive file/folder item summary.
@@ -7077,6 +7146,75 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Message forwarded"));
+    }
+
+    #[test]
+    fn render_ms365_mail_attachments_human() {
+        let r = Ms365MailAttachmentsResponse {
+            attachments: vec![
+                Ms365MailAttachmentSummary {
+                    id: "att-1".into(),
+                    name: "report.pdf".into(),
+                    content_type: "application/pdf".into(),
+                    size: 204800,
+                    is_inline: false,
+                },
+                Ms365MailAttachmentSummary {
+                    id: "att-2".into(),
+                    name: "logo.png".into(),
+                    content_type: "image/png".into(),
+                    size: 1024,
+                    is_inline: true,
+                },
+            ],
+            message_id: "msg-1".into(),
+            total: 2,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("2 attachment(s)"));
+        assert!(out.contains("report.pdf"));
+        assert!(out.contains("200.0 KB"));
+        assert!(out.contains("(inline)"));
+    }
+
+    #[test]
+    fn render_ms365_mail_attachment_read_human() {
+        let r = Ms365MailAttachmentReadResponse {
+            id: "att-1".into(),
+            name: "report.pdf".into(),
+            content_type: "application/pdf".into(),
+            size: 204800,
+            is_inline: false,
+            message_id: "msg-1".into(),
+            last_modified: Some("2025-01-15T10:00:00Z".into()),
+            content_id: None,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Attachment: report.pdf"));
+        assert!(out.contains("application/pdf"));
+        assert!(out.contains("200.0 KB"));
+        assert!(out.contains("Inline:       no"));
+        assert!(out.contains("Modified:     2025-01-15T10:00:00Z"));
+    }
+
+    #[test]
+    fn render_ms365_mail_attachments_json() {
+        let r = Ms365MailAttachmentsResponse {
+            attachments: vec![Ms365MailAttachmentSummary {
+                id: "att-1".into(),
+                name: "doc.docx".into(),
+                content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document".into(),
+                size: 51200,
+                is_inline: false,
+            }],
+            message_id: "msg-1".into(),
+            total: 1,
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["total"], 1);
+        assert_eq!(v["attachments"][0]["name"], "doc.docx");
+        assert_eq!(v["attachments"][0]["size"], 51200);
     }
 
     #[test]

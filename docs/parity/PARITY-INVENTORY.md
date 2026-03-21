@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through ninth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, and Teams inspection.
+First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read.
 
 Observed subcommands:
 
@@ -705,6 +705,8 @@ Observed subcommands:
 - `ms365 teams channels --team-id <id>` — list channels in a team
 - `ms365 teams channel-read --team-id <id> --id <id>` — read details of a single channel
 - `ms365 teams messages --team-id <id> --channel-id <id>` — list recent messages in a channel
+- `ms365 mail attachments --id <msg_id>` — list attachments on a mail message
+- `ms365 mail attachment-read --message-id <msg_id> --id <att_id>` — read metadata of a single mail attachment
 
 Required concepts:
 - auth/config readiness inspection (tenant, client, scopes, token validity)
@@ -718,12 +720,13 @@ Required concepts:
 - To-Do list discovery and task enumeration by list ID
 - SharePoint site discovery, detail read, list/library enumeration, and list item browsing
 - Teams discovery, channel enumeration, channel detail, and channel message listing
+- mail attachment listing by message ID and single-attachment metadata read
 - operator-friendly rich output (headers, attendees, body preview, file metadata, user profiles, task progress)
 - JSON and human-readable output
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–8). Gateway endpoint and Graph integration deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–8, 10). Gateway endpoint and Graph integration deferred.
 
 ---
 

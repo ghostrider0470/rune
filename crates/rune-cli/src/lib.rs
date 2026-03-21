@@ -1202,6 +1202,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_mail_forward(&id, &to, comment.as_deref()).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365MailAction::Attachments { id } => {
+                    let result = client.ms365_mail_attachments(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365MailAction::AttachmentRead { message_id, id } => {
+                    let result = client.ms365_mail_attachment_read(&message_id, &id).await?;
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Calendar { action } => match action {
                 Ms365CalendarAction::Upcoming { limit, hours } => {
