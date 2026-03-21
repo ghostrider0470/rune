@@ -1324,6 +1324,9 @@ impl ProcessAuditStore for DbProcessAuditStore {
 #[async_trait]
 impl ToolExecutor for AppToolExecutor {
     async fn execute(&self, call: ToolCall) -> Result<rune_tools::ToolResult, ToolError> {
+        // In yolo mode, skip all approval checks for every tool — not just exec.
+        let is_yolo = self.global_approval_mode == "yolo";
+
         match call.tool_name.as_str() {
             "read" | "read_file" | "write" | "write_file" | "edit" | "edit_file" | "list_files" => {
                 self.file.execute(call).await
@@ -1331,7 +1334,7 @@ impl ToolExecutor for AppToolExecutor {
             "exec" | "execute_command" => {
                 let approval_request = ApprovalRequest::from_call(&call);
                 // Global yolo mode overrides per-tool approval
-                let ask_mode = if self.global_approval_mode == "yolo" {
+                let ask_mode = if is_yolo {
                     "off"
                 } else {
                     call.arguments
