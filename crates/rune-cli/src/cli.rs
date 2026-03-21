@@ -274,6 +274,11 @@ pub enum Ms365Action {
         #[command(subcommand)]
         action: Ms365TodoAction,
     },
+    /// SharePoint sites inspection.
+    Sites {
+        #[command(subcommand)]
+        action: Ms365SitesAction,
+    },
 }
 
 /// Auth/config inspection subcommands.
@@ -418,6 +423,45 @@ pub enum Ms365TodoAction {
         /// Task ID to retrieve.
         #[arg(long)]
         id: String,
+    },
+}
+
+/// SharePoint sites subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365SitesAction {
+    /// List SharePoint sites accessible to the authenticated user.
+    List {
+        /// Maximum number of sites to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    /// Read details of a single SharePoint site by ID.
+    Read {
+        /// Site ID to retrieve.
+        #[arg(long)]
+        id: String,
+    },
+    /// List document libraries in a SharePoint site.
+    Lists {
+        /// Site ID to list libraries from.
+        #[arg(long)]
+        site_id: String,
+        /// Maximum number of lists to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    /// List items in a SharePoint list/library.
+    #[command(name = "list-items")]
+    ListItems {
+        /// Site ID that contains the list.
+        #[arg(long)]
+        site_id: String,
+        /// List ID to enumerate items from.
+        #[arg(long)]
+        list_id: String,
+        /// Maximum number of items to return.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
     },
 }
 

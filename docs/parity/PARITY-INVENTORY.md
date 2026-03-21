@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through seventh parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, and To-Do lists/tasks.
+First through eighth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, and SharePoint sites inspection.
 
 Observed subcommands:
 
@@ -697,6 +697,10 @@ Observed subcommands:
 - `ms365 todo lists` — list Microsoft To-Do task lists
 - `ms365 todo tasks --list-id <id>` — list tasks in a To-Do list
 - `ms365 todo task-read --list-id <id> --id <id>` — read a single To-Do task by ID
+- `ms365 sites list` — list SharePoint sites accessible to the authenticated user
+- `ms365 sites read --id <site_id>` — read details of a single SharePoint site
+- `ms365 sites lists --site-id <id>` — list document libraries/lists in a SharePoint site
+- `ms365 sites list-items --site-id <id> --list-id <id>` — list items in a SharePoint list/library
 
 Required concepts:
 - auth/config readiness inspection (tenant, client, scopes, token validity)
@@ -708,12 +712,13 @@ Required concepts:
 - users/org directory inspection (me, list, read by ID/UPN)
 - Planner plan discovery and task enumeration by plan ID
 - To-Do list discovery and task enumeration by list ID
+- SharePoint site discovery, detail read, list/library enumeration, and list item browsing
 - operator-friendly rich output (headers, attendees, body preview, file metadata, user profiles, task progress)
 - JSON and human-readable output
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–7). Gateway endpoint and Graph integration deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–8). Gateway endpoint and Graph integration deferred.
 
 ---
 

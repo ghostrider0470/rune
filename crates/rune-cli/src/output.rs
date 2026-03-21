@@ -3975,6 +3975,147 @@ impl fmt::Display for Ms365TodoTaskReadResponse {
     }
 }
 
+// ── SharePoint Sites ─────────────────────────────────────────
+
+/// Summary of a SharePoint site (used in list responses).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365SiteSummary {
+    pub id: String,
+    pub display_name: String,
+    pub web_url: Option<String>,
+    pub description: Option<String>,
+}
+
+impl fmt::Display for Ms365SiteSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let url = self.web_url.as_deref().unwrap_or("-");
+        write!(f, "  {} — {url}", self.display_name)
+    }
+}
+
+/// Response from `rune ms365 sites list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365SitesListResponse {
+    pub sites: Vec<Ms365SiteSummary>,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365SitesListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "SharePoint sites: {} site(s)", self.total)?;
+        for s in &self.sites {
+            writeln!(f, "{s}")?;
+            writeln!(f, "    id: {}", s.id)?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 sites read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365SiteReadResponse {
+    pub id: String,
+    pub display_name: String,
+    pub web_url: Option<String>,
+    pub description: Option<String>,
+    pub created_at: Option<String>,
+    pub last_modified_at: Option<String>,
+}
+
+impl fmt::Display for Ms365SiteReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "── Site: {} ──", self.display_name)?;
+        writeln!(f, "  ID:       {}", self.id)?;
+        if let Some(ref url) = self.web_url {
+            writeln!(f, "  URL:      {url}")?;
+        }
+        if let Some(ref desc) = self.description {
+            if !desc.is_empty() {
+                writeln!(f, "  Desc:     {desc}")?;
+            }
+        }
+        if let Some(ref created) = self.created_at {
+            writeln!(f, "  Created:  {created}")?;
+        }
+        if let Some(ref modified) = self.last_modified_at {
+            writeln!(f, "  Modified: {modified}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Summary of a SharePoint list/library.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365SiteListSummary {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub list_type: Option<String>,
+}
+
+impl fmt::Display for Ms365SiteListSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = self.list_type.as_deref().unwrap_or("list");
+        write!(f, "  {} ({kind})", self.display_name)
+    }
+}
+
+/// Response from `rune ms365 sites lists`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365SiteListsResponse {
+    pub lists: Vec<Ms365SiteListSummary>,
+    pub site_id: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365SiteListsResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Site {} — {} list(s)", self.site_id, self.total)?;
+        for l in &self.lists {
+            writeln!(f, "{l}")?;
+            writeln!(f, "    id: {}", l.id)?;
+        }
+        Ok(())
+    }
+}
+
+/// Summary of a SharePoint list item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365SiteListItemSummary {
+    pub id: String,
+    pub name: Option<String>,
+    pub content_type: Option<String>,
+    pub created_at: Option<String>,
+}
+
+impl fmt::Display for Ms365SiteListItemSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = self.name.as_deref().unwrap_or("(untitled)");
+        let ct = self.content_type.as_deref().unwrap_or("-");
+        write!(f, "  {name} [{ct}]")
+    }
+}
+
+/// Response from `rune ms365 sites list-items`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365SiteListItemsResponse {
+    pub items: Vec<Ms365SiteListItemSummary>,
+    pub site_id: String,
+    pub list_id: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365SiteListItemsResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Site {} / list {} — {} item(s)", self.site_id, self.list_id, self.total)?;
+        for item in &self.items {
+            writeln!(f, "{item}")?;
+            writeln!(f, "    id: {}", item.id)?;
+        }
+        Ok(())
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} B")

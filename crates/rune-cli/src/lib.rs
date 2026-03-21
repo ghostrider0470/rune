@@ -29,7 +29,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365TodoAction, Ms365UsersAction, ProcessAction,
+    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction, Ms365TodoAction, Ms365UsersAction, ProcessAction,
     RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
@@ -1247,6 +1247,24 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 Ms365TodoAction::TaskRead { list_id, id } => {
                     let result = client.ms365_todo_task_read(&list_id, &id).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            Ms365Action::Sites { action } => match action {
+                Ms365SitesAction::List { limit } => {
+                    let result = client.ms365_sites_list(limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365SitesAction::Read { id } => {
+                    let result = client.ms365_sites_read(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365SitesAction::Lists { site_id, limit } => {
+                    let result = client.ms365_sites_lists(&site_id, limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365SitesAction::ListItems { site_id, list_id, limit } => {
+                    let result = client.ms365_sites_list_items(&site_id, &list_id, limit).await?;
                     println!("{}", render(&result, format));
                 }
             },
