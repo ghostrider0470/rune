@@ -3022,6 +3022,30 @@ impl GatewayClient {
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
 
+    pub async fn ms365_sites_list(&self, limit: u32) -> Result<crate::output::Ms365SitesListResponse> {
+        let r = self.http.get(self.url("/ms365/sites"))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_sites_read(&self, id: &str) -> Result<crate::output::Ms365SiteReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/sites/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_sites_lists(&self, site_id: &str, limit: u32) -> Result<crate::output::Ms365SiteListsResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/sites/{site_id}/lists")))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_sites_list_items(&self, site_id: &str, list_id: &str, limit: u32) -> Result<crate::output::Ms365SiteListItemsResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/sites/{site_id}/lists/{list_id}/items")))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
         let r = self.http.post(self.url("/setup")).send().await.context("gateway")?;
