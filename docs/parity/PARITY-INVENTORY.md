@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download.
+First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download. Eleventh and twelfth slices: mail send/reply/forward and calendar create/delete/respond mutations.
 
 Observed subcommands:
 
@@ -708,6 +708,9 @@ Observed subcommands:
 - `ms365 mail attachments --id <msg_id>` — list attachments on a mail message
 - `ms365 mail attachment-read --message-id <msg_id> --id <att_id>` — read metadata of a single mail attachment
 - `ms365 mail attachment-download --message-id <msg_id> --id <att_id> [--output <path>]` — download attachment content to a local file
+- `ms365 calendar create --subject <s> --start <dt> --end <dt> [--attendees <emails>] [--location <loc>] [--body <text>]` — create a new calendar event
+- `ms365 calendar delete --id <event_id>` — delete a calendar event by ID
+- `ms365 calendar respond --id <event_id> --response <accept|decline|tentative> [--comment <text>]` — respond to a calendar event invitation
 
 Required concepts:
 - auth/config readiness inspection (tenant, client, scopes, token validity)
@@ -722,12 +725,15 @@ Required concepts:
 - SharePoint site discovery, detail read, list/library enumeration, and list item browsing
 - Teams discovery, channel enumeration, channel detail, and channel message listing
 - mail attachment listing by message ID, single-attachment metadata read, and content download
+- calendar event creation (subject, start/end, attendees, location, body)
+- calendar event deletion by ID
+- calendar invitation response (accept, decline, tentative) with optional comment
 - operator-friendly rich output (headers, attendees, body preview, file metadata, user profiles, task progress)
 - JSON and human-readable output
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–8, 10). Gateway endpoint and Graph integration deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–8, 10, 12). Calendar mutation surface (create/delete/respond) added in slice 12. Gateway endpoint and Graph integration deferred.
 
 ---
 

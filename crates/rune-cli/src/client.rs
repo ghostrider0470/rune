@@ -2950,6 +2950,41 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_calendar_create(&self, subject: &str, start: &str, end: &str, attendees: &[String], location: Option<&str>, body: Option<&str>) -> Result<crate::output::Ms365CalendarCreateResponse> {
+        let mut payload = serde_json::json!({
+            "subject": subject,
+            "start": start,
+            "end": end,
+            "attendees": attendees,
+        });
+        if let Some(loc) = location {
+            payload["location"] = serde_json::json!(loc);
+        }
+        if let Some(b) = body {
+            payload["body"] = serde_json::json!(b);
+        }
+        let r = self.http.post(self.url("/ms365/calendar/events"))
+            .json(&payload)
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_calendar_delete(&self, id: &str) -> Result<crate::output::Ms365CalendarDeleteResponse> {
+        let r = self.http.post(self.url(&format!("/ms365/calendar/events/{id}/delete")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_calendar_respond(&self, id: &str, response: &str, comment: Option<&str>) -> Result<crate::output::Ms365CalendarRespondResponse> {
+        let mut payload = serde_json::json!({
+            "response": response,
+        });
+        if let Some(c) = comment {
+            payload["comment"] = serde_json::json!(c);
+        }
+        let r = self.http.post(self.url(&format!("/ms365/calendar/events/{id}/respond")))
+            .json(&payload)
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
     pub async fn ms365_auth_status(&self) -> Result<crate::output::Ms365AuthStatusResponse> {
         let r = self.http.get(self.url("/ms365/auth/status"))
             .send().await.context("gateway")?;

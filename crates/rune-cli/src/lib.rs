@@ -1233,6 +1233,19 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_calendar_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365CalendarAction::Create { subject, start, end, attendees, location, body } => {
+                    let attendees: Vec<String> = attendees.unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    let result = client.ms365_calendar_create(&subject, &start, &end, &attendees, location.as_deref(), body.as_deref()).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365CalendarAction::Delete { id } => {
+                    let result = client.ms365_calendar_delete(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365CalendarAction::Respond { id, response, comment } => {
+                    let result = client.ms365_calendar_respond(&id, &response, comment.as_deref()).await?;
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Files { action } => match action {
                 Ms365FilesAction::List { path, limit } => {

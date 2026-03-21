@@ -401,6 +401,45 @@ pub enum Ms365CalendarAction {
         #[arg(long)]
         id: String,
     },
+    /// Create a new calendar event.
+    Create {
+        /// Event subject/title.
+        #[arg(long)]
+        subject: String,
+        /// Start date-time (ISO 8601, e.g. 2026-03-21T14:00:00).
+        #[arg(long)]
+        start: String,
+        /// End date-time (ISO 8601, e.g. 2026-03-21T15:00:00).
+        #[arg(long)]
+        end: String,
+        /// Attendee email address(es), comma-separated.
+        #[arg(long)]
+        attendees: Option<String>,
+        /// Location description.
+        #[arg(long)]
+        location: Option<String>,
+        /// Event body/description (plain text).
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Delete a calendar event by ID.
+    Delete {
+        /// Event ID to delete.
+        #[arg(long)]
+        id: String,
+    },
+    /// Respond to a calendar event invitation (accept, decline, or tentatively accept).
+    Respond {
+        /// Event ID to respond to.
+        #[arg(long)]
+        id: String,
+        /// Response: accept, decline, or tentative.
+        #[arg(long)]
+        response: String,
+        /// Optional comment to include with the response.
+        #[arg(long)]
+        comment: Option<String>,
+    },
 }
 
 /// OneDrive file subcommands.
