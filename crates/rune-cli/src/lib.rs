@@ -1173,10 +1173,18 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_mail_unread(limit, &folder).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365MailAction::Read { id } => {
+                    let result = client.ms365_mail_read(&id).await?;
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Calendar { action } => match action {
                 Ms365CalendarAction::Upcoming { limit, hours } => {
                     let result = client.ms365_calendar_upcoming(limit, hours).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365CalendarAction::Read { id } => {
+                    let result = client.ms365_calendar_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
             },

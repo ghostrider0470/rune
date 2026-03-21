@@ -263,6 +263,12 @@ pub enum Ms365MailAction {
         #[arg(long, default_value = "Inbox")]
         folder: String,
     },
+    /// Read a single mail message by ID.
+    Read {
+        /// Message ID to retrieve.
+        #[arg(long)]
+        id: String,
+    },
 }
 
 /// Calendar subcommands.
@@ -276,6 +282,12 @@ pub enum Ms365CalendarAction {
         /// Look-ahead window in hours.
         #[arg(long, default_value_t = 24)]
         hours: u32,
+    },
+    /// Read a single calendar event by ID.
+    Read {
+        /// Event ID to retrieve.
+        #[arg(long)]
+        id: String,
     },
 }
 
@@ -4650,6 +4662,28 @@ mod subagent_cli_tests {
         let cli = Cli::try_parse_from(["rune", "reset"]).unwrap();
         match cli.command {
             Command::Reset { confirm } => assert!(!confirm),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_mail_read() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "mail", "read", "--id", "abc123"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Mail { action: Ms365MailAction::Read { id } } } => {
+                assert_eq!(id, "abc123");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_calendar_read() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "calendar", "read", "--id", "evt456"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Calendar { action: Ms365CalendarAction::Read { id } } } => {
+                assert_eq!(id, "evt456");
+            }
             other => panic!("unexpected: {other:?}"),
         }
     }
