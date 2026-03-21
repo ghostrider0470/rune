@@ -3306,6 +3306,7 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
         ("paths.memory_dir", &config.paths.memory_dir, true),
         ("paths.media_dir", &config.paths.media_dir, true),
         ("paths.skills_dir", &config.paths.skills_dir, true),
+        ("paths.plugins_dir", &config.paths.plugins_dir, true),
         ("paths.logs_dir", &config.paths.logs_dir, true),
         ("paths.backups_dir", &config.paths.backups_dir, true),
         ("paths.config_dir", &config.paths.config_dir, true),
@@ -3529,6 +3530,7 @@ mod tests {
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
                 skills_dir: base.join("skills"),
+                plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
@@ -3537,7 +3539,7 @@ mod tests {
             ..Default::default()
         };
         let checks = storage_path_checks(&config);
-        assert_eq!(checks.len(), 9);
+        assert_eq!(checks.len(), 10);
         for c in &checks {
             assert_eq!(c.status, "pass", "expected pass for {}: {}", c.name, c.message);
         }
@@ -3555,6 +3557,7 @@ mod tests {
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
                 skills_dir: base.join("skills"),
+                plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),

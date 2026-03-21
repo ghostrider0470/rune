@@ -523,6 +523,8 @@ impl ApprovalRepo for MemApprovalRepo {
             decided_at: None,
             presented_payload: approval.presented_payload,
             created_at: approval.created_at,
+            handle_ref: approval.handle_ref,
+            host_ref: approval.host_ref,
         };
         self.approvals.lock().await.push(row.clone());
         Ok(row)

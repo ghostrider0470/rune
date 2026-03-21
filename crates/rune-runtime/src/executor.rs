@@ -17,6 +17,7 @@ use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 use crate::compaction::CompactionStrategy;
 use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
+use crate::hooks::{HookEvent, HookRegistry};
 use crate::lane_queue::{Lane, LaneQueue};
 use crate::memory::MemoryLoader;
 use crate::session_metadata::selected_model;
@@ -48,6 +49,7 @@ pub struct TurnExecutor {
     lane_queue: Option<Arc<LaneQueue>>,
     skill_registry: Option<Arc<SkillRegistry>>,
     tool_approval_policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
+    hook_registry: Option<Arc<HookRegistry>>,
 }
 
 impl TurnExecutor {
@@ -78,6 +80,7 @@ impl TurnExecutor {
             lane_queue: None,
             skill_registry: None,
             tool_approval_policy_repo: None,
+            hook_registry: None,
         }
     }
 
@@ -121,6 +124,12 @@ impl TurnExecutor {
     /// Attach a durable tool approval policy store for persisting allow-always decisions.
     pub fn with_tool_approval_policy_repo(mut self, repo: Arc<dyn ToolApprovalPolicyRepo>) -> Self {
         self.tool_approval_policy_repo = Some(repo);
+        self
+    }
+
+    /// Attach a hook registry for emitting pre/post tool call and session lifecycle events.
+    pub fn with_hook_registry(mut self, registry: Arc<HookRegistry>) -> Self {
+        self.hook_registry = Some(registry);
         self
     }
 
@@ -625,6 +634,22 @@ impl TurnExecutor {
                             serde_json::Value::String(turn_id.into_uuid().to_string()),
                         );
                     }
+
+                    // Emit PreToolCall hook
+                    if let Some(ref hook_reg) = self.hook_registry {
+                        let mut hook_ctx = serde_json::json!({
+                            "tool_name": tc.function.name,
+                            "arguments": &args,
+                            "session_id": session_id.to_string(),
+                            "turn_id": turn_id.into_uuid().to_string(),
+                        });
+                        hook_reg.emit(&HookEvent::PreToolCall, &mut hook_ctx).await;
+                        // Allow hooks to modify arguments
+                        if let Some(modified_args) = hook_ctx.get("arguments").cloned() {
+                            args = modified_args;
+                        }
+                    }
+
                     let call = ToolCall {
                         tool_call_id,
                         tool_name: tc.function.name.clone(),
@@ -689,12 +714,24 @@ impl TurnExecutor {
                     // Persist tool result
                     let result_item = TranscriptItem::ToolResult {
                         tool_call_id: tool_result.tool_call_id,
-                        output: tool_result.output,
+                        output: tool_result.output.clone(),
                         is_error: tool_result.is_error,
-                        tool_execution_id: tool_result.tool_execution_id,
+                        tool_execution_id: tool_result.tool_execution_id.clone(),
                     };
                     self.append_transcript(session_id, Some(turn_id.into_uuid()), &result_item)
                         .await?;
+
+                    // Emit PostToolCall hook
+                    if let Some(ref hook_reg) = self.hook_registry {
+                        let mut hook_ctx = serde_json::json!({
+                            "tool_name": tc.function.name,
+                            "session_id": session_id.to_string(),
+                            "turn_id": turn_id.into_uuid().to_string(),
+                            "output": tool_result.output,
+                            "is_error": tool_result.is_error,
+                        });
+                        hook_reg.emit(&HookEvent::PostToolCall, &mut hook_ctx).await;
+                    }
                 }
 
                 // Loop back to model
