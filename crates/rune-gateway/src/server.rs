@@ -132,7 +132,12 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         .as_deref()
         .filter(|k| !k.is_empty())
         .map(|key| {
-            let provider: Box<dyn rune_stt::SttProvider> = Box::new(OpenAiStt::new(key));
+            let provider: Box<dyn rune_stt::SttProvider> = Box::new(OpenAiStt::new(
+                key,
+                services.config.media.stt.base_url.clone().unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+                services.config.media.stt.api_version.clone(),
+                services.config.media.stt.model.clone(),
+            ));
             Arc::new(RwLock::new(SttEngine::new(
                 provider,
                 services.config.media.stt.clone(),

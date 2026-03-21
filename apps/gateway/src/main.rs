@@ -612,7 +612,15 @@ async fn build_services(
         let stt_cfg = config.media.stt.clone();
         if stt_cfg.enabled {
             let api_key = stt_cfg.api_key.clone().unwrap_or_default();
-            let provider = Box::new(rune_stt::openai::OpenAiStt::new(api_key));
+            let provider = Box::new(rune_stt::openai::OpenAiStt::new(
+                api_key,
+                stt_cfg
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+                stt_cfg.api_version.clone(),
+                stt_cfg.model.clone(),
+            ));
             let engine = rune_stt::SttEngine::new(provider, stt_cfg);
             info!("STT engine enabled");
             Some(Arc::new(tokio::sync::RwLock::new(engine)))

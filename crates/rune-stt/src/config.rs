@@ -12,7 +12,13 @@ pub struct SttConfig {
     /// API key for the chosen provider.
     pub api_key: Option<String>,
 
-    /// Model identifier (e.g. `"whisper-1"`).
+    /// Optional base URL for OpenAI-compatible providers.
+    pub base_url: Option<String>,
+
+    /// Optional API version for Azure OpenAI-compatible endpoints.
+    pub api_version: Option<String>,
+
+    /// Model identifier (e.g. `"gpt-4o-mini-transcribe"`).
     pub model: String,
 }
 
@@ -22,7 +28,9 @@ impl Default for SttConfig {
             enabled: false,
             provider: "openai".to_owned(),
             api_key: None,
-            model: "whisper-1".to_owned(),
+            base_url: None,
+            api_version: None,
+            model: "gpt-4o-mini-transcribe".to_owned(),
         }
     }
 }
