@@ -29,7 +29,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365UsersAction, ProcessAction,
+    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365UsersAction, ProcessAction,
     RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
@@ -1219,6 +1219,20 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 Ms365UsersAction::Read { id } => {
                     let result = client.ms365_users_read(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            Ms365Action::Planner { action } => match action {
+                Ms365PlannerAction::Plans { limit } => {
+                    let result = client.ms365_planner_plans(limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365PlannerAction::Tasks { plan_id, limit } => {
+                    let result = client.ms365_planner_tasks(&plan_id, limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365PlannerAction::TaskRead { id } => {
+                    let result = client.ms365_planner_task_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
             },

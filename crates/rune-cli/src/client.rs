@@ -2987,6 +2987,23 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_planner_plans(&self, limit: u32) -> Result<crate::output::Ms365PlannerPlansResponse> {
+        let r = self.http.get(self.url("/ms365/planner/plans"))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_planner_tasks(&self, plan_id: &str, limit: u32) -> Result<crate::output::Ms365PlannerTasksResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/planner/plans/{plan_id}/tasks")))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_planner_task_read(&self, id: &str) -> Result<crate::output::Ms365PlannerTaskReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/planner/tasks/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
