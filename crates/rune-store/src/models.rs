@@ -455,6 +455,8 @@ pub struct ProcessHandleRow {
     pub exit_code: Option<i32>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+    pub execution_mode: Option<String>,
+    pub tool_execution_id: Option<Uuid>,
 }
 
 /// Insert payload for a new process handle.
@@ -469,4 +471,6 @@ pub struct NewProcessHandle {
     pub cwd: String,
     pub status: String,
     pub started_at: DateTime<Utc>,
+    pub execution_mode: Option<String>,
+    pub tool_execution_id: Option<Uuid>,
 }

@@ -222,6 +222,8 @@ fn row_to_process_handle(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessHan
         exit_code: row.get(6)?,
         started_at: parse_dt(&row.get::<_, String>(7)?),
         ended_at: parse_dt_opt(row.get(8)?),
+        execution_mode: row.get(9)?,
+        tool_execution_id: row.get::<_, Option<String>>(10)?.map(|s| parse_uuid(&s)),
     })
 }
 
@@ -264,7 +266,7 @@ const JOB_RUN_COLS: &str =
 const APPROVAL_COLS: &str = "id, subject_type, subject_id, reason, decision, decided_by, decided_at, presented_payload, created_at, handle_ref, host_ref";
 const TOOL_EXEC_COLS: &str = "id, tool_call_id, session_id, turn_id, tool_name, arguments, status, result_summary, error_summary, started_at, ended_at, approval_id, execution_mode";
 const PROCESS_HANDLE_COLS: &str =
-    "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at";
+    "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at, execution_mode, tool_execution_id";
 const PAIRED_DEVICE_COLS: &str = "id, name, public_key, role, scopes, token_hash, token_expires_at, paired_at, last_seen_at, created_at";
 const PAIRING_REQUEST_COLS: &str = "id, device_name, public_key, challenge, created_at, expires_at";
 
@@ -1210,12 +1212,14 @@ impl ProcessHandleRepo for SqliteProcessHandleRepo {
     async fn create(&self, h: NewProcessHandle) -> Result<ProcessHandleRow, StoreError> {
         self.conn.call(move |conn| {
             conn.execute(
-                &format!("INSERT INTO process_handles ({PROCESS_HANDLE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+                &format!("INSERT INTO process_handles ({PROCESS_HANDLE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
                 rusqlite::params![
                     h.process_id.to_string(), h.tool_call_id.to_string(),
                     h.session_id.to_string(), h.command, h.cwd,
                     h.status, Option::<i32>::None,
                     to_rfc3339(&h.started_at), Option::<String>::None,
+                    h.execution_mode,
+                    h.tool_execution_id.map(|id| id.to_string()),
                 ],
             )?;
             conn.prepare(&format!("SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE process_id = ?1"))?
@@ -1278,10 +1282,48 @@ impl ProcessHandleRepo for SqliteProcessHandleRepo {
     async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError> {
         self.conn
             .call(move |conn| {
-                conn.prepare(
-                    "SELECT process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at FROM process_handles WHERE status IN ('running', 'backgrounded') ORDER BY started_at DESC"
-                )?
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE status IN ('running', 'backgrounded') ORDER BY started_at DESC"
+                ))?
                 .query_map([], row_to_process_handle)?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_by_tool_call_id(
+        &self,
+        tool_call_id: Uuid,
+    ) -> Result<Option<ProcessHandleRow>, StoreError> {
+        let tc_s = tool_call_id.to_string();
+        self.conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE tool_call_id = ?1"
+                ))?;
+                let mut rows = stmt.query_map([&tc_s], row_to_process_handle)?;
+                match rows.next() {
+                    Some(Ok(row)) => Ok(Some(row)),
+                    Some(Err(e)) => Err(e.into()),
+                    None => Ok(None),
+                }
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn find_by_tool_execution_id(
+        &self,
+        tool_execution_id: Uuid,
+    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        let te_s = tool_execution_id.to_string();
+        self.conn
+            .call(move |conn| {
+                conn.prepare(&format!(
+                    "SELECT {PROCESS_HANDLE_COLS} FROM process_handles WHERE tool_execution_id = ?1 ORDER BY started_at DESC"
+                ))?
+                .query_map([&te_s], row_to_process_handle)?
                 .collect::<Result<Vec<_>, _>>()
             })
             .await
