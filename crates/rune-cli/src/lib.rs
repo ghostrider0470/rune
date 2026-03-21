@@ -1256,6 +1256,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_files_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365FilesAction::Search { query, limit } => {
+                    let result = client.ms365_files_search(&query, limit).await?;
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Users { action } => match action {
                 Ms365UsersAction::Me => {

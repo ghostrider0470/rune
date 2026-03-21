@@ -460,6 +460,15 @@ pub enum Ms365FilesAction {
         #[arg(long)]
         id: String,
     },
+    /// Search for files in OneDrive by name or content.
+    Search {
+        /// Search query string.
+        #[arg(long)]
+        query: String,
+        /// Maximum number of results to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
 }
 
 /// Users/org inspection subcommands.
