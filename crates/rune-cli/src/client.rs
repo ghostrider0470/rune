@@ -3004,6 +3004,23 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_todo_lists(&self, limit: u32) -> Result<crate::output::Ms365TodoListsResponse> {
+        let r = self.http.get(self.url("/ms365/todo/lists"))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_todo_tasks(&self, list_id: &str, limit: u32) -> Result<crate::output::Ms365TodoTasksResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/todo/lists/{list_id}/tasks")))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_todo_task_read(&self, list_id: &str, id: &str) -> Result<crate::output::Ms365TodoTaskReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/todo/lists/{list_id}/tasks/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {

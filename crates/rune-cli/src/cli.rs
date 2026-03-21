@@ -269,6 +269,11 @@ pub enum Ms365Action {
         #[command(subcommand)]
         action: Ms365PlannerAction,
     },
+    /// Microsoft To-Do lists and tasks.
+    Todo {
+        #[command(subcommand)]
+        action: Ms365TodoAction,
+    },
 }
 
 /// Auth/config inspection subcommands.
@@ -380,6 +385,36 @@ pub enum Ms365PlannerAction {
     /// Read a single task by ID.
     #[command(name = "task-read")]
     TaskRead {
+        /// Task ID to retrieve.
+        #[arg(long)]
+        id: String,
+    },
+}
+
+/// Microsoft To-Do subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365TodoAction {
+    /// List To-Do task lists.
+    Lists {
+        /// Maximum number of lists to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    /// List tasks in a To-Do list.
+    Tasks {
+        /// Task list ID to list tasks from.
+        #[arg(long)]
+        list_id: String,
+        /// Maximum number of tasks to return.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Read a single To-Do task by ID.
+    #[command(name = "task-read")]
+    TaskRead {
+        /// Task list ID that contains the task.
+        #[arg(long)]
+        list_id: String,
         /// Task ID to retrieve.
         #[arg(long)]
         id: String,
@@ -4833,5 +4868,40 @@ mod subagent_cli_tests {
             cli.command,
             Command::Ms365 { action: Ms365Action::Mail { action: Ms365MailAction::Folders } }
         ));
+    }
+
+    #[test]
+    fn parse_ms365_todo_lists() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "todo", "lists"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Todo { action: Ms365TodoAction::Lists { limit } } } => {
+                assert_eq!(limit, 25);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_todo_tasks() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "todo", "tasks", "--list-id", "lst1"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Todo { action: Ms365TodoAction::Tasks { list_id, limit } } } => {
+                assert_eq!(list_id, "lst1");
+                assert_eq!(limit, 50);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_todo_task_read() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "todo", "task-read", "--list-id", "lst1", "--id", "task1"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Todo { action: Ms365TodoAction::TaskRead { list_id, id } } } => {
+                assert_eq!(list_id, "lst1");
+                assert_eq!(id, "task1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 }
