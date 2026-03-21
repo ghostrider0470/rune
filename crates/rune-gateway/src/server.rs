@@ -324,6 +324,9 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
                 .put(routes::set_approval_policy)
                 .delete(routes::clear_approval_policy),
         )
+        // Agent (subagent) control routes
+        .route("/agents/{id}/steer", post(routes::agent_steer))
+        .route("/agents/{id}/kill", post(routes::agent_kill))
         // Device pairing routes
         .route("/devices/pair/approve", post(routes::device_pair_approve))
         .route("/devices/pair/reject", post(routes::device_pair_reject))

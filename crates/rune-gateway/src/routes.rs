@@ -1419,6 +1419,172 @@ pub async fn send_message(
     }))
 }
 
+// ── Agent (subagent) control ──────────────────────────────────────────────────
+
+/// Request body for `POST /agents/{id}/steer`.
+#[derive(Deserialize)]
+pub struct AgentSteerRequest {
+    pub message: String,
+}
+
+/// Response for `POST /agents/{id}/steer`.
+#[derive(Serialize)]
+pub struct AgentSteerResponse {
+    pub session_id: String,
+    pub accepted: bool,
+    pub detail: String,
+}
+
+/// Request body for `POST /agents/{id}/kill`.
+#[derive(Deserialize)]
+pub struct AgentKillRequest {
+    pub reason: Option<String>,
+}
+
+/// Response for `POST /agents/{id}/kill`.
+#[derive(Serialize)]
+pub struct AgentKillResponse {
+    pub session_id: String,
+    pub killed: bool,
+    pub detail: String,
+}
+
+/// `POST /agents/{id}/steer` — inject a steering instruction into a running subagent.
+pub async fn agent_steer(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<AgentSteerRequest>,
+) -> Result<Json<AgentSteerResponse>, GatewayError> {
+    let session = state
+        .session_repo
+        .find_by_id(id)
+        .await
+        .map_err(|_| GatewayError::SessionNotFound(format!("agent session {id} not found")))?;
+
+    let now = chrono::Utc::now();
+    let note = format!(
+        "[steer] operator instruction injected: {}",
+        body.message
+    );
+
+    // Append a status_note transcript item for auditability.
+    state
+        .transcript_repo
+        .append(rune_store::models::NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id: id,
+            turn_id: None,
+            seq: 0,
+            kind: "status_note".into(),
+            payload: json!({ "content": note }),
+            created_at: now,
+        })
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    // Update subagent lifecycle metadata.
+    let mut metadata = session.metadata.clone();
+    metadata["subagent_lifecycle"] = json!("steered");
+    metadata["subagent_runtime_status"] = json!("running");
+    metadata["subagent_runtime_attached"] = json!(true);
+    metadata["subagent_status_updated_at"] = json!(now.to_rfc3339());
+    metadata["subagent_last_note"] = json!(note);
+
+    state
+        .session_repo
+        .update_metadata(id, metadata, now)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: id.to_string(),
+        kind: "agent_steered".to_string(),
+        payload: json!({
+            "session_id": id,
+            "message": body.message,
+        }),
+        state_changed: true,
+    });
+
+    Ok(Json(AgentSteerResponse {
+        session_id: id.to_string(),
+        accepted: true,
+        detail: format!(
+            "steering instruction delivered to session {}",
+            id
+        ),
+    }))
+}
+
+/// `POST /agents/{id}/kill` — cancel/terminate a running subagent session.
+pub async fn agent_kill(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<AgentKillRequest>,
+) -> Result<Json<AgentKillResponse>, GatewayError> {
+    let session = state
+        .session_repo
+        .find_by_id(id)
+        .await
+        .map_err(|_| GatewayError::SessionNotFound(format!("agent session {id} not found")))?;
+
+    let now = chrono::Utc::now();
+    let reason = body.reason.as_deref().unwrap_or("operator-initiated");
+    let note = format!("[kill] session cancelled: {reason}");
+
+    // Mark session as cancelled.
+    state
+        .session_repo
+        .update_status(id, "cancelled", now)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    // Append a status_note transcript item.
+    state
+        .transcript_repo
+        .append(rune_store::models::NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id: id,
+            turn_id: None,
+            seq: 0,
+            kind: "status_note".into(),
+            payload: json!({ "content": note }),
+            created_at: now,
+        })
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    // Update subagent lifecycle metadata.
+    let mut metadata = session.metadata.clone();
+    metadata["subagent_lifecycle"] = json!("cancelled");
+    metadata["subagent_runtime_status"] = json!("stopped");
+    metadata["subagent_runtime_attached"] = json!(false);
+    metadata["subagent_status_updated_at"] = json!(now.to_rfc3339());
+    metadata["subagent_last_note"] = json!(note);
+
+    state
+        .session_repo
+        .update_metadata(id, metadata, now)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: id.to_string(),
+        kind: "agent_killed".to_string(),
+        payload: json!({
+            "session_id": id,
+            "reason": reason,
+        }),
+        state_changed: true,
+    });
+
+    Ok(Json(AgentKillResponse {
+        session_id: id.to_string(),
+        killed: true,
+        detail: format!("session {} cancelled: {reason}", id),
+    }))
+}
+
 // ── Transcript ────────────────────────────────────────────────────────────────
 
 /// A single transcript entry in the response.
@@ -3518,7 +3684,7 @@ mod tests {
         let base = tmp.path().to_path_buf();
         // Create all 9 subdirs
         for sub in &[
-            "db", "sessions", "memory", "media", "skills", "logs", "backups", "config", "secrets",
+            "db", "sessions", "memory", "media", "skills", "plugins", "logs", "backups", "config", "secrets",
         ] {
             std::fs::create_dir(base.join(sub)).unwrap();
         }

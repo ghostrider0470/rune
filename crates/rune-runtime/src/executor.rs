@@ -716,7 +716,7 @@ impl TurnExecutor {
                         tool_call_id: tool_result.tool_call_id,
                         output: tool_result.output.clone(),
                         is_error: tool_result.is_error,
-                        tool_execution_id: tool_result.tool_execution_id.clone(),
+                        tool_execution_id: tool_result.tool_execution_id,
                     };
                     self.append_transcript(session_id, Some(turn_id.into_uuid()), &result_item)
                         .await?;

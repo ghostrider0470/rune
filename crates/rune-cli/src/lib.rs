@@ -833,7 +833,7 @@ async fn init_workspace(
         let mut entries = tokio::fs::read_dir(&templates_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let p = entry.path();
-            if p.extension().map_or(false, |e| e == "toml") {
+            if p.extension().is_some_and(|e| e == "toml") {
                 count += 1;
             }
         }

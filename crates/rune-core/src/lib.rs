@@ -126,6 +126,14 @@ impl fmt::Display for ToolCallId {
     }
 }
 
+impl FromStr for ToolCallId {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.to_owned()))
+    }
+}
+
 impl From<ToolCallId> for Uuid {
     fn from(value: ToolCallId) -> Self {
         value.into_uuid()

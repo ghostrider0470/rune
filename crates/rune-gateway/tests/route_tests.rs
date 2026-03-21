@@ -22,8 +22,8 @@ use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };
 use rune_runtime::{
-    CompactionStrategy, ContextAssembler, NoOpCompaction, SessionEngine, SkillLoader,
-    SkillRegistry, TurnExecutor,
+    CompactionStrategy, ContextAssembler, HookRegistry, NoOpCompaction, PluginLoader,
+    PluginRegistry, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -51,6 +51,16 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
         approval_mode: "prompt".to_string(),
         security_posture: "sandboxed".to_string(),
     })
+}
+
+fn test_plugins() -> (Arc<PluginRegistry>, Arc<PluginLoader>, Arc<HookRegistry>) {
+    let plugin_registry = Arc::new(PluginRegistry::new());
+    let plugin_loader = Arc::new(PluginLoader::new(
+        std::env::temp_dir(),
+        plugin_registry.clone(),
+    ));
+    let hook_registry = Arc::new(HookRegistry::new());
+    (plugin_registry, plugin_loader, hook_registry)
 }
 
 // ── In-memory repos ───────────────────────────────────────────────────────────
@@ -383,6 +393,8 @@ impl ApprovalRepo for MemApprovalRepo {
             decided_at: None,
             presented_payload: approval.presented_payload,
             created_at: approval.created_at,
+            handle_ref: None,
+            host_ref: None,
         };
         self.approvals.lock().await.push(row.clone());
         Ok(row)
@@ -771,6 +783,7 @@ fn build_test_app_parts(
     let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config,
@@ -793,6 +806,9 @@ fn build_test_app_parts(
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -855,6 +871,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -877,6 +894,9 @@ async fn ws_rpc_status_matches_http_status_basics() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -953,6 +973,7 @@ enabled: true
     let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -975,6 +996,9 @@ enabled: true
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1063,6 +1087,7 @@ async fn status_reports_configured_lane_capacities() {
     };
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(config)),
@@ -1085,6 +1110,9 @@ async fn status_reports_configured_lane_capacities() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1150,6 +1178,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -1172,6 +1201,9 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1271,6 +1303,7 @@ async fn ws_rpc_health_reports_session_count() {
         .unwrap();
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -1293,6 +1326,9 @@ async fn ws_rpc_health_reports_session_count() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1349,6 +1385,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
     let now = chrono::Utc::now();
     let job_id = scheduler
         .add_job(rune_runtime::scheduler::Job {
@@ -1393,6 +1430,9 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1490,6 +1530,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         .unwrap();
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -1512,6 +1553,9 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1626,6 +1670,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         .unwrap();
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -1648,6 +1693,9 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1709,6 +1757,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -1731,6 +1780,9 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1789,6 +1841,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -1811,6 +1864,9 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -1929,6 +1985,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -1951,6 +2008,9 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -2065,6 +2125,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -2087,6 +2148,9 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -2166,6 +2230,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -2188,6 +2253,9 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -3498,6 +3566,7 @@ async fn send_message_and_transcript_with_shared_state() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -3520,6 +3589,9 @@ async fn send_message_and_transcript_with_shared_state() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -3718,6 +3790,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         .unwrap();
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -3740,6 +3813,9 @@ async fn get_session_status_surfaces_subagent_metadata() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -4711,6 +4787,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -4733,6 +4810,9 @@ async fn list_sessions_filters_by_channel_and_activity() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -4945,6 +5025,7 @@ async fn reminders_list_includes_outcome_fields() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     // Pre-populate reminder store with a cancelled reminder.
     let reminder_store = Arc::new(ReminderStore::new());
@@ -4977,6 +5058,9 @@ async fn reminders_list_includes_outcome_fields() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -5041,6 +5125,7 @@ async fn reminders_cancel_returns_success() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     // Pre-populate reminder store with a pending reminder.
     let reminder_store = Arc::new(ReminderStore::new());
@@ -5072,6 +5157,9 @@ async fn reminders_cancel_returns_success() {
         device_registry,
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine: None,
         stt_engine: None,
@@ -5099,4 +5187,422 @@ async fn reminders_cancel_returns_success() {
         serde_json::json!("cancelled")
     );
     assert!(r.outcome_at.is_some());
+}
+
+// ── Agent (subagent) control tests ───────────────────────────────────────────
+
+#[tokio::test]
+async fn agent_steer_success() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+
+    let now = chrono::Utc::now();
+    let agent_id = Uuid::now_v7();
+    session_repo
+        .create(rune_store::models::NewSession {
+            id: agent_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("test");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        tts_engine: None,
+        stt_engine: None,
+    };
+
+    let app = build_router(state, None);
+
+    let response = app
+        .oneshot(
+            Request::post(format!("/agents/{agent_id}/steer"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"message":"focus on tests"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["session_id"], agent_id.to_string());
+    assert_eq!(json["accepted"], true);
+    assert!(json["detail"].as_str().unwrap().contains("steering instruction delivered"));
+
+    // Verify transcript got a status_note.
+    let items = transcript_repo.list_by_session(agent_id).await.unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].kind, "status_note");
+    assert!(items[0].payload["content"]
+        .as_str()
+        .unwrap()
+        .contains("focus on tests"));
+
+    // Verify metadata was updated.
+    let session = session_repo.find_by_id(agent_id).await.unwrap();
+    assert_eq!(session.metadata["subagent_lifecycle"], "steered");
+}
+
+#[tokio::test]
+async fn agent_steer_not_found() {
+    let app = build_test_app(None);
+    let fake_id = Uuid::now_v7();
+
+    let response = app
+        .oneshot(
+            Request::post(format!("/agents/{fake_id}/steer"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"message":"hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "session_not_found");
+}
+
+#[tokio::test]
+async fn agent_kill_success() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+
+    let now = chrono::Utc::now();
+    let agent_id = Uuid::now_v7();
+    session_repo
+        .create(rune_store::models::NewSession {
+            id: agent_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("test");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        tts_engine: None,
+        stt_engine: None,
+    };
+
+    let app = build_router(state, None);
+
+    let response = app
+        .oneshot(
+            Request::post(format!("/agents/{agent_id}/kill"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"reason":"no longer needed"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["session_id"], agent_id.to_string());
+    assert_eq!(json["killed"], true);
+    assert!(json["detail"].as_str().unwrap().contains("cancelled"));
+
+    // Verify session status changed.
+    let session = session_repo.find_by_id(agent_id).await.unwrap();
+    assert_eq!(session.status, "cancelled");
+    assert_eq!(session.metadata["subagent_lifecycle"], "cancelled");
+
+    // Verify transcript got a status_note.
+    let items = transcript_repo.list_by_session(agent_id).await.unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].kind, "status_note");
+    assert!(items[0].payload["content"]
+        .as_str()
+        .unwrap()
+        .contains("no longer needed"));
+}
+
+#[tokio::test]
+async fn agent_kill_not_found() {
+    let app = build_test_app(None);
+    let fake_id = Uuid::now_v7();
+
+    let response = app
+        .oneshot(
+            Request::post(format!("/agents/{fake_id}/kill"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "session_not_found");
+}
+
+#[tokio::test]
+async fn ws_rpc_agent_steer_and_kill() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+
+    let now = chrono::Utc::now();
+    let agent_id = Uuid::now_v7();
+    session_repo
+        .create(rune_store::models::NewSession {
+            id: agent_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("test");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        tts_engine: None,
+        stt_engine: None,
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+
+    // Test agent.steer via WS-RPC.
+    let steer_result = dispatcher
+        .dispatch(
+            "agent.steer",
+            serde_json::json!({
+                "session_id": agent_id.to_string(),
+                "message": "prioritize security review"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(steer_result["accepted"], true);
+    assert_eq!(steer_result["session_id"], agent_id.to_string());
+
+    // Test agent.kill via WS-RPC.
+    let kill_result = dispatcher
+        .dispatch(
+            "agent.kill",
+            serde_json::json!({
+                "session_id": agent_id.to_string(),
+                "reason": "task complete"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(kill_result["killed"], true);
+    assert_eq!(kill_result["session_id"], agent_id.to_string());
+
+    // Test not-found via WS-RPC.
+    let fake_id = Uuid::now_v7();
+    let err = dispatcher
+        .dispatch(
+            "agent.steer",
+            serde_json::json!({
+                "session_id": fake_id.to_string(),
+                "message": "hello"
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "not_found");
 }

@@ -45,6 +45,7 @@ impl HookEvent {
     }
 
     /// Parse a string into a HookEvent.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "pre_tool_call" => Some(HookEvent::PreToolCall),
@@ -92,10 +93,13 @@ pub trait HookHandler: Send + Sync {
 // Registry
 // ---------------------------------------------------------------------------
 
+/// Handler map: event → ordered list of handlers.
+type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
+
 /// Maps hook events to registered handlers. Thread-safe.
 #[derive(Clone)]
 pub struct HookRegistry {
-    handlers: Arc<RwLock<HashMap<HookEvent, Vec<Box<dyn HookHandler>>>>>,
+    handlers: Arc<RwLock<HandlerMap>>,
 }
 
 impl HookRegistry {
