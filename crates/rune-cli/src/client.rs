@@ -2960,6 +2960,40 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_mail_send(&self, to: &[String], subject: &str, body: &str, cc: &[String]) -> Result<crate::output::Ms365MailSendResponse> {
+        let payload = serde_json::json!({
+            "to": to,
+            "subject": subject,
+            "body": body,
+            "cc": cc,
+        });
+        let r = self.http.post(self.url("/ms365/mail/send"))
+            .json(&payload)
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_mail_reply(&self, id: &str, body: &str, reply_all: bool) -> Result<crate::output::Ms365MailReplyResponse> {
+        let payload = serde_json::json!({
+            "body": body,
+            "reply_all": reply_all,
+        });
+        let r = self.http.post(self.url(&format!("/ms365/mail/messages/{id}/reply")))
+            .json(&payload)
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_mail_forward(&self, id: &str, to: &[String], comment: Option<&str>) -> Result<crate::output::Ms365MailForwardResponse> {
+        let mut payload = serde_json::json!({
+            "to": to,
+        });
+        if let Some(c) = comment {
+            payload["comment"] = serde_json::json!(c);
+        }
+        let r = self.http.post(self.url(&format!("/ms365/mail/messages/{id}/forward")))
+            .json(&payload)
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
     pub async fn ms365_files_list(&self, path: &str, limit: u32) -> Result<crate::output::Ms365FilesListResponse> {
         let r = self.http.get(self.url("/ms365/files"))
             .query(&[("path", path.to_string()), ("limit", limit.to_string())])

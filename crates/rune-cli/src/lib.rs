@@ -1187,6 +1187,21 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_mail_folders().await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365MailAction::Send { to, subject, body, cc } => {
+                    let to: Vec<String> = to.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    let cc: Vec<String> = cc.unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    let result = client.ms365_mail_send(&to, &subject, &body, &cc).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365MailAction::Reply { id, body, reply_all } => {
+                    let result = client.ms365_mail_reply(&id, &body, reply_all).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365MailAction::Forward { id, to, comment } => {
+                    let to: Vec<String> = to.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    let result = client.ms365_mail_forward(&id, &to, comment.as_deref()).await?;
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Calendar { action } => match action {
                 Ms365CalendarAction::Upcoming { limit, hours } => {

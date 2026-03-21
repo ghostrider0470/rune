@@ -313,6 +313,45 @@ pub enum Ms365MailAction {
     },
     /// List mail folders in the authenticated mailbox.
     Folders,
+    /// Send a new mail message.
+    Send {
+        /// Recipient email address(es), comma-separated.
+        #[arg(long, required = true)]
+        to: String,
+        /// Message subject.
+        #[arg(long)]
+        subject: String,
+        /// Message body (plain text).
+        #[arg(long)]
+        body: String,
+        /// CC recipient email address(es), comma-separated.
+        #[arg(long)]
+        cc: Option<String>,
+    },
+    /// Reply to an existing mail message.
+    Reply {
+        /// Message ID to reply to.
+        #[arg(long)]
+        id: String,
+        /// Reply body (plain text).
+        #[arg(long)]
+        body: String,
+        /// Reply to all recipients instead of just the sender.
+        #[arg(long)]
+        reply_all: bool,
+    },
+    /// Forward an existing mail message.
+    Forward {
+        /// Message ID to forward.
+        #[arg(long)]
+        id: String,
+        /// Recipient email address(es), comma-separated.
+        #[arg(long, required = true)]
+        to: String,
+        /// Optional comment to include with the forwarded message.
+        #[arg(long)]
+        comment: Option<String>,
+    },
 }
 
 /// Calendar subcommands.
