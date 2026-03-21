@@ -591,6 +591,53 @@ impl ApprovalRepo for MemApprovalRepo {
     }
 }
 
+struct MemToolApprovalPolicyRepo {
+    policies: Mutex<Vec<ToolApprovalPolicy>>,
+}
+
+impl MemToolApprovalPolicyRepo {
+    fn new() -> Self {
+        Self {
+            policies: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl ToolApprovalPolicyRepo for MemToolApprovalPolicyRepo {
+    async fn list_policies(&self) -> Result<Vec<ToolApprovalPolicy>, StoreError> {
+        Ok(self.policies.lock().await.clone())
+    }
+
+    async fn get_policy(&self, tool_name: &str) -> Result<Option<ToolApprovalPolicy>, StoreError> {
+        let policies = self.policies.lock().await;
+        Ok(policies.iter().find(|p| p.tool_name == tool_name).cloned())
+    }
+
+    async fn set_policy(
+        &self,
+        tool_name: &str,
+        decision: &str,
+    ) -> Result<ToolApprovalPolicy, StoreError> {
+        let mut policies = self.policies.lock().await;
+        policies.retain(|p| p.tool_name != tool_name);
+        let policy = ToolApprovalPolicy {
+            tool_name: tool_name.to_string(),
+            decision: decision.to_string(),
+            decided_at: chrono::Utc::now(),
+        };
+        policies.push(policy.clone());
+        Ok(policy)
+    }
+
+    async fn clear_policy(&self, tool_name: &str) -> Result<bool, StoreError> {
+        let mut policies = self.policies.lock().await;
+        let before = policies.len();
+        policies.retain(|p| p.tool_name != tool_name);
+        Ok(policies.len() < before)
+    }
+}
+
 struct TestHarness {
     session_repo: Arc<MemSessionRepo>,
     turn_repo: Arc<MemTurnRepo>,
@@ -665,6 +712,27 @@ impl TestHarness {
         } else {
             executor
         }
+    }
+
+    fn turn_executor_with_policy_repo(
+        &self,
+        model: Arc<dyn ModelProvider>,
+        tool_executor: Arc<dyn ToolExecutor>,
+        tool_registry: ToolRegistry,
+        policy_repo: Arc<dyn ToolApprovalPolicyRepo>,
+    ) -> TurnExecutor {
+        TurnExecutor::new(
+            self.session_repo.clone(),
+            self.turn_repo.clone(),
+            self.transcript_repo.clone(),
+            self.approval_repo.clone(),
+            model,
+            tool_executor,
+            Arc::new(tool_registry),
+            ContextAssembler::new("You are a helpful assistant."),
+            Arc::new(NoOpCompaction),
+        )
+        .with_tool_approval_policy_repo(policy_repo)
     }
 
     fn session_engine(&self) -> SessionEngine {
@@ -1697,4 +1765,231 @@ async fn selected_model_metadata_is_used_for_future_turns() {
 
     let requests = model_handle.requests().await;
     assert_eq!(requests[0].model.as_deref(), Some("azure/gpt-5.4"));
+}
+
+// ── allow-always reuse tests ──────────────────────────────────────────
+
+#[tokio::test]
+async fn allow_always_policy_auto_approves_matching_tool_call() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    // Model makes a tool call, then receives the result and finishes.
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"ls"}"#),
+        FakeModelProvider::text_response("done after auto-approval"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    // Pre-seed an allow-always policy for the "exec" tool.
+    let policy_repo = Arc::new(MemToolApprovalPolicyRepo::new());
+    policy_repo
+        .set_policy("exec", "allow_always")
+        .await
+        .unwrap();
+
+    // The tool executor returns ApprovalRequired on the first call, then
+    // succeeds on the second (the auto-approved retry with __approval_resume).
+    let executor = h.turn_executor_with_policy_repo(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({
+                        "command": "ls",
+                    }),
+                    command: Some("ls".to_string()),
+                })
+                .unwrap(),
+            },
+            FakeToolStep::Output("file1.txt\nfile2.txt".to_string()),
+        ])),
+        registry,
+        policy_repo,
+    );
+
+    let (turn, _) = executor.execute(session.id, "list files", None).await.unwrap();
+    // Turn should complete (not halt at waiting_for_approval).
+    assert_eq!(turn.status, "completed");
+
+    // Session should NOT be stuck in waiting_for_approval.
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_ne!(session_row.status, "waiting_for_approval");
+
+    // No pending approval records should have been created.
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    assert!(approvals.is_empty(), "expected no pending approvals");
+
+    // Transcript should contain an auto-approval audit entry.
+    let items = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let kinds: Vec<&str> = items.iter().map(|i| i.kind.as_str()).collect();
+    assert!(
+        kinds.contains(&"approval_response"),
+        "transcript should contain auto-approval audit entry, got: {kinds:?}"
+    );
+
+    // Verify the auto-approval note mentions the policy.
+    let approval_item = items
+        .iter()
+        .find(|i| i.kind == "approval_response")
+        .unwrap();
+    let note = approval_item.payload["note"].as_str().unwrap_or("");
+    assert!(
+        note.contains("auto-approved") && note.contains("allow-always"),
+        "auto-approval note should mention policy, got: {note}"
+    );
+}
+
+#[tokio::test]
+async fn no_allow_always_policy_still_halts_for_approval() {
+    // When no policy repo has a matching allow-always entry, the executor
+    // should behave exactly as before: halt and wait for approval.
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"rm -rf /"}"#),
+        FakeModelProvider::text_response("should not reach here"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    // Policy repo exists but is empty — no allow-always policy.
+    let policy_repo = Arc::new(MemToolApprovalPolicyRepo::new());
+
+    let executor = h.turn_executor_with_policy_repo(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::High,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({
+                        "command": "rm -rf /",
+                    }),
+                    command: Some("rm -rf /".to_string()),
+                })
+                .unwrap(),
+            },
+        ])),
+        registry,
+        policy_repo,
+    );
+
+    let (turn, _) = executor.execute(session.id, "nuke it", None).await.unwrap();
+    assert_eq!(turn.status, "tool_executing");
+
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_eq!(session_row.status, "waiting_for_approval");
+
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    assert_eq!(approvals.len(), 1);
+}
+
+#[tokio::test]
+async fn allow_always_policy_does_not_affect_different_tool() {
+    // An allow-always policy for tool "exec" should NOT auto-approve
+    // a different tool like "file_write".
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("file_write", r#"{"path":"/tmp/x"}"#),
+        FakeModelProvider::text_response("should not reach here"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "file_write".to_string(),
+        description: "Write a file".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::FileWrite,
+        requires_approval: true,
+    });
+
+    // Policy is for "exec", NOT "file_write".
+    let policy_repo = Arc::new(MemToolApprovalPolicyRepo::new());
+    policy_repo
+        .set_policy("exec", "allow_always")
+        .await
+        .unwrap();
+
+    let executor = h.turn_executor_with_policy_repo(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "file_write".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "file_write".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({
+                        "path": "/tmp/x",
+                    }),
+                    command: None,
+                })
+                .unwrap(),
+            },
+        ])),
+        registry,
+        policy_repo,
+    );
+
+    let (turn, _) = executor
+        .execute(session.id, "write file", None)
+        .await
+        .unwrap();
+    // Should halt — the allow-always policy is for a different tool.
+    assert_eq!(turn.status, "tool_executing");
+
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_eq!(session_row.status, "waiting_for_approval");
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use rune_core::{
@@ -659,46 +659,119 @@ impl TurnExecutor {
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,
                         Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
-                            warn!(tool = %tool, "tool execution requires approval");
-
-                            let approval_id = ApprovalId::new();
-                            let approval_request = TranscriptItem::ApprovalRequest {
-                                approval_id,
-                                summary: details.clone(),
-                                command: extract_approval_command(&details),
+                            // Check for a persisted allow-always policy before
+                            // halting the turn loop.  This lets a prior
+                            // allow-always decision auto-approve matching future
+                            // tool calls without operator intervention.
+                            let has_allow_always = if let Some(ref repo) =
+                                self.tool_approval_policy_repo
+                            {
+                                matches!(
+                                    repo.get_policy(&tool).await,
+                                    Ok(Some(ref p)) if p.decision == "allow_always"
+                                )
+                            } else {
+                                false
                             };
-                            self.append_transcript(
-                                session_id,
-                                Some(turn_id.into_uuid()),
-                                &approval_request,
-                            )
-                            .await?;
 
-                            self.approval_repo
-                                .create(NewApproval {
-                                    id: approval_id.into_uuid(),
-                                    subject_type: "tool_call".to_string(),
-                                    subject_id: tool_call_id.clone().into_uuid(),
-                                    reason: tool.clone(),
-                                    presented_payload: approval_payload(
-                                        session_id,
-                                        turn_id,
-                                        tool_call_id.clone(),
-                                        &tc.function.name,
-                                        &details,
-                                        &call.arguments,
-                                    ),
-                                    created_at: Utc::now(),
-                                    handle_ref: None,
-                                    host_ref: None,
-                                })
+                            if has_allow_always {
+                                info!(
+                                    tool = %tool,
+                                    "auto-approved by persisted allow-always policy"
+                                );
+
+                                // Audit: record auto-approval in the transcript
+                                // so it is visible in the conversation history.
+                                let auto_approval_id = ApprovalId::new();
+                                let response = TranscriptItem::ApprovalResponse {
+                                    approval_id: auto_approval_id,
+                                    decision: ApprovalDecision::AllowAlways,
+                                    note: Some(format!(
+                                        "auto-approved: persisted allow-always policy for {tool}"
+                                    )),
+                                };
+                                self.append_transcript(
+                                    session_id,
+                                    Some(turn_id.into_uuid()),
+                                    &response,
+                                )
                                 .await?;
 
-                            self.session_repo
-                                .update_status(session_id, "waiting_for_approval", Utc::now())
+                                // Re-execute the tool with the approval bypass
+                                // flag, mirroring the manual resume path.
+                                let mut auto_args = call.arguments.clone();
+                                if let Some(obj) = auto_args.as_object_mut() {
+                                    obj.insert(
+                                        "__approval_resume".to_string(),
+                                        serde_json::Value::Bool(true),
+                                    );
+                                }
+
+                                let auto_call = ToolCall {
+                                    tool_call_id: call.tool_call_id.clone(),
+                                    tool_name: call.tool_name.clone(),
+                                    arguments: auto_args,
+                                };
+
+                                match self.tool_executor.execute(auto_call).await {
+                                    Ok(result) => result,
+                                    Err(e) => {
+                                        warn!(
+                                            error = %e,
+                                            tool = %tool,
+                                            "auto-approved tool execution failed"
+                                        );
+                                        ToolResult {
+                                            tool_call_id,
+                                            output: format!("Tool error: {e}"),
+                                            is_error: true,
+                                            tool_execution_id: None,
+                                        }
+                                    }
+                                }
+                            } else {
+                                // No allow-always policy — standard approval gate.
+                                warn!(tool = %tool, "tool execution requires approval");
+
+                                let approval_id = ApprovalId::new();
+                                let approval_request = TranscriptItem::ApprovalRequest {
+                                    approval_id,
+                                    summary: details.clone(),
+                                    command: extract_approval_command(&details),
+                                };
+                                self.append_transcript(
+                                    session_id,
+                                    Some(turn_id.into_uuid()),
+                                    &approval_request,
+                                )
                                 .await?;
 
-                            return Ok(TurnLoopOutcome::WaitingForApproval);
+                                self.approval_repo
+                                    .create(NewApproval {
+                                        id: approval_id.into_uuid(),
+                                        subject_type: "tool_call".to_string(),
+                                        subject_id: tool_call_id.clone().into_uuid(),
+                                        reason: tool.clone(),
+                                        presented_payload: approval_payload(
+                                            session_id,
+                                            turn_id,
+                                            tool_call_id.clone(),
+                                            &tc.function.name,
+                                            &details,
+                                            &call.arguments,
+                                        ),
+                                        created_at: Utc::now(),
+                                        handle_ref: None,
+                                        host_ref: None,
+                                    })
+                                    .await?;
+
+                                self.session_repo
+                                    .update_status(session_id, "waiting_for_approval", Utc::now())
+                                    .await?;
+
+                                return Ok(TurnLoopOutcome::WaitingForApproval);
+                            }
                         }
                         Err(e) => {
                             warn!(error = %e, tool = %tc.function.name, "tool execution failed");
