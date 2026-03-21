@@ -10,6 +10,7 @@ mod routes;
 mod server;
 mod state;
 mod supervisor;
+mod webchat;
 pub mod ws;
 pub mod ws_rpc;
 

@@ -355,6 +355,8 @@ pub struct GatewayConfig {
     pub host: String,
     pub port: u16,
     pub auth_token: Option<String>,
+    #[serde(default)]
+    pub tls: TlsConfig,
 }
 
 impl Default for GatewayConfig {
@@ -363,7 +365,38 @@ impl Default for GatewayConfig {
             host: "0.0.0.0".to_string(),
             port: 8787,
             auth_token: None,
+            tls: TlsConfig::default(),
         }
+    }
+}
+
+/// TLS termination settings for the gateway.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TlsConfig {
+    /// Enable TLS. When false (the default), the gateway serves plain HTTP.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Path to the PEM-encoded certificate chain file.
+    #[serde(default)]
+    pub cert_path: Option<String>,
+    /// Path to the PEM-encoded private key file.
+    #[serde(default)]
+    pub key_path: Option<String>,
+}
+
+impl TlsConfig {
+    /// Returns an error message if the config is inconsistent.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.cert_path.is_none() {
+            return Err("gateway.tls.cert_path is required when TLS is enabled".into());
+        }
+        if self.key_path.is_none() {
+            return Err("gateway.tls.key_path is required when TLS is enabled".into());
+        }
+        Ok(())
     }
 }
 
