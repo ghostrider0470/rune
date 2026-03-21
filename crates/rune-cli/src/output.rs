@@ -3687,6 +3687,25 @@ impl fmt::Display for Ms365MailAttachmentReadResponse {
     }
 }
 
+/// Response for `ms365 mail attachment-download`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailAttachmentDownloadResponse {
+    pub attachment_id: String,
+    pub filename: String,
+    pub size: u64,
+    pub saved_to: String,
+}
+
+impl fmt::Display for Ms365MailAttachmentDownloadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "✓ Downloaded: {}", self.filename)?;
+        writeln!(f, "  Attachment: {}", self.attachment_id)?;
+        writeln!(f, "  Size:       {}", format_bytes(self.size))?;
+        writeln!(f, "  Saved to:   {}", self.saved_to)?;
+        Ok(())
+    }
+}
+
 // ── Microsoft 365 Files ───────────────────────────────────────────
 
 /// A single OneDrive file/folder item summary.
@@ -7215,6 +7234,35 @@ mod tests {
         assert_eq!(v["total"], 1);
         assert_eq!(v["attachments"][0]["name"], "doc.docx");
         assert_eq!(v["attachments"][0]["size"], 51200);
+    }
+
+    #[test]
+    fn render_ms365_mail_attachment_download_human() {
+        let r = Ms365MailAttachmentDownloadResponse {
+            attachment_id: "att-1".into(),
+            filename: "report.pdf".into(),
+            size: 204800,
+            saved_to: "/tmp/report.pdf".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Downloaded: report.pdf"));
+        assert!(out.contains("200.0 KB"));
+        assert!(out.contains("/tmp/report.pdf"));
+    }
+
+    #[test]
+    fn render_ms365_mail_attachment_download_json() {
+        let r = Ms365MailAttachmentDownloadResponse {
+            attachment_id: "att-1".into(),
+            filename: "report.pdf".into(),
+            size: 204800,
+            saved_to: "/tmp/report.pdf".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["filename"], "report.pdf");
+        assert_eq!(v["size"], 204800);
+        assert_eq!(v["saved_to"], "/tmp/report.pdf");
     }
 
     #[test]

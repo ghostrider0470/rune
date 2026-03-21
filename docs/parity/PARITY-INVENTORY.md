@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read.
+First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download.
 
 Observed subcommands:
 
@@ -707,6 +707,7 @@ Observed subcommands:
 - `ms365 teams messages --team-id <id> --channel-id <id>` — list recent messages in a channel
 - `ms365 mail attachments --id <msg_id>` — list attachments on a mail message
 - `ms365 mail attachment-read --message-id <msg_id> --id <att_id>` — read metadata of a single mail attachment
+- `ms365 mail attachment-download --message-id <msg_id> --id <att_id> [--output <path>]` — download attachment content to a local file
 
 Required concepts:
 - auth/config readiness inspection (tenant, client, scopes, token validity)
@@ -720,7 +721,7 @@ Required concepts:
 - To-Do list discovery and task enumeration by list ID
 - SharePoint site discovery, detail read, list/library enumeration, and list item browsing
 - Teams discovery, channel enumeration, channel detail, and channel message listing
-- mail attachment listing by message ID and single-attachment metadata read
+- mail attachment listing by message ID, single-attachment metadata read, and content download
 - operator-friendly rich output (headers, attendees, body preview, file metadata, user profiles, task progress)
 - JSON and human-readable output
 

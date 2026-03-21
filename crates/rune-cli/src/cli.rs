@@ -368,6 +368,19 @@ pub enum Ms365MailAction {
         #[arg(long)]
         id: String,
     },
+    /// Download attachment content to a local file.
+    #[command(name = "attachment-download")]
+    AttachmentDownload {
+        /// Message ID that owns the attachment.
+        #[arg(long)]
+        message_id: String,
+        /// Attachment ID to download.
+        #[arg(long)]
+        id: String,
+        /// Output file path (defaults to attachment name in current directory).
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 /// Calendar subcommands.
