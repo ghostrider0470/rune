@@ -275,7 +275,6 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
         .route("/devices/pair/request", post(routes::device_pair_request))
         // Dashboard SPA + API — public for operator visibility
-        .route("/", get(routes::spa_index))
         .route("/dashboard", get(routes::spa_index))
         .route("/ui", get(routes::spa_index))
         .route("/api/dashboard/summary", get(routes::dashboard_summary))
