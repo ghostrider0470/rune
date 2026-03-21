@@ -279,6 +279,11 @@ pub enum Ms365Action {
         #[command(subcommand)]
         action: Ms365SitesAction,
     },
+    /// Microsoft Teams inspection.
+    Teams {
+        #[command(subcommand)]
+        action: Ms365TeamsAction,
+    },
 }
 
 /// Auth/config inspection subcommands.
@@ -461,6 +466,48 @@ pub enum Ms365SitesAction {
         list_id: String,
         /// Maximum number of items to return.
         #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+}
+
+/// Microsoft Teams subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365TeamsAction {
+    /// List teams the authenticated user belongs to.
+    List {
+        /// Maximum number of teams to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    /// List channels in a team.
+    Channels {
+        /// Team ID to list channels from.
+        #[arg(long)]
+        team_id: String,
+        /// Maximum number of channels to return.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Read details of a single channel.
+    #[command(name = "channel-read")]
+    ChannelRead {
+        /// Team ID that contains the channel.
+        #[arg(long)]
+        team_id: String,
+        /// Channel ID to retrieve.
+        #[arg(long)]
+        id: String,
+    },
+    /// List recent messages in a channel.
+    Messages {
+        /// Team ID that contains the channel.
+        #[arg(long)]
+        team_id: String,
+        /// Channel ID to list messages from.
+        #[arg(long)]
+        channel_id: String,
+        /// Maximum number of messages to return.
+        #[arg(long, default_value_t = 25)]
         limit: u32,
     },
 }
@@ -4944,6 +4991,54 @@ mod subagent_cli_tests {
             Command::Ms365 { action: Ms365Action::Todo { action: Ms365TodoAction::TaskRead { list_id, id } } } => {
                 assert_eq!(list_id, "lst1");
                 assert_eq!(id, "task1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_teams_list() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "teams", "list"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::List { limit } } } => {
+                assert_eq!(limit, 25);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_teams_channels() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "teams", "channels", "--team-id", "t1"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::Channels { team_id, limit } } } => {
+                assert_eq!(team_id, "t1");
+                assert_eq!(limit, 50);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_teams_channel_read() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "teams", "channel-read", "--team-id", "t1", "--id", "ch1"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::ChannelRead { team_id, id } } } => {
+                assert_eq!(team_id, "t1");
+                assert_eq!(id, "ch1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_teams_messages() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "teams", "messages", "--team-id", "t1", "--channel-id", "ch1"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::Messages { team_id, channel_id, limit } } } => {
+                assert_eq!(team_id, "t1");
+                assert_eq!(channel_id, "ch1");
+                assert_eq!(limit, 25);
             }
             other => panic!("unexpected: {other:?}"),
         }

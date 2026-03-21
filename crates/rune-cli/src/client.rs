@@ -3046,6 +3046,30 @@ impl GatewayClient {
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
 
+    pub async fn ms365_teams_list(&self, limit: u32) -> Result<crate::output::Ms365TeamsListResponse> {
+        let r = self.http.get(self.url("/ms365/teams"))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_teams_channels(&self, team_id: &str, limit: u32) -> Result<crate::output::Ms365TeamsChannelsResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/teams/{team_id}/channels")))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_teams_channel_read(&self, team_id: &str, id: &str) -> Result<crate::output::Ms365TeamsChannelReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/teams/{team_id}/channels/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_teams_messages(&self, team_id: &str, channel_id: &str, limit: u32) -> Result<crate::output::Ms365TeamsMessagesResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/teams/{team_id}/channels/{channel_id}/messages")))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
         let r = self.http.post(self.url("/setup")).send().await.context("gateway")?;

@@ -29,7 +29,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction, Ms365TodoAction, Ms365UsersAction, ProcessAction,
+    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction, Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, ProcessAction,
     RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
@@ -1247,6 +1247,24 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 Ms365TodoAction::TaskRead { list_id, id } => {
                     let result = client.ms365_todo_task_read(&list_id, &id).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            Ms365Action::Teams { action } => match action {
+                Ms365TeamsAction::List { limit } => {
+                    let result = client.ms365_teams_list(limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365TeamsAction::Channels { team_id, limit } => {
+                    let result = client.ms365_teams_channels(&team_id, limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365TeamsAction::ChannelRead { team_id, id } => {
+                    let result = client.ms365_teams_channel_read(&team_id, &id).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365TeamsAction::Messages { team_id, channel_id, limit } => {
+                    let result = client.ms365_teams_messages(&team_id, &channel_id, limit).await?;
                     println!("{}", render(&result, format));
                 }
             },
