@@ -29,7 +29,8 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, ProcessAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
+    ModelsAction, Ms365Action, Ms365CalendarAction, Ms365MailAction, ProcessAction,
+    RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
 };
@@ -1165,6 +1166,20 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.approvals_clear(&tool).await?;
                 println!("{}", render(&result, format));
             }
+        },
+        Command::Ms365 { action } => match action {
+            Ms365Action::Mail { action } => match action {
+                Ms365MailAction::Unread { limit, folder } => {
+                    let result = client.ms365_mail_unread(limit, &folder).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            Ms365Action::Calendar { action } => match action {
+                Ms365CalendarAction::Upcoming { limit, hours } => {
+                    let result = client.ms365_calendar_upcoming(limit, hours).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
         },
         Command::Process { action } => match action {
             ProcessAction::List => {

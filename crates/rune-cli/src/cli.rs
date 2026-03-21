@@ -226,6 +226,57 @@ pub enum Command {
         #[arg(long)]
         confirm: bool,
     },
+    /// Microsoft 365 integration surfaces (mail, calendar).
+    #[command(name = "ms365")]
+    Ms365 {
+        #[command(subcommand)]
+        action: Ms365Action,
+    },
+}
+
+// ── Microsoft 365 ─────────────────────────────────────────────────
+
+/// Top-level MS365 subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365Action {
+    /// Mail operations.
+    Mail {
+        #[command(subcommand)]
+        action: Ms365MailAction,
+    },
+    /// Calendar operations.
+    Calendar {
+        #[command(subcommand)]
+        action: Ms365CalendarAction,
+    },
+}
+
+/// Mail subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365MailAction {
+    /// List unread messages from the authenticated mailbox.
+    Unread {
+        /// Maximum number of messages to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+        /// Folder to query (default: Inbox).
+        #[arg(long, default_value = "Inbox")]
+        folder: String,
+    },
+}
+
+/// Calendar subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365CalendarAction {
+    /// List upcoming calendar events.
+    Upcoming {
+        /// Maximum number of events to return.
+        #[arg(long, default_value_t = 10)]
+        limit: u32,
+        /// Look-ahead window in hours.
+        #[arg(long, default_value_t = 24)]
+        hours: u32,
+    },
 }
 
 /// Direct agent-turn invocation actions.
