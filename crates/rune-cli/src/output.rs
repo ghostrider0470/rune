@@ -5954,6 +5954,7 @@ mod tests {
         let resp = ConfigureResponse {
             success: true,
             detail: "Setup wizard completed.".into(),
+            items: vec![],
         };
         let out = render(&resp, OutputFormat::Human);
         assert!(out.contains("✓"));
