@@ -78,13 +78,13 @@ impl<M: SubagentManager> SubagentToolExecutor<M> {
 
         match result {
             Ok(output) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output,
                 is_error: false,
                 tool_execution_id: None,
             }),
             Err(e) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: e,
                 is_error: true,
                 tool_execution_id: None,

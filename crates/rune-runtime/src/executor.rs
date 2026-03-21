@@ -604,9 +604,9 @@ impl TurnExecutor {
                 for tc in &response.tool_calls {
                     let args: serde_json::Value =
                         serde_json::from_str(&tc.function.arguments).unwrap_or_default();
-                    let tool_call_id = ToolCallId::new();
+                    let tool_call_id = ToolCallId::from_model(&tc.id);
                     let req_item = TranscriptItem::ToolRequest {
-                        tool_call_id,
+                        tool_call_id: tool_call_id.clone(),
                         tool_name: tc.function.name.clone(),
                         arguments: args.clone(),
                     };
@@ -651,7 +651,7 @@ impl TurnExecutor {
                     }
 
                     let call = ToolCall {
-                        tool_call_id,
+                        tool_call_id: tool_call_id.clone(),
                         tool_name: tc.function.name.clone(),
                         arguments: args,
                     };
@@ -678,12 +678,12 @@ impl TurnExecutor {
                                 .create(NewApproval {
                                     id: approval_id.into_uuid(),
                                     subject_type: "tool_call".to_string(),
-                                    subject_id: tool_call_id.into_uuid(),
+                                    subject_id: tool_call_id.clone().into_uuid(),
                                     reason: tool.clone(),
                                     presented_payload: approval_payload(
                                         session_id,
                                         turn_id,
-                                        tool_call_id,
+                                        tool_call_id.clone(),
                                         &tc.function.name,
                                         &details,
                                         &call.arguments,

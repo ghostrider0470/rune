@@ -562,7 +562,7 @@ impl ProcessToolExecutor {
                     })
                     .collect();
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: serde_json::to_string_pretty(&json).unwrap_or_default(),
                     is_error: false,
                     tool_execution_id: None,
@@ -583,7 +583,7 @@ impl ProcessToolExecutor {
                     self.manager.poll_wait(pid, timeout).await?
                 };
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: serde_json::json!({
                         "processId": info.process_id,
                         "running": info.running,
@@ -620,7 +620,7 @@ impl ProcessToolExecutor {
                     .map(|v| v as usize);
                 let output = self.manager.log(pid, offset, limit).await?;
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output,
                     is_error: false,
                     tool_execution_id: None,
@@ -643,7 +643,7 @@ impl ProcessToolExecutor {
                     .unwrap_or(false);
                 let written = self.manager.write_stdin(pid, data, eof).await?;
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: format!("wrote {written} bytes"),
                     is_error: false,
                     tool_execution_id: None,
@@ -661,7 +661,7 @@ impl ProcessToolExecutor {
                 let payload = format!("{data}\n");
                 let written = self.manager.write_stdin(pid, &payload, false).await?;
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: format!("submitted {written} bytes"),
                     is_error: false,
                     tool_execution_id: None,
@@ -689,7 +689,7 @@ impl ProcessToolExecutor {
                 };
                 let written = self.manager.write_stdin(pid, &payload, false).await?;
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: format!("pasted {written} bytes"),
                     is_error: false,
                     tool_execution_id: None,
@@ -744,7 +744,7 @@ impl ProcessToolExecutor {
                     self.manager.close_stdin(pid).await?;
                 }
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: format!("sent {written} bytes"),
                     is_error: false,
                     tool_execution_id: None,
@@ -755,7 +755,7 @@ impl ProcessToolExecutor {
                     .ok_or_else(|| ToolError::InvalidArgument("kill requires sessionId".into()))?;
                 self.manager.kill(pid).await?;
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: format!("killed process {pid}"),
                     is_error: false,
                     tool_execution_id: None,

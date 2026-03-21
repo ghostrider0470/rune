@@ -123,7 +123,7 @@ impl FileToolExecutor {
         let output = lines[start..end].join("\n");
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output: truncate_read_output(&output),
             is_error: false,
             tool_execution_id: None,
@@ -150,7 +150,7 @@ impl FileToolExecutor {
         })?;
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output: format!("wrote {} bytes to {}", content.len(), path_str),
             is_error: false,
             tool_execution_id: None,
@@ -170,7 +170,7 @@ impl FileToolExecutor {
 
         if !content.contains(old_string) {
             return Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: "old_string not found in file — no changes made".into(),
                 is_error: true,
                 tool_execution_id: None,
@@ -180,7 +180,7 @@ impl FileToolExecutor {
         let match_count = content.matches(old_string).count();
         if match_count != 1 {
             return Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: format!(
                     "old_string matched {match_count} times — must match exactly once for safe edit"
                 ),
@@ -195,7 +195,7 @@ impl FileToolExecutor {
         })?;
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output: format!("edited {path_str}: replaced 1 occurrence"),
             is_error: false,
             tool_execution_id: None,
@@ -232,7 +232,7 @@ impl FileToolExecutor {
         names.sort();
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output: names.join("\n"),
             is_error: false,
             tool_execution_id: None,

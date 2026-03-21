@@ -77,7 +77,7 @@ impl WebFetchToolExecutor {
             "POST" => self.client.post(url),
             other => {
                 return Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: format!("Unsupported HTTP method: {other}. Use GET or POST."),
                     is_error: true,
                     tool_execution_id: None,
@@ -107,7 +107,7 @@ impl WebFetchToolExecutor {
                     format!("HTTP request failed: {e}")
                 };
                 return Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: msg,
                     is_error: true,
                     tool_execution_id: None,
@@ -143,7 +143,7 @@ impl WebFetchToolExecutor {
             Ok(text) => text,
             Err(e) => {
                 return Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: format!("HTTP {status_code} — failed to read response body: {e}"),
                     is_error: true,
                     tool_execution_id: None,
@@ -177,7 +177,7 @@ impl WebFetchToolExecutor {
         }
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output,
             is_error: false,
             tool_execution_id: None,

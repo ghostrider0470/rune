@@ -14,7 +14,7 @@ pub struct StubExecutor;
 impl ToolExecutor for StubExecutor {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output: format!(
                 "[stub] {} executed with args: {}",
                 call.tool_name, call.arguments

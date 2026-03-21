@@ -78,13 +78,13 @@ impl<S: SessionSpawner> SpawnToolExecutor<S> {
             .await
         {
             Ok(output) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output,
                 is_error: false,
                 tool_execution_id: None,
             }),
             Err(e) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: e,
                 is_error: true,
                 tool_execution_id: None,
@@ -117,13 +117,13 @@ impl<S: SessionSpawner> SpawnToolExecutor<S> {
 
         match self.spawner.send_message(session_key, label, message).await {
             Ok(output) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output,
                 is_error: false,
                 tool_execution_id: None,
             }),
             Err(e) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: e,
                 is_error: true,
                 tool_execution_id: None,

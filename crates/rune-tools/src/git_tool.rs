@@ -51,7 +51,7 @@ impl GitToolExecutor {
         // Validate against allow-list
         if !ALLOWED_OPERATIONS.contains(&operation) {
             return Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: format!(
                     "Unsupported git operation: {operation}. Allowed: {}",
                     ALLOWED_OPERATIONS.join(", ")
@@ -151,7 +151,7 @@ impl GitToolExecutor {
         }
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output: result_text,
             is_error,
             tool_execution_id: None,

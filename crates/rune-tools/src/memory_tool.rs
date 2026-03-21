@@ -295,7 +295,7 @@ impl MemoryToolExecutor {
         };
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output,
             is_error: false,
             tool_execution_id: None,
@@ -371,7 +371,7 @@ impl MemoryToolExecutor {
         let output = lines[start..end].join("\n");
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output,
             is_error: false,
             tool_execution_id: None,

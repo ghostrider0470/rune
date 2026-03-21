@@ -73,7 +73,70 @@ macro_rules! id_newtype {
 
 id_newtype!(SessionId);
 id_newtype!(TurnId);
-id_newtype!(ToolCallId);
+// ToolCallId is a string wrapper (not UUID) because model providers return
+// opaque string IDs like "call_abc123" that must be echoed back verbatim.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ToolCallId(String);
+
+impl ToolCallId {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7().to_string())
+    }
+
+    #[must_use]
+    pub fn from_model(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// For backward compat with code that expects a UUID.
+    /// Tries to parse as UUID; falls back to a deterministic UUID derived from the string bytes.
+    #[must_use]
+    pub fn into_uuid(self) -> Uuid {
+        Uuid::parse_str(&self.0).unwrap_or_else(|_| {
+            // Deterministic: take first 16 bytes of the string (padded) as a UUID
+            let mut bytes = [0u8; 16];
+            let src = self.0.as_bytes();
+            for (i, b) in src.iter().take(16).enumerate() {
+                bytes[i] = *b;
+            }
+            // Set version 4 and variant bits for a valid UUID
+            bytes[6] = (bytes[6] & 0x0f) | 0x40;
+            bytes[8] = (bytes[8] & 0x3f) | 0x80;
+            Uuid::from_bytes(bytes)
+        })
+    }
+}
+
+impl Default for ToolCallId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ToolCallId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<ToolCallId> for Uuid {
+    fn from(value: ToolCallId) -> Self {
+        value.into_uuid()
+    }
+}
+
+impl From<Uuid> for ToolCallId {
+    fn from(value: Uuid) -> Self {
+        Self(value.to_string())
+    }
+}
 id_newtype!(JobId);
 id_newtype!(ApprovalId);
 id_newtype!(ChannelId);

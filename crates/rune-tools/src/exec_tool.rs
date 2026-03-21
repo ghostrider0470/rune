@@ -205,7 +205,7 @@ impl ExecToolExecutor {
                 };
 
                 Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output,
                     is_error,
                     tool_execution_id: None,
@@ -215,7 +215,7 @@ impl ExecToolExecutor {
                 "failed to spawn command: {e}"
             ))),
             Err(_) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: format!("command timed out after {}s", timeout_secs.as_secs()),
                 is_error: true,
                 tool_execution_id: None,
@@ -261,7 +261,7 @@ impl ExecToolExecutor {
                 audit_store
                     .record_spawn(NewProcessAudit {
                         process_id: process_id.clone(),
-                        tool_call_id: call.tool_call_id.into_uuid(),
+                        tool_call_id: call.tool_call_id.clone().into_uuid(),
                         session_id: extract_uuid_argument(&call.arguments, "__session_id"),
                         turn_id: extract_uuid_argument(&call.arguments, "__turn_id"),
                         tool_name: call.tool_name.clone(),
@@ -289,13 +289,13 @@ impl ExecToolExecutor {
             "workdir": workdir,
             "command": command_str,
             "durable": audit_record.is_some(),
-            "toolCallId": call.tool_call_id.into_uuid(),
+            "toolCallId": call.tool_call_id.clone().into_uuid(),
             "toolExecutionId": audit_record.as_ref().map(|record| record.tool_execution_id),
         })
         .to_string();
 
         Ok(ToolResult {
-            tool_call_id: call.tool_call_id,
+            tool_call_id: call.tool_call_id.clone(),
             output,
             is_error: false,
             tool_execution_id: audit_record.as_ref().map(|record| record.tool_execution_id),
@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(value["durable"], true);
         assert_eq!(
             value["toolCallId"],
-            call.tool_call_id.into_uuid().to_string()
+            call.tool_call_id.clone().into_uuid().to_string()
         );
         assert!(value.get("toolExecutionId").is_some());
         assert_ne!(value["toolExecutionId"], serde_json::Value::Null);
@@ -545,7 +545,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(persisted.tool_call_id, call.tool_call_id.into_uuid());
+        assert_eq!(persisted.tool_call_id, call.tool_call_id.clone().into_uuid());
         assert_eq!(
             value["toolExecutionId"],
             serde_json::Value::String(persisted.tool_execution_id.to_string())

@@ -89,13 +89,13 @@ impl<Q: SessionQuery> SessionToolExecutor<Q> {
 
         match self.query.list_sessions(limit, kinds).await {
             Ok(output) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output,
                 is_error: false,
                 tool_execution_id: None,
             }),
             Err(e) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: e,
                 is_error: true,
                 tool_execution_id: None,
@@ -121,13 +121,13 @@ impl<Q: SessionQuery> SessionToolExecutor<Q> {
 
         match self.query.get_history(session_id, limit).await {
             Ok(output) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output,
                 is_error: false,
                 tool_execution_id: None,
             }),
             Err(e) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: e,
                 is_error: true,
                 tool_execution_id: None,
@@ -147,20 +147,20 @@ impl<Q: SessionQuery> SessionToolExecutor<Q> {
         match self.query.session_status(session_id).await {
             Ok(output) => match validate_session_status_payload(&output) {
                 Ok(()) => Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output,
                     is_error: false,
                     tool_execution_id: None,
                 }),
                 Err(e) => Ok(ToolResult {
-                    tool_call_id: call.tool_call_id,
+                    tool_call_id: call.tool_call_id.clone(),
                     output: e,
                     is_error: true,
                     tool_execution_id: None,
                 }),
             },
             Err(e) => Ok(ToolResult {
-                tool_call_id: call.tool_call_id,
+                tool_call_id: call.tool_call_id.clone(),
                 output: e,
                 is_error: true,
                 tool_execution_id: None,
