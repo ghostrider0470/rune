@@ -4116,6 +4116,150 @@ impl fmt::Display for Ms365SiteListItemsResponse {
     }
 }
 
+// ── Teams ────────────────────────────────────────────────────
+
+/// Summary of a Microsoft Teams team (used in list responses).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TeamSummary {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+}
+
+impl fmt::Display for Ms365TeamSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let desc = self.description.as_deref().unwrap_or("-");
+        write!(f, "  {} — {desc}", self.display_name)
+    }
+}
+
+/// Response from `rune ms365 teams list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TeamsListResponse {
+    pub teams: Vec<Ms365TeamSummary>,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365TeamsListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Teams: {} team(s)", self.total)?;
+        for t in &self.teams {
+            writeln!(f, "{t}")?;
+            writeln!(f, "    id: {}", t.id)?;
+        }
+        Ok(())
+    }
+}
+
+/// Summary of a Teams channel (used in list responses).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TeamChannelSummary {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub membership_type: Option<String>,
+}
+
+impl fmt::Display for Ms365TeamChannelSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = self.membership_type.as_deref().unwrap_or("standard");
+        write!(f, "  {} ({kind})", self.display_name)
+    }
+}
+
+/// Response from `rune ms365 teams channels`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TeamsChannelsResponse {
+    pub channels: Vec<Ms365TeamChannelSummary>,
+    pub team_id: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365TeamsChannelsResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Team {} — {} channel(s)", self.team_id, self.total)?;
+        for ch in &self.channels {
+            writeln!(f, "{ch}")?;
+            writeln!(f, "    id: {}", ch.id)?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 teams channel-read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TeamsChannelReadResponse {
+    pub id: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub membership_type: Option<String>,
+    pub web_url: Option<String>,
+    pub created_at: Option<String>,
+    pub team_id: String,
+}
+
+impl fmt::Display for Ms365TeamsChannelReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "── Channel: {} ──", self.display_name)?;
+        writeln!(f, "  ID:         {}", self.id)?;
+        writeln!(f, "  Team:       {}", self.team_id)?;
+        if let Some(ref desc) = self.description {
+            if !desc.is_empty() {
+                writeln!(f, "  Desc:       {desc}")?;
+            }
+        }
+        if let Some(ref kind) = self.membership_type {
+            writeln!(f, "  Type:       {kind}")?;
+        }
+        if let Some(ref url) = self.web_url {
+            writeln!(f, "  URL:        {url}")?;
+        }
+        if let Some(ref created) = self.created_at {
+            writeln!(f, "  Created:    {created}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Summary of a Teams channel message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TeamMessageSummary {
+    pub id: String,
+    pub sender: Option<String>,
+    pub created_at: Option<String>,
+    pub subject: Option<String>,
+    pub preview: Option<String>,
+}
+
+impl fmt::Display for Ms365TeamMessageSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sender = self.sender.as_deref().unwrap_or("(unknown)");
+        let preview = self.preview.as_deref().unwrap_or("");
+        let ts = self.created_at.as_deref().unwrap_or("-");
+        write!(f, "  [{ts}] {sender}: {preview}")
+    }
+}
+
+/// Response from `rune ms365 teams messages`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TeamsMessagesResponse {
+    pub messages: Vec<Ms365TeamMessageSummary>,
+    pub team_id: String,
+    pub channel_id: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365TeamsMessagesResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Team {} / channel {} — {} message(s)", self.team_id, self.channel_id, self.total)?;
+        for msg in &self.messages {
+            writeln!(f, "{msg}")?;
+            writeln!(f, "    id: {}", msg.id)?;
+        }
+        Ok(())
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
