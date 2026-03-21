@@ -1202,6 +1202,27 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_mail_forward(&id, &to, comment.as_deref()).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365MailAction::Attachments { id } => {
+                    let result = client.ms365_mail_attachments(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365MailAction::AttachmentRead { message_id, id } => {
+                    let result = client.ms365_mail_attachment_read(&message_id, &id).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365MailAction::AttachmentDownload { message_id, id, output } => {
+                    let (filename, bytes) = client.ms365_mail_attachment_download(&message_id, &id).await?;
+                    let dest = output.unwrap_or_else(|| filename.clone());
+                    tokio::fs::write(&dest, &bytes).await
+                        .with_context(|| format!("failed to write attachment to {dest}"))?;
+                    let result = crate::output::Ms365MailAttachmentDownloadResponse {
+                        attachment_id: id,
+                        filename,
+                        size: bytes.len() as u64,
+                        saved_to: dest,
+                    };
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Calendar { action } => match action {
                 Ms365CalendarAction::Upcoming { limit, hours } => {

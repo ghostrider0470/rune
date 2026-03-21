@@ -352,6 +352,35 @@ pub enum Ms365MailAction {
         #[arg(long)]
         comment: Option<String>,
     },
+    /// List attachments on a mail message.
+    Attachments {
+        /// Message ID whose attachments to list.
+        #[arg(long)]
+        id: String,
+    },
+    /// Read metadata of a single mail attachment.
+    #[command(name = "attachment-read")]
+    AttachmentRead {
+        /// Message ID that owns the attachment.
+        #[arg(long)]
+        message_id: String,
+        /// Attachment ID to retrieve.
+        #[arg(long)]
+        id: String,
+    },
+    /// Download attachment content to a local file.
+    #[command(name = "attachment-download")]
+    AttachmentDownload {
+        /// Message ID that owns the attachment.
+        #[arg(long)]
+        message_id: String,
+        /// Attachment ID to download.
+        #[arg(long)]
+        id: String,
+        /// Output file path (defaults to attachment name in current directory).
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 /// Calendar subcommands.

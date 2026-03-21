@@ -2994,6 +2994,31 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_mail_attachments(&self, message_id: &str) -> Result<crate::output::Ms365MailAttachmentsResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_mail_attachment_read(&self, message_id: &str, attachment_id: &str) -> Result<crate::output::Ms365MailAttachmentReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments/{attachment_id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    /// Download raw attachment content. Returns (filename, bytes).
+    pub async fn ms365_mail_attachment_download(&self, message_id: &str, attachment_id: &str) -> Result<(String, Vec<u8>)> {
+        let meta: crate::output::Ms365MailAttachmentReadResponse = {
+            let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments/{attachment_id}")))
+                .send().await.context("gateway")?;
+            if r.status().is_success() { r.json().await.context("json")? } else { bail!("HTTP {}", r.status()); }
+        };
+        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments/{attachment_id}/content")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() {
+            Ok((meta.name, r.bytes().await.context("bytes")?.to_vec()))
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
     pub async fn ms365_files_list(&self, path: &str, limit: u32) -> Result<crate::output::Ms365FilesListResponse> {
         let r = self.http.get(self.url("/ms365/files"))
             .query(&[("path", path.to_string()), ("limit", limit.to_string())])
