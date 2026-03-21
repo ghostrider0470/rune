@@ -1,21 +1,18 @@
 //! Main Agent message dispatch routing.
 //!
-//! Analyzes inbound messages and decides whether to handle them directly
-//! (questions, status queries) or route them to a project orchestrator
-//! (dev work, fixes, implementations). The Main Agent stays responsive
-//! because dev work runs in orchestrator subagent sessions.
+//! Provides a lightweight classifier that the Main Agent uses (via its system
+//! prompt and tool-call logic) to decide whether an inbound message should be
+//! handled directly or routed to a project orchestrator subagent.
+//!
+//! The Main Agent IS a Rune session (e.g. Telegram-connected). Orchestrators
+//! are subagent sessions, each with their own workspace pointing at a project
+//! repo.  The dispatcher provides the *analysis* — the Main Agent acts on it
+//! by calling `SessionEngine` to create/steer subagent sessions.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-
-use rune_core::{SessionKind, SessionStatus};
-use rune_store::models::SessionRow;
-use rune_store::repos::SessionRepo;
-
-use crate::error::RuntimeError;
 
 // ---------------------------------------------------------------------------
 // Orchestrator handle & status
@@ -48,10 +45,14 @@ pub struct OrchestratorSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Registry
+// Registry — in-memory tracker of active orchestrator sessions
 // ---------------------------------------------------------------------------
 
 /// Tracks running orchestrator sessions keyed by project name.
+///
+/// This is purely in-memory runtime state — it does not persist to disk.
+/// The Main Agent populates it on startup by scanning active subagent sessions
+/// whose `channel_ref` matches `orchestrator:{project}`.
 #[derive(Debug, Default)]
 pub struct OrchestratorRegistry {
     entries: HashMap<String, OrchestratorHandle>,
@@ -90,6 +91,26 @@ impl OrchestratorRegistry {
     /// Check whether a project already has an orchestrator.
     pub fn contains(&self, project: &str) -> bool {
         self.entries.contains_key(project)
+    }
+
+    /// Mark an orchestrator as idle. Returns `false` if not found.
+    pub fn mark_idle(&mut self, project: &str) -> bool {
+        if let Some(h) = self.entries.get_mut(project) {
+            h.status = OrchestratorStatus::Idle;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Mark an orchestrator as stopped. Returns `false` if not found.
+    pub fn mark_stopped(&mut self, project: &str) -> bool {
+        if let Some(h) = self.entries.get_mut(project) {
+            h.status = OrchestratorStatus::Stopped;
+            true
+        } else {
+            false
+        }
     }
 
     /// Number of tracked orchestrators.
@@ -139,17 +160,20 @@ const DEV_KEYWORDS: &[&str] = &[
 // Message dispatcher
 // ---------------------------------------------------------------------------
 
-/// Routes inbound messages: handle directly or delegate to an orchestrator.
+/// Analyzes inbound messages and decides how the Main Agent should handle them.
+///
+/// This is a lightweight helper — it does not own sessions or repos. The Main
+/// Agent calls [`MessageDispatcher::analyze`] and then acts on the decision
+/// using `SessionEngine` (to spawn subagent sessions) or `TurnExecutor` (to
+/// inject messages into existing orchestrator sessions).
 pub struct MessageDispatcher {
     orchestrators: OrchestratorRegistry,
-    session_repo: Arc<dyn SessionRepo>,
 }
 
 impl MessageDispatcher {
-    pub fn new(session_repo: Arc<dyn SessionRepo>) -> Self {
+    pub fn new() -> Self {
         Self {
             orchestrators: OrchestratorRegistry::new(),
-            session_repo,
         }
     }
 
@@ -163,25 +187,21 @@ impl MessageDispatcher {
         &mut self.orchestrators
     }
 
-    // -------------------------------------------------------------------
-    // Classification
-    // -------------------------------------------------------------------
-
     /// Classify an inbound message to decide how to handle it.
     ///
-    /// When a `project` hint is provided (e.g. from a channel or prior
-    /// context), the decision can be `RouteToOrchestrator` or
-    /// `SpawnOrchestrator`. Without a project hint, dev-like messages still
+    /// When a `project` hint is provided (e.g. from channel context or an
+    /// explicit project mention), the decision can be `RouteToOrchestrator`
+    /// or `SpawnOrchestrator`. Without a project hint, dev-like messages
     /// return `HandleDirectly` since we cannot determine the target project.
     pub fn analyze(&self, content: &str, project_hint: Option<&str>) -> DispatchDecision {
         let lower = content.to_lowercase();
 
-        // If the message ends with '?' or starts with a direct keyword, handle directly.
+        // Questions or status queries → handle directly.
         if lower.trim_end().ends_with('?') || Self::matches_any(&lower, DIRECT_KEYWORDS) {
             return DispatchDecision::HandleDirectly;
         }
 
-        // Check for dev-work signals.
+        // Dev-work signals → route to project orchestrator.
         if Self::matches_any(&lower, DEV_KEYWORDS) {
             if let Some(project) = project_hint {
                 let project = project.to_string();
@@ -196,125 +216,6 @@ impl MessageDispatcher {
         DispatchDecision::HandleDirectly
     }
 
-    /// Simple keyword matcher — checks if any keyword appears in the text.
-    fn matches_any(text: &str, keywords: &[&str]) -> bool {
-        keywords.iter().any(|kw| text.contains(kw))
-    }
-
-    // -------------------------------------------------------------------
-    // Orchestrator lifecycle
-    // -------------------------------------------------------------------
-
-    /// Spawn a new orchestrator subagent session for the given project.
-    ///
-    /// Creates a `Subagent` session linked to `parent_session_id`, registers
-    /// it in the orchestrator registry, and returns the new session id.
-    pub async fn spawn_orchestrator(
-        &mut self,
-        project: &str,
-        parent_session_id: Uuid,
-        workspace_root: Option<String>,
-    ) -> Result<Uuid, RuntimeError> {
-        use rune_store::models::NewSession;
-
-        let session_id = Uuid::now_v7();
-        let now = Utc::now();
-
-        let new_session = NewSession {
-            id: session_id,
-            kind: serde_json::to_value(SessionKind::Subagent)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string(),
-            status: SessionStatus::Created.as_str().to_string(),
-            workspace_root,
-            channel_ref: Some(format!("orchestrator:{project}")),
-            requester_session_id: Some(parent_session_id),
-            latest_turn_id: None,
-            metadata: serde_json::json!({ "role": "orchestrator", "project": project }),
-            created_at: now,
-            updated_at: now,
-            last_activity_at: now,
-        };
-
-        let row = self.session_repo.create(new_session).await?;
-        let _row = self
-            .session_repo
-            .update_status(row.id, SessionStatus::Ready.as_str(), Utc::now())
-            .await?;
-
-        let handle = OrchestratorHandle {
-            project_name: project.to_string(),
-            session_id,
-            status: OrchestratorStatus::Running,
-            started_at: now,
-        };
-        self.orchestrators.insert(handle);
-
-        tracing::info!(project, %session_id, "spawned orchestrator session");
-        Ok(session_id)
-    }
-
-    /// Route a message to the orchestrator for the given project.
-    ///
-    /// Returns the orchestrator's session row so the caller can inject the
-    /// message via `TurnExecutor`.  Returns an error if the orchestrator is
-    /// not found or has stopped.
-    pub async fn route_to_orchestrator(
-        &self,
-        project: &str,
-    ) -> Result<SessionRow, RuntimeError> {
-        let handle = self
-            .orchestrators
-            .get(project)
-            .ok_or_else(|| RuntimeError::SessionNotFound(format!("orchestrator:{project}")))?;
-
-        if handle.status == OrchestratorStatus::Stopped {
-            return Err(RuntimeError::InvalidSessionState {
-                expected: "running or idle".to_string(),
-                actual: "stopped".to_string(),
-            });
-        }
-
-        let row = self
-            .session_repo
-            .find_by_id(handle.session_id)
-            .await
-            .map_err(|_| {
-                RuntimeError::SessionNotFound(format!(
-                    "orchestrator session {} for project {project}",
-                    handle.session_id
-                ))
-            })?;
-
-        Ok(row)
-    }
-
-    /// Mark an orchestrator as stopped and update the registry.
-    pub fn stop_orchestrator(&mut self, project: &str) -> bool {
-        if let Some(handle) = self.orchestrators.get_mut(project) {
-            handle.status = OrchestratorStatus::Stopped;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Mark an orchestrator as idle.
-    pub fn idle_orchestrator(&mut self, project: &str) -> bool {
-        if let Some(handle) = self.orchestrators.get_mut(project) {
-            handle.status = OrchestratorStatus::Idle;
-            true
-        } else {
-            false
-        }
-    }
-
-    // -------------------------------------------------------------------
-    // Reporting
-    // -------------------------------------------------------------------
-
     /// Return a summary of all tracked orchestrators.
     pub fn status_summary(&self) -> Vec<OrchestratorSummary> {
         self.orchestrators
@@ -326,6 +227,16 @@ impl MessageDispatcher {
                 started_at: h.started_at,
             })
             .collect()
+    }
+
+    fn matches_any(text: &str, keywords: &[&str]) -> bool {
+        keywords.iter().any(|kw| text.contains(kw))
+    }
+}
+
+impl Default for MessageDispatcher {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -375,21 +286,31 @@ mod tests {
         assert!(reg.remove("proj").is_none());
     }
 
-    // -- DispatchDecision (analyze) -----------------------------------------
+    #[test]
+    fn registry_mark_idle_and_stopped() {
+        let mut reg = OrchestratorRegistry::new();
+        reg.insert(OrchestratorHandle {
+            project_name: "p".into(),
+            session_id: Uuid::now_v7(),
+            status: OrchestratorStatus::Running,
+            started_at: Utc::now(),
+        });
 
-    /// Helper: build a dispatcher with no session repo (analysis is sync and
-    /// does not hit the store).
-    fn test_dispatcher() -> MessageDispatcher {
-        // We need a SessionRepo for construction but analyze() is sync.
-        // Use an in-memory store stub.
-        use std::sync::Arc;
-        let repo: Arc<dyn SessionRepo> = Arc::new(StubSessionRepo);
-        MessageDispatcher::new(repo)
+        assert!(reg.mark_idle("p"));
+        assert_eq!(reg.get("p").unwrap().status, OrchestratorStatus::Idle);
+
+        assert!(reg.mark_stopped("p"));
+        assert_eq!(reg.get("p").unwrap().status, OrchestratorStatus::Stopped);
+
+        assert!(!reg.mark_idle("nope"));
+        assert!(!reg.mark_stopped("nope"));
     }
+
+    // -- DispatchDecision (analyze) -----------------------------------------
 
     #[test]
     fn analyze_question_handled_directly() {
-        let d = test_dispatcher();
+        let d = MessageDispatcher::new();
         assert_eq!(
             d.analyze("what is the build status?", Some("acme")),
             DispatchDecision::HandleDirectly,
@@ -402,7 +323,7 @@ mod tests {
 
     #[test]
     fn analyze_trailing_question_mark_handled_directly() {
-        let d = test_dispatcher();
+        let d = MessageDispatcher::new();
         assert_eq!(
             d.analyze("fix the build?", Some("acme")),
             DispatchDecision::HandleDirectly,
@@ -411,7 +332,7 @@ mod tests {
 
     #[test]
     fn analyze_dev_command_spawns_when_no_orchestrator() {
-        let d = test_dispatcher();
+        let d = MessageDispatcher::new();
         assert_eq!(
             d.analyze("fix the login bug", Some("acme")),
             DispatchDecision::SpawnOrchestrator {
@@ -422,7 +343,7 @@ mod tests {
 
     #[test]
     fn analyze_dev_command_routes_when_orchestrator_exists() {
-        let mut d = test_dispatcher();
+        let mut d = MessageDispatcher::new();
         d.orchestrators.insert(OrchestratorHandle {
             project_name: "acme".into(),
             session_id: Uuid::now_v7(),
@@ -440,8 +361,7 @@ mod tests {
 
     #[test]
     fn analyze_dev_command_without_project_hint_falls_back() {
-        let d = test_dispatcher();
-        // No project hint ⇒ we cannot route, so handle directly.
+        let d = MessageDispatcher::new();
         assert_eq!(
             d.analyze("fix the login bug", None),
             DispatchDecision::HandleDirectly,
@@ -450,7 +370,7 @@ mod tests {
 
     #[test]
     fn analyze_greeting_handled_directly() {
-        let d = test_dispatcher();
+        let d = MessageDispatcher::new();
         assert_eq!(
             d.analyze("hello there", Some("acme")),
             DispatchDecision::HandleDirectly,
@@ -459,7 +379,7 @@ mod tests {
 
     #[test]
     fn status_summary_matches_registry() {
-        let mut d = test_dispatcher();
+        let mut d = MessageDispatcher::new();
         let id = Uuid::now_v7();
         d.orchestrators.insert(OrchestratorHandle {
             project_name: "proj".into(),
@@ -473,82 +393,5 @@ mod tests {
         assert_eq!(summaries[0].project_name, "proj");
         assert_eq!(summaries[0].session_id, id);
         assert_eq!(summaries[0].status, OrchestratorStatus::Idle);
-    }
-
-    #[test]
-    fn stop_and_idle_orchestrator() {
-        let mut d = test_dispatcher();
-        d.orchestrators.insert(OrchestratorHandle {
-            project_name: "p".into(),
-            session_id: Uuid::now_v7(),
-            status: OrchestratorStatus::Running,
-            started_at: Utc::now(),
-        });
-
-        assert!(d.idle_orchestrator("p"));
-        assert_eq!(d.orchestrators.get("p").unwrap().status, OrchestratorStatus::Idle);
-
-        assert!(d.stop_orchestrator("p"));
-        assert_eq!(d.orchestrators.get("p").unwrap().status, OrchestratorStatus::Stopped);
-
-        // Unknown project returns false.
-        assert!(!d.stop_orchestrator("nope"));
-    }
-
-    // -- Stub SessionRepo (satisfies the trait, unused in sync tests) -------
-
-    struct StubSessionRepo;
-
-    #[async_trait::async_trait]
-    impl SessionRepo for StubSessionRepo {
-        async fn create(
-            &self,
-            _new: rune_store::models::NewSession,
-        ) -> Result<SessionRow, rune_store::StoreError> {
-            unimplemented!()
-        }
-        async fn find_by_id(&self, _id: Uuid) -> Result<SessionRow, rune_store::StoreError> {
-            unimplemented!()
-        }
-        async fn find_by_channel_ref(
-            &self,
-            _cr: &str,
-        ) -> Result<Option<SessionRow>, rune_store::StoreError> {
-            unimplemented!()
-        }
-        async fn update_status(
-            &self,
-            _id: Uuid,
-            _status: &str,
-            _now: DateTime<Utc>,
-        ) -> Result<SessionRow, rune_store::StoreError> {
-            unimplemented!()
-        }
-        async fn update_metadata(
-            &self,
-            _id: Uuid,
-            _meta: serde_json::Value,
-            _now: DateTime<Utc>,
-        ) -> Result<SessionRow, rune_store::StoreError> {
-            unimplemented!()
-        }
-        async fn update_latest_turn(
-            &self,
-            _id: Uuid,
-            _turn_id: Uuid,
-            _now: DateTime<Utc>,
-        ) -> Result<SessionRow, rune_store::StoreError> {
-            unimplemented!()
-        }
-        async fn delete(&self, _id: Uuid) -> Result<bool, rune_store::StoreError> {
-            unimplemented!()
-        }
-        async fn list(
-            &self,
-            _limit: i64,
-            _offset: i64,
-        ) -> Result<Vec<SessionRow>, rune_store::StoreError> {
-            unimplemented!()
-        }
     }
 }
