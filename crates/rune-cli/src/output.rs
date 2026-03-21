@@ -3433,6 +3433,78 @@ impl fmt::Display for Ms365CalendarUpcomingResponse {
     }
 }
 
+/// Full detail of a single mail message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailReadResponse {
+    pub id: String,
+    pub subject: String,
+    pub from: String,
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+    pub received_at: String,
+    pub body_preview: String,
+    pub has_attachments: bool,
+    pub importance: String,
+    pub is_read: bool,
+}
+
+impl fmt::Display for Ms365MailReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Subject:     {}", self.subject)?;
+        writeln!(f, "From:        {}", self.from)?;
+        writeln!(f, "To:          {}", self.to.join(", "))?;
+        if !self.cc.is_empty() {
+            writeln!(f, "Cc:          {}", self.cc.join(", "))?;
+        }
+        writeln!(f, "Received:    {}", self.received_at)?;
+        writeln!(f, "Importance:  {}", self.importance)?;
+        writeln!(f, "Read:        {}", if self.is_read { "yes" } else { "no" })?;
+        writeln!(f, "Attachments: {}", if self.has_attachments { "yes" } else { "no" })?;
+        writeln!(f)?;
+        writeln!(f, "{}", self.body_preview)?;
+        Ok(())
+    }
+}
+
+/// Full detail of a single calendar event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365CalendarReadResponse {
+    pub id: String,
+    pub subject: String,
+    pub organizer: String,
+    pub attendees: Vec<String>,
+    pub start: String,
+    pub end: String,
+    pub location: Option<String>,
+    pub body_preview: String,
+    pub is_all_day: bool,
+    pub status: String,
+}
+
+impl fmt::Display for Ms365CalendarReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Subject:    {}", self.subject)?;
+        writeln!(f, "Organizer:  {}", self.organizer)?;
+        if !self.attendees.is_empty() {
+            writeln!(f, "Attendees:  {}", self.attendees.join(", "))?;
+        }
+        if self.is_all_day {
+            writeln!(f, "When:       {} (all day)", self.start)?;
+        } else {
+            writeln!(f, "Start:      {}", self.start)?;
+            writeln!(f, "End:        {}", self.end)?;
+        }
+        let loc = self.location.as_deref().unwrap_or("-");
+        writeln!(f, "Location:   {}", loc)?;
+        writeln!(f, "Status:     {}", self.status)?;
+        if !self.body_preview.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "{}", self.body_preview)?;
+        }
+        Ok(())
+    }
+}
+
 // ── Sandbox ───────────────────────────────────────────────────────
 
 /// Response from `rune sandbox list`.
@@ -5959,6 +6031,115 @@ mod tests {
         let out = render(&resp, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("wizard completed"));
+    }
+
+    #[test]
+    fn render_ms365_mail_read_human() {
+        let r = Ms365MailReadResponse {
+            id: "msg-1".into(),
+            subject: "Quarterly review".into(),
+            from: "alice@example.com".into(),
+            to: vec!["bob@example.com".into(), "carol@example.com".into()],
+            cc: vec!["dave@example.com".into()],
+            received_at: "2026-03-21T10:00:00Z".into(),
+            body_preview: "Please find attached the Q1 numbers.".into(),
+            has_attachments: true,
+            importance: "high".into(),
+            is_read: false,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Subject:     Quarterly review"));
+        assert!(out.contains("From:        alice@example.com"));
+        assert!(out.contains("bob@example.com, carol@example.com"));
+        assert!(out.contains("Cc:          dave@example.com"));
+        assert!(out.contains("Importance:  high"));
+        assert!(out.contains("Read:        no"));
+        assert!(out.contains("Attachments: yes"));
+        assert!(out.contains("Q1 numbers"));
+    }
+
+    #[test]
+    fn render_ms365_mail_read_json() {
+        let r = Ms365MailReadResponse {
+            id: "msg-1".into(),
+            subject: "Test".into(),
+            from: "a@b.com".into(),
+            to: vec!["c@d.com".into()],
+            cc: vec![],
+            received_at: "2026-03-21T10:00:00Z".into(),
+            body_preview: "hello".into(),
+            has_attachments: false,
+            importance: "normal".into(),
+            is_read: true,
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["id"], "msg-1");
+        assert_eq!(v["is_read"], true);
+    }
+
+    #[test]
+    fn render_ms365_calendar_read_human() {
+        let r = Ms365CalendarReadResponse {
+            id: "evt-1".into(),
+            subject: "Sprint planning".into(),
+            organizer: "alice@example.com".into(),
+            attendees: vec!["bob@example.com".into()],
+            start: "2026-03-21T14:00:00Z".into(),
+            end: "2026-03-21T15:00:00Z".into(),
+            location: Some("Room 42".into()),
+            body_preview: "Discuss sprint goals.".into(),
+            is_all_day: false,
+            status: "confirmed".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Subject:    Sprint planning"));
+        assert!(out.contains("Organizer:  alice@example.com"));
+        assert!(out.contains("bob@example.com"));
+        assert!(out.contains("Start:"));
+        assert!(out.contains("End:"));
+        assert!(out.contains("Room 42"));
+        assert!(out.contains("Status:     confirmed"));
+        assert!(out.contains("sprint goals"));
+    }
+
+    #[test]
+    fn render_ms365_calendar_read_all_day() {
+        let r = Ms365CalendarReadResponse {
+            id: "evt-2".into(),
+            subject: "Company holiday".into(),
+            organizer: "hr@example.com".into(),
+            attendees: vec![],
+            start: "2026-03-25".into(),
+            end: "2026-03-25".into(),
+            location: None,
+            body_preview: String::new(),
+            is_all_day: true,
+            status: "confirmed".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("(all day)"));
+        assert!(!out.contains("End:"));
+    }
+
+    #[test]
+    fn render_ms365_calendar_read_json() {
+        let r = Ms365CalendarReadResponse {
+            id: "evt-1".into(),
+            subject: "Test".into(),
+            organizer: "a@b.com".into(),
+            attendees: vec![],
+            start: "2026-03-21T14:00:00Z".into(),
+            end: "2026-03-21T15:00:00Z".into(),
+            location: None,
+            body_preview: String::new(),
+            is_all_day: false,
+            status: "tentative".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["id"], "evt-1");
+        assert_eq!(v["status"], "tentative");
     }
 }
 

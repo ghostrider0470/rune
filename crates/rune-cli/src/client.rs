@@ -2940,6 +2940,16 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_mail_read(&self, id: &str) -> Result<crate::output::Ms365MailReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_calendar_read(&self, id: &str) -> Result<crate::output::Ms365CalendarReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/calendar/events/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
