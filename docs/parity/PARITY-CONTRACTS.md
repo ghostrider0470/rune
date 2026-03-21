@@ -207,8 +207,8 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - reminder timing and terminal outcomes remain operator-predictable; reminder `target` routes execution: `"main"` delivers through the stable scheduled main session, `"isolated"` creates a one-shot subagent session under it; unknown targets fall back to `"main"` with a warning
 - delivery modes are executable runtime behavior: `announce` broadcasts a `cron_run_completed` event via the session event channel, `webhook` POSTs the job result payload to the configured URL (30 s timeout, no retry), and `none` suppresses outbound delivery; all three modes remain durable and inspectable as job metadata
 - due jobs and reminders are claimed atomically before execution via `claimed_at`; stale claims older than the configured lease duration (default 300 s) expire and become reclaimable for crash recovery; concurrent supervisor ticks cannot duplicate execution
-- heartbeat no-op and duplicate-suppression semantics are preserved; broader quiet-window policy is still follow-on work
-- repeated heartbeats do not spam without new cause
+- heartbeat no-op and fingerprint-based duplicate-suppression semantics are preserved; persisted suppression state survives restart well enough to avoid replaying the same notification solely because the process restarted; broader quiet-window policy is still follow-on work
+- repeated heartbeats do not spam without new cause within the shipped no-op/duplicate-suppression contract
 - `sessionTarget=isolated` cron jobs remain auditable as isolated descendant runs; main-target cron jobs, reminders, and heartbeats reuse scheduled session contexts
 - wake requests preserve explicit `now` vs `next-heartbeat` mode selection on the operator/event surface; durable wake execution is not yet a shipped contract
 
@@ -254,7 +254,7 @@ Do not mark a subsystem parity-complete without black-box evidence.
 - reminder due/delivered/missed/cancelled and target-routing tests
 - reminder target routing tests: `"main"` vs `"isolated"` session creation
 - wake mode normalization/event-payload tests
-- heartbeat no-op, notify, and duplicate-suppression persistence tests
+- heartbeat instruction-loading, no-op, notify, and duplicate-suppression persistence tests
 
 ---
 

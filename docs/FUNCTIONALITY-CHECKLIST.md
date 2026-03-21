@@ -270,7 +270,8 @@ Implementation note (2026-03-14): executable parity progress now includes concre
 - [x] enable/disable semantics
 - [x] no-op heartbeat suppression (`HEARTBEAT_OK` behavior)
   - 2026-03-14 watchdog verification: `rune-runtime` already enforces `HEARTBEAT_OK` suppression in the live heartbeat runner (`HeartbeatRunner::should_suppress`) and carries suppression counters/state persistence tests, so this item was doc drift rather than a remaining gap.
-- [ ] duplicate notification suppression
+- [x] duplicate notification suppression
+  - 2026-03-21 docs reconciliation: `rune-runtime` already persists normalized heartbeat duplicate-suppression state and surfaces it through the shipped heartbeat runner/status path; remaining work is broader quiet-window policy and hook/webhook breadth, not duplicate-suppression absence.
 - [ ] hook/webhook lifecycle where shipped
 
 ---

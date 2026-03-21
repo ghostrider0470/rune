@@ -234,7 +234,7 @@ Reproduce proactive automation behavior.
 - reminder due/delivered/missed/cancelled plus target-routing flows
 - reminder target routing tests: `"main"` vs `"isolated"` session creation
 - durable claim/lease tests: atomic claim, stale-claim reclaim, release-and-reclaim, concurrent duplicate suppression
-- wake mode normalization and queued-event payload tests
+- wake mode normalization (`next-heartbeat` / `next_heartbeat` aliasing and defaulting) plus queued-event payload tests
 - heartbeat instruction loading, no-op suppression, and duplicate-notification suppression persistence behavior
 
 ### Key risk retired

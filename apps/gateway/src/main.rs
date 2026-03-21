@@ -548,6 +548,7 @@ async fn build_services(
         mcp,
         approval,
         tool_approval_repo: tool_approval_repo.clone(),
+        global_approval_mode: config.approval.mode.as_str().to_string(),
     });
 
     // Resolve system prompt: agent config → hardcoded default
@@ -1126,6 +1127,8 @@ struct AppToolExecutor {
     mcp: Option<Arc<McpToolExecutor>>,
     approval: Arc<PolicyBasedApproval>,
     tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
+    /// Global approval mode from config — "yolo" skips all approvals.
+    global_approval_mode: String,
 }
 
 #[derive(Clone)]
@@ -1273,11 +1276,15 @@ impl ToolExecutor for AppToolExecutor {
             }
             "exec" | "execute_command" => {
                 let approval_request = ApprovalRequest::from_call(&call);
-                let ask_mode = call
-                    .arguments
-                    .get("ask")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("on-miss");
+                // Global yolo mode overrides per-tool approval
+                let ask_mode = if self.global_approval_mode == "yolo" {
+                    "off"
+                } else {
+                    call.arguments
+                        .get("ask")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("on-miss")
+                };
                 let security_mode = call
                     .arguments
                     .get("security")

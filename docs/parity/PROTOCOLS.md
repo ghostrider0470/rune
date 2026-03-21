@@ -1005,6 +1005,8 @@ Current shipped delivery semantics:
 Wake semantics currently preserve:
 
 - accepted modes normalize to `now` or `next-heartbeat`
+- omitted mode defaults to `next-heartbeat`
+- both `next-heartbeat` and `next_heartbeat` are accepted on the operator surface and normalize to the same queued wake mode
 - optional `context_messages` counts are surfaced on the queued wake event payload
 - the current shipped contract is queueing/inspection of wake events, not guaranteed downstream wake consumption
 
@@ -1021,7 +1023,7 @@ Heartbeat behavior must preserve the existing intent:
 Heartbeat invariants:
 
 - heartbeat runs are isolated and auditable
-- repeated heartbeats should not duplicate notifications without new cause
+- repeated heartbeats should not duplicate notifications without new cause within the shipped no-op and normalized-fingerprint duplicate-suppression contract
 - quiet/no-op outcomes should still be representable in run history or persisted heartbeat state
 - anti-spam state must survive restart well enough to avoid replaying the same notification solely because the process restarted
 - broader quiet-window policy is not yet part of the shipped runtime contract
