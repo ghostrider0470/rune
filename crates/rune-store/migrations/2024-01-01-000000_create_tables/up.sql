@@ -69,7 +69,9 @@ CREATE TABLE approvals (
     decided_by        TEXT,
     decided_at        TIMESTAMPTZ,
     presented_payload JSONB NOT NULL,
-    created_at        TIMESTAMPTZ NOT NULL
+    created_at        TIMESTAMPTZ NOT NULL,
+    handle_ref        TEXT,
+    host_ref          TEXT
 );
 
 CREATE INDEX idx_approvals_subject ON approvals (subject_type, subject_id);
