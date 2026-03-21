@@ -1305,7 +1305,7 @@ impl ProcessHandleRepo for SqliteProcessHandleRepo {
                 let mut rows = stmt.query_map([&tc_s], row_to_process_handle)?;
                 match rows.next() {
                     Some(Ok(row)) => Ok(Some(row)),
-                    Some(Err(e)) => Err(e.into()),
+                    Some(Err(e)) => Err(e),
                     None => Ok(None),
                 }
             })
