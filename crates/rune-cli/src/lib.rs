@@ -29,7 +29,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, Ms365Action, Ms365CalendarAction, Ms365MailAction, ProcessAction,
+    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365MailAction, ProcessAction,
     RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
@@ -1168,6 +1168,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         },
         Command::Ms365 { action } => match action {
+            Ms365Action::Auth { action } => match action {
+                Ms365AuthAction::Status => {
+                    let result = client.ms365_auth_status().await?;
+                    println!("{}", render(&result, format));
+                }
+            },
             Ms365Action::Mail { action } => match action {
                 Ms365MailAction::Unread { limit, folder } => {
                     let result = client.ms365_mail_unread(limit, &folder).await?;
@@ -1175,6 +1181,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 Ms365MailAction::Read { id } => {
                     let result = client.ms365_mail_read(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365MailAction::Folders => {
+                    let result = client.ms365_mail_folders().await?;
                     println!("{}", render(&result, format));
                 }
             },

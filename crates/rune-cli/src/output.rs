@@ -3505,6 +3505,77 @@ impl fmt::Display for Ms365CalendarReadResponse {
     }
 }
 
+/// Auth/config inspection for Microsoft 365.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365AuthStatusResponse {
+    pub authenticated: bool,
+    pub tenant_id: Option<String>,
+    pub client_id: Option<String>,
+    pub user_principal: Option<String>,
+    pub scopes: Vec<String>,
+    pub token_expires_at: Option<String>,
+    pub token_valid: bool,
+}
+
+impl fmt::Display for Ms365AuthStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "MS365 Auth Status")?;
+        writeln!(f, "  Authenticated: {}", if self.authenticated { "yes" } else { "no" })?;
+        if let Some(t) = &self.tenant_id {
+            writeln!(f, "  Tenant ID:     {t}")?;
+        }
+        if let Some(c) = &self.client_id {
+            writeln!(f, "  Client ID:     {c}")?;
+        }
+        if let Some(u) = &self.user_principal {
+            writeln!(f, "  User:          {u}")?;
+        }
+        if !self.scopes.is_empty() {
+            writeln!(f, "  Scopes:        {}", self.scopes.join(", "))?;
+        }
+        writeln!(f, "  Token valid:   {}", if self.token_valid { "yes" } else { "no" })?;
+        if let Some(exp) = &self.token_expires_at {
+            writeln!(f, "  Token expires: {exp}")?;
+        }
+        Ok(())
+    }
+}
+
+/// A single mail folder summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailFolder {
+    pub id: String,
+    pub display_name: String,
+    pub total_count: u32,
+    pub unread_count: u32,
+}
+
+impl fmt::Display for Ms365MailFolder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "  {} ({} total, {} unread)", self.display_name, self.total_count, self.unread_count)
+    }
+}
+
+/// Response from `rune ms365 mail folders`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailFoldersResponse {
+    pub folders: Vec<Ms365MailFolder>,
+}
+
+impl fmt::Display for Ms365MailFoldersResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Mail folders: {} folder(s)", self.folders.len())?;
+        if self.folders.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for folder in &self.folders {
+                writeln!(f, "{folder}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 // ── Sandbox ───────────────────────────────────────────────────────
 
 /// Response from `rune sandbox list`.
@@ -6140,6 +6211,110 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["id"], "evt-1");
         assert_eq!(v["status"], "tentative");
+    }
+
+    #[test]
+    fn render_ms365_auth_status_human() {
+        let r = Ms365AuthStatusResponse {
+            authenticated: true,
+            tenant_id: Some("tenant-abc".into()),
+            client_id: Some("client-xyz".into()),
+            user_principal: Some("user@example.com".into()),
+            scopes: vec!["Mail.Read".into(), "Calendars.Read".into()],
+            token_expires_at: Some("2026-03-21T12:00:00Z".into()),
+            token_valid: true,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Authenticated: yes"));
+        assert!(out.contains("Tenant ID:     tenant-abc"));
+        assert!(out.contains("Client ID:     client-xyz"));
+        assert!(out.contains("User:          user@example.com"));
+        assert!(out.contains("Mail.Read, Calendars.Read"));
+        assert!(out.contains("Token valid:   yes"));
+        assert!(out.contains("Token expires: 2026-03-21T12:00:00Z"));
+    }
+
+    #[test]
+    fn render_ms365_auth_status_unauthenticated() {
+        let r = Ms365AuthStatusResponse {
+            authenticated: false,
+            tenant_id: None,
+            client_id: None,
+            user_principal: None,
+            scopes: vec![],
+            token_expires_at: None,
+            token_valid: false,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Authenticated: no"));
+        assert!(out.contains("Token valid:   no"));
+        assert!(!out.contains("Tenant ID:"));
+    }
+
+    #[test]
+    fn render_ms365_auth_status_json() {
+        let r = Ms365AuthStatusResponse {
+            authenticated: true,
+            tenant_id: Some("t1".into()),
+            client_id: Some("c1".into()),
+            user_principal: Some("u@e.com".into()),
+            scopes: vec!["Mail.Read".into()],
+            token_expires_at: Some("2026-03-21T12:00:00Z".into()),
+            token_valid: true,
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["authenticated"], true);
+        assert_eq!(v["tenant_id"], "t1");
+        assert_eq!(v["scopes"][0], "Mail.Read");
+    }
+
+    #[test]
+    fn render_ms365_mail_folders_human() {
+        let r = Ms365MailFoldersResponse {
+            folders: vec![
+                Ms365MailFolder {
+                    id: "f1".into(),
+                    display_name: "Inbox".into(),
+                    total_count: 120,
+                    unread_count: 5,
+                },
+                Ms365MailFolder {
+                    id: "f2".into(),
+                    display_name: "Sent Items".into(),
+                    total_count: 80,
+                    unread_count: 0,
+                },
+            ],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Mail folders: 2 folder(s)"));
+        assert!(out.contains("Inbox (120 total, 5 unread)"));
+        assert!(out.contains("Sent Items (80 total, 0 unread)"));
+    }
+
+    #[test]
+    fn render_ms365_mail_folders_empty() {
+        let r = Ms365MailFoldersResponse { folders: vec![] };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("0 folder(s)"));
+        assert!(out.contains("(none)"));
+    }
+
+    #[test]
+    fn render_ms365_mail_folders_json() {
+        let r = Ms365MailFoldersResponse {
+            folders: vec![Ms365MailFolder {
+                id: "f1".into(),
+                display_name: "Inbox".into(),
+                total_count: 10,
+                unread_count: 2,
+            }],
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["folders"][0]["display_name"], "Inbox");
+        assert_eq!(v["folders"][0]["unread_count"], 2);
     }
 }
 
