@@ -2203,6 +2203,30 @@ pub async fn get_process_log(
         .into_response())
 }
 
+/// `POST /processes/{id}/kill` — kill a running background process.
+pub async fn kill_process(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    state
+        .process_manager
+        .kill(&id)
+        .await
+        .map_err(|e| match e {
+            rune_tools::ToolError::ExecutionFailed(message)
+                if message.contains("process not found") =>
+            {
+                GatewayError::BadRequest(message)
+            }
+            other => GatewayError::Internal(other.to_string()),
+        })?;
+
+    Ok(Json(ActionResponse {
+        success: true,
+        message: format!("process {id} killed"),
+    }))
+}
+
 // ── Telegram Webhook ────────────────────────────────────────────────
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────────

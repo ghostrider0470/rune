@@ -102,6 +102,21 @@ impl RpcDispatcher {
             "skills.disable" => self.skills_disable(params).await,
             "health" => self.health().await,
             "status" => self.full_status().await,
+            // ── Parity WS-RPC methods (#39) ─────────────────────────────
+            "turns.list" => self.turns_list(params).await,
+            "turns.get" => self.turns_get(params).await,
+            "tools.list" => self.tools_list().await,
+            "approvals.list" => self.approvals_list().await,
+            "approvals.decide" => self.approvals_decide(params).await,
+            "processes.list" => self.processes_list().await,
+            "processes.get" => self.processes_get(params).await,
+            "processes.kill" => self.processes_kill(params).await,
+            "channels.list" => self.channels_list().await,
+            "channels.status" => self.channels_status().await,
+            "memory.status" => self.memory_status().await,
+            "memory.search" => self.memory_search(params).await,
+            "logs.query" => self.logs_query(params).await,
+            "doctor.run" => self.doctor_run().await,
             other => {
                 warn!(method = %other, "unknown WS RPC method");
                 Err(RpcError::method_not_found(other))
@@ -783,6 +798,299 @@ impl RpcDispatcher {
             "session_count": sessions.len(),
             "ws_subscribers": self.state.event_tx.receiver_count(),
             "ws_connections": active_ws_connections(),
+        }))
+    }
+
+    // ── Turns ────────────────────────────────────────────────────────────
+
+    /// List turns for a session. Params: `session_id` (required), `limit`, `offset`.
+    async fn turns_list(&self, params: Value) -> Result<Value, RpcError> {
+        let session_id = require_uuid(&params, "session_id")?;
+        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(100).min(500) as usize;
+        let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        let rows = self.state.turn_repo
+            .list_by_session(session_id)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        let items: Vec<Value> = rows.into_iter().skip(offset).take(limit).map(|row| {
+            json!({
+                "id": row.id,
+                "session_id": row.session_id,
+                "trigger_kind": row.trigger_kind,
+                "status": row.status,
+                "model_ref": row.model_ref,
+                "usage_prompt_tokens": row.usage_prompt_tokens,
+                "usage_completion_tokens": row.usage_completion_tokens,
+                "started_at": row.started_at.to_rfc3339(),
+                "ended_at": row.ended_at.map(|t| t.to_rfc3339()),
+            })
+        }).collect();
+
+        Ok(json!(items))
+    }
+
+    /// Get a single turn. Params: `turn_id` (required).
+    async fn turns_get(&self, params: Value) -> Result<Value, RpcError> {
+        let turn_id = require_uuid(&params, "turn_id")?;
+
+        let row = self.state.turn_repo
+            .find_by_id(turn_id)
+            .await
+            .map_err(|e| RpcError::not_found(e.to_string()))?;
+
+        Ok(json!({
+            "id": row.id,
+            "session_id": row.session_id,
+            "trigger_kind": row.trigger_kind,
+            "status": row.status,
+            "model_ref": row.model_ref,
+            "usage_prompt_tokens": row.usage_prompt_tokens,
+            "usage_completion_tokens": row.usage_completion_tokens,
+            "started_at": row.started_at.to_rfc3339(),
+            "ended_at": row.ended_at.map(|t| t.to_rfc3339()),
+        }))
+    }
+
+    // ── Tools ───────────────────────────────────────────────────────────
+
+    /// List registered tools/skills.
+    async fn tools_list(&self) -> Result<Value, RpcError> {
+        let skills = self.state.skill_registry.list().await;
+        let items: Vec<Value> = skills.into_iter().map(|s| {
+            json!({
+                "name": s.name,
+                "description": s.description,
+                "enabled": s.enabled,
+            })
+        }).collect();
+        Ok(json!(items))
+    }
+
+    // ── Approvals ───────────────────────────────────────────────────────
+
+    /// List pending approval requests.
+    async fn approvals_list(&self) -> Result<Value, RpcError> {
+        let approvals = self.state.approval_repo
+            .list(true)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        let items: Vec<Value> = approvals.into_iter().map(|a| {
+            json!({
+                "id": a.id,
+                "subject_type": a.subject_type,
+                "subject_id": a.subject_id,
+                "reason": a.reason,
+                "decision": a.decision,
+                "decided_by": a.decided_by,
+                "presented_payload": a.presented_payload,
+                "created_at": a.created_at.to_rfc3339(),
+                "decided_at": a.decided_at.map(|t| t.to_rfc3339()),
+            })
+        }).collect();
+
+        Ok(json!(items))
+    }
+
+    /// Decide an approval. Params: `id`, `decision`, optional `decided_by`.
+    async fn approvals_decide(&self, params: Value) -> Result<Value, RpcError> {
+        let id_str = require_string(&params, "id")?;
+        let approval_id = Uuid::parse_str(id_str)
+            .map_err(|_| RpcError::bad_request(format!("invalid approval id: {id_str}")))?;
+        let decision = require_string(&params, "decision")?;
+        let normalised = decision.replace('-', "_");
+
+        let valid = ["allow_once", "allow_always", "deny"];
+        if !valid.contains(&normalised.as_str()) {
+            return Err(RpcError::bad_request(format!(
+                "invalid decision '{decision}'; expected: allow-once, allow-always, deny"
+            )));
+        }
+
+        let decided_by = params.get("decided_by")
+            .and_then(|v| v.as_str())
+            .unwrap_or("operator");
+
+        let decided = self.state.approval_repo
+            .decide(approval_id, &normalised, decided_by, chrono::Utc::now())
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        Ok(json!({
+            "id": decided.id,
+            "decision": decided.decision,
+            "decided_by": decided.decided_by,
+            "decided_at": decided.decided_at.map(|t| t.to_rfc3339()),
+        }))
+    }
+
+    // ── Processes ────────────────────────────────────────────────────────
+
+    /// List background processes.
+    async fn processes_list(&self) -> Result<Value, RpcError> {
+        let processes = self.state.process_manager.list().await;
+        let items: Vec<Value> = processes.into_iter().map(|p| {
+            json!({
+                "process_id": p.process_id,
+                "running": p.running,
+                "exit_code": p.exit_code,
+                "live": p.live,
+                "durable_status": p.durable_status,
+                "note": p.note,
+            })
+        }).collect();
+        Ok(json!(items))
+    }
+
+    /// Get a single process. Params: `id` (required).
+    async fn processes_get(&self, params: Value) -> Result<Value, RpcError> {
+        let id = require_string(&params, "id")?;
+        let p = self.state.process_manager.poll(id).await
+            .map_err(|e| RpcError::not_found(e.to_string()))?;
+
+        Ok(json!({
+            "process_id": p.process_id,
+            "running": p.running,
+            "exit_code": p.exit_code,
+            "live": p.live,
+            "durable_status": p.durable_status,
+            "note": p.note,
+        }))
+    }
+
+    /// Kill a background process. Params: `id` (required).
+    async fn processes_kill(&self, params: Value) -> Result<Value, RpcError> {
+        let id = require_string(&params, "id")?;
+        self.state.process_manager.kill(id).await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        Ok(json!({
+            "process_id": id,
+            "killed": true,
+        }))
+    }
+
+    // ── Channels ────────────────────────────────────────────────────────
+
+    /// List configured channel adapters.
+    async fn channels_list(&self) -> Result<Value, RpcError> {
+        let config = self.state.config.read().await;
+        let mut channels = config.channels.enabled.clone();
+        if config.channels.telegram_token.is_some() && !channels.iter().any(|c| c == "telegram") {
+            channels.push("telegram".to_string());
+        }
+        channels.sort();
+
+        let items: Vec<Value> = channels.into_iter().map(|name| {
+            json!({ "name": name, "kind": name, "enabled": true })
+        }).collect();
+        Ok(json!(items))
+    }
+
+    /// Channel subsystem status.
+    async fn channels_status(&self) -> Result<Value, RpcError> {
+        let config = self.state.config.read().await;
+        let mut channels = config.channels.enabled.clone();
+        if config.channels.telegram_token.is_some() && !channels.iter().any(|c| c == "telegram") {
+            channels.push("telegram".to_string());
+        }
+        channels.sort();
+        drop(config);
+
+        let rows = self.state.session_repo
+            .list(i64::MAX / 4, 0)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+        let active_sessions = rows.iter().filter(|r| r.channel_ref.is_some()).count();
+
+        Ok(json!({
+            "configured": channels,
+            "active_sessions": active_sessions,
+        }))
+    }
+
+    // ── Memory ──────────────────────────────────────────────────────────
+
+    /// Memory subsystem status.
+    async fn memory_status(&self) -> Result<Value, RpcError> {
+        let config = self.state.config.read().await;
+        Ok(json!({
+            "memory_mode": self.state.capabilities.memory_mode,
+            "memory_dir": config.paths.memory_dir.display().to_string(),
+            "pgvector": self.state.capabilities.pgvector,
+        }))
+    }
+
+    /// Search memory (stub).
+    async fn memory_search(&self, params: Value) -> Result<Value, RpcError> {
+        let q = params.get("q").and_then(|v| v.as_str()).unwrap_or("");
+        if q.is_empty() {
+            return Err(RpcError::bad_request("missing required param: q"));
+        }
+
+        Ok(json!({
+            "query": q,
+            "results": [],
+            "message": "memory search not yet wired to gateway-level index",
+        }))
+    }
+
+    // ── Logs ────────────────────────────────────────────────────────────
+
+    /// Query structured logs (stub).
+    async fn logs_query(&self, _params: Value) -> Result<Value, RpcError> {
+        let config = self.state.config.read().await;
+        let logs_dir = config.paths.logs_dir.display().to_string();
+
+        Ok(json!({
+            "entries": [],
+            "message": format!("structured log query not yet aggregated; logs directory: {logs_dir}"),
+        }))
+    }
+
+    // ── Doctor ──────────────────────────────────────────────────────────
+
+    /// Run doctor checks.
+    async fn doctor_run(&self) -> Result<Value, RpcError> {
+        let config = self.state.config.read().await;
+        let provider_ok = !config.models.providers.is_empty();
+        let auth_ok = config.gateway.auth_token.is_some();
+        drop(config);
+
+        let session_ok = self.state.session_repo.list(1, 0).await.is_ok();
+
+        let checks = vec![
+            json!({
+                "name": "model_providers",
+                "status": if provider_ok { "pass" } else { "warn" },
+                "message": if provider_ok { "provider(s) configured" } else { "no model providers configured" },
+            }),
+            json!({
+                "name": "auth",
+                "status": if auth_ok { "pass" } else { "warn" },
+                "message": if auth_ok { "bearer auth enabled" } else { "no auth token configured" },
+            }),
+            json!({
+                "name": "session_store",
+                "status": if session_ok { "pass" } else { "fail" },
+                "message": if session_ok { "session store reachable" } else { "session store error" },
+            }),
+        ];
+
+        let overall = if checks.iter().any(|c| c["status"] == "fail") {
+            "fail"
+        } else if checks.iter().any(|c| c["status"] == "warn") {
+            "warn"
+        } else {
+            "pass"
+        };
+
+        Ok(json!({
+            "overall": overall,
+            "checks": checks,
+            "run_at": chrono::Utc::now().to_rfc3339(),
         }))
     }
 

@@ -318,6 +318,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/processes", get(routes::list_processes))
         .route("/processes/{id}", get(routes::get_process))
         .route("/processes/{id}/log", get(routes::get_process_log))
+        .route("/processes/{id}/kill", post(routes::kill_process))
         .route(
             "/approvals/policies/{tool}",
             get(routes::get_approval_policy)
