@@ -35,7 +35,8 @@ use rune_models::{
     RoutedModelProvider, Usage,
 };
 use rune_runtime::{
-    ContextAssembler, LaneQueue, NoOpCompaction, SessionEngine, TurnExecutor,
+    ContextAssembler, LaneQueue, NoOpCompaction, SessionEngine, TelegramFileDownloader,
+    TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
@@ -68,6 +69,25 @@ const OPENAI_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
 const OLLAMA_HOST_ENV: &str = "OLLAMA_HOST";
 const MEMORY_INDEX_POLL_INTERVAL_SECS_ENV: &str = "RUNE_MEMORY_INDEX_POLL_INTERVAL_SECS";
 const DEFAULT_MEMORY_INDEX_POLL_INTERVAL_SECS: u64 = 5;
+
+/// Bridges the runtime-generic [`TelegramFileDownloader`] trait to the concrete
+/// [`TelegramAdapter`] so the session loop can download voice/audio files
+/// without depending on channel internals.
+struct TelegramFileDownloaderImpl {
+    adapter: Arc<TelegramAdapter>,
+}
+
+#[async_trait]
+impl TelegramFileDownloader for TelegramFileDownloaderImpl {
+    async fn download(&self, file_id: &str) -> Result<Vec<u8>, String> {
+        let (bytes, _path) = self
+            .adapter
+            .download_file(file_id)
+            .await
+            .map_err(|e| format!("{e}"))?;
+        Ok(bytes)
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -587,19 +607,46 @@ async fn build_services(
 
     let turn_executor = Arc::new(turn_executor);
 
+    // Build STT engine (shared across session loops).
+    let stt_engine = {
+        let stt_cfg = config.media.stt.clone();
+        if stt_cfg.enabled {
+            let api_key = stt_cfg.api_key.clone().unwrap_or_default();
+            let provider = Box::new(rune_stt::openai::OpenAiStt::new(api_key));
+            let engine = rune_stt::SttEngine::new(provider, stt_cfg);
+            info!("STT engine enabled");
+            Some(Arc::new(tokio::sync::RwLock::new(engine)))
+        } else {
+            info!("STT engine disabled");
+            None
+        }
+    };
+
     // Build session loop if Telegram channel is configured.
     let session_loop = if let Some(ref tg) = config.channels.telegram_token {
         if !tg.is_empty() {
             info!(token_len = tg.len(), "configuring Telegram channel adapter");
-            let adapter = TelegramAdapter::new(tg);
-            Some(SessionLoop::new(
+            let adapter = Arc::new(TelegramAdapter::new(tg));
+            let downloader: Arc<dyn TelegramFileDownloader> =
+                Arc::new(TelegramFileDownloaderImpl {
+                    adapter: adapter.clone(),
+                });
+
+            let mut loop_builder = SessionLoop::new(
                 session_engine.clone(),
                 turn_executor.clone(),
                 session_repo.clone(),
-                Box::new(adapter),
+                Box::new(TelegramAdapter::new(tg)),
                 config.agents.clone(),
                 config.models.clone(),
-            ))
+            )
+            .with_file_downloader(downloader);
+
+            if let Some(ref stt) = stt_engine {
+                loop_builder = loop_builder.with_stt(stt.clone());
+            }
+
+            Some(loop_builder)
         } else {
             None
         }

@@ -18,6 +18,7 @@ rune-gateway = { path = "../../crates/rune-gateway" }
 rune-models = { path = "../../crates/rune-models" }
 rune-mcp = { path = "../../crates/rune-mcp" }
 rune-runtime = { path = "../../crates/rune-runtime" }
+rune-stt = { path = "../../crates/rune-stt" }
 rune-store = { path = "../../crates/rune-store" }
 rune-tools = { path = "../../crates/rune-tools" }
 

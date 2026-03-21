@@ -5,13 +5,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use async_trait::async_trait;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
 use rune_config::{AgentsConfig, ModelsConfig};
 use rune_core::SessionKind;
+use rune_stt::SttEngine;
 use rune_store::models::SessionRow;
 use rune_store::repos::SessionRepo;
 
@@ -19,6 +21,16 @@ use crate::engine::SessionEngine;
 use crate::error::RuntimeError;
 use crate::executor::TurnExecutor;
 use crate::session_metadata::{selected_model, set_selected_model};
+
+/// Trait for downloading files from Telegram (or any provider using `telegram-file:` URLs).
+///
+/// Implemented outside the runtime crate so the session loop stays generic.
+#[async_trait]
+pub trait TelegramFileDownloader: Send + Sync {
+    /// Download a file by its provider-specific file ID.
+    /// Returns the raw bytes on success.
+    async fn download(&self, file_id: &str) -> Result<Vec<u8>, String>;
+}
 
 const HELP_TEXT: &str = "\
 Rune commands:
@@ -40,7 +52,15 @@ pub struct SessionLoop {
     sessions: Mutex<SessionIndex>,
     agents: AgentsConfig,
     models: ModelsConfig,
+    stt_engine: Option<Arc<RwLock<SttEngine>>>,
+    file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
 }
+
+/// MIME types considered audio for transcription purposes.
+const AUDIO_MIME_TYPES: &[&str] = &["audio/ogg", "audio/mpeg", "audio/mp4"];
+
+/// MIME type prefixes considered images.
+const IMAGE_MIME_PREFIX: &str = "image/";
 
 impl SessionLoop {
     pub fn new(
@@ -59,7 +79,21 @@ impl SessionLoop {
             sessions: Mutex::new(HashMap::new()),
             agents,
             models,
+            stt_engine: None,
+            file_downloader: None,
         }
+    }
+
+    /// Attach an STT engine for voice/audio transcription.
+    pub fn with_stt(mut self, stt_engine: Arc<RwLock<SttEngine>>) -> Self {
+        self.stt_engine = Some(stt_engine);
+        self
+    }
+
+    /// Attach a file downloader for resolving `telegram-file:` URLs.
+    pub fn with_file_downloader(mut self, downloader: Arc<dyn TelegramFileDownloader>) -> Self {
+        self.file_downloader = Some(downloader);
+        self
     }
 
     /// Run the session loop forever, processing inbound events.
@@ -97,7 +131,10 @@ impl SessionLoop {
 
                 let session = self.find_or_create_session(&routing_key).await?;
 
-                info!(session_id = %session.id, len = msg.content.len(), "executing turn");
+                // Enrich content by downloading/transcribing media attachments.
+                let enriched_content = self.enrich_media_content(&msg).await;
+
+                info!(session_id = %session.id, len = enriched_content.len(), "executing turn");
 
                 // Send typing indicator before executing the turn
                 {
@@ -112,7 +149,7 @@ impl SessionLoop {
 
                 match self
                     .turn_executor
-                    .execute(session.id, &msg.content, None)
+                    .execute(session.id, &enriched_content, None)
                     .await
                 {
                     Ok((turn, usage)) => {
@@ -440,6 +477,80 @@ impl SessionLoop {
         }
 
         models
+    }
+
+    /// Inspect message attachments for `telegram-file:` URLs and enrich the
+    /// message content with transcriptions (audio) or placeholders (images).
+    async fn enrich_media_content(&self, msg: &rune_channels::ChannelMessage) -> String {
+        let mut extra_parts: Vec<String> = Vec::new();
+
+        for attachment in &msg.attachments {
+            let url = match attachment.url.as_deref() {
+                Some(u) if u.starts_with("telegram-file:") => u,
+                _ => continue,
+            };
+            let file_id = &url["telegram-file:".len()..];
+            let mime = attachment.mime_type.as_deref().unwrap_or("");
+
+            if AUDIO_MIME_TYPES.contains(&mime) {
+                // Attempt download + transcription
+                info!(file_id = %file_id, mime = %mime, "downloading audio attachment for transcription");
+                match self.download_and_transcribe(file_id, mime).await {
+                    Ok(text) => {
+                        info!(file_id = %file_id, chars = text.len(), "transcription succeeded");
+                        extra_parts.push(format!("[Voice transcription]: {text}"));
+                    }
+                    Err(e) => {
+                        warn!(file_id = %file_id, error = %e, "transcription failed");
+                        extra_parts.push(format!("[Voice message — transcription failed: {e}]"));
+                    }
+                }
+            } else if mime.starts_with(IMAGE_MIME_PREFIX) {
+                info!(file_id = %file_id, mime = %mime, "image attachment detected");
+                extra_parts.push("[Image attached]".to_string());
+            }
+        }
+
+        if extra_parts.is_empty() {
+            return msg.content.clone();
+        }
+
+        let enrichment = extra_parts.join("\n");
+
+        if msg.content.is_empty() {
+            // Voice-only message: transcription IS the content (strip the prefix
+            // when there is exactly one audio part so the turn sees clean text).
+            if extra_parts.len() == 1 && extra_parts[0].starts_with("[Voice transcription]: ") {
+                extra_parts[0]["[Voice transcription]: ".len()..].to_string()
+            } else {
+                enrichment
+            }
+        } else {
+            format!("{}\n{enrichment}", msg.content)
+        }
+    }
+
+    /// Download a file via the downloader and transcribe via the STT engine.
+    async fn download_and_transcribe(&self, file_id: &str, mime: &str) -> Result<String, String> {
+        let downloader = self
+            .file_downloader
+            .as_ref()
+            .ok_or_else(|| "no file downloader configured".to_string())?;
+
+        let audio_bytes = downloader.download(file_id).await?;
+
+        let stt = self
+            .stt_engine
+            .as_ref()
+            .ok_or_else(|| "no STT engine configured".to_string())?;
+
+        let engine = stt.read().await;
+        let result = engine
+            .transcribe(&audio_bytes, mime)
+            .await
+            .map_err(|e| format!("{e}"))?;
+
+        Ok(result.text)
     }
 
     async fn get_last_assistant_message(&self, session_id: Uuid) -> Option<String> {

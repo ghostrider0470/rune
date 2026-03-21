@@ -11,6 +11,7 @@ rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
 rune-store = { path = "../rune-store" }
 rune-models = { path = "../rune-models" }
+rune-stt = { path = "../rune-stt" }
 rune-tools = { path = "../rune-tools" }
 async-trait.workspace = true
 chrono.workspace = true

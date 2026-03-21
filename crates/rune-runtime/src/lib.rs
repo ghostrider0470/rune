@@ -27,6 +27,7 @@ pub use hooks::{HookEvent, HookHandler, HookRegistry};
 pub use lane_queue::{Lane, LanePermit, LaneQueue, LaneStats};
 pub use plugin::{PluginLoader, PluginManifest, PluginRegistry, PluginScanSummary};
 pub use skill::{Skill, SkillRegistry};
+pub use session_loop::TelegramFileDownloader;
 pub use skill_loader::{SkillLoader, SkillScanSummary};
 pub use usage::UsageAccumulator;
 
