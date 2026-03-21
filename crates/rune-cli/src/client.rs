@@ -2950,6 +2950,16 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_auth_status(&self) -> Result<crate::output::Ms365AuthStatusResponse> {
+        let r = self.http.get(self.url("/ms365/auth/status"))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_mail_folders(&self) -> Result<crate::output::Ms365MailFoldersResponse> {
+        let r = self.http.get(self.url("/ms365/mail/folders"))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {

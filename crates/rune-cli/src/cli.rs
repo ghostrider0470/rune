@@ -239,6 +239,11 @@ pub enum Command {
 /// Top-level MS365 subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Ms365Action {
+    /// Inspect Microsoft 365 auth/config readiness.
+    Auth {
+        #[command(subcommand)]
+        action: Ms365AuthAction,
+    },
     /// Mail operations.
     Mail {
         #[command(subcommand)]
@@ -249,6 +254,13 @@ pub enum Ms365Action {
         #[command(subcommand)]
         action: Ms365CalendarAction,
     },
+}
+
+/// Auth/config inspection subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365AuthAction {
+    /// Show current authentication and configuration status.
+    Status,
 }
 
 /// Mail subcommands.
@@ -269,6 +281,8 @@ pub enum Ms365MailAction {
         #[arg(long)]
         id: String,
     },
+    /// List mail folders in the authenticated mailbox.
+    Folders,
 }
 
 /// Calendar subcommands.
@@ -4686,5 +4700,23 @@ mod subagent_cli_tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_ms365_auth_status() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "auth", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Ms365 { action: Ms365Action::Auth { action: Ms365AuthAction::Status } }
+        ));
+    }
+
+    #[test]
+    fn parse_ms365_mail_folders() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "mail", "folders"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Ms365 { action: Ms365Action::Mail { action: Ms365MailAction::Folders } }
+        ));
     }
 }

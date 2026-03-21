@@ -676,17 +676,20 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First and second parity slices: read-only mail and calendar surfaces, including list and read-detail.
+First through third parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, and mail folder listing.
 
 Observed subcommands:
 
+- `ms365 auth status` — inspect Microsoft 365 auth/config readiness (tenant, client, token, scopes)
 - `ms365 mail unread` — list unread messages from the authenticated mailbox
 - `ms365 mail read --id <msg_id>` — read full detail of a single mail message
+- `ms365 mail folders` — list mail folders in the authenticated mailbox
 - `ms365 calendar upcoming` — list upcoming calendar events
 - `ms365 calendar read --id <event_id>` — read full detail of a single calendar event
 
 Required concepts:
-- mailbox folder selection (`--folder`)
+- auth/config readiness inspection (tenant, client, scopes, token validity)
+- mailbox folder discovery and selection (`--folder`)
 - result limiting (`--limit`)
 - calendar look-ahead window (`--hours`)
 - single-item read-detail by ID (`--id`)
@@ -695,7 +698,7 @@ Required concepts:
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–2). Gateway endpoint and Graph integration deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–3). Gateway endpoint and Graph integration deferred.
 
 ---
 
