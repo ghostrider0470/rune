@@ -1990,9 +1990,40 @@ impl fmt::Display for ConfigExportResponse {
 }
 
 // ── Lifecycle responses (#74, #70) ────────────────────────────
+
+/// A single configuration item with its status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SetupResponse { pub success: bool, pub detail: String }
-impl fmt::Display for SetupResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+pub struct ConfigureItem {
+    /// Name of the configuration area (e.g. "model_providers", "auth").
+    pub name: String,
+    /// One of: "configured", "skipped", "needed".
+    pub status: String,
+    /// Human-readable detail about this item.
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupResponse {
+    pub success: bool,
+    pub detail: String,
+    #[serde(default)]
+    pub items: Vec<ConfigureItem>,
+}
+impl fmt::Display for SetupResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{i} {}", self.detail)?;
+        for item in &self.items {
+            let icon = match item.status.as_str() {
+                "configured" => "✓",
+                "skipped" => "–",
+                _ => "✗",
+            };
+            writeln!(f, "  {icon} {}: {}", item.name, item.message)?;
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupCreateResponse { pub success: bool, pub backup_id: String, pub detail: String }
 impl fmt::Display for BackupCreateResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "✓ Backup {} created: {}", self.backup_id, self.detail) } }
@@ -3553,12 +3584,23 @@ impl fmt::Display for SecretsApplyResponse {
 pub struct ConfigureResponse {
     pub success: bool,
     pub detail: String,
+    #[serde(default)]
+    pub items: Vec<ConfigureItem>,
 }
 
 impl fmt::Display for ConfigureResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let icon = if self.success { "✓" } else { "✗" };
-        write!(f, "{icon} {}", self.detail)
+        writeln!(f, "{icon} {}", self.detail)?;
+        for item in &self.items {
+            let icon = match item.status.as_str() {
+                "configured" => "✓",
+                "skipped" => "–",
+                _ => "✗",
+            };
+            writeln!(f, "  {icon} {}: {}", item.name, item.message)?;
+        }
+        Ok(())
     }
 }
 
@@ -5912,6 +5954,7 @@ mod tests {
         let resp = ConfigureResponse {
             success: true,
             detail: "Setup wizard completed.".into(),
+            items: vec![],
         };
         let out = render(&resp, OutputFormat::Human);
         assert!(out.contains("✓"));

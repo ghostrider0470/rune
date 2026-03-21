@@ -3651,6 +3651,162 @@ pub async fn doctor_results(
     doctor_run(State(state)).await
 }
 
+// ── Configure / Setup ────────────────────────────────────────────────────────
+
+/// A single configuration item reported by the configure surface.
+#[derive(Serialize)]
+pub struct ConfigureItem {
+    pub name: String,
+    pub status: &'static str,
+    pub message: String,
+}
+
+/// Full response from the configure/setup endpoints.
+#[derive(Serialize)]
+pub struct ConfigureGatewayResponse {
+    pub success: bool,
+    pub detail: String,
+    pub items: Vec<ConfigureItem>,
+}
+
+/// Inspect current configuration and report what is configured, skipped, or needed.
+fn build_configure_items(
+    config: &rune_config::AppConfig,
+    capabilities: &rune_config::Capabilities,
+    tts_available: bool,
+    stt_available: bool,
+) -> Vec<ConfigureItem> {
+    let mut items = Vec::new();
+
+    // Model providers
+    let provider_count = config.models.providers.len();
+    items.push(ConfigureItem {
+        name: "model_providers".into(),
+        status: if provider_count > 0 { "configured" } else { "needed" },
+        message: if provider_count > 0 {
+            format!("{provider_count} provider(s) configured")
+        } else {
+            "no model providers; using demo echo backend".into()
+        },
+    });
+
+    // Auth
+    let auth = config.gateway.auth_token.is_some();
+    items.push(ConfigureItem {
+        name: "auth".into(),
+        status: if auth { "configured" } else { "needed" },
+        message: if auth {
+            "bearer auth enabled".into()
+        } else {
+            "no auth token; gateway is unauthenticated".into()
+        },
+    });
+
+    // Storage paths
+    let sessions_ok = config.paths.sessions_dir.exists();
+    items.push(ConfigureItem {
+        name: "sessions_dir".into(),
+        status: if sessions_ok { "configured" } else { "needed" },
+        message: format!(
+            "{} ({})",
+            config.paths.sessions_dir.display(),
+            if sessions_ok { "exists" } else { "missing" }
+        ),
+    });
+
+    let memory_ok = config.paths.memory_dir.exists();
+    items.push(ConfigureItem {
+        name: "memory_dir".into(),
+        status: if memory_ok { "configured" } else { "needed" },
+        message: format!(
+            "{} ({})",
+            config.paths.memory_dir.display(),
+            if memory_ok { "exists" } else { "missing" }
+        ),
+    });
+
+    // TTS / STT (optional)
+    items.push(ConfigureItem {
+        name: "tts".into(),
+        status: if tts_available { "configured" } else { "skipped" },
+        message: if tts_available {
+            "TTS engine available".into()
+        } else {
+            "TTS not configured (optional)".into()
+        },
+    });
+    items.push(ConfigureItem {
+        name: "stt".into(),
+        status: if stt_available { "configured" } else { "skipped" },
+        message: if stt_available {
+            "STT engine available".into()
+        } else {
+            "STT not configured (optional)".into()
+        },
+    });
+
+    // Channels (optional)
+    let ch = &capabilities.channels;
+    items.push(ConfigureItem {
+        name: "channels".into(),
+        status: if ch.is_empty() { "skipped" } else { "configured" },
+        message: if ch.is_empty() {
+            "no channels enabled (optional)".into()
+        } else {
+            format!("{} channel(s): {}", ch.len(), ch.join(", "))
+        },
+    });
+
+    // MCP servers (optional)
+    let mcp = capabilities.mcp_servers;
+    items.push(ConfigureItem {
+        name: "mcp_servers".into(),
+        status: if mcp > 0 { "configured" } else { "skipped" },
+        message: if mcp > 0 {
+            format!("{mcp} MCP server(s) enabled")
+        } else {
+            "no MCP servers (optional)".into()
+        },
+    });
+
+    items
+}
+
+/// `POST /configure` — inspect configuration and report operator-meaningful status.
+pub async fn configure(
+    State(state): State<AppState>,
+) -> Result<Json<ConfigureGatewayResponse>, GatewayError> {
+    let config = state.config.read().await;
+    let items = build_configure_items(
+        &config,
+        &state.capabilities,
+        state.tts_engine.is_some(),
+        state.stt_engine.is_some(),
+    );
+    drop(config);
+
+    let needed = items.iter().filter(|i| i.status == "needed").count();
+    let success = needed == 0;
+    let detail = if success {
+        "all required configuration present".into()
+    } else {
+        format!("{needed} item(s) still need configuration")
+    };
+
+    Ok(Json(ConfigureGatewayResponse {
+        success,
+        detail,
+        items,
+    }))
+}
+
+/// `POST /setup` — alias for configure (first-run setup wizard surface).
+pub async fn setup(
+    State(state): State<AppState>,
+) -> Result<Json<ConfigureGatewayResponse>, GatewayError> {
+    configure(State(state)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
