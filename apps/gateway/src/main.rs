@@ -20,7 +20,7 @@ use rune_browser::{
     BrowseTool, BrowserPool, BrowserPoolConfig, SnapshotOptions, browse_tool_definition,
 };
 use tokio::signal;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use rune_channels::TelegramAdapter;
 use rune_config::{
@@ -107,20 +107,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    let (services, _embedded_pg, session_loop) = build_services(config).await?;
+    let (services, _embedded_pg, _session_loop) = build_services(config).await?;
     let handle = start(services).await.context("failed to start gateway")?;
 
-    // Start the session loop (channel listener) if a channel is configured.
-    if let Some(loop_handle) = session_loop {
-        let loop_handle = Arc::new(loop_handle);
-        let lh = loop_handle.clone();
-        tokio::spawn(async move {
-            if let Err(e) = lh.run().await {
-                error!(error = %e, "session loop exited with error");
-            }
-        });
-        info!("session loop started for Telegram channel");
-    }
 
     shutdown_signal().await;
     info!("shutdown signal received");

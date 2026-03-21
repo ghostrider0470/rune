@@ -2452,13 +2452,229 @@ pub async fn telegram_webhook(
         return Err(GatewayError::Unauthorized);
     }
 
-    // Emit the update as a session event for processing
+    let mut payload = update.clone();
+
+    if let Some(message) = update.get("message") {
+        let media_file = message
+            .get("voice")
+            .and_then(|v| v.get("file_id"))
+            .or_else(|| message.get("audio").and_then(|v| v.get("file_id")))
+            .or_else(|| message.get("video_note").and_then(|v| v.get("file_id")))
+            .or_else(|| message.get("video").and_then(|v| v.get("file_id")))
+            .or_else(|| message.get("animation").and_then(|v| v.get("file_id")));
+
+        let media_mime = message
+            .get("voice")
+            .and_then(|v| v.get("mime_type"))
+            .or_else(|| message.get("audio").and_then(|v| v.get("mime_type")))
+            .or_else(|| message.get("video").and_then(|v| v.get("mime_type")))
+            .or_else(|| message.get("animation").and_then(|v| v.get("mime_type")))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+
+        if let Some(file_id) = media_file.and_then(|v| v.as_str()) {
+            if let Some(engine_lock) = &state.stt_engine {
+                let file_url = format!(
+                    "https://api.telegram.org/bot{}/getFile?file_id={}",
+                    expected_token, file_id
+                );
+
+                let client = reqwest::Client::new();
+                if let Ok(resp) = client.get(&file_url).send().await {
+                    if let Ok(body) = resp.json::<serde_json::Value>().await {
+                        if let Some(file_path) = body
+                            .get("result")
+                            .and_then(|r| r.get("file_path"))
+                            .and_then(|v| v.as_str())
+                        {
+                            let download_url = format!(
+                                "https://api.telegram.org/file/bot{}/{}",
+                                expected_token, file_path
+                            );
+                            if let Ok(file_resp) = client.get(&download_url).send().await {
+                                if let Ok(bytes) = file_resp.bytes().await {
+                                    let mime_type = media_mime
+                                        .clone()
+                                        .unwrap_or_else(|| {
+                                            if message.get("voice").is_some() {
+                                                "audio/ogg".to_string()
+                                            } else if message.get("audio").is_some() {
+                                                "audio/mpeg".to_string()
+                                            } else {
+                                                "audio/ogg".to_string()
+                                            }
+                                        });
+
+                                    let engine = engine_lock.read().await;
+                                    if let Ok(result) = engine.transcribe(&bytes, &mime_type).await {
+                                        if let Some(root) = payload.as_object_mut() {
+                                            root.insert(
+                                                "media_transcription".to_string(),
+                                                serde_json::json!({
+                                                    "text": result.text,
+                                                    "language": result.language,
+                                                    "duration_seconds": result.duration_seconds,
+                                                    "mime_type": mime_type,
+                                                    "file_id": file_id,
+                                                    "file_path": file_path,
+                                                }),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Emit the raw update as a session event for observability.
     let _ = state.event_tx.send(crate::state::SessionEvent {
         session_id: "telegram".to_string(),
         kind: "telegram_update".to_string(),
-        payload: update,
+        payload: payload.clone(),
         state_changed: true,
     });
+
+    if let Some(message) = payload.get("message") {
+        let chat_id = message
+            .get("chat")
+            .and_then(|chat| chat.get("id"))
+            .and_then(|id| id.as_i64())
+            .ok_or_else(|| GatewayError::BadRequest("telegram message missing chat.id".to_string()))?;
+
+        let sender = message
+            .get("from")
+            .and_then(|from| from.get("username").and_then(|v| v.as_str()).map(str::to_string)
+                .or_else(|| from.get("id").map(|v| v.to_string())))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let routing_key = format!("{}:{}", chat_id, sender);
+
+        let session = if let Some(existing) = state
+            .session_repo
+            .find_by_channel_ref(&routing_key)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+        {
+            existing
+        } else {
+            let config_guard = state.config.read().await;
+            let workspace = config_guard
+                .agents
+                .default_agent()
+                .and_then(|a| config_guard.agents.effective_workspace(a))
+                .map(String::from);
+            drop(config_guard);
+
+            state
+                .session_engine
+                .create_session_full(
+                    rune_core::SessionKind::Channel,
+                    workspace,
+                    None,
+                    Some(routing_key.clone()),
+                )
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))?
+        };
+
+        let mut content = message
+            .get("text")
+            .and_then(|v| v.as_str())
+            .or_else(|| message.get("caption").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_string();
+
+        if let Some(transcribed) = payload
+            .get("media_transcription")
+            .and_then(|v| v.get("text"))
+            .and_then(|v| v.as_str())
+        {
+            if content.trim().is_empty() {
+                content = transcribed.to_string();
+            } else {
+                content = format!("{}
+
+[Voice transcription]
+{}", content, transcribed);
+            }
+        }
+
+        if !content.trim().is_empty() {
+            let (turn_row, usage) = state
+                .turn_executor
+                .execute(session.id, &content, None)
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+            let transcript = state
+                .transcript_repo
+                .list_by_session(session.id)
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+            let assistant_reply = transcript
+                .iter()
+                .rev()
+                .find(|t| t.turn_id == Some(turn_row.id) && t.kind == "assistant_message")
+                .and_then(|t| t.payload.get("content").and_then(|v| v.as_str()))
+                .map(String::from);
+
+            if let Some(reply) = assistant_reply {
+                let message_id = message
+                    .get("message_id")
+                    .and_then(|v| v.as_i64())
+                    .map(|id| id.to_string())
+                    .unwrap_or_default();
+                let client = reqwest::Client::new();
+                let send_url = format!("https://api.telegram.org/bot{}/sendMessage", expected_token);
+                let mut params = serde_json::json!({
+                    "chat_id": chat_id,
+                    "text": reply,
+                    "parse_mode": "Markdown",
+                });
+                if let Ok(reply_id) = message_id.parse::<i64>() {
+                    params["reply_parameters"] = serde_json::json!({ "message_id": reply_id });
+                }
+                if let Ok(resp) = client.post(&send_url).json(&params).send().await {
+                    if let Ok(body) = resp.json::<serde_json::Value>().await {
+                        let markdown_failed = body
+                            .get("ok")
+                            .and_then(|v| v.as_bool())
+                            .map(|ok| !ok)
+                            .unwrap_or(false)
+                            && body
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .map(|d| d.contains("parse entities") || d.contains("can't parse"))
+                                .unwrap_or(false);
+                        if markdown_failed {
+                            params.as_object_mut().unwrap().remove("parse_mode");
+                            let _ = client.post(&send_url).json(&params).send().await;
+                        }
+                    }
+                }
+
+                let _ = state.event_tx.send(SessionEvent {
+                    session_id: session.id.to_string(),
+                    kind: "turn_completed".to_string(),
+                    payload: json!({
+                        "session_id": session.id,
+                        "turn_id": turn_row.id,
+                        "assistant_reply": reply,
+                        "prompt_tokens": usage.prompt_tokens,
+                        "completion_tokens": usage.completion_tokens,
+                        "channel": "telegram",
+                        "routing_key": routing_key,
+                    }),
+                    state_changed: true,
+                });
+            }
+        }
+    }
 
     Ok(StatusCode::OK)
 }
