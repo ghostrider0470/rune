@@ -3505,6 +3505,48 @@ impl fmt::Display for Ms365CalendarReadResponse {
     }
 }
 
+/// Response from `rune ms365 calendar create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365CalendarCreateResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for Ms365CalendarCreateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.message)
+    }
+}
+
+/// Response from `rune ms365 calendar delete`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365CalendarDeleteResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for Ms365CalendarDeleteResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.message)
+    }
+}
+
+/// Response from `rune ms365 calendar respond`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365CalendarRespondResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for Ms365CalendarRespondResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.message)
+    }
+}
+
 /// Auth/config inspection for Microsoft 365.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ms365AuthStatusResponse {
@@ -7165,6 +7207,47 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Message forwarded"));
+    }
+
+    #[test]
+    fn render_ms365_calendar_create_human() {
+        let r = Ms365CalendarCreateResponse { success: true, message: "Event created".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Event created"));
+    }
+
+    #[test]
+    fn render_ms365_calendar_create_failure() {
+        let r = Ms365CalendarCreateResponse { success: false, message: "Failed to create event".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✗"));
+        assert!(out.contains("Failed to create event"));
+    }
+
+    #[test]
+    fn render_ms365_calendar_delete_human() {
+        let r = Ms365CalendarDeleteResponse { success: true, message: "Event deleted".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Event deleted"));
+    }
+
+    #[test]
+    fn render_ms365_calendar_respond_human() {
+        let r = Ms365CalendarRespondResponse { success: true, message: "Response sent: accepted".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Response sent: accepted"));
+    }
+
+    #[test]
+    fn render_ms365_calendar_create_json() {
+        let r = Ms365CalendarCreateResponse { success: true, message: "Event created".into() };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["message"], "Event created");
     }
 
     #[test]
