@@ -18,7 +18,6 @@ use chrono::Timelike;
 use rune_config::{
     AppConfig, Capabilities, ConfiguredModel, LaneQueueConfig, ModelProviderConfig, RuntimeMode,
 };
-use rune_core::SessionKind;
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };

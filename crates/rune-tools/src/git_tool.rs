@@ -73,11 +73,9 @@ impl GitToolExecutor {
                             .filter_map(|item| item.as_str().map(String::from))
                             .collect(),
                     )
-                } else if let Some(s) = v.as_str() {
-                    // Split a single string on whitespace for convenience
-                    Some(s.split_whitespace().map(String::from).collect())
                 } else {
-                    None
+                    // Split a single string on whitespace for convenience
+                    v.as_str().map(|s| s.split_whitespace().map(String::from).collect())
                 }
             })
             .unwrap_or_default();
