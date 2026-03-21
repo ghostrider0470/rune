@@ -3576,6 +3576,99 @@ impl fmt::Display for Ms365MailFoldersResponse {
     }
 }
 
+// ── Microsoft 365 Files ───────────────────────────────────────────
+
+/// A single OneDrive file/folder item summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365FileItem {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub is_folder: bool,
+    pub last_modified: String,
+    pub web_url: Option<String>,
+}
+
+impl fmt::Display for Ms365FileItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = if self.is_folder { "DIR " } else { "FILE" };
+        write!(f, "  {kind}  {:<40} {:>10}  {}", self.name, format_bytes(self.size), self.last_modified)
+    }
+}
+
+/// Response from `rune ms365 files list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365FilesListResponse {
+    pub items: Vec<Ms365FileItem>,
+    pub path: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365FilesListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "OneDrive path: {}  ({} item(s))", self.path, self.total)?;
+        if self.items.is_empty() {
+            writeln!(f, "  (empty)")?;
+        } else {
+            for item in &self.items {
+                writeln!(f, "{item}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 files read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365FileReadResponse {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub is_folder: bool,
+    pub mime_type: Option<String>,
+    pub last_modified: String,
+    pub created_at: String,
+    pub web_url: Option<String>,
+    pub parent_path: Option<String>,
+    pub download_url: Option<String>,
+}
+
+impl fmt::Display for Ms365FileReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = if self.is_folder { "Folder" } else { "File" };
+        writeln!(f, "── {kind}: {} ──", self.name)?;
+        writeln!(f, "  ID:            {}", self.id)?;
+        writeln!(f, "  Size:          {}", format_bytes(self.size))?;
+        if let Some(ref mime) = self.mime_type {
+            writeln!(f, "  Type:          {mime}")?;
+        }
+        writeln!(f, "  Created:       {}", self.created_at)?;
+        writeln!(f, "  Modified:      {}", self.last_modified)?;
+        if let Some(ref parent) = self.parent_path {
+            writeln!(f, "  Parent:        {parent}")?;
+        }
+        if let Some(ref url) = self.web_url {
+            writeln!(f, "  Web URL:       {url}")?;
+        }
+        if let Some(ref dl) = self.download_url {
+            writeln!(f, "  Download URL:  {dl}")?;
+        }
+        Ok(())
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
 // ── Sandbox ───────────────────────────────────────────────────────
 
 /// Response from `rune sandbox list`.

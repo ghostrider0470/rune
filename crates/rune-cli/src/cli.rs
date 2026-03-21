@@ -226,7 +226,7 @@ pub enum Command {
         #[arg(long)]
         confirm: bool,
     },
-    /// Microsoft 365 integration surfaces (mail, calendar).
+    /// Microsoft 365 integration surfaces (mail, calendar, files).
     #[command(name = "ms365")]
     Ms365 {
         #[command(subcommand)]
@@ -253,6 +253,11 @@ pub enum Ms365Action {
     Calendar {
         #[command(subcommand)]
         action: Ms365CalendarAction,
+    },
+    /// OneDrive file operations.
+    Files {
+        #[command(subcommand)]
+        action: Ms365FilesAction,
     },
 }
 
@@ -300,6 +305,26 @@ pub enum Ms365CalendarAction {
     /// Read a single calendar event by ID.
     Read {
         /// Event ID to retrieve.
+        #[arg(long)]
+        id: String,
+    },
+}
+
+/// OneDrive file subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365FilesAction {
+    /// List files in a OneDrive folder.
+    List {
+        /// Folder path (default: root).
+        #[arg(long, default_value = "/")]
+        path: String,
+        /// Maximum number of items to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    /// Read metadata for a single file by ID.
+    Read {
+        /// File/item ID to retrieve.
         #[arg(long)]
         id: String,
     },

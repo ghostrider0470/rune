@@ -2960,6 +2960,17 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_files_list(&self, path: &str, limit: u32) -> Result<crate::output::Ms365FilesListResponse> {
+        let r = self.http.get(self.url("/ms365/files"))
+            .query(&[("path", path.to_string()), ("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_files_read(&self, id: &str) -> Result<crate::output::Ms365FileReadResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/files/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
