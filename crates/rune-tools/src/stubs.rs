@@ -146,6 +146,10 @@ pub fn register_builtin_stubs(registry: &mut ToolRegistry) {
     for tool in builtins {
         registry.register(tool);
     }
+
+    // Register real tool definitions (executors are wired separately)
+    registry.register(crate::web_fetch_tool::web_fetch_tool_definition());
+    registry.register(crate::git_tool::git_tool_definition());
 }
 
 /// Validate that a tool call's arguments satisfy the `required` fields in the tool schema.

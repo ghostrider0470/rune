@@ -8,6 +8,7 @@ pub mod exec_tool;
 mod executor;
 pub mod file_tools;
 pub mod gateway_tool;
+pub mod git_tool;
 pub mod memory_index;
 pub mod memory_tool;
 pub mod message_tool;
@@ -18,6 +19,7 @@ pub mod session_tool;
 pub mod spawn_tool;
 mod stubs;
 pub mod subagent_tool;
+pub mod web_fetch_tool;
 
 pub use definition::{ToolCall, ToolDefinition, ToolResult};
 pub use error::ToolError;
