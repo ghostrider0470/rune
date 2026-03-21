@@ -501,6 +501,8 @@ impl SessionStatus {
             (Self::Created, Self::Ready)
             // Ready → Running
             | (Self::Ready, Self::Running)
+            // Running → Running (self-transition during multi-tool turns)
+            | (Self::Running, Self::Running)
             // Running → terminal or waiting
             | (Self::Running, Self::WaitingForTool)
             | (Self::Running, Self::WaitingForApproval)
