@@ -87,6 +87,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let (event_tx, _) = broadcast::channel::<SessionEvent>(256);
 
     // Extract values from config before wrapping in RwLock.
+    let tls_config = services.config.gateway.tls.clone();
     let auth_token = services.config.gateway.auth_token.clone();
     let addr: SocketAddr = format!(
         "{}:{}",
@@ -185,24 +186,55 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
 
     let app = build_router(state, auth_token);
 
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| GatewayError::Internal(e.to_string()))?;
-
-    info!(%addr, "gateway listening");
+    // Validate TLS config before attempting to bind.
+    tls_config
+        .validate()
+        .map_err(GatewayError::Internal)?;
 
     let mut supervisor = BackgroundSupervisor::new();
     supervisor.start(supervisor_deps);
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let server_handle = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {
+
+    let server_handle = if tls_config.enabled {
+        let rustls_config = build_rustls_config(
+            tls_config.cert_path.as_deref().unwrap(),
+            tls_config.key_path.as_deref().unwrap(),
+        )?;
+
+        info!(%addr, "gateway listening (HTTPS)");
+
+        let tls_cfg = axum_server::tls_rustls::RustlsConfig::from_config(rustls_config);
+        let handle = axum_server::Handle::new();
+        let shutdown_handle = handle.clone();
+        tokio::spawn(async move {
+            // Spawn a task to trigger graceful shutdown on signal.
+            tokio::spawn(async move {
                 let _ = shutdown_rx.await;
-            })
+                shutdown_handle.graceful_shutdown(None);
+            });
+            axum_server::bind_rustls(addr, tls_cfg)
+                .handle(handle)
+                .serve(app.into_make_service())
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))
+        })
+    } else {
+        let listener = TcpListener::bind(addr)
             .await
-            .map_err(|e| GatewayError::Internal(e.to_string()))
-    });
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+        info!(%addr, "gateway listening (HTTP)");
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))
+        })
+    };
 
     Ok(GatewayHandle {
         server_handle,
@@ -353,4 +385,109 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .merge(public_routes)
         .merge(protected_routes)
         .merge(spa_routes)
+}
+
+/// Build a [`rustls::ServerConfig`] from PEM-encoded cert chain and private key files.
+fn build_rustls_config(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<Arc<rustls::ServerConfig>, GatewayError> {
+    use rustls::ServerConfig;
+    use rustls_pemfile::{certs, private_key};
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let cert_file = File::open(cert_path)
+        .map_err(|e| GatewayError::Internal(format!("cannot open TLS cert {cert_path}: {e}")))?;
+    let key_file = File::open(key_path)
+        .map_err(|e| GatewayError::Internal(format!("cannot open TLS key {key_path}: {e}")))?;
+
+    let cert_chain: Vec<_> = certs(&mut BufReader::new(cert_file))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| GatewayError::Internal(format!("invalid TLS certificate: {e}")))?;
+
+    let key = private_key(&mut BufReader::new(key_file))
+        .map_err(|e| GatewayError::Internal(format!("invalid TLS private key: {e}")))?
+        .ok_or_else(|| GatewayError::Internal("no private key found in key file".into()))?;
+
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .map_err(|e| GatewayError::Internal(format!("TLS config error: {e}")))?;
+
+    Ok(Arc::new(config))
+}
+
+#[cfg(test)]
+mod tests {
+    use rune_config::TlsConfig;
+
+    #[test]
+    fn tls_config_disabled_validates() {
+        let cfg = TlsConfig::default();
+        assert!(!cfg.enabled);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn tls_config_enabled_missing_cert() {
+        let cfg = TlsConfig {
+            enabled: true,
+            cert_path: None,
+            key_path: Some("/tmp/key.pem".into()),
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("cert_path"));
+    }
+
+    #[test]
+    fn tls_config_enabled_missing_key() {
+        let cfg = TlsConfig {
+            enabled: true,
+            cert_path: Some("/tmp/cert.pem".into()),
+            key_path: None,
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("key_path"));
+    }
+
+    #[test]
+    fn tls_config_enabled_valid() {
+        let cfg = TlsConfig {
+            enabled: true,
+            cert_path: Some("/tmp/cert.pem".into()),
+            key_path: Some("/tmp/key.pem".into()),
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn tls_config_deserializes() {
+        let json = serde_json::json!({
+            "enabled": true,
+            "cert_path": "/etc/rune/tls/cert.pem",
+            "key_path": "/etc/rune/tls/key.pem"
+        });
+        let cfg: TlsConfig = serde_json::from_value(json).unwrap();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.cert_path.as_deref(), Some("/etc/rune/tls/cert.pem"));
+        assert_eq!(cfg.key_path.as_deref(), Some("/etc/rune/tls/key.pem"));
+    }
+
+    #[test]
+    fn tls_config_defaults_when_omitted() {
+        let json = serde_json::json!({});
+        let cfg: TlsConfig = serde_json::from_value(json).unwrap();
+        assert!(!cfg.enabled);
+        assert!(cfg.cert_path.is_none());
+        assert!(cfg.key_path.is_none());
+    }
+
+    #[test]
+    fn build_rustls_config_rejects_missing_files() {
+        let result = super::build_rustls_config("/nonexistent/cert.pem", "/nonexistent/key.pem");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("cannot open TLS cert"));
+    }
 }
