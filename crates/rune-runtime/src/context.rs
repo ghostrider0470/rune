@@ -67,19 +67,61 @@ impl ContextAssembler {
             tool_calls: None,
         });
 
-        // Convert transcript rows to chat messages
-        for row in transcript_rows {
-            if let Some(msg) = self.row_to_chat_message(row) {
+        // Convert transcript rows to chat messages.
+        // Group consecutive ToolRequest items into a single Assistant message
+        // with multiple tool_calls, as the OpenAI API requires.
+        let mut i = 0;
+        while i < transcript_rows.len() {
+            let item: TranscriptItem =
+                match serde_json::from_value(transcript_rows[i].payload.clone()) {
+                    Ok(item) => item,
+                    Err(_) => { i += 1; continue; }
+                };
+
+            if matches!(item, TranscriptItem::ToolRequest { .. }) {
+                // Collect consecutive ToolRequests into one assistant message
+                let mut tool_calls = Vec::new();
+                while i < transcript_rows.len() {
+                    let inner: TranscriptItem =
+                        match serde_json::from_value(transcript_rows[i].payload.clone()) {
+                            Ok(item) => item,
+                            Err(_) => break,
+                        };
+                    if let TranscriptItem::ToolRequest { tool_call_id, tool_name, arguments } = inner {
+                        tool_calls.push(ToolCallRequest {
+                            id: tool_call_id.to_string(),
+                            call_type: "function".to_string(),
+                            function: FunctionCall {
+                                name: tool_name,
+                                arguments: arguments.to_string(),
+                            },
+                        });
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if !tool_calls.is_empty() {
+                    messages.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: None,
+                        name: None,
+                        tool_call_id: None,
+                        tool_calls: Some(tool_calls),
+                    });
+                }
+            } else if let Some(msg) = self.item_to_chat_message(item) {
                 messages.push(msg);
+                i += 1;
+            } else {
+                i += 1;
             }
         }
 
         compaction.compact(messages)
     }
 
-    fn row_to_chat_message(&self, row: &TranscriptItemRow) -> Option<ChatMessage> {
-        let item: TranscriptItem = serde_json::from_value(row.payload.clone()).ok()?;
-
+    fn item_to_chat_message(&self, item: TranscriptItem) -> Option<ChatMessage> {
         match item {
             TranscriptItem::UserMessage { message } => Some(ChatMessage {
                 role: Role::User,
@@ -95,24 +137,8 @@ impl ContextAssembler {
                 tool_call_id: None,
                 tool_calls: None,
             }),
-            TranscriptItem::ToolRequest {
-                tool_call_id,
-                tool_name,
-                arguments,
-            } => Some(ChatMessage {
-                role: Role::Assistant,
-                content: None,
-                name: None,
-                tool_call_id: None,
-                tool_calls: Some(vec![ToolCallRequest {
-                    id: tool_call_id.to_string(),
-                    call_type: "function".to_string(),
-                    function: FunctionCall {
-                        name: tool_name,
-                        arguments: arguments.to_string(),
-                    },
-                }]),
-            }),
+            // ToolRequest is handled by the grouping logic in assemble()
+            TranscriptItem::ToolRequest { .. } => None,
             TranscriptItem::ToolResult {
                 tool_call_id,
                 output,
