@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { QueryProvider, queryClient } from "@/integrations/tanstack-query/root-provider";
 import { routeTree } from "./routeTree.gen";
+import { registerServiceWorker } from "@/lib/register-sw";
 import "./styles.css";
+
+registerServiceWorker();
 
 const router = createRouter({
   routeTree,
