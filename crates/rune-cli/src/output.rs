@@ -3657,6 +3657,82 @@ impl fmt::Display for Ms365FileReadResponse {
     }
 }
 
+// ── MS365 Users/Org ─────────────────────────────────────────────
+
+/// A single user profile (used by `me`, `read`, and inside list responses).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365UserProfileResponse {
+    pub id: String,
+    pub display_name: String,
+    pub user_principal_name: String,
+    pub mail: Option<String>,
+    pub job_title: Option<String>,
+    pub department: Option<String>,
+    pub office_location: Option<String>,
+    pub mobile_phone: Option<String>,
+}
+
+impl fmt::Display for Ms365UserProfileResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "── User: {} ──", self.display_name)?;
+        writeln!(f, "  ID:         {}", self.id)?;
+        writeln!(f, "  UPN:        {}", self.user_principal_name)?;
+        if let Some(ref mail) = self.mail {
+            writeln!(f, "  Mail:       {mail}")?;
+        }
+        if let Some(ref title) = self.job_title {
+            writeln!(f, "  Job title:  {title}")?;
+        }
+        if let Some(ref dept) = self.department {
+            writeln!(f, "  Department: {dept}")?;
+        }
+        if let Some(ref office) = self.office_location {
+            writeln!(f, "  Office:     {office}")?;
+        }
+        if let Some(ref phone) = self.mobile_phone {
+            writeln!(f, "  Phone:      {phone}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Summary user entry for list responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365UserSummary {
+    pub id: String,
+    pub display_name: String,
+    pub user_principal_name: String,
+    pub job_title: Option<String>,
+}
+
+impl fmt::Display for Ms365UserSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let title = self.job_title.as_deref().unwrap_or("–");
+        write!(f, "  {} <{}> — {title}", self.display_name, self.user_principal_name)
+    }
+}
+
+/// Response from `rune ms365 users list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365UsersListResponse {
+    pub users: Vec<Ms365UserSummary>,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365UsersListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Directory users: {} user(s)", self.total)?;
+        if self.users.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for u in &self.users {
+                writeln!(f, "{u}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
@@ -6408,6 +6484,117 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["folders"][0]["display_name"], "Inbox");
         assert_eq!(v["folders"][0]["unread_count"], 2);
+    }
+
+    #[test]
+    fn render_ms365_user_profile_human() {
+        let r = Ms365UserProfileResponse {
+            id: "u-1".into(),
+            display_name: "Alice Smith".into(),
+            user_principal_name: "alice@example.com".into(),
+            mail: Some("alice@example.com".into()),
+            job_title: Some("Engineer".into()),
+            department: Some("Platform".into()),
+            office_location: Some("Building 5".into()),
+            mobile_phone: Some("+1-555-0100".into()),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("User: Alice Smith"));
+        assert!(out.contains("ID:         u-1"));
+        assert!(out.contains("UPN:        alice@example.com"));
+        assert!(out.contains("Mail:       alice@example.com"));
+        assert!(out.contains("Job title:  Engineer"));
+        assert!(out.contains("Department: Platform"));
+        assert!(out.contains("Office:     Building 5"));
+        assert!(out.contains("Phone:      +1-555-0100"));
+    }
+
+    #[test]
+    fn render_ms365_user_profile_minimal() {
+        let r = Ms365UserProfileResponse {
+            id: "u-2".into(),
+            display_name: "Bob".into(),
+            user_principal_name: "bob@example.com".into(),
+            mail: None,
+            job_title: None,
+            department: None,
+            office_location: None,
+            mobile_phone: None,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("User: Bob"));
+        assert!(out.contains("UPN:        bob@example.com"));
+        assert!(!out.contains("Job title:"));
+        assert!(!out.contains("Department:"));
+    }
+
+    #[test]
+    fn render_ms365_user_profile_json() {
+        let r = Ms365UserProfileResponse {
+            id: "u-1".into(),
+            display_name: "Alice".into(),
+            user_principal_name: "alice@example.com".into(),
+            mail: Some("alice@example.com".into()),
+            job_title: Some("Engineer".into()),
+            department: None,
+            office_location: None,
+            mobile_phone: None,
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["id"], "u-1");
+        assert_eq!(v["display_name"], "Alice");
+        assert_eq!(v["job_title"], "Engineer");
+    }
+
+    #[test]
+    fn render_ms365_users_list_human() {
+        let r = Ms365UsersListResponse {
+            users: vec![
+                Ms365UserSummary {
+                    id: "u-1".into(),
+                    display_name: "Alice".into(),
+                    user_principal_name: "alice@example.com".into(),
+                    job_title: Some("Engineer".into()),
+                },
+                Ms365UserSummary {
+                    id: "u-2".into(),
+                    display_name: "Bob".into(),
+                    user_principal_name: "bob@example.com".into(),
+                    job_title: None,
+                },
+            ],
+            total: 2,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Directory users: 2 user(s)"));
+        assert!(out.contains("Alice <alice@example.com> — Engineer"));
+        assert!(out.contains("Bob <bob@example.com>"));
+    }
+
+    #[test]
+    fn render_ms365_users_list_empty() {
+        let r = Ms365UsersListResponse { users: vec![], total: 0 };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("0 user(s)"));
+        assert!(out.contains("(none)"));
+    }
+
+    #[test]
+    fn render_ms365_users_list_json() {
+        let r = Ms365UsersListResponse {
+            users: vec![Ms365UserSummary {
+                id: "u-1".into(),
+                display_name: "Alice".into(),
+                user_principal_name: "alice@example.com".into(),
+                job_title: Some("Engineer".into()),
+            }],
+            total: 1,
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["users"][0]["display_name"], "Alice");
+        assert_eq!(v["total"], 1);
     }
 }
 

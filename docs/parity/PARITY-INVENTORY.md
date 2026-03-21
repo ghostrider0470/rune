@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through fourth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, and OneDrive file list/read.
+First through fifth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, and users/org directory inspection.
 
 Observed subcommands:
 
@@ -688,6 +688,9 @@ Observed subcommands:
 - `ms365 calendar read --id <event_id>` — read full detail of a single calendar event
 - `ms365 files list` — list files/folders in a OneDrive path
 - `ms365 files read --id <item_id>` — read metadata for a single OneDrive item
+- `ms365 users me` — show authenticated user's profile
+- `ms365 users list` — list users in the organization directory
+- `ms365 users read --id <user_id>` — read a single user's profile by ID or UPN
 
 Required concepts:
 - auth/config readiness inspection (tenant, client, scopes, token validity)
@@ -696,12 +699,13 @@ Required concepts:
 - calendar look-ahead window (`--hours`)
 - OneDrive folder path browsing (`--path`)
 - single-item read-detail by ID (`--id`)
-- operator-friendly rich output (headers, attendees, body preview, file metadata)
+- users/org directory inspection (me, list, read by ID/UPN)
+- operator-friendly rich output (headers, attendees, body preview, file metadata, user profiles)
 - JSON and human-readable output
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–4). Gateway endpoint and Graph integration deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–5). Gateway endpoint and Graph integration deferred.
 
 ---
 
