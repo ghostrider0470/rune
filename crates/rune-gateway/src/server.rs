@@ -391,6 +391,9 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         // Doctor routes
         .route("/api/doctor/run", post(routes::doctor_run))
         .route("/api/doctor/results", get(routes::doctor_results))
+        // Configure / Setup routes
+        .route("/configure", post(routes::configure))
+        .route("/setup", post(routes::setup))
         .layer(middleware::from_fn(move |req, next| {
             bearer_auth(req, next, auth_token.clone(), device_registry.clone())
         }))

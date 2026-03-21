@@ -5606,3 +5606,106 @@ async fn ws_rpc_agent_steer_and_kill() {
         .unwrap_err();
     assert_eq!(err.code, "not_found");
 }
+
+// ── Configure / Setup route tests (#61) ───────────────────────────────────────
+
+#[tokio::test]
+async fn configure_returns_items_with_default_config() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::post("/configure")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+
+    // With default config: no providers, no auth → success should be false
+    assert_eq!(json["success"], false);
+    assert!(json["detail"].as_str().unwrap().contains("need configuration"));
+
+    // Items array should exist and contain expected keys
+    let items = json["items"].as_array().unwrap();
+    let names: Vec<&str> = items.iter().map(|i| i["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"model_providers"));
+    assert!(names.contains(&"auth"));
+    assert!(names.contains(&"sessions_dir"));
+    assert!(names.contains(&"memory_dir"));
+    assert!(names.contains(&"tts"));
+    assert!(names.contains(&"stt"));
+    assert!(names.contains(&"channels"));
+    assert!(names.contains(&"mcp_servers"));
+
+    // model_providers should be "needed" with default config
+    let mp = items.iter().find(|i| i["name"] == "model_providers").unwrap();
+    assert_eq!(mp["status"], "needed");
+}
+
+#[tokio::test]
+async fn setup_returns_same_shape_as_configure() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::post("/setup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert!(json["items"].is_array());
+    assert!(json.get("success").is_some());
+    assert!(json.get("detail").is_some());
+}
+
+#[tokio::test]
+async fn configure_with_providers_reports_configured() {
+    let mut config = AppConfig::default();
+    config.gateway.auth_token = Some("test-token".to_string());
+    config.models.providers.push(ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.example".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1-mini".to_string())],
+    });
+
+    let app = build_test_app_with_config(config, Some("test-token".to_string()));
+    let response = app
+        .oneshot(
+            Request::post("/configure")
+                .header("Authorization", "Bearer test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+
+    let items = json["items"].as_array().unwrap();
+
+    // model_providers should be "configured"
+    let mp = items.iter().find(|i| i["name"] == "model_providers").unwrap();
+    assert_eq!(mp["status"], "configured");
+    assert!(mp["message"].as_str().unwrap().contains("1 provider"));
+
+    // auth should be "configured"
+    let auth = items.iter().find(|i| i["name"] == "auth").unwrap();
+    assert_eq!(auth["status"], "configured");
+
+    // Optional items should be "skipped" (not "needed")
+    let tts = items.iter().find(|i| i["name"] == "tts").unwrap();
+    assert_eq!(tts["status"], "skipped");
+}
