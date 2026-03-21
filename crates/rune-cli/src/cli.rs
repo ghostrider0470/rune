@@ -259,6 +259,11 @@ pub enum Ms365Action {
         #[command(subcommand)]
         action: Ms365FilesAction,
     },
+    /// Users and organization inspection.
+    Users {
+        #[command(subcommand)]
+        action: Ms365UsersAction,
+    },
 }
 
 /// Auth/config inspection subcommands.
@@ -325,6 +330,25 @@ pub enum Ms365FilesAction {
     /// Read metadata for a single file by ID.
     Read {
         /// File/item ID to retrieve.
+        #[arg(long)]
+        id: String,
+    },
+}
+
+/// Users/org inspection subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365UsersAction {
+    /// Show the authenticated user's profile.
+    Me,
+    /// List users in the organization directory.
+    List {
+        /// Maximum number of users to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    /// Read a single user's profile by ID or UPN.
+    Read {
+        /// User ID or user principal name.
         #[arg(long)]
         id: String,
     },

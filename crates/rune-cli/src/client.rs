@@ -2971,6 +2971,22 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_users_me(&self) -> Result<crate::output::Ms365UserProfileResponse> {
+        let r = self.http.get(self.url("/ms365/users/me"))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_users_list(&self, limit: u32) -> Result<crate::output::Ms365UsersListResponse> {
+        let r = self.http.get(self.url("/ms365/users"))
+            .query(&[("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn ms365_users_read(&self, id: &str) -> Result<crate::output::Ms365UserProfileResponse> {
+        let r = self.http.get(self.url(&format!("/ms365/users/{id}")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {

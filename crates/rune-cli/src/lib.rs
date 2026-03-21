@@ -29,7 +29,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, ProcessAction,
+    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365UsersAction, ProcessAction,
     RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
@@ -1205,6 +1205,20 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 Ms365FilesAction::Read { id } => {
                     let result = client.ms365_files_read(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            Ms365Action::Users { action } => match action {
+                Ms365UsersAction::Me => {
+                    let result = client.ms365_users_me().await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365UsersAction::List { limit } => {
+                    let result = client.ms365_users_list(limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365UsersAction::Read { id } => {
+                    let result = client.ms365_users_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
             },
