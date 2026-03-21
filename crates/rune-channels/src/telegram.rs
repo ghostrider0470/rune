@@ -1,6 +1,7 @@
 //! Telegram Bot API channel adapter.
 //!
 //! Implements long-polling for inbound messages and HTTP Bot API for outbound actions.
+//! Supports voice, audio, video_note, photo, and document media with file download.
 
 use std::time::Duration;
 
@@ -102,8 +103,21 @@ impl TelegramAdapter {
     /// Convert a Telegram update into an InboundEvent.
     fn convert_update(update: &TelegramUpdate) -> Option<InboundEvent> {
         if let Some(msg) = &update.message {
-            let text = msg.text.clone().unwrap_or_default();
-            if text.is_empty() && msg.document.is_none() && msg.photo.is_none() {
+            // Use text, or caption (for media messages with captions), or empty
+            let text = msg
+                .text
+                .clone()
+                .or_else(|| msg.caption.clone())
+                .unwrap_or_default();
+
+            let has_media = msg.document.is_some()
+                || msg.photo.is_some()
+                || msg.voice.is_some()
+                || msg.audio.is_some()
+                || msg.video_note.is_some()
+                || msg.video.is_some();
+
+            if text.is_empty() && !has_media {
                 return None;
             }
 
@@ -128,7 +142,6 @@ impl TelegramAdapter {
                 provider_message_id: msg.message_id.to_string(),
             }))
         } else if let Some(cb) = &update.callback_query {
-            // Convert callback query (inline keyboard press) into a message event
             let data = cb.data.clone().unwrap_or_default();
             let chat_id = cb
                 .message
@@ -174,7 +187,7 @@ impl TelegramAdapter {
                 name: doc.file_name.clone().unwrap_or_else(|| "document".into()),
                 mime_type: doc.mime_type.clone(),
                 size_bytes: doc.file_size.map(|s| s as u64),
-                url: None,
+                url: Some(format!("telegram-file:{}", doc.file_id)),
             });
         }
 
@@ -184,12 +197,111 @@ impl TelegramAdapter {
                     name: format!("photo_{}.jpg", largest.file_id),
                     mime_type: Some("image/jpeg".into()),
                     size_bytes: largest.file_size.map(|s| s as u64),
-                    url: None,
+                    url: Some(format!("telegram-file:{}", largest.file_id)),
                 });
             }
         }
 
+        if let Some(voice) = &msg.voice {
+            attachments.push(AttachmentRef {
+                name: "voice.ogg".into(),
+                mime_type: Some(
+                    voice
+                        .mime_type
+                        .clone()
+                        .unwrap_or_else(|| "audio/ogg".into()),
+                ),
+                size_bytes: voice.file_size.map(|s| s as u64),
+                url: Some(format!("telegram-file:{}", voice.file_id)),
+            });
+        }
+
+        if let Some(audio) = &msg.audio {
+            attachments.push(AttachmentRef {
+                name: "audio.mp3".into(),
+                mime_type: Some(
+                    audio
+                        .mime_type
+                        .clone()
+                        .unwrap_or_else(|| "audio/mpeg".into()),
+                ),
+                size_bytes: audio.file_size.map(|s| s as u64),
+                url: Some(format!("telegram-file:{}", audio.file_id)),
+            });
+        }
+
+        if let Some(video_note) = &msg.video_note {
+            attachments.push(AttachmentRef {
+                name: "video_note.mp4".into(),
+                mime_type: Some("video/mp4".into()),
+                size_bytes: video_note.file_size.map(|s| s as u64),
+                url: Some(format!("telegram-file:{}", video_note.file_id)),
+            });
+        }
+
+        if let Some(video) = &msg.video {
+            attachments.push(AttachmentRef {
+                name: "video.mp4".into(),
+                mime_type: Some(
+                    video
+                        .mime_type
+                        .clone()
+                        .unwrap_or_else(|| "video/mp4".into()),
+                ),
+                size_bytes: video.file_size.map(|s| s as u64),
+                url: Some(format!("telegram-file:{}", video.file_id)),
+            });
+        }
+
         attachments
+    }
+
+    /// Download a file from Telegram servers by file_id.
+    /// Returns (bytes, file_path) on success.
+    pub async fn download_file(&self, file_id: &str) -> Result<(Vec<u8>, String), ChannelError> {
+        // Step 1: getFile to get the file_path
+        let url = format!("{}/getFile", self.base_url);
+        let params = serde_json::json!({ "file_id": file_id });
+        let resp = self
+            .client
+            .post(&url)
+            .json(&params)
+            .send()
+            .await
+            .map_err(|e| ChannelError::Provider {
+                message: format!("getFile failed: {e}"),
+            })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| ChannelError::Provider {
+            message: format!("getFile parse failed: {e}"),
+        })?;
+        let file_path = body
+            .get("result")
+            .and_then(|r| r.get("file_path"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ChannelError::Provider {
+                message: "getFile: no file_path in response".into(),
+            })?
+            .to_string();
+
+        // Step 2: download the actual file bytes
+        let download_url = self.base_url.replace("/bot", "/file/bot");
+        let download_url = format!("{download_url}/{file_path}");
+        let file_resp = self
+            .client
+            .get(&download_url)
+            .send()
+            .await
+            .map_err(|e| ChannelError::Provider {
+                message: format!("file download failed: {e}"),
+            })?;
+        let bytes = file_resp
+            .bytes()
+            .await
+            .map_err(|e| ChannelError::Provider {
+                message: format!("file read failed: {e}"),
+            })?;
+
+        Ok((bytes.to_vec(), file_path))
     }
 
     /// Send a message via Telegram Bot API.
@@ -215,7 +327,6 @@ impl TelegramAdapter {
 
         let url = format!("{}/sendMessage", self.base_url);
 
-        // Try with Markdown first, fall back to plain text if parsing fails.
         let response = self
             .client
             .post(&url)
@@ -280,12 +391,10 @@ impl TelegramAdapter {
 impl ChannelAdapter for TelegramAdapter {
     async fn receive(&mut self) -> Result<InboundEvent, ChannelError> {
         loop {
-            // Return from buffer first
             if let Some(event) = self.pending_events.pop() {
                 return Ok(event);
             }
 
-            // Long-poll for new updates (blocks up to `timeout` seconds)
             let updates = self.poll_updates().await?;
 
             for update in &updates {
@@ -294,10 +403,7 @@ impl ChannelAdapter for TelegramAdapter {
                 }
             }
 
-            // Reverse so we pop from the front (oldest first)
             self.pending_events.reverse();
-
-            // If no actionable events, just loop back and poll again
         }
     }
 
@@ -349,7 +455,6 @@ impl ChannelAdapter for TelegramAdapter {
                 })
             }
             OutboundAction::React { .. } => {
-                // Telegram Bot API has limited reaction support
                 debug!("reaction requested but Telegram Bot API support is limited");
                 Ok(DeliveryReceipt {
                     provider_message_id: String::new(),
@@ -479,9 +584,14 @@ struct TelegramMessage {
     chat: TelegramChat,
     date: i64,
     text: Option<String>,
+    caption: Option<String>,
     from: Option<TelegramUser>,
     document: Option<TelegramDocument>,
     photo: Option<Vec<TelegramPhotoSize>>,
+    voice: Option<TelegramFileRef>,
+    audio: Option<TelegramFileRef>,
+    video_note: Option<TelegramFileRef>,
+    video: Option<TelegramFileRef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -497,7 +607,6 @@ struct TelegramUser {
 
 #[derive(Debug, Deserialize)]
 struct TelegramDocument {
-    #[allow(dead_code)]
     file_id: String,
     file_name: Option<String>,
     mime_type: Option<String>,
@@ -510,26 +619,47 @@ struct TelegramPhotoSize {
     file_size: Option<i32>,
 }
 
+/// Generic Telegram file reference (voice, audio, video_note, video).
+#[derive(Debug, Deserialize)]
+struct TelegramFileRef {
+    file_id: String,
+    #[allow(dead_code)]
+    file_unique_id: Option<String>,
+    mime_type: Option<String>,
+    file_size: Option<i32>,
+    #[allow(dead_code)]
+    duration: Option<i32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_msg(text: Option<&str>, caption: Option<&str>) -> TelegramMessage {
+        TelegramMessage {
+            message_id: 42,
+            chat: TelegramChat { id: 999 },
+            date: 1710320000,
+            text: text.map(String::from),
+            caption: caption.map(String::from),
+            from: Some(TelegramUser {
+                id: 123,
+                username: Some("testuser".into()),
+            }),
+            document: None,
+            photo: None,
+            voice: None,
+            audio: None,
+            video_note: None,
+            video: None,
+        }
+    }
 
     #[test]
     fn convert_text_message_update() {
         let update = TelegramUpdate {
             update_id: 1,
-            message: Some(TelegramMessage {
-                message_id: 42,
-                chat: TelegramChat { id: 999 },
-                date: 1710320000,
-                text: Some("hello".into()),
-                from: Some(TelegramUser {
-                    id: 123,
-                    username: Some("testuser".into()),
-                }),
-                document: None,
-                photo: None,
-            }),
+            message: Some(make_msg(Some("hello"), None)),
             edited_message: None,
             callback_query: None,
         };
@@ -546,19 +676,67 @@ mod tests {
     }
 
     #[test]
+    fn convert_voice_message_produces_event() {
+        let mut msg = make_msg(None, None);
+        msg.voice = Some(TelegramFileRef {
+            file_id: "voice123".into(),
+            file_unique_id: None,
+            mime_type: Some("audio/ogg".into()),
+            file_size: Some(4096),
+            duration: Some(5),
+        });
+        let update = TelegramUpdate {
+            update_id: 10,
+            message: Some(msg),
+            edited_message: None,
+            callback_query: None,
+        };
+        let event = TelegramAdapter::convert_update(&update).unwrap();
+        match event {
+            InboundEvent::Message(m) => {
+                assert!(m.content.is_empty());
+                assert_eq!(m.attachments.len(), 1);
+                assert_eq!(m.attachments[0].name, "voice.ogg");
+                assert_eq!(
+                    m.attachments[0].url.as_deref(),
+                    Some("telegram-file:voice123")
+                );
+            }
+            _ => panic!("expected Message event"),
+        }
+    }
+
+    #[test]
+    fn caption_used_as_content_for_media() {
+        let mut msg = make_msg(None, Some("check this out"));
+        msg.photo = Some(vec![TelegramPhotoSize {
+            file_id: "photo456".into(),
+            file_size: Some(1024),
+        }]);
+        let update = TelegramUpdate {
+            update_id: 11,
+            message: Some(msg),
+            edited_message: None,
+            callback_query: None,
+        };
+        let event = TelegramAdapter::convert_update(&update).unwrap();
+        match event {
+            InboundEvent::Message(m) => {
+                assert_eq!(m.content, "check this out");
+                assert_eq!(m.attachments.len(), 1);
+            }
+            _ => panic!("expected Message event"),
+        }
+    }
+
+    #[test]
     fn convert_edit_update() {
+        let mut msg = make_msg(Some("edited text"), None);
+        msg.message_id = 43;
         let update = TelegramUpdate {
             update_id: 2,
             message: None,
-            edited_message: Some(TelegramMessage {
-                message_id: 43,
-                chat: TelegramChat { id: 999 },
-                date: 1710320100,
-                text: Some("edited text".into()),
-                from: None,
-                document: None,
-                photo: None,
-            }),
+            edited_message: Some(msg),
             callback_query: None,
         };
 
@@ -580,43 +758,28 @@ mod tests {
     fn convert_empty_message_returns_none() {
         let update = TelegramUpdate {
             update_id: 3,
-            message: Some(TelegramMessage {
-                message_id: 44,
-                chat: TelegramChat { id: 999 },
-                date: 1710320200,
-                text: None,
-                from: None,
-                document: None,
-                photo: None,
-            }),
+            message: Some(make_msg(None, None)),
             edited_message: None,
             callback_query: None,
         };
-
         assert!(TelegramAdapter::convert_update(&update).is_none());
     }
 
     #[test]
     fn extract_document_attachment() {
-        let msg = TelegramMessage {
-            message_id: 45,
-            chat: TelegramChat { id: 999 },
-            date: 1710320300,
-            text: Some("here's a file".into()),
-            from: None,
-            document: Some(TelegramDocument {
-                file_id: "abc123".into(),
-                file_name: Some("report.pdf".into()),
-                mime_type: Some("application/pdf".into()),
-                file_size: Some(1024),
-            }),
-            photo: None,
-        };
+        let mut msg = make_msg(Some("here's a file"), None);
+        msg.document = Some(TelegramDocument {
+            file_id: "abc123".into(),
+            file_name: Some("report.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            file_size: Some(1024),
+        });
 
         let attachments = TelegramAdapter::extract_attachments(&msg);
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].name, "report.pdf");
         assert_eq!(attachments[0].mime_type.as_deref(), Some("application/pdf"));
+        assert!(attachments[0].url.as_ref().unwrap().starts_with("telegram-file:"));
     }
 
     #[test]
