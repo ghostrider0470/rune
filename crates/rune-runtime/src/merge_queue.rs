@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -183,7 +184,13 @@ impl MergeQueue {
     }
 
     /// Persist the queue back into an [`OrchestratorState`] and save.
-    pub fn persist(&self, state: &mut OrchestratorState) -> Result<(), OrchestratorError> {
+    ///
+    /// `workspace` is the Main Agent workspace root (e.g. `~/.rune/workspace`).
+    pub fn persist(
+        &self,
+        state: &mut OrchestratorState,
+        workspace: &Path,
+    ) -> Result<(), OrchestratorError> {
         state.merge_queue = self
             .entries
             .iter()
@@ -195,7 +202,7 @@ impl MergeQueue {
                 queued_at: e.queued_at,
             })
             .collect();
-        state.save()
+        state.save(workspace)
     }
 }
 

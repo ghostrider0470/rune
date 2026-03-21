@@ -48,7 +48,9 @@ pub struct OrchestratorState {
     pub test_command: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lint_command: Option<String>,
-    pub worktree_root: PathBuf,
+    /// Path to the actual project repository on disk
+    /// (e.g. `/home/user/Development/my-project`).
+    pub repo_path: PathBuf,
     pub active_agents: Vec<AgentEntry>,
     /// Glob pattern -> agent_id that holds the lock.
     pub file_locks: HashMap<String, String>,
@@ -58,14 +60,20 @@ pub struct OrchestratorState {
 }
 
 impl OrchestratorState {
-    /// Path to the state file inside a worktree root.
-    pub fn state_path(worktree_root: &Path) -> PathBuf {
-        worktree_root.join(".orchestrator-state.json")
+    /// Path to the state file under the Main Agent's workspace:
+    /// `{workspace}/agents/{project}/.orchestrator-state.json`
+    pub fn state_path(workspace: &Path, project: &str) -> PathBuf {
+        workspace
+            .join("agents")
+            .join(project)
+            .join(".orchestrator-state.json")
     }
 
     /// Read state from disk. Returns `None` when the file does not exist.
-    pub fn load(worktree_root: &Path) -> Result<Option<Self>, OrchestratorError> {
-        let path = Self::state_path(worktree_root);
+    ///
+    /// `workspace` is the Main Agent workspace root (e.g. `~/.rune/workspace`).
+    pub fn load(workspace: &Path, project: &str) -> Result<Option<Self>, OrchestratorError> {
+        let path = Self::state_path(workspace, project);
         if !path.exists() {
             return Ok(None);
         }
@@ -77,8 +85,15 @@ impl OrchestratorState {
     }
 
     /// Persist state to disk (atomic: write tmp then rename).
-    pub fn save(&self) -> Result<(), OrchestratorError> {
-        let path = Self::state_path(&self.worktree_root);
+    ///
+    /// Creates the `{workspace}/agents/{project}/` directory if it does not
+    /// exist.
+    pub fn save(&self, workspace: &Path) -> Result<(), OrchestratorError> {
+        let path = Self::state_path(workspace, &self.project);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| OrchestratorError::Io(e.to_string()))?;
+        }
         let tmp = path.with_extension("json.tmp");
         let data = serde_json::to_string_pretty(self)
             .map_err(|e| OrchestratorError::Parse(e.to_string()))?;
@@ -337,7 +352,7 @@ mod tests {
             build_command: "cargo build".into(),
             test_command: "cargo test".into(),
             lint_command: None,
-            worktree_root: PathBuf::from("/tmp/test-worktree"),
+            repo_path: PathBuf::from("/home/user/Development/test-project"),
             active_agents: vec![],
             file_locks: HashMap::new(),
             merge_queue: vec![],
@@ -472,22 +487,32 @@ mod tests {
 
     #[test]
     fn save_and_load_round_trip() {
-        let dir = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
         let mut state = make_state();
-        state.worktree_root = dir.path().to_path_buf();
         state.file_locks.insert("src/*".into(), "agent-1".into());
 
-        state.save().unwrap();
+        state.save(workspace.path()).unwrap();
 
-        let loaded = OrchestratorState::load(dir.path()).unwrap().unwrap();
+        let loaded =
+            OrchestratorState::load(workspace.path(), "test-project").unwrap().unwrap();
         assert_eq!(loaded.project, "test-project");
         assert_eq!(loaded.file_locks.get("src/*").unwrap(), "agent-1");
     }
 
     #[test]
+    fn save_creates_agent_directory() {
+        let workspace = tempfile::tempdir().unwrap();
+        let state = make_state();
+        state.save(workspace.path()).unwrap();
+
+        let expected = workspace.path().join("agents/test-project/.orchestrator-state.json");
+        assert!(expected.exists());
+    }
+
+    #[test]
     fn load_returns_none_for_missing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let loaded = OrchestratorState::load(dir.path()).unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let loaded = OrchestratorState::load(workspace.path(), "nonexistent").unwrap();
         assert!(loaded.is_none());
     }
 }
