@@ -6,6 +6,7 @@ use std::time::Instant;
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
+    HookRegistry, PluginLoader, PluginRegistry,
     SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
@@ -74,6 +75,12 @@ pub struct AppState {
     pub skill_registry: Arc<SkillRegistry>,
     /// Skill loader used for explicit reloads and background scanning.
     pub skill_loader: Arc<SkillLoader>,
+    /// Dynamic plugin registry populated from scanned `PLUGIN.md` directories.
+    pub plugin_registry: Arc<PluginRegistry>,
+    /// Plugin loader used for discovery and background scanning.
+    pub plugin_loader: Arc<PluginLoader>,
+    /// Hook registry for plugin event handlers.
+    pub hook_registry: Arc<HookRegistry>,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
     /// Text-to-speech engine (constructed when TTS API key is configured).

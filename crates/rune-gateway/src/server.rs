@@ -14,6 +14,7 @@ use tracing::info;
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
+    HookRegistry, PluginLoader, PluginRegistry,
     SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
@@ -98,6 +99,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     .map_err(|e: std::net::AddrParseError| GatewayError::Internal(e.to_string()))?;
 
     let skills_dir = services.config.paths.skills_dir.clone();
+    let plugins_dir = services.config.paths.plugins_dir.clone();
     let workspace_root = services.config.agents.defaults.workspace.clone();
 
     // Build TTS engine if an API key is configured.
@@ -142,11 +144,19 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
     let _ = skill_loader.scan().await;
 
+    // Plugin and hook system initialization
+    let plugin_registry = Arc::new(PluginRegistry::new());
+    let plugin_loader = Arc::new(PluginLoader::new(plugins_dir, plugin_registry.clone()));
+    let _ = plugin_loader.scan().await;
+    let hook_registry = Arc::new(HookRegistry::new());
+    plugin_registry.register_hooks(&hook_registry).await;
+
     let turn_executor = Arc::new(
         Arc::try_unwrap(services.turn_executor)
             .unwrap_or_else(|executor| (*executor).clone())
             .with_skill_registry(skill_registry.clone())
-            .with_tool_approval_policy_repo(services.tool_approval_repo.clone()),
+            .with_tool_approval_policy_repo(services.tool_approval_repo.clone())
+            .with_hook_registry(hook_registry.clone()),
     );
 
     let state = AppState {
@@ -169,6 +179,9 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         device_registry: Arc::new(DeviceRegistry::new(services.device_repo)),
         skill_registry,
         skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
         event_tx,
         tts_engine,
         stt_engine,
