@@ -29,7 +29,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365MailAction, ProcessAction,
+    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, ProcessAction,
     RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
@@ -1195,6 +1195,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
                 Ms365CalendarAction::Read { id } => {
                     let result = client.ms365_calendar_read(&id).await?;
+                    println!("{}", render(&result, format));
+                }
+            },
+            Ms365Action::Files { action } => match action {
+                Ms365FilesAction::List { path, limit } => {
+                    let result = client.ms365_files_list(&path, limit).await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365FilesAction::Read { id } => {
+                    let result = client.ms365_files_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
             },
