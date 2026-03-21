@@ -115,6 +115,20 @@ fn new_tool_execution(session_id: Uuid, turn_id: Uuid) -> NewToolExecution {
     }
 }
 
+fn new_process_handle(session_id: Uuid) -> NewProcessHandle {
+    NewProcessHandle {
+        process_id: Uuid::now_v7(),
+        tool_call_id: Uuid::now_v7(),
+        session_id,
+        command: "sleep 60".into(),
+        cwd: "/tmp".into(),
+        status: "running".into(),
+        started_at: now(),
+        execution_mode: Some("background".into()),
+        tool_execution_id: Some(Uuid::now_v7()),
+    }
+}
+
 fn new_paired_device() -> NewPairedDevice {
     NewPairedDevice {
         id: Uuid::now_v7(),
@@ -676,6 +690,115 @@ async fn test_claim_due_reminders(repo: &dyn JobRepo) {
     assert!(claimed2.is_empty());
 }
 
+async fn test_process_handle_crud(
+    session_repo: &dyn SessionRepo,
+    handle_repo: &dyn ProcessHandleRepo,
+) {
+    let s = new_session();
+    let sid = s.id;
+    session_repo.create(s).await.unwrap();
+
+    let h = new_process_handle(sid);
+    let pid = h.process_id;
+    let tcid = h.tool_call_id;
+    let teid = h.tool_execution_id;
+
+    // Create
+    let created = handle_repo.create(h).await.unwrap();
+    assert_eq!(created.process_id, pid);
+    assert_eq!(created.status, "running");
+    assert_eq!(created.execution_mode, Some("background".into()));
+    assert_eq!(created.tool_execution_id, teid);
+
+    // Find by ID
+    let found = handle_repo.find_by_id(pid).await.unwrap();
+    assert_eq!(found.command, "sleep 60");
+    assert_eq!(found.execution_mode, Some("background".into()));
+    assert_eq!(found.tool_execution_id, teid);
+
+    // Find by tool_call_id
+    let by_tc = handle_repo.find_by_tool_call_id(tcid).await.unwrap();
+    assert!(by_tc.is_some());
+    assert_eq!(by_tc.unwrap().process_id, pid);
+
+    // Find by non-existent tool_call_id
+    let missing = handle_repo
+        .find_by_tool_call_id(Uuid::now_v7())
+        .await
+        .unwrap();
+    assert!(missing.is_none());
+
+    // Find by tool_execution_id
+    let by_te = handle_repo
+        .find_by_tool_execution_id(teid.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(by_te.len(), 1);
+    assert_eq!(by_te[0].process_id, pid);
+
+    // Find by non-existent tool_execution_id
+    let missing_te = handle_repo
+        .find_by_tool_execution_id(Uuid::now_v7())
+        .await
+        .unwrap();
+    assert!(missing_te.is_empty());
+
+    // List by session
+    let list = handle_repo.list_by_session(sid).await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].process_id, pid);
+
+    // List active
+    let active = handle_repo.list_active().await.unwrap();
+    assert!(active.iter().any(|h| h.process_id == pid));
+
+    // Update status
+    let updated = handle_repo
+        .update_status(pid, "exited", Some(0), Some(now()))
+        .await
+        .unwrap();
+    assert_eq!(updated.status, "exited");
+    assert_eq!(updated.exit_code, Some(0));
+    assert!(updated.ended_at.is_some());
+    // Audit fields survive update
+    assert_eq!(updated.execution_mode, Some("background".into()));
+    assert_eq!(updated.tool_execution_id, teid);
+
+    // No longer active after exit
+    let active_after = handle_repo.list_active().await.unwrap();
+    assert!(!active_after.iter().any(|h| h.process_id == pid));
+}
+
+async fn test_process_handle_foreground(
+    session_repo: &dyn SessionRepo,
+    handle_repo: &dyn ProcessHandleRepo,
+) {
+    let s = new_session();
+    let sid = s.id;
+    session_repo.create(s).await.unwrap();
+
+    // Create a foreground handle with no tool_execution_id
+    let h = NewProcessHandle {
+        process_id: Uuid::now_v7(),
+        tool_call_id: Uuid::now_v7(),
+        session_id: sid,
+        command: "echo hi".into(),
+        cwd: "/tmp".into(),
+        status: "running".into(),
+        started_at: now(),
+        execution_mode: Some("foreground".into()),
+        tool_execution_id: None,
+    };
+    let pid = h.process_id;
+    let created = handle_repo.create(h).await.unwrap();
+    assert_eq!(created.execution_mode, Some("foreground".into()));
+    assert_eq!(created.tool_execution_id, None);
+
+    let found = handle_repo.find_by_id(pid).await.unwrap();
+    assert_eq!(found.execution_mode, Some("foreground".into()));
+    assert_eq!(found.tool_execution_id, None);
+}
+
 // ── SQLite contract module ───────────────────────────────────────────
 
 #[cfg(feature = "sqlite")]
@@ -694,6 +817,7 @@ mod sqlite_contract {
         SqliteToolExecutionRepo,
         SqliteMemoryEmbeddingRepo,
         SqliteDeviceRepo,
+        SqliteProcessHandleRepo,
     ) {
         let conn = open_memory().await.unwrap();
         (
@@ -706,7 +830,8 @@ mod sqlite_contract {
             SqliteToolApprovalPolicyRepo::new(conn.clone()),
             SqliteToolExecutionRepo::new(conn.clone()),
             SqliteMemoryEmbeddingRepo::new(conn.clone()),
-            SqliteDeviceRepo::new(conn),
+            SqliteDeviceRepo::new(conn.clone()),
+            SqliteProcessHandleRepo::new(conn),
         )
     }
 
@@ -766,20 +891,32 @@ mod sqlite_contract {
 
     #[tokio::test]
     async fn memory_embedding_crud() {
-        let (_, _, _, _, _, _, _, _, me, _) = repos().await;
+        let (_, _, _, _, _, _, _, _, me, _, _) = repos().await;
         test_memory_embedding_crud(&me).await;
     }
 
     #[tokio::test]
     async fn device_crud() {
-        let (_, _, _, _, _, _, _, _, _, d) = repos().await;
+        let (_, _, _, _, _, _, _, _, _, d, _) = repos().await;
         test_device_crud(&d).await;
     }
 
     #[tokio::test]
     async fn pairing_request_crud() {
-        let (_, _, _, _, _, _, _, _, _, d) = repos().await;
+        let (_, _, _, _, _, _, _, _, _, d, _) = repos().await;
         test_pairing_request_crud(&d).await;
+    }
+
+    #[tokio::test]
+    async fn process_handle_crud() {
+        let (s, _, _, _, _, _, _, _, _, _, ph) = repos().await;
+        test_process_handle_crud(&s, &ph).await;
+    }
+
+    #[tokio::test]
+    async fn process_handle_foreground() {
+        let (s, _, _, _, _, _, _, _, _, _, ph) = repos().await;
+        test_process_handle_foreground(&s, &ph).await;
     }
 
     #[tokio::test]

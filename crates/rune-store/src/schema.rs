@@ -119,6 +119,8 @@ table! {
         exit_code -> Nullable<Int4>,
         started_at -> Timestamptz,
         ended_at -> Nullable<Timestamptz>,
+        execution_mode -> Nullable<Text>,
+        tool_execution_id -> Nullable<Uuid>,
     }
 }
 

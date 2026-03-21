@@ -973,6 +973,34 @@ impl ProcessHandleRepo for PgProcessHandleRepo {
             .await
             .map_err(StoreError::from)
     }
+
+    async fn find_by_tool_call_id(
+        &self,
+        tool_call_id: Uuid,
+    ) -> Result<Option<ProcessHandleRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        process_handles::table
+            .filter(process_handles::tool_call_id.eq(tool_call_id))
+            .select(ProcessHandleRow::as_select())
+            .first(&mut conn)
+            .await
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    async fn find_by_tool_execution_id(
+        &self,
+        tool_execution_id: Uuid,
+    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        process_handles::table
+            .filter(process_handles::tool_execution_id.eq(tool_execution_id))
+            .select(ProcessHandleRow::as_select())
+            .order(process_handles::started_at.desc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 // ── PgDeviceRepo ────────────────────────────────────────────────────────────

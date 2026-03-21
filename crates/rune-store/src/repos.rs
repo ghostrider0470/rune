@@ -422,4 +422,16 @@ pub trait ProcessHandleRepo: Send + Sync {
 
     /// List all active (running/backgrounded) process handles.
     async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError>;
+
+    /// Find a process handle by tool_call_id.
+    async fn find_by_tool_call_id(
+        &self,
+        tool_call_id: Uuid,
+    ) -> Result<Option<ProcessHandleRow>, StoreError>;
+
+    /// Find process handles linked to a tool_execution_id (audit lookup).
+    async fn find_by_tool_execution_id(
+        &self,
+        tool_execution_id: Uuid,
+    ) -> Result<Vec<ProcessHandleRow>, StoreError>;
 }

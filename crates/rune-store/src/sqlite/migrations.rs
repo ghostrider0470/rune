@@ -266,6 +266,15 @@ ALTER TABLE approvals ADD COLUMN handle_ref TEXT;
 ALTER TABLE approvals ADD COLUMN host_ref TEXT;
 "#,
     },
+    Migration {
+        version: 6,
+        name: "process_handle_audit_linkage",
+        sql: r#"
+-- Add execution-mode and tool-execution linkage to process handles.
+ALTER TABLE process_handles ADD COLUMN execution_mode TEXT;
+ALTER TABLE process_handles ADD COLUMN tool_execution_id TEXT;
+"#,
+    },
 ];
 
 /// Run all pending migrations on the given connection.
