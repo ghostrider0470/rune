@@ -3684,7 +3684,7 @@ mod tests {
         let base = tmp.path().to_path_buf();
         // Create all 9 subdirs
         for sub in &[
-            "db", "sessions", "memory", "media", "skills", "logs", "backups", "config", "secrets",
+            "db", "sessions", "memory", "media", "skills", "plugins", "logs", "backups", "config", "secrets",
         ] {
             std::fs::create_dir(base.join(sub)).unwrap();
         }
