@@ -17,6 +17,7 @@ pub mod skill;
 pub mod skill_loader;
 mod usage;
 pub mod workspace;
+pub mod orchestrator;
 
 pub use compaction::{CompactionStrategy, NoOpCompaction};
 pub use context::ContextAssembler;
