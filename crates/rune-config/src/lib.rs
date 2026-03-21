@@ -2889,6 +2889,7 @@ models = ["gpt-5.4", "gpt-image-1"]
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
                 skills_dir: base.join("skills"),
+                plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
@@ -2905,6 +2906,7 @@ models = ["gpt-5.4", "gpt-image-1"]
         assert!(base.join("memory").is_dir());
         assert!(base.join("media").is_dir());
         assert!(base.join("skills").is_dir());
+        assert!(base.join("plugins").is_dir());
         assert!(base.join("logs").is_dir());
         assert!(base.join("backups").is_dir());
         assert!(base.join("config").is_dir());
@@ -2923,6 +2925,7 @@ models = ["gpt-5.4", "gpt-image-1"]
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
                 skills_dir: base.join("skills"),
+                plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
@@ -2949,6 +2952,7 @@ models = ["gpt-5.4", "gpt-image-1"]
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
                 skills_dir: base.join("skills"),
+                plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
