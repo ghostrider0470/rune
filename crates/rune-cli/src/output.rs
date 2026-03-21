@@ -3576,6 +3576,48 @@ impl fmt::Display for Ms365MailFoldersResponse {
     }
 }
 
+/// Response from `rune ms365 mail send`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailSendResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for Ms365MailSendResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.message)
+    }
+}
+
+/// Response from `rune ms365 mail reply`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailReplyResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for Ms365MailReplyResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.message)
+    }
+}
+
+/// Response from `rune ms365 mail forward`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365MailForwardResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for Ms365MailForwardResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.message)
+    }
+}
+
 // ── Microsoft 365 Files ───────────────────────────────────────────
 
 /// A single OneDrive file/folder item summary.
@@ -7011,6 +7053,30 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["folders"][0]["display_name"], "Inbox");
         assert_eq!(v["folders"][0]["unread_count"], 2);
+    }
+
+    #[test]
+    fn render_ms365_mail_send_human() {
+        let r = Ms365MailSendResponse { success: true, message: "Message sent".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Message sent"));
+    }
+
+    #[test]
+    fn render_ms365_mail_reply_human() {
+        let r = Ms365MailReplyResponse { success: true, message: "Reply sent".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Reply sent"));
+    }
+
+    #[test]
+    fn render_ms365_mail_forward_human() {
+        let r = Ms365MailForwardResponse { success: true, message: "Message forwarded".into() };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Message forwarded"));
     }
 
     #[test]
