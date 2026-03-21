@@ -1977,6 +1977,17 @@ pub struct ConfigEnvResponse { pub overrides: Vec<ConfigEnvOverride> }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigEnvOverride { pub key: String, pub value: String, pub source: String }
 impl fmt::Display for ConfigEnvResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.overrides.is_empty() { return write!(f, "No environment overrides active."); } for o in &self.overrides { writeln!(f, "  {}: {} ({})", o.key, o.value, o.source)?; } Ok(()) } }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigExportResponse { pub destination: String, pub bytes_written: usize }
+impl fmt::Display for ConfigExportResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.destination == "-" {
+            Ok(()) // content already printed to stdout
+        } else {
+            write!(f, "Exported resolved config to {} ({} bytes)", self.destination, self.bytes_written)
+        }
+    }
+}
 
 // ── Lifecycle responses (#74, #70) ────────────────────────────
 #[derive(Debug, Clone, Serialize, Deserialize)]

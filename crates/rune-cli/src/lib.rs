@@ -29,7 +29,7 @@ use cli::{
     ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
     GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
     MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
+    ModelsAction, ProcessAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
     SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
     BackupAction, UpdateAction,
 };
@@ -1166,6 +1166,24 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::Process { action } => match action {
+            ProcessAction::List => {
+                let result = client.process_list().await?;
+                println!("{}", render(&result, format));
+            }
+            ProcessAction::Get { id } => {
+                let result = client.process_get(&id).await?;
+                println!("{}", render(&result, format));
+            }
+            ProcessAction::Log { id } => {
+                let log = client.process_log(&id).await?;
+                print!("{log}");
+            }
+            ProcessAction::Kill { id } => {
+                let result = client.process_kill(&id).await?;
+                println!("{}", render(&result, format));
+            }
+        },
         Command::Cron { action } => match action {
             CronAction::Status => {
                 let result = client.cron_status().await?;
@@ -2017,6 +2035,15 @@ pub async fn run(cli: Cli) -> Result<()> {
             ConfigAction::Env => {
                 let result = client.config_env().await?;
                 println!("{}", render(&result, format));
+            }
+            ConfigAction::Export { output } => {
+                let result = client.config_export().await?;
+                if output == "-" {
+                    println!("{}", render(&result, format));
+                } else {
+                    std::fs::write(&output, render(&result, format))?;
+                    println!("Exported resolved config to {output}");
+                }
             }
         },
         Command::Security { action } => match action {

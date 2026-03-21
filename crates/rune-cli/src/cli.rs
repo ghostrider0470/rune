@@ -134,6 +134,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ApprovalsAction,
     },
+    /// Inspect and manage background processes.
+    Process {
+        #[command(subcommand)]
+        action: ProcessAction,
+    },
     /// Manage reminders (one-shot scheduled messages).
     Reminders {
         #[command(subcommand)]
@@ -1343,6 +1348,33 @@ pub enum ConfigAction {
     Diff,
     /// Show all resolved RUNE__* environment variable overrides.
     Env,
+    /// Export resolved configuration (secrets redacted) to a file or stdout.
+    Export {
+        /// Output file path. Omit or use `-` to write to stdout.
+        #[arg(default_value = "-")]
+        output: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProcessAction {
+    /// List background processes.
+    List,
+    /// Inspect a single background process.
+    Get {
+        /// Process identifier.
+        id: String,
+    },
+    /// Fetch log output from a background process.
+    Log {
+        /// Process identifier.
+        id: String,
+    },
+    /// Kill a running background process.
+    Kill {
+        /// Process identifier.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2853,6 +2885,61 @@ mod tests {
                 action: ConfigAction::Env
             }
         ));
+    }
+
+    #[test]
+    fn parse_config_export_default() {
+        let cli = Cli::try_parse_from(["rune", "config", "export"]).unwrap();
+        match cli.command {
+            Command::Config { action: ConfigAction::Export { output } } => {
+                assert_eq!(output, "-");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_config_export_file() {
+        let cli = Cli::try_parse_from(["rune", "config", "export", "/tmp/out.toml"]).unwrap();
+        match cli.command {
+            Command::Config { action: ConfigAction::Export { output } } => {
+                assert_eq!(output, "/tmp/out.toml");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_process_list() {
+        let cli = Cli::try_parse_from(["rune", "process", "list"]).unwrap();
+        assert!(matches!(cli.command, Command::Process { action: ProcessAction::List }));
+    }
+
+    #[test]
+    fn parse_process_get() {
+        let cli = Cli::try_parse_from(["rune", "process", "get", "abc123"]).unwrap();
+        match cli.command {
+            Command::Process { action: ProcessAction::Get { id } } => assert_eq!(id, "abc123"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_process_kill() {
+        let cli = Cli::try_parse_from(["rune", "process", "kill", "abc123"]).unwrap();
+        match cli.command {
+            Command::Process { action: ProcessAction::Kill { id } } => assert_eq!(id, "abc123"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_process_log() {
+        let cli = Cli::try_parse_from(["rune", "process", "log", "abc123"]).unwrap();
+        match cli.command {
+            Command::Process { action: ProcessAction::Log { id } } => assert_eq!(id, "abc123"),
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

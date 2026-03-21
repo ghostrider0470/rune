@@ -2904,6 +2904,28 @@ impl GatewayClient {
         let r = self.http.get(self.url("/config/env")).send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn config_export(&self) -> Result<crate::output::ConfigExportResponse> {
+        let r = self.http.get(self.url("/config/export")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+
+    // ── Processes (#39) ────────────────────────────────────────
+    pub async fn process_list(&self) -> Result<serde_json::Value> {
+        let r = self.http.get(self.url("/processes")).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn process_get(&self, id: &str) -> Result<serde_json::Value> {
+        let r = self.http.get(self.url(&format!("/processes/{id}"))).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn process_log(&self, id: &str) -> Result<String> {
+        let r = self.http.get(self.url(&format!("/processes/{id}/log"))).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.text().await.context("text")?) } else { bail!("HTTP {}", r.status()); }
+    }
+    pub async fn process_kill(&self, id: &str) -> Result<crate::output::ActionResult> {
+        let r = self.http.post(self.url(&format!("/processes/{id}/kill"))).send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
