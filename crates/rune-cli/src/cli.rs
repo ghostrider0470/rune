@@ -264,6 +264,11 @@ pub enum Ms365Action {
         #[command(subcommand)]
         action: Ms365UsersAction,
     },
+    /// Planner plans and tasks.
+    Planner {
+        #[command(subcommand)]
+        action: Ms365PlannerAction,
+    },
 }
 
 /// Auth/config inspection subcommands.
@@ -349,6 +354,33 @@ pub enum Ms365UsersAction {
     /// Read a single user's profile by ID or UPN.
     Read {
         /// User ID or user principal name.
+        #[arg(long)]
+        id: String,
+    },
+}
+
+/// Planner subcommands.
+#[derive(Debug, Subcommand)]
+pub enum Ms365PlannerAction {
+    /// List plans accessible to the authenticated user.
+    Plans {
+        /// Maximum number of plans to return.
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+    },
+    /// List tasks in a plan.
+    Tasks {
+        /// Plan ID to list tasks from.
+        #[arg(long)]
+        plan_id: String,
+        /// Maximum number of tasks to return.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Read a single task by ID.
+    #[command(name = "task-read")]
+    TaskRead {
+        /// Task ID to retrieve.
         #[arg(long)]
         id: String,
     },
@@ -4758,6 +4790,40 @@ mod subagent_cli_tests {
             cli.command,
             Command::Ms365 { action: Ms365Action::Auth { action: Ms365AuthAction::Status } }
         ));
+    }
+
+    #[test]
+    fn parse_ms365_planner_plans() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "planner", "plans"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Planner { action: Ms365PlannerAction::Plans { limit } } } => {
+                assert_eq!(limit, 25);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_planner_tasks() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "planner", "tasks", "--plan-id", "p1"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Planner { action: Ms365PlannerAction::Tasks { plan_id, limit } } } => {
+                assert_eq!(plan_id, "p1");
+                assert_eq!(limit, 50);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_planner_task_read() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "planner", "task-read", "--id", "t1"]).unwrap();
+        match cli.command {
+            Command::Ms365 { action: Ms365Action::Planner { action: Ms365PlannerAction::TaskRead { id } } } => {
+                assert_eq!(id, "t1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 
     #[test]

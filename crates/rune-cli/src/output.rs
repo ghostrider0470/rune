@@ -3733,6 +3733,128 @@ impl fmt::Display for Ms365UsersListResponse {
     }
 }
 
+// ── Planner ──────────────────────────────────────────────────────
+
+/// Summary plan entry for list responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerPlan {
+    pub id: String,
+    pub title: String,
+    pub owner: Option<String>,
+    pub created_at: Option<String>,
+}
+
+impl fmt::Display for Ms365PlannerPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let owner = self.owner.as_deref().unwrap_or("–");
+        write!(f, "  {} — owner: {owner}", self.title)
+    }
+}
+
+/// Response from `rune ms365 planner plans`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerPlansResponse {
+    pub plans: Vec<Ms365PlannerPlan>,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365PlannerPlansResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Planner plans: {} plan(s)", self.total)?;
+        if self.plans.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for p in &self.plans {
+                writeln!(f, "{p}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Summary task entry for list responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerTaskSummary {
+    pub id: String,
+    pub title: String,
+    pub percent_complete: u8,
+    pub assigned_to: Option<String>,
+    pub due_date: Option<String>,
+}
+
+impl fmt::Display for Ms365PlannerTaskSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let assignee = self.assigned_to.as_deref().unwrap_or("unassigned");
+        let due = self.due_date.as_deref().unwrap_or("no due date");
+        write!(f, "  [{}%] {} — {assignee}, {due}", self.percent_complete, self.title)
+    }
+}
+
+/// Response from `rune ms365 planner tasks`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerTasksResponse {
+    pub tasks: Vec<Ms365PlannerTaskSummary>,
+    pub plan_id: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365PlannerTasksResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Plan {} — {} task(s)", self.plan_id, self.total)?;
+        if self.tasks.is_empty() {
+            writeln!(f, "  (none)")?;
+        } else {
+            for t in &self.tasks {
+                writeln!(f, "{t}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 planner task-read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerTaskReadResponse {
+    pub id: String,
+    pub title: String,
+    pub plan_id: String,
+    pub bucket_id: Option<String>,
+    pub percent_complete: u8,
+    pub assigned_to: Option<String>,
+    pub due_date: Option<String>,
+    pub created_at: Option<String>,
+    pub priority: Option<u8>,
+    pub description: Option<String>,
+}
+
+impl fmt::Display for Ms365PlannerTaskReadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "── Task: {} ──", self.title)?;
+        writeln!(f, "  ID:        {}", self.id)?;
+        writeln!(f, "  Plan:      {}", self.plan_id)?;
+        if let Some(ref bucket) = self.bucket_id {
+            writeln!(f, "  Bucket:    {bucket}")?;
+        }
+        writeln!(f, "  Progress:  {}%", self.percent_complete)?;
+        if let Some(ref assignee) = self.assigned_to {
+            writeln!(f, "  Assigned:  {assignee}")?;
+        }
+        if let Some(ref due) = self.due_date {
+            writeln!(f, "  Due:       {due}")?;
+        }
+        if let Some(pri) = self.priority {
+            writeln!(f, "  Priority:  {pri}")?;
+        }
+        if let Some(ref created) = self.created_at {
+            writeln!(f, "  Created:   {created}")?;
+        }
+        if let Some(ref desc) = self.description {
+            writeln!(f, "  Description: {desc}")?;
+        }
+        Ok(())
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
