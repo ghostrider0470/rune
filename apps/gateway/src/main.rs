@@ -27,6 +27,7 @@ use rune_config::{
     AppConfig, MemoryLevel, ModelBootstrap, PathsProfile, RuntimeMode, StorageBackend,
 };
 use rune_core::ToolCategory;
+use rune_gateway::ms365::GraphMs365PlannerService;
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
 use rune_mcp::{McpManager, McpToolExecutor};
@@ -704,6 +705,7 @@ async fn build_services(
         process_manager,
         capabilities,
         device_repo,
+        ms365_planner_service: Arc::new(GraphMs365PlannerService::new()),
     };
 
     Ok((services, embedded_pg, session_loop))
@@ -1425,7 +1427,9 @@ impl ToolExecutor for AppToolExecutor {
             "memory_search" | "memory_get" => self.memory.execute(call).await,
             "memory_write" => {
                 // Append to today's daily note file (memory/YYYY-MM-DD.md)
-                let text = call.arguments.get("text")
+                let text = call
+                    .arguments
+                    .get("text")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
@@ -1467,16 +1471,14 @@ impl ToolExecutor for AppToolExecutor {
             }
             "sessions_spawn" | "sessions_send" => self.spawn.execute(call).await,
             "subagents" => self.subagents.execute(call).await,
-            "web_fetch" => {
-                match rune_tools::web_fetch_tool::WebFetchToolExecutor::new() {
-                    Ok(executor) => executor.execute(call).await,
-                    Err(e) => Err(e),
-                }
-            }
+            "web_fetch" => match rune_tools::web_fetch_tool::WebFetchToolExecutor::new() {
+                Ok(executor) => executor.execute(call).await,
+                Err(e) => Err(e),
+            },
             "git" => {
-                rune_tools::git_tool::GitToolExecutor::new(
-                    self.workspace_root.clone()
-                ).execute(call).await
+                rune_tools::git_tool::GitToolExecutor::new(self.workspace_root.clone())
+                    .execute(call)
+                    .await
             }
             other if other.contains("__") => match &self.mcp {
                 Some(mcp) => mcp.execute(call).await,

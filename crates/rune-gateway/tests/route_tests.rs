@@ -34,6 +34,10 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
+use rune_gateway::ms365::{
+    CreatePlannerTaskRequest, Ms365PlannerService, Ms365PlannerServiceError, PlannerTask,
+    UpdatePlannerTaskRequest,
+};
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
@@ -723,6 +727,104 @@ impl ToolExecutor for FakeToolExecutor {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlannerMutationCall {
+    Create(CreatePlannerTaskRequest),
+    Update {
+        id: String,
+        request: UpdatePlannerTaskRequest,
+    },
+    Complete {
+        id: String,
+    },
+}
+
+#[derive(Debug)]
+struct FakeMs365PlannerService {
+    create_response: Result<PlannerTask, Ms365PlannerServiceError>,
+    update_response: Result<PlannerTask, Ms365PlannerServiceError>,
+    complete_response: Result<PlannerTask, Ms365PlannerServiceError>,
+    calls: Mutex<Vec<PlannerMutationCall>>,
+}
+
+impl Default for FakeMs365PlannerService {
+    fn default() -> Self {
+        Self {
+            create_response: Err(Ms365PlannerServiceError::NotConfigured(
+                "test planner service not configured".to_string(),
+            )),
+            update_response: Err(Ms365PlannerServiceError::NotConfigured(
+                "test planner service not configured".to_string(),
+            )),
+            complete_response: Err(Ms365PlannerServiceError::NotConfigured(
+                "test planner service not configured".to_string(),
+            )),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl FakeMs365PlannerService {
+    fn with_create_response(response: Result<PlannerTask, Ms365PlannerServiceError>) -> Self {
+        Self {
+            create_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_update_response(response: Result<PlannerTask, Ms365PlannerServiceError>) -> Self {
+        Self {
+            update_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_complete_response(response: Result<PlannerTask, Ms365PlannerServiceError>) -> Self {
+        Self {
+            complete_response: response,
+            ..Self::default()
+        }
+    }
+
+    async fn calls(&self) -> Vec<PlannerMutationCall> {
+        self.calls.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl Ms365PlannerService for FakeMs365PlannerService {
+    async fn create_task(
+        &self,
+        request: CreatePlannerTaskRequest,
+    ) -> Result<PlannerTask, Ms365PlannerServiceError> {
+        self.calls
+            .lock()
+            .await
+            .push(PlannerMutationCall::Create(request));
+        self.create_response.clone()
+    }
+
+    async fn update_task(
+        &self,
+        id: &str,
+        request: UpdatePlannerTaskRequest,
+    ) -> Result<PlannerTask, Ms365PlannerServiceError> {
+        self.calls.lock().await.push(PlannerMutationCall::Update {
+            id: id.to_string(),
+            request,
+        });
+        self.update_response.clone()
+    }
+
+    async fn complete_task(&self, id: &str) -> Result<PlannerTask, Ms365PlannerServiceError> {
+        self.calls
+            .lock()
+            .await
+            .push(PlannerMutationCall::Complete { id: id.to_string() });
+        self.complete_response.clone()
+    }
+}
+
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 const TEST_AUTH_TOKEN: &str = "test-secret-token";
@@ -735,9 +837,21 @@ fn build_test_app_with_config(config: AppConfig, auth_token: Option<String>) -> 
     build_test_app_parts(config, auth_token).0
 }
 
+fn test_ms365_planner_service() -> Arc<dyn Ms365PlannerService> {
+    Arc::new(FakeMs365PlannerService::default())
+}
+
 fn build_test_app_parts(
+    config: AppConfig,
+    auth_token: Option<String>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_planner_service(config, auth_token, test_ms365_planner_service())
+}
+
+fn build_test_app_parts_with_planner_service(
     mut config: AppConfig,
     auth_token: Option<String>,
+    ms365_planner_service: Arc<dyn Ms365PlannerService>,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -812,6 +926,7 @@ fn build_test_app_parts(
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service,
     };
 
     (build_router(state, auth_token), device_repo)
@@ -825,6 +940,21 @@ async fn body_json(response: axum::http::Response<Body>) -> Value {
 async fn body_text(response: axum::http::Response<Body>) -> String {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+fn sample_planner_task(id: &str) -> PlannerTask {
+    PlannerTask {
+        id: id.to_string(),
+        title: "Draft release notes".to_string(),
+        plan_id: "plan-123".to_string(),
+        bucket_id: Some("bucket-456".to_string()),
+        percent_complete: 25,
+        assigned_to: Some("user-789".to_string()),
+        due_date: Some("2026-03-30T12:00:00Z".to_string()),
+        created_at: Some("2026-03-22T10:15:00Z".to_string()),
+        priority: Some(5),
+        description: Some("Collect user-facing changes.".to_string()),
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -900,6 +1030,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1002,6 +1133,7 @@ enabled: true
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1116,6 +1248,7 @@ async fn status_reports_configured_lane_capacities() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -1207,6 +1340,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1332,6 +1466,7 @@ async fn ws_rpc_health_reports_session_count() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1436,6 +1571,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1559,6 +1695,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1699,6 +1836,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1786,6 +1924,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1870,6 +2009,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2014,6 +2154,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2154,6 +2295,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2259,6 +2401,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2716,6 +2859,211 @@ async fn ms365_auth_status_requires_auth_when_gateway_token_enabled() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ms365_planner_create_task_forwards_request_and_returns_created_task() {
+    let planner_service = Arc::new(FakeMs365PlannerService::with_create_response(Ok(
+        sample_planner_task("task-create-1"),
+    )));
+    let (app, _device_repo) = build_test_app_parts_with_planner_service(
+        AppConfig::default(),
+        None,
+        planner_service.clone(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/planner/tasks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "plan_id": "plan-123",
+                        "title": "Draft release notes",
+                        "bucket_id": "bucket-456",
+                        "assigned_to": "user-789",
+                        "due_date": "2026-03-30T12:00:00Z",
+                        "priority": 5,
+                        "description": "Collect user-facing changes."
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let json = body_json(response).await;
+    assert_eq!(json["task"]["id"], "task-create-1");
+    assert_eq!(json["task"]["plan_id"], "plan-123");
+    assert_eq!(json["task"]["title"], "Draft release notes");
+    assert_eq!(json["task"]["percent_complete"], 25);
+
+    let calls = planner_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![PlannerMutationCall::Create(CreatePlannerTaskRequest {
+            plan_id: "plan-123".to_string(),
+            title: "Draft release notes".to_string(),
+            bucket_id: Some("bucket-456".to_string()),
+            assigned_to: Some("user-789".to_string()),
+            due_date: Some("2026-03-30T12:00:00Z".to_string()),
+            priority: Some(5),
+            description: Some("Collect user-facing changes.".to_string()),
+        })]
+    );
+}
+
+#[tokio::test]
+async fn ms365_planner_update_task_forwards_request_and_returns_updated_task() {
+    let planner_service = Arc::new(FakeMs365PlannerService::with_update_response(Ok(
+        sample_planner_task("task-update-1"),
+    )));
+    let (app, _device_repo) = build_test_app_parts_with_planner_service(
+        AppConfig::default(),
+        None,
+        planner_service.clone(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/planner/tasks/task-update-1")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "title": "Finalize release notes",
+                        "description": "Ship the final draft."
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["task"]["id"], "task-update-1");
+    assert_eq!(json["task"]["title"], "Draft release notes");
+
+    let calls = planner_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![PlannerMutationCall::Update {
+            id: "task-update-1".to_string(),
+            request: UpdatePlannerTaskRequest {
+                title: Some("Finalize release notes".to_string()),
+                bucket_id: None,
+                assigned_to: None,
+                due_date: None,
+                priority: None,
+                description: Some("Ship the final draft.".to_string()),
+            },
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_planner_update_task_rejects_empty_patch() {
+    let planner_service = Arc::new(FakeMs365PlannerService::with_update_response(Err(
+        Ms365PlannerServiceError::Validation(
+            "planner task update requires at least one mutable field".to_string(),
+        ),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_planner_service(AppConfig::default(), None, planner_service);
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/planner/tasks/task-update-1")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("planner task update requires at least one mutable field")
+    );
+}
+
+#[tokio::test]
+async fn ms365_planner_complete_task_forwards_id_and_returns_completed_task() {
+    let mut task = sample_planner_task("task-complete-1");
+    task.percent_complete = 100;
+
+    let planner_service = Arc::new(FakeMs365PlannerService::with_complete_response(Ok(task)));
+    let (app, _device_repo) = build_test_app_parts_with_planner_service(
+        AppConfig::default(),
+        None,
+        planner_service.clone(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/planner/tasks/task-complete-1/complete")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["task"]["id"], "task-complete-1");
+    assert_eq!(json["task"]["percent_complete"], 100);
+
+    let calls = planner_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![PlannerMutationCall::Complete {
+            id: "task-complete-1".to_string(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_planner_mutation_routes_require_auth_when_gateway_token_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/ms365/planner/tasks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "plan_id": "plan-123",
+                        "title": "Draft release notes"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/planner/tasks/task-complete-1/complete")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
@@ -3706,6 +4054,7 @@ async fn send_message_and_transcript_with_shared_state() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -3930,6 +4279,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -4767,8 +5117,7 @@ enabled: false
 #[tokio::test]
 async fn skills_detail_route_returns_skill_and_missing_error() {
     let mut config = AppConfig::default();
-    let skills_dir =
-        std::env::temp_dir().join(format!("rune-gw-skill-detail-{}", Uuid::now_v7()));
+    let skills_dir = std::env::temp_dir().join(format!("rune-gw-skill-detail-{}", Uuid::now_v7()));
     std::fs::create_dir_all(skills_dir.join("alpha")).unwrap();
     std::fs::write(
         skills_dir.join("alpha/SKILL.md"),
@@ -4804,7 +5153,10 @@ enabled: true
     assert_eq!(json["name"], "alpha");
     assert_eq!(json["description"], "Alpha skill");
     assert_eq!(json["enabled"], true);
-    assert_eq!(json["source_dir"], skills_dir.join("alpha").display().to_string());
+    assert_eq!(
+        json["source_dir"],
+        skills_dir.join("alpha").display().to_string()
+    );
     assert!(
         json["binary_path"]
             .as_str()
@@ -4927,6 +5279,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -5175,6 +5528,7 @@ async fn reminders_list_includes_outcome_fields() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -5274,6 +5628,7 @@ async fn reminders_cancel_returns_success() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -5388,6 +5743,7 @@ async fn agent_steer_success() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -5406,16 +5762,23 @@ async fn agent_steer_success() {
     let json = body_json(response).await;
     assert_eq!(json["session_id"], agent_id.to_string());
     assert_eq!(json["accepted"], true);
-    assert!(json["detail"].as_str().unwrap().contains("steering instruction delivered"));
+    assert!(
+        json["detail"]
+            .as_str()
+            .unwrap()
+            .contains("steering instruction delivered")
+    );
 
     // Verify transcript got a status_note.
     let items = transcript_repo.list_by_session(agent_id).await.unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].kind, "status_note");
-    assert!(items[0].payload["content"]
-        .as_str()
-        .unwrap()
-        .contains("focus on tests"));
+    assert!(
+        items[0].payload["content"]
+            .as_str()
+            .unwrap()
+            .contains("focus on tests")
+    );
 
     // Verify metadata was updated.
     let session = session_repo.find_by_id(agent_id).await.unwrap();
@@ -5528,6 +5891,7 @@ async fn agent_kill_success() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let app = build_router(state, None);
@@ -5557,10 +5921,12 @@ async fn agent_kill_success() {
     let items = transcript_repo.list_by_session(agent_id).await.unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].kind, "status_note");
-    assert!(items[0].payload["content"]
-        .as_str()
-        .unwrap()
-        .contains("no longer needed"));
+    assert!(
+        items[0].payload["content"]
+            .as_str()
+            .unwrap()
+            .contains("no longer needed")
+    );
 }
 
 #[tokio::test]
@@ -5671,6 +6037,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -5724,11 +6091,7 @@ async fn ws_rpc_agent_steer_and_kill() {
 async fn configure_returns_items_with_default_config() {
     let app = build_test_app(None);
     let response = app
-        .oneshot(
-            Request::post("/configure")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::post("/configure").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -5737,7 +6100,12 @@ async fn configure_returns_items_with_default_config() {
 
     // With default config: no providers, no auth → success should be false
     assert_eq!(json["success"], false);
-    assert!(json["detail"].as_str().unwrap().contains("need configuration"));
+    assert!(
+        json["detail"]
+            .as_str()
+            .unwrap()
+            .contains("need configuration")
+    );
 
     // Items array should exist and contain expected keys
     let items = json["items"].as_array().unwrap();
@@ -5752,7 +6120,10 @@ async fn configure_returns_items_with_default_config() {
     assert!(names.contains(&"mcp_servers"));
 
     // model_providers should be "needed" with default config
-    let mp = items.iter().find(|i| i["name"] == "model_providers").unwrap();
+    let mp = items
+        .iter()
+        .find(|i| i["name"] == "model_providers")
+        .unwrap();
     assert_eq!(mp["status"], "needed");
 }
 
@@ -5760,11 +6131,7 @@ async fn configure_returns_items_with_default_config() {
 async fn setup_returns_same_shape_as_configure() {
     let app = build_test_app(None);
     let response = app
-        .oneshot(
-            Request::post("/setup")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::post("/setup").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -5808,7 +6175,10 @@ async fn configure_with_providers_reports_configured() {
     let items = json["items"].as_array().unwrap();
 
     // model_providers should be "configured"
-    let mp = items.iter().find(|i| i["name"] == "model_providers").unwrap();
+    let mp = items
+        .iter()
+        .find(|i| i["name"] == "model_providers")
+        .unwrap();
     assert_eq!(mp["status"], "configured");
     assert!(mp["message"].as_str().unwrap().contains("1 provider"));
 

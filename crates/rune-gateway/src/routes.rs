@@ -25,6 +25,9 @@ use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
 use serde_json::Value;
 
 use crate::error::GatewayError;
+use crate::ms365::{
+    CreatePlannerTaskRequest, Ms365PlannerServiceError, PlannerTask, UpdatePlannerTaskRequest,
+};
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
 use crate::state::{AppState, SessionEvent};
 use crate::ws::active_ws_connections;
@@ -240,10 +243,7 @@ pub async fn spa_index() -> Response {
     spa_response_for_path("")
 }
 
-pub async fn spa_handler(
-    headers: axum::http::HeaderMap,
-    uri: axum::http::Uri,
-) -> Response {
+pub async fn spa_handler(headers: axum::http::HeaderMap, uri: axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
 
     // If the request is for an API path or doesn't accept HTML, return 404
@@ -1480,10 +1480,7 @@ pub async fn agent_steer(
         .map_err(|_| GatewayError::SessionNotFound(format!("agent session {id} not found")))?;
 
     let now = chrono::Utc::now();
-    let note = format!(
-        "[steer] operator instruction injected: {}",
-        body.message
-    );
+    let note = format!("[steer] operator instruction injected: {}", body.message);
 
     // Append a status_note transcript item for auditability.
     state
@@ -1527,10 +1524,7 @@ pub async fn agent_steer(
     Ok(Json(AgentSteerResponse {
         session_id: id.to_string(),
         accepted: true,
-        detail: format!(
-            "steering instruction delivered to session {}",
-            id
-        ),
+        detail: format!("steering instruction delivered to session {}", id),
     }))
 }
 
@@ -2226,18 +2220,14 @@ pub async fn kill_process(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ActionResponse>, GatewayError> {
-    state
-        .process_manager
-        .kill(&id)
-        .await
-        .map_err(|e| match e {
-            rune_tools::ToolError::ExecutionFailed(message)
-                if message.contains("process not found") =>
-            {
-                GatewayError::BadRequest(message)
-            }
-            other => GatewayError::Internal(other.to_string()),
-        })?;
+    state.process_manager.kill(&id).await.map_err(|e| match e {
+        rune_tools::ToolError::ExecutionFailed(message)
+            if message.contains("process not found") =>
+        {
+            GatewayError::BadRequest(message)
+        }
+        other => GatewayError::Internal(other.to_string()),
+    })?;
 
     Ok(Json(ActionResponse {
         success: true,
@@ -2511,20 +2501,19 @@ pub async fn telegram_webhook(
                             );
                             if let Ok(file_resp) = client.get(&download_url).send().await {
                                 if let Ok(bytes) = file_resp.bytes().await {
-                                    let mime_type = media_mime
-                                        .clone()
-                                        .unwrap_or_else(|| {
-                                            if message.get("voice").is_some() {
-                                                "audio/ogg".to_string()
-                                            } else if message.get("audio").is_some() {
-                                                "audio/mpeg".to_string()
-                                            } else {
-                                                "audio/ogg".to_string()
-                                            }
-                                        });
+                                    let mime_type = media_mime.clone().unwrap_or_else(|| {
+                                        if message.get("voice").is_some() {
+                                            "audio/ogg".to_string()
+                                        } else if message.get("audio").is_some() {
+                                            "audio/mpeg".to_string()
+                                        } else {
+                                            "audio/ogg".to_string()
+                                        }
+                                    });
 
                                     let engine = engine_lock.read().await;
-                                    if let Ok(result) = engine.transcribe(&bytes, &mime_type).await {
+                                    if let Ok(result) = engine.transcribe(&bytes, &mime_type).await
+                                    {
                                         if let Some(root) = payload.as_object_mut() {
                                             root.insert(
                                                 "media_transcription".to_string(),
@@ -2561,12 +2550,18 @@ pub async fn telegram_webhook(
             .get("chat")
             .and_then(|chat| chat.get("id"))
             .and_then(|id| id.as_i64())
-            .ok_or_else(|| GatewayError::BadRequest("telegram message missing chat.id".to_string()))?;
+            .ok_or_else(|| {
+                GatewayError::BadRequest("telegram message missing chat.id".to_string())
+            })?;
 
         let sender = message
             .get("from")
-            .and_then(|from| from.get("username").and_then(|v| v.as_str()).map(str::to_string)
-                .or_else(|| from.get("id").map(|v| v.to_string())))
+            .and_then(|from| {
+                from.get("username")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .or_else(|| from.get("id").map(|v| v.to_string()))
+            })
             .unwrap_or_else(|| "unknown".to_string());
 
         let routing_key = format!("{}:{}", chat_id, sender);
@@ -2614,10 +2609,13 @@ pub async fn telegram_webhook(
             if content.trim().is_empty() {
                 content = transcribed.to_string();
             } else {
-                content = format!("{}
+                content = format!(
+                    "{}
 
 [Voice transcription]
-{}", content, transcribed);
+{}",
+                    content, transcribed
+                );
             }
         }
 
@@ -2648,7 +2646,8 @@ pub async fn telegram_webhook(
                     .map(|id| id.to_string())
                     .unwrap_or_default();
                 let client = reqwest::Client::new();
-                let send_url = format!("https://api.telegram.org/bot{}/sendMessage", expected_token);
+                let send_url =
+                    format!("https://api.telegram.org/bot{}/sendMessage", expected_token);
                 let mut params = serde_json::json!({
                     "chat_id": chat_id,
                     "text": reply,
@@ -3222,10 +3221,9 @@ pub async fn tts_synthesize(
     .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
     if body.channel.as_deref() == Some("telegram") {
-        let chat_id = body
-            .chat_id
-            .as_deref()
-            .ok_or_else(|| GatewayError::BadRequest("chat_id is required for Telegram TTS delivery".to_string()))?;
+        let chat_id = body.chat_id.as_deref().ok_or_else(|| {
+            GatewayError::BadRequest("chat_id is required for Telegram TTS delivery".to_string())
+        })?;
         let bot_token = state
             .config
             .read()
@@ -3234,7 +3232,8 @@ pub async fn tts_synthesize(
             .telegram_token
             .clone()
             .ok_or_else(|| GatewayError::BadRequest("Telegram not configured".to_string()))?;
-        let adapter: rune_channels::TelegramAdapter = crate::telegram_adapter_from_token(&bot_token);
+        let adapter: rune_channels::TelegramAdapter =
+            crate::telegram_adapter_from_token(&bot_token);
         let receipt = adapter
             .send_audio_bytes(
                 chat_id,
@@ -3563,6 +3562,68 @@ pub async fn ms365_auth_status(
     }))
 }
 
+#[derive(Serialize)]
+pub struct Ms365PlannerTaskMutationResponse {
+    pub task: PlannerTask,
+}
+
+/// `POST /ms365/planner/tasks` — create a Microsoft Planner task.
+pub async fn ms365_planner_create_task(
+    State(state): State<AppState>,
+    Json(request): Json<CreatePlannerTaskRequest>,
+) -> Result<(StatusCode, Json<Ms365PlannerTaskMutationResponse>), GatewayError> {
+    let task = state
+        .ms365_planner_service
+        .create_task(request)
+        .await
+        .map_err(map_ms365_planner_service_error)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(Ms365PlannerTaskMutationResponse { task }),
+    ))
+}
+
+/// `POST /ms365/planner/tasks/{id}` — update a Microsoft Planner task.
+pub async fn ms365_planner_update_task(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<UpdatePlannerTaskRequest>,
+) -> Result<Json<Ms365PlannerTaskMutationResponse>, GatewayError> {
+    let task = state
+        .ms365_planner_service
+        .update_task(&id, request)
+        .await
+        .map_err(map_ms365_planner_service_error)?;
+
+    Ok(Json(Ms365PlannerTaskMutationResponse { task }))
+}
+
+/// `POST /ms365/planner/tasks/{id}/complete` — mark a Microsoft Planner task complete.
+pub async fn ms365_planner_complete_task(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Ms365PlannerTaskMutationResponse>, GatewayError> {
+    let task = state
+        .ms365_planner_service
+        .complete_task(&id)
+        .await
+        .map_err(map_ms365_planner_service_error)?;
+
+    Ok(Json(Ms365PlannerTaskMutationResponse { task }))
+}
+
+fn map_ms365_planner_service_error(error: Ms365PlannerServiceError) -> GatewayError {
+    match error {
+        Ms365PlannerServiceError::Validation(message)
+        | Ms365PlannerServiceError::NotFound(message) => GatewayError::BadRequest(message),
+        Ms365PlannerServiceError::NotConfigured(message)
+        | Ms365PlannerServiceError::Upstream(message) => GatewayError::Internal(message),
+        Ms365PlannerServiceError::Unauthorized => GatewayError::Unauthorized,
+        Ms365PlannerServiceError::Forbidden(message) => GatewayError::Forbidden(message),
+    }
+}
+
 // ── Auth ────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -3770,7 +3831,11 @@ fn probe_writable(dir: &std::path::Path) -> bool {
     }
 }
 
-fn gateway_path_hint(path: &std::path::Path, mode: &rune_config::RuntimeMode, writable: bool) -> String {
+fn gateway_path_hint(
+    path: &std::path::Path,
+    mode: &rune_config::RuntimeMode,
+    writable: bool,
+) -> String {
     match (mode, writable) {
         (rune_config::RuntimeMode::Standalone, false) => {
             format!("Fix permissions: chmod u+w {}", path.display())
@@ -3984,7 +4049,11 @@ fn build_configure_items(
     let provider_count = config.models.providers.len();
     items.push(ConfigureItem {
         name: "model_providers".into(),
-        status: if provider_count > 0 { "configured" } else { "needed" },
+        status: if provider_count > 0 {
+            "configured"
+        } else {
+            "needed"
+        },
         message: if provider_count > 0 {
             format!("{provider_count} provider(s) configured")
         } else {
@@ -4030,7 +4099,11 @@ fn build_configure_items(
     // TTS / STT (optional)
     items.push(ConfigureItem {
         name: "tts".into(),
-        status: if tts_available { "configured" } else { "skipped" },
+        status: if tts_available {
+            "configured"
+        } else {
+            "skipped"
+        },
         message: if tts_available {
             "TTS engine available".into()
         } else {
@@ -4039,7 +4112,11 @@ fn build_configure_items(
     });
     items.push(ConfigureItem {
         name: "stt".into(),
-        status: if stt_available { "configured" } else { "skipped" },
+        status: if stt_available {
+            "configured"
+        } else {
+            "skipped"
+        },
         message: if stt_available {
             "STT engine available".into()
         } else {
@@ -4051,7 +4128,11 @@ fn build_configure_items(
     let ch = &capabilities.channels;
     items.push(ConfigureItem {
         name: "channels".into(),
-        status: if ch.is_empty() { "skipped" } else { "configured" },
+        status: if ch.is_empty() {
+            "skipped"
+        } else {
+            "configured"
+        },
         message: if ch.is_empty() {
             "no channels enabled (optional)".into()
         } else {
@@ -4130,7 +4211,10 @@ mod tests {
     fn hint_standalone_missing_path() {
         let p = PathBuf::from("/home/user/.rune/db");
         let hint = gateway_path_hint(&p, &rune_config::RuntimeMode::Standalone, true);
-        assert!(hint.contains("mkdir -p"), "expected mkdir hint, got: {hint}");
+        assert!(
+            hint.contains("mkdir -p"),
+            "expected mkdir hint, got: {hint}"
+        );
     }
 
     #[test]
@@ -4144,10 +4228,7 @@ mod tests {
     fn hint_server_missing_path() {
         let p = PathBuf::from("/data/db");
         let hint = gateway_path_hint(&p, &rune_config::RuntimeMode::Server, true);
-        assert!(
-            hint.contains("volume"),
-            "expected volume hint, got: {hint}"
-        );
+        assert!(hint.contains("volume"), "expected volume hint, got: {hint}");
     }
 
     #[test]
@@ -4166,7 +4247,8 @@ mod tests {
         let base = tmp.path().to_path_buf();
         // Create all 9 subdirs
         for sub in &[
-            "db", "sessions", "memory", "media", "skills", "plugins", "logs", "backups", "config", "secrets",
+            "db", "sessions", "memory", "media", "skills", "plugins", "logs", "backups", "config",
+            "secrets",
         ] {
             std::fs::create_dir(base.join(sub)).unwrap();
         }
@@ -4189,7 +4271,11 @@ mod tests {
         let checks = storage_path_checks(&config);
         assert_eq!(checks.len(), 10);
         for c in &checks {
-            assert_eq!(c.status, "pass", "expected pass for {}: {}", c.name, c.message);
+            assert_eq!(
+                c.status, "pass",
+                "expected pass for {}: {}",
+                c.name, c.message
+            );
         }
     }
 
@@ -4215,7 +4301,11 @@ mod tests {
         };
         let checks = storage_path_checks(&config);
         for c in &checks {
-            assert_eq!(c.status, "warn", "expected warn for {}: {}", c.name, c.message);
+            assert_eq!(
+                c.status, "warn",
+                "expected warn for {}: {}",
+                c.name, c.message
+            );
         }
     }
 }
