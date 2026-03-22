@@ -99,6 +99,7 @@ fn default_files_for_session(session_kind: SessionKind) -> Vec<String> {
         "USER.md".into(),
         "TOOLS.md".into(),
         "IDENTITY.md".into(),
+        "ROADMAP.md".into(),
     ];
 
     // Direct (main) sessions get MEMORY.md for long-term continuity
@@ -108,8 +109,9 @@ fn default_files_for_session(session_kind: SessionKind) -> Vec<String> {
         files.push("agent-orchestration-runbook.md".into());
     }
 
-    // Scheduled sessions get the heartbeat prompt
+    // Scheduled sessions get MEMORY.md + heartbeat prompt
     if matches!(session_kind, SessionKind::Scheduled) {
+        files.push("MEMORY.md".into());
         files.push("HEARTBEAT.md".into());
     }
 
