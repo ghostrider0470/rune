@@ -3558,6 +3558,95 @@ impl GatewayClient {
             bail!("HTTP {}", r.status());
         }
     }
+    pub async fn ms365_todo_task_create(
+        &self,
+        list_id: &str,
+        title: &str,
+        due_date: Option<&str>,
+        importance: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<crate::output::Ms365TodoTaskCreateResponse> {
+        let mut payload = serde_json::json!({
+            "title": title,
+        });
+        if let Some(due_date) = due_date {
+            payload["due_date"] = serde_json::json!(due_date);
+        }
+        if let Some(importance) = importance {
+            payload["importance"] = serde_json::json!(importance);
+        }
+        if let Some(body) = body {
+            payload["body"] = serde_json::json!(body);
+        }
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/todo/lists/{list_id}/tasks")))
+            .json(&payload)
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
+    pub async fn ms365_todo_task_update(
+        &self,
+        list_id: &str,
+        id: &str,
+        title: Option<&str>,
+        status: Option<&str>,
+        importance: Option<&str>,
+        due_date: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<crate::output::Ms365TodoTaskUpdateResponse> {
+        let mut payload = serde_json::json!({});
+        if let Some(title) = title {
+            payload["title"] = serde_json::json!(title);
+        }
+        if let Some(status) = status {
+            payload["status"] = serde_json::json!(status);
+        }
+        if let Some(importance) = importance {
+            payload["importance"] = serde_json::json!(importance);
+        }
+        if let Some(due_date) = due_date {
+            payload["due_date"] = serde_json::json!(due_date);
+        }
+        if let Some(body) = body {
+            payload["body"] = serde_json::json!(body);
+        }
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/todo/lists/{list_id}/tasks/{id}")))
+            .json(&payload)
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
+    pub async fn ms365_todo_task_complete(
+        &self,
+        list_id: &str,
+        id: &str,
+    ) -> Result<crate::output::Ms365TodoTaskCompleteResponse> {
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/todo/lists/{list_id}/tasks/{id}/complete")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
 
     pub async fn ms365_sites_list(
         &self,
@@ -5847,6 +5936,96 @@ mod tests {
 
         let client = GatewayClient::new(&server.uri());
         let resp = client.ms365_planner_task_complete("task-1").await.unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.task_id.as_deref(), Some("task-1"));
+    }
+
+    #[tokio::test]
+    async fn ms365_todo_task_create_posts_expected_payload() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ms365/todo/lists/list-1/tasks"))
+            .and(body_json(json!({
+                "title": "Draft follow-up",
+                "due_date": "2026-03-25T12:00:00Z",
+                "importance": "high",
+                "body": "Prepare operator summary"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "To-Do task created",
+                "task_id": "task-1"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .ms365_todo_task_create(
+                "list-1",
+                "Draft follow-up",
+                Some("2026-03-25T12:00:00Z"),
+                Some("high"),
+                Some("Prepare operator summary"),
+            )
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.task_id.as_deref(), Some("task-1"));
+    }
+
+    #[tokio::test]
+    async fn ms365_todo_task_update_posts_only_changed_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ms365/todo/lists/list-1/tasks/task-1"))
+            .and(body_json(json!({
+                "status": "inProgress",
+                "importance": "high"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "To-Do task updated",
+                "task_id": "task-1"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .ms365_todo_task_update(
+                "list-1",
+                "task-1",
+                None,
+                Some("inProgress"),
+                Some("high"),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.task_id.as_deref(), Some("task-1"));
+    }
+
+    #[tokio::test]
+    async fn ms365_todo_task_complete_posts_expected_route() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ms365/todo/lists/list-1/tasks/task-1/complete"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "To-Do task completed",
+                "task_id": "task-1"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .ms365_todo_task_complete("list-1", "task-1")
+            .await
+            .unwrap();
         assert!(resp.success);
         assert_eq!(resp.task_id.as_deref(), Some("task-1"));
     }

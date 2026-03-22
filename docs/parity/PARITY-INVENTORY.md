@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download. Eleventh and twelfth slices: mail send/reply/forward and calendar create/delete/respond mutations. Thirteenth slice: OneDrive file search. Fourteenth slice: OneDrive file download. Fifteenth slice: Planner task create/update/complete mutations.
+First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download. Eleventh and twelfth slices: mail send/reply/forward and calendar create/delete/respond mutations. Thirteenth slice: OneDrive file search. Fourteenth slice: OneDrive file download. Fifteenth slice: Planner task create/update/complete mutations. Sixteenth slice: To-Do task create/update/complete mutations.
 
 Observed subcommands:
 
@@ -702,6 +702,9 @@ Observed subcommands:
 - `ms365 todo lists` — list Microsoft To-Do task lists
 - `ms365 todo tasks --list-id <id>` — list tasks in a To-Do list
 - `ms365 todo task-read --list-id <id> --id <id>` — read a single To-Do task by ID
+- `ms365 todo create --list-id <id> --title <text> [--due-date <iso8601>] [--importance <low|normal|high>] [--body <text>]` — create a To-Do task
+- `ms365 todo update --list-id <id> --id <id> [--title <text>] [--status <value>] [--importance <value>] [--due-date <iso8601>] [--body <text>]` — update To-Do task details or workflow status
+- `ms365 todo complete --list-id <id> --id <id>` — mark a To-Do task complete
 - `ms365 sites list` — list SharePoint sites accessible to the authenticated user
 - `ms365 sites read --id <site_id>` — read details of a single SharePoint site
 - `ms365 sites lists --site-id <id>` — list document libraries/lists in a SharePoint site
@@ -728,6 +731,7 @@ Required concepts:
 - Planner plan discovery and task enumeration by plan ID
 - Planner task creation, detail/progress update, and explicit completion
 - To-Do list discovery and task enumeration by list ID
+- To-Do task creation, detail/status updates, and explicit completion
 - SharePoint site discovery, detail read, list/library enumeration, and list item browsing
 - Teams discovery, channel enumeration, channel detail, and channel message listing
 - mail attachment listing by message ID, single-attachment metadata read, and content download
@@ -740,7 +744,7 @@ Required concepts:
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–8, 10, 12–15). Calendar mutation surface (create/delete/respond) added in slice 12. OneDrive file search added in slice 13. OneDrive file download added in slice 14. Planner task mutation surface (create/update/complete) added in slice 15. Backend foundation now includes `/ms365/auth/status`, Planner mutation routes for task create/update/complete, and To-Do mutation routes for list-scoped task create/update/complete to unblock #232 and #256; the rest of the gateway `/ms365` family remains deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–8, 10, 12–16). Calendar mutation surface (create/delete/respond) added in slice 12. OneDrive file search added in slice 13. OneDrive file download added in slice 14. Planner task mutation surface (create/update/complete) added in slice 15. To-Do task mutation surface (create/update/complete) added in slice 16. Backend foundation now includes `/ms365/auth/status`, Planner mutation routes for task create/update/complete, and To-Do mutation routes for list-scoped task create/update/complete; the rest of the gateway `/ms365` family remains deferred.
 
 ---
 
