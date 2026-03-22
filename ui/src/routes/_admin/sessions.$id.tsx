@@ -53,6 +53,41 @@ function SessionDetailPage() {
     }
   };
 
+  // Extract human-readable content from transcript entry payloads
+  const renderPayload = (entry: { kind: string; payload: unknown }) => {
+    const p = entry.payload as Record<string, unknown> | null;
+    if (!p) return "";
+    if (typeof p === "string") return p;
+
+    // User message
+    if (p.content && typeof p.content === "string") return p.content;
+    if (p.message && typeof p.message === "object") {
+      const msg = p.message as Record<string, unknown>;
+      if (msg.content && typeof msg.content === "string") return msg.content;
+    }
+
+    // Tool request — show name + truncated args
+    if (p.tool_name && typeof p.tool_name === "string") {
+      const args = typeof p.arguments === "string"
+        ? p.arguments
+        : JSON.stringify(p.arguments ?? {});
+      const truncated = args.length > 200 ? args.slice(0, 200) + "..." : args;
+      return `${p.tool_name}(${truncated})`;
+    }
+
+    // Tool result — show output truncated
+    if (p.output && typeof p.output === "string") {
+      return p.output.length > 500 ? p.output.slice(0, 500) + "\n..." : p.output;
+    }
+
+    // Approval
+    if (p.summary && typeof p.summary === "string") return p.summary;
+
+    // Fallback — compact JSON
+    const json = JSON.stringify(p, null, 2);
+    return json.length > 300 ? json.slice(0, 300) + "\n..." : json;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -146,7 +181,7 @@ function SessionDetailPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1">
-          <div className="max-h-[60vh] overflow-y-auto rounded-md border bg-muted/20 p-4">
+          <div className="h-[60vh] overflow-y-auto rounded-md border bg-muted/20 p-4">
             {transcriptLoading ? (
               <div className="space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -182,9 +217,7 @@ function SessionDetailPage() {
                       </span>
                     </div>
                     <pre className="whitespace-pre-wrap font-sans">
-                      {typeof entry.payload === "string"
-                        ? entry.payload
-                        : JSON.stringify(entry.payload, null, 2)}
+                      {renderPayload(entry)}
                     </pre>
                   </div>
                 ))}
