@@ -1977,7 +1977,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
     let unresolved = payload["unresolved"].as_array().unwrap();
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("cost posture is estimate-only; provider pricing is not wired yet")));
-    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable")));
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
 }
@@ -4640,7 +4640,7 @@ async fn get_session_status_returns_parity_card_fields() {
     assert_eq!(json["security_mode"], "allowlist");
     assert!(json["unresolved"].is_array());
     let unresolved = json["unresolved"].as_array().unwrap();
-    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable")));
 }
 
 #[tokio::test]
@@ -4772,7 +4772,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
     let unresolved = json["unresolved"].as_array().unwrap();
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("cost posture is estimate-only; provider pricing is not wired yet")));
-    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet")));
+    assert!(unresolved.iter().any(|item| item.as_str() == Some("approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable")));
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
     assert!(unresolved.iter().any(|item| item.as_str() == Some("subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete")));
