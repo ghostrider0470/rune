@@ -42,20 +42,26 @@ pub struct Mem0Engine {
 
 // ── SQL constants ────────────────────────────────────────────────────
 
+/// On Azure Cosmos DB for PostgreSQL (Citus), `CREATE EXTENSION` is blocked —
+/// use the Citus helper function instead.  We try `create_extension()` first,
+/// then fall back to `CREATE EXTENSION IF NOT EXISTS` for vanilla Postgres.
+const ENSURE_EXTENSION_CITUS_SQL: &str = "SELECT create_extension('vector')";
 const ENSURE_EXTENSION_SQL: &str = "CREATE EXTENSION IF NOT EXISTS vector";
 
-const ENSURE_TABLE_SQL: &str = r#"
-CREATE TABLE IF NOT EXISTS rune_memories (
+fn ensure_table_sql(dims: usize) -> String {
+    format!(
+        r#"CREATE TABLE IF NOT EXISTS rune_memories (
     id UUID PRIMARY KEY,
     fact TEXT NOT NULL,
     category TEXT NOT NULL DEFAULT 'general',
-    embedding vector(3072),
+    embedding vector({dims}),
     source_session_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     access_count INTEGER NOT NULL DEFAULT 0
-)
-"#;
+)"#
+    )
+}
 
 /// We use HNSW for the index — it works without needing a minimum row count
 /// (unlike ivfflat which needs `lists` tuning).  Falls back gracefully if
@@ -148,19 +154,45 @@ impl Mem0Engine {
             }
         };
 
-        // Ensure schema
-        if let Err(e) = client.batch_execute(ENSURE_EXTENSION_SQL).await {
-            warn!(error = %e, "mem0: failed to create vector extension (may already exist or lack permissions)");
-            // Continue — the extension might already be loaded.
+        // Ensure vector extension — try Citus helper first (required for
+        // Azure Cosmos DB for PostgreSQL), then fall back to standard CREATE EXTENSION.
+        let ext_ok = match client.batch_execute(ENSURE_EXTENSION_CITUS_SQL).await {
+            Ok(()) => {
+                debug!("mem0: vector extension enabled via Citus create_extension()");
+                true
+            }
+            Err(_) => {
+                // Not Citus — try standard SQL
+                match client.batch_execute(ENSURE_EXTENSION_SQL).await {
+                    Ok(()) => {
+                        debug!("mem0: vector extension enabled via CREATE EXTENSION");
+                        true
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "mem0: failed to create vector extension");
+                        // Continue — extension may already exist from a prior run
+                        true
+                    }
+                }
+            }
+        };
+
+        if !ext_ok {
+            error!("mem0: could not ensure vector extension — disabling");
+            return None;
         }
 
-        if let Err(e) = client.batch_execute(ENSURE_TABLE_SQL).await {
+        let table_sql = ensure_table_sql(config.embedding_dims);
+        if let Err(e) = client.batch_execute(&table_sql).await {
             error!(error = %e, "mem0: failed to create rune_memories table — disabling");
             return None;
         }
 
+        // HNSW index is limited to 2000 dims in pgvector < 0.8.  If our
+        // embeddings are larger (e.g. 3072), the index creation will fail.
+        // This is fine — queries still work via sequential scan, just slower.
         if let Err(e) = client.batch_execute(ENSURE_INDEX_SQL).await {
-            warn!(error = %e, "mem0: failed to create HNSW index (may already exist)");
+            info!(error = %e, "mem0: HNSW index not created (likely >2000 dims) — brute-force cosine search will be used");
         }
 
         info!("mem0 engine connected and schema ensured");
@@ -311,6 +343,7 @@ impl Mem0Engine {
         let body = serde_json::json!({
             "input": text,
             "model": self.config.embedding_model,
+            "dimensions": self.config.embedding_dims,
         });
 
         let resp = self
