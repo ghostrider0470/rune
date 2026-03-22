@@ -201,6 +201,77 @@ pub struct TodoTask {
     pub body_preview: Option<String>,
 }
 
+/// Gateway request for sending a Microsoft 365 mail message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SendMailRequest {
+    #[serde(default)]
+    pub to: Vec<String>,
+    pub subject: String,
+    pub body: String,
+    #[serde(default)]
+    pub cc: Vec<String>,
+}
+
+impl SendMailRequest {
+    pub fn validate(&self) -> Result<(), Ms365MailServiceError> {
+        validate_mail_recipients(&self.to, "mail to")?;
+        validate_optional_mail_recipients(&self.cc, "mail cc")?;
+
+        if self.subject.trim().is_empty() {
+            return Err(Ms365MailServiceError::Validation(
+                "mail subject is required".to_string(),
+            ));
+        }
+
+        if self.body.trim().is_empty() {
+            return Err(Ms365MailServiceError::Validation(
+                "mail body is required".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Gateway request for replying to a Microsoft 365 mail message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReplyMailRequest {
+    pub body: String,
+    #[serde(default)]
+    pub reply_all: bool,
+}
+
+impl ReplyMailRequest {
+    pub fn validate(&self, id: &str) -> Result<(), Ms365MailServiceError> {
+        validate_mail_message_id(id)?;
+
+        if self.body.trim().is_empty() {
+            return Err(Ms365MailServiceError::Validation(
+                "mail reply body is required".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Gateway request for forwarding a Microsoft 365 mail message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForwardMailRequest {
+    #[serde(default)]
+    pub to: Vec<String>,
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+impl ForwardMailRequest {
+    pub fn validate(&self, id: &str) -> Result<(), Ms365MailServiceError> {
+        validate_mail_message_id(id)?;
+        validate_mail_recipients(&self.to, "mail forward to")?;
+        Ok(())
+    }
+}
+
 /// Errors surfaced by the Microsoft 365 mutation service boundaries.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum Ms365ServiceError {
@@ -220,6 +291,7 @@ pub enum Ms365ServiceError {
 
 pub type Ms365PlannerServiceError = Ms365ServiceError;
 pub type Ms365TodoServiceError = Ms365ServiceError;
+pub type Ms365MailServiceError = Ms365ServiceError;
 
 #[async_trait]
 pub trait Ms365PlannerService: Send + Sync {
@@ -257,6 +329,23 @@ pub trait Ms365TodoService: Send + Sync {
         list_id: &str,
         id: &str,
     ) -> Result<TodoTask, Ms365TodoServiceError>;
+}
+
+#[async_trait]
+pub trait Ms365MailService: Send + Sync {
+    async fn send_mail(&self, request: SendMailRequest) -> Result<(), Ms365MailServiceError>;
+
+    async fn reply_to_message(
+        &self,
+        id: &str,
+        request: ReplyMailRequest,
+    ) -> Result<(), Ms365MailServiceError>;
+
+    async fn forward_message(
+        &self,
+        id: &str,
+        request: ForwardMailRequest,
+    ) -> Result<(), Ms365MailServiceError>;
 }
 
 /// Planner mutation service backed by Microsoft Graph.
@@ -684,6 +773,112 @@ impl Ms365TodoService for GraphMs365TodoService {
     }
 }
 
+/// Mail mutation service backed by Microsoft Graph.
+pub struct GraphMs365MailService {
+    client: Client,
+}
+
+impl Default for GraphMs365MailService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphMs365MailService {
+    pub fn new() -> Self {
+        Self {
+            client: Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl Ms365MailService for GraphMs365MailService {
+    async fn send_mail(&self, request: SendMailRequest) -> Result<(), Ms365MailServiceError> {
+        request.validate()?;
+
+        let mut message = Map::new();
+        message.insert("subject".to_string(), json!(request.subject.trim()));
+        message.insert("body".to_string(), graph_item_body_value(request.body.trim()));
+        message.insert(
+            "toRecipients".to_string(),
+            graph_mail_recipients_value(&request.to)?,
+        );
+
+        let cc_recipients = graph_optional_mail_recipients_value(&request.cc)?;
+        if let Some(cc_recipients) = cc_recipients {
+            message.insert("ccRecipients".to_string(), cc_recipients);
+        }
+
+        send_graph_empty(
+            graph_request(&self.client, reqwest::Method::POST, "/me/sendMail")?.json(&json!({
+                "message": Value::Object(message),
+                "saveToSentItems": true,
+            })),
+            "mail",
+        )
+        .await
+    }
+
+    async fn reply_to_message(
+        &self,
+        id: &str,
+        request: ReplyMailRequest,
+    ) -> Result<(), Ms365MailServiceError> {
+        request.validate(id)?;
+
+        let message_id = id.trim();
+        let action = if request.reply_all {
+            "replyAll"
+        } else {
+            "reply"
+        };
+
+        send_graph_empty(
+            graph_request(
+                &self.client,
+                reqwest::Method::POST,
+                &format!("/me/messages/{message_id}/{action}"),
+            )?
+            .json(&json!({
+                "comment": request.body.trim(),
+            })),
+            "mail",
+        )
+        .await
+    }
+
+    async fn forward_message(
+        &self,
+        id: &str,
+        request: ForwardMailRequest,
+    ) -> Result<(), Ms365MailServiceError> {
+        request.validate(id)?;
+
+        let message_id = id.trim();
+        let comment = request
+            .comment
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string();
+
+        send_graph_empty(
+            graph_request(
+                &self.client,
+                reqwest::Method::POST,
+                &format!("/me/messages/{message_id}/forward"),
+            )?
+            .json(&json!({
+                "comment": comment,
+                "toRecipients": graph_mail_recipients_value(&request.to)?,
+            })),
+            "mail",
+        )
+        .await
+    }
+}
+
 async fn map_graph_error(response: reqwest::Response, service_name: &str) -> Ms365ServiceError {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
@@ -870,6 +1065,22 @@ async fn send_graph_json<T: serde::de::DeserializeOwned>(
     }
 }
 
+async fn send_graph_empty(
+    builder: reqwest::RequestBuilder,
+    service_name: &str,
+) -> Result<(), Ms365ServiceError> {
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| Ms365ServiceError::Upstream(error.to_string()))?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(map_graph_error(response, service_name).await)
+    }
+}
+
 async fn patch_graph_json(
     client: &Client,
     path: &str,
@@ -927,6 +1138,76 @@ fn graph_datetime_string(value: &GraphDateTimeTimeZone) -> String {
     }
 
     value.date_time.clone()
+}
+
+fn validate_mail_message_id(id: &str) -> Result<(), Ms365MailServiceError> {
+    if id.trim().is_empty() {
+        return Err(Ms365MailServiceError::Validation(
+            "mail message id is required".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_mail_recipients(
+    recipients: &[String],
+    field_name: &str,
+) -> Result<(), Ms365MailServiceError> {
+    if recipients.is_empty() {
+        return Err(Ms365MailServiceError::Validation(format!(
+            "{field_name} requires at least one recipient"
+        )));
+    }
+
+    validate_optional_mail_recipients(recipients, field_name)
+}
+
+fn validate_optional_mail_recipients(
+    recipients: &[String],
+    field_name: &str,
+) -> Result<(), Ms365MailServiceError> {
+    if recipients.iter().any(|recipient| recipient.trim().is_empty()) {
+        return Err(Ms365MailServiceError::Validation(format!(
+            "{field_name} recipients cannot be empty"
+        )));
+    }
+
+    Ok(())
+}
+
+fn graph_mail_recipients_value(recipients: &[String]) -> Result<Value, Ms365MailServiceError> {
+    validate_mail_recipients(recipients, "mail recipients")?;
+    Ok(Value::Array(
+        recipients
+            .iter()
+            .map(|recipient| graph_mail_recipient_value(recipient))
+            .collect(),
+    ))
+}
+
+fn graph_optional_mail_recipients_value(
+    recipients: &[String],
+) -> Result<Option<Value>, Ms365MailServiceError> {
+    validate_optional_mail_recipients(recipients, "mail recipients")?;
+
+    if recipients.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(Value::Array(
+        recipients
+            .iter()
+            .map(|recipient| graph_mail_recipient_value(recipient))
+            .collect(),
+    )))
+}
+
+fn graph_mail_recipient_value(recipient: &str) -> Value {
+    json!({
+        "emailAddress": {
+            "address": recipient.trim(),
+        }
+    })
 }
 
 fn validate_todo_list_id(list_id: &str) -> Result<(), Ms365TodoServiceError> {
