@@ -277,8 +277,8 @@ function ChatPage() {
   }, []);
 
   return (
-    <div className="space-y-4">
-      <section className="overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-background via-background to-primary/5 shadow-[0_24px_80px_rgba(249,115,22,0.10)]">
+    <div className="flex h-[100dvh] flex-col gap-4 overflow-hidden">
+      <section className="shrink-0 overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-background via-background to-primary/5 shadow-[0_24px_80px_rgba(249,115,22,0.10)]">
         <div className="grid gap-4 px-4 py-4 sm:px-6 sm:py-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8 lg:py-6">
           <div className="space-y-3 sm:space-y-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -387,7 +387,7 @@ function ChatPage() {
         </div>
       </section>
 
-      <div className="grid h-[calc(100dvh-17.5rem)] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-3 lg:hidden">
           <div className="grid grid-cols-1 gap-2 rounded-3xl border border-border/70 bg-card/80 p-3 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur sm:grid-cols-2">
             <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-background/70 px-3 py-2">

@@ -269,7 +269,7 @@ export function ChatThread({
   }
 
   return (
-    <div className={cn("relative flex-1 bg-gradient-to-b from-background/40 to-background", className)}>
+    <div className={cn("relative min-h-0 flex-1 overflow-hidden bg-gradient-to-b from-background/40 to-background", className)}>
       <div
         ref={containerRef}
         onScroll={checkScrollPosition}
