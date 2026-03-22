@@ -35,9 +35,10 @@ use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
 use rune_gateway::ms365::{
-    CreatePlannerTaskRequest, CreateTodoTaskRequest, Ms365PlannerService, Ms365PlannerServiceError,
-    Ms365TodoService, Ms365TodoServiceError, PlannerTask, TodoTask, UpdatePlannerTaskRequest,
-    UpdateTodoTaskRequest,
+    CreatePlannerTaskRequest, CreateTodoTaskRequest, ForwardMailRequest, Ms365MailService,
+    Ms365MailServiceError, Ms365PlannerService, Ms365PlannerServiceError, Ms365TodoService,
+    Ms365TodoServiceError, PlannerTask, ReplyMailRequest, SendMailRequest, TodoTask,
+    UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
 };
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
 
@@ -787,6 +788,21 @@ struct FakeMs365TodoService {
     calls: Mutex<Vec<TodoMutationCall>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MailMutationCall {
+    Send(SendMailRequest),
+    Reply { id: String, request: ReplyMailRequest },
+    Forward { id: String, request: ForwardMailRequest },
+}
+
+#[derive(Debug)]
+struct FakeMs365MailService {
+    send_response: Result<(), Ms365MailServiceError>,
+    reply_response: Result<(), Ms365MailServiceError>,
+    forward_response: Result<(), Ms365MailServiceError>,
+    calls: Mutex<Vec<MailMutationCall>>,
+}
+
 impl Default for FakeMs365PlannerService {
     fn default() -> Self {
         Self {
@@ -816,6 +832,17 @@ impl Default for FakeMs365TodoService {
             complete_response: Err(Ms365TodoServiceError::NotConfigured(
                 "test todo service not configured".to_string(),
             )),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for FakeMs365MailService {
+    fn default() -> Self {
+        Self {
+            send_response: Ok(()),
+            reply_response: Ok(()),
+            forward_response: Ok(()),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -950,6 +977,30 @@ impl Ms365TodoService for FakeMs365TodoService {
     }
 }
 
+#[async_trait]
+impl Ms365MailService for FakeMs365MailService {
+    async fn send_mail(&self, request: SendMailRequest) -> Result<(), Ms365MailServiceError> {
+        self.calls.lock().await.push(MailMutationCall::Send(request));
+        self.send_response.clone()
+    }
+
+    async fn reply_to_message(&self, id: &str, request: ReplyMailRequest) -> Result<(), Ms365MailServiceError> {
+        self.calls.lock().await.push(MailMutationCall::Reply {
+            id: id.to_string(),
+            request,
+        });
+        self.reply_response.clone()
+    }
+
+    async fn forward_message(&self, id: &str, request: ForwardMailRequest) -> Result<(), Ms365MailServiceError> {
+        self.calls.lock().await.push(MailMutationCall::Forward {
+            id: id.to_string(),
+            request,
+        });
+        self.forward_response.clone()
+    }
+}
+
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 const TEST_AUTH_TOKEN: &str = "test-secret-token";
@@ -968,6 +1019,10 @@ fn test_ms365_planner_service() -> Arc<dyn Ms365PlannerService> {
 
 fn test_ms365_todo_service() -> Arc<dyn Ms365TodoService> {
     Arc::new(FakeMs365TodoService::default())
+}
+
+fn test_ms365_mail_service() -> Arc<dyn Ms365MailService> {
+    Arc::new(FakeMs365MailService::default())
 }
 
 fn build_test_app_parts(
@@ -1089,6 +1144,7 @@ fn build_test_app_parts_with_ms365_services(
         stt_engine: None,
         ms365_planner_service,
         ms365_todo_service,
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     (build_router(state, auth_token), device_repo)
@@ -1209,6 +1265,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1313,6 +1370,7 @@ enabled: true
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1429,6 +1487,7 @@ async fn status_reports_configured_lane_capacities() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -1522,6 +1581,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1649,6 +1709,7 @@ async fn ws_rpc_health_reports_session_count() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1755,6 +1816,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1880,6 +1942,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2022,6 +2085,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2111,6 +2175,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2197,6 +2262,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2343,6 +2409,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2485,6 +2552,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2592,6 +2660,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -4441,6 +4510,7 @@ async fn send_message_and_transcript_with_shared_state() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -4667,6 +4737,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -5668,6 +5739,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -5918,6 +5990,7 @@ async fn reminders_list_includes_outcome_fields() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -6019,6 +6092,7 @@ async fn reminders_cancel_returns_success() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -6135,6 +6209,7 @@ async fn agent_steer_success() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -6284,6 +6359,7 @@ async fn agent_kill_success() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let app = build_router(state, None);
@@ -6431,6 +6507,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
