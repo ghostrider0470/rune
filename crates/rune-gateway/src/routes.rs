@@ -774,6 +774,7 @@ pub async fn cron_run(
         workspace_root,
         device_registry: state.device_registry.clone(),
         event_tx: state.event_tx.clone(),
+        operator_delivery: None,
     };
 
     let (_status, _output) =

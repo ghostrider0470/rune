@@ -28,6 +28,60 @@ pub struct BackgroundSupervisor {
     shutdown_tx: Option<watch::Sender<bool>>,
 }
 
+/// Callback for delivering heartbeat/scheduled output to the operator's channel.
+#[async_trait::async_trait]
+pub trait OperatorDelivery: Send + Sync {
+    /// Send a text message to the operator's primary channel (e.g. Telegram).
+    async fn deliver(&self, text: &str) -> Result<(), String>;
+}
+
+/// Delivers messages to a Telegram chat via the Bot API.
+pub struct TelegramOperatorDelivery {
+    bot_token: String,
+    chat_id: String,
+    client: reqwest::Client,
+}
+
+impl TelegramOperatorDelivery {
+    pub fn new(bot_token: impl Into<String>, chat_id: impl Into<String>) -> Self {
+        Self {
+            bot_token: bot_token.into(),
+            chat_id: chat_id.into(),
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl OperatorDelivery for TelegramOperatorDelivery {
+    async fn deliver(&self, text: &str) -> Result<(), String> {
+        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
+        let params = serde_json::json!({
+            "chat_id": self.chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+        });
+
+        let resp = self.client.post(&url).json(&params).send().await
+            .map_err(|e| format!("telegram send failed: {e}"))?;
+
+        if !resp.status().is_success() {
+            // Retry without Markdown if parsing failed
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            let desc = body.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            if desc.contains("parse entities") || desc.contains("can't parse") {
+                let plain = serde_json::json!({
+                    "chat_id": self.chat_id,
+                    "text": text,
+                });
+                let _ = self.client.post(&url).json(&plain).send().await;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Dependencies the supervisor loop needs.
 #[derive(Clone)]
 pub struct SupervisorDeps {
@@ -40,6 +94,8 @@ pub struct SupervisorDeps {
     pub device_registry: Arc<DeviceRegistry>,
     /// Broadcast channel for session/runtime events (delivery announce).
     pub event_tx: broadcast::Sender<SessionEvent>,
+    /// Optional delivery to the operator's user-facing channel.
+    pub operator_delivery: Option<Arc<dyn OperatorDelivery>>,
 }
 
 impl BackgroundSupervisor {
@@ -236,9 +292,14 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                                 debug!("heartbeat response suppressed (duplicate)");
                             }
                             HeartbeatResponseAction::Deliver => {
-                                info!(len = response.len(), "heartbeat produced output");
-                                // Non-suppressed heartbeat output is already persisted in the
-                                // session transcript by TurnExecutor; nothing else to deliver.
+                                info!(len = response.len(), "heartbeat produced output — delivering to operator");
+                                if let Some(ref delivery) = deps.operator_delivery {
+                                    if let Err(e) = delivery.deliver(&response).await {
+                                        error!(error = %e, "failed to deliver heartbeat to operator");
+                                    }
+                                } else {
+                                    debug!("heartbeat output ready but no operator delivery configured");
+                                }
                             }
                         }
                     }

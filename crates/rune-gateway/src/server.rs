@@ -144,6 +144,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
             )))
         });
 
+    // Clone telegram token before services.config is moved
+    let tg_token_for_delivery = services.config.channels.telegram_token.clone();
     let config = Arc::new(RwLock::new(services.config));
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
@@ -192,6 +194,36 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         stt_engine,
     };
 
+    // Build operator delivery for heartbeat/scheduled output to Telegram.
+    // Looks up the operator's chat_id from the most recent Channel session's
+    // channel_ref (format: "{chat_id}:{sender}").
+    let operator_delivery: Option<Arc<dyn crate::supervisor::OperatorDelivery>> =
+        if let Some(ref tg_token) = tg_token_for_delivery {
+            let session_repo = &state.session_repo;
+            let chat_id = session_repo
+                .list(50, 0)
+                .await
+                .ok()
+                .and_then(|sessions| {
+                    sessions.into_iter()
+                        .find(|s| s.channel_ref.is_some())
+                        .and_then(|s| s.channel_ref)
+                        .and_then(|r| r.split(':').next().map(String::from))
+                });
+            if let Some(chat_id) = chat_id {
+                info!(chat_id = %chat_id, "heartbeat delivery target resolved from session DB");
+                Some(Arc::new(crate::supervisor::TelegramOperatorDelivery::new(
+                    tg_token.clone(),
+                    chat_id,
+                )))
+            } else {
+                info!("no Telegram sessions found yet — heartbeat delivery will be configured after first message");
+                None
+            }
+        } else {
+            None
+        };
+
     let supervisor_deps = SupervisorDeps {
         heartbeat: state.heartbeat.clone(),
         scheduler: state.scheduler.clone(),
@@ -201,6 +233,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         workspace_root,
         device_registry: state.device_registry.clone(),
         event_tx: state.event_tx.clone(),
+        operator_delivery,
     };
 
     let app = build_router(state, auth_token);
