@@ -268,6 +268,13 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let public_routes = Router::new()
         .route("/health", get(routes::health))
+        .route("/status", get(routes::status))
+        .route("/dashboard", get(routes::spa_index))
+        .route("/ui", get(routes::spa_index))
+        .route("/api/dashboard/summary", get(routes::dashboard_summary))
+        .route("/api/dashboard/models", get(routes::dashboard_models))
+        .route("/api/dashboard/sessions", get(routes::dashboard_sessions))
+        .route("/api/dashboard/diagnostics", get(routes::dashboard_diagnostics))
         .route("/chat", get(webchat::webchat_handler))
         .route("/ws", get(ws::ws_handler))
         .route("/assets/{path}", get(routes::branded_asset))
@@ -276,16 +283,6 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .with_state(state.clone());
 
     let protected_routes = Router::new()
-        .route("/status", get(routes::status))
-        .route("/dashboard", get(routes::spa_index))
-        .route("/ui", get(routes::spa_index))
-        .route("/api/dashboard/summary", get(routes::dashboard_summary))
-        .route("/api/dashboard/models", get(routes::dashboard_models))
-        .route("/api/dashboard/sessions", get(routes::dashboard_sessions))
-        .route(
-            "/api/dashboard/diagnostics",
-            get(routes::dashboard_diagnostics),
-        )
         .route("/gateway/health", get(routes::health))
         .route("/gateway/start", post(routes::gateway_start))
         .route("/gateway/stop", post(routes::gateway_stop))
