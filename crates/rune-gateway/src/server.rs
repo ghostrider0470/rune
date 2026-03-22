@@ -14,8 +14,8 @@ use tracing::info;
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
-    HookRegistry, PluginLoader, PluginRegistry,
-    SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
+    HookRegistry, PluginLoader, PluginRegistry, SessionEngine, SkillLoader, SkillRegistry,
+    TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -32,6 +32,7 @@ use tokio::sync::RwLock;
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
+use crate::ms365::Ms365PlannerService;
 use crate::pairing::DeviceRegistry;
 use crate::routes;
 use crate::state::{AppState, SessionEvent};
@@ -80,6 +81,7 @@ pub struct Services {
     pub process_manager: ProcessManager,
     pub capabilities: Capabilities,
     pub device_repo: Arc<dyn DeviceRepo>,
+    pub ms365_planner_service: Arc<dyn Ms365PlannerService>,
 }
 
 /// Start the gateway HTTP server.
@@ -134,7 +136,13 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         .map(|key| {
             let provider: Box<dyn rune_stt::SttProvider> = Box::new(OpenAiStt::new(
                 key,
-                services.config.media.stt.base_url.clone().unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+                services
+                    .config
+                    .media
+                    .stt
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
                 services.config.media.stt.api_version.clone(),
                 services.config.media.stt.model.clone(),
             ));
@@ -192,37 +200,40 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         event_tx,
         tts_engine,
         stt_engine,
+        ms365_planner_service: services.ms365_planner_service,
     };
 
     // Build operator delivery for heartbeat/scheduled output to Telegram.
     // Looks up the operator's chat_id from the most recent Channel session's
     // channel_ref (format: "{chat_id}:{sender}").
-    let operator_delivery: Option<Arc<dyn crate::supervisor::OperatorDelivery>> =
-        if let Some(ref tg_token) = tg_token_for_delivery {
-            let session_repo = &state.session_repo;
-            let chat_id = session_repo
-                .list(50, 0)
-                .await
-                .ok()
-                .and_then(|sessions| {
-                    sessions.into_iter()
-                        .find(|s| s.channel_ref.is_some())
-                        .and_then(|s| s.channel_ref)
-                        .and_then(|r| r.split(':').next().map(String::from))
-                });
-            if let Some(chat_id) = chat_id {
-                info!(chat_id = %chat_id, "heartbeat delivery target resolved from session DB");
-                Some(Arc::new(crate::supervisor::TelegramOperatorDelivery::new(
-                    tg_token.clone(),
-                    chat_id,
-                )))
-            } else {
-                info!("no Telegram sessions found yet — heartbeat delivery will be configured after first message");
-                None
-            }
+    let operator_delivery: Option<Arc<dyn crate::supervisor::OperatorDelivery>> = if let Some(
+        ref tg_token,
+    ) =
+        tg_token_for_delivery
+    {
+        let session_repo = &state.session_repo;
+        let chat_id = session_repo.list(50, 0).await.ok().and_then(|sessions| {
+            sessions
+                .into_iter()
+                .find(|s| s.channel_ref.is_some())
+                .and_then(|s| s.channel_ref)
+                .and_then(|r| r.split(':').next().map(String::from))
+        });
+        if let Some(chat_id) = chat_id {
+            info!(chat_id = %chat_id, "heartbeat delivery target resolved from session DB");
+            Some(Arc::new(crate::supervisor::TelegramOperatorDelivery::new(
+                tg_token.clone(),
+                chat_id,
+            )))
         } else {
+            info!(
+                "no Telegram sessions found yet — heartbeat delivery will be configured after first message"
+            );
             None
-        };
+        }
+    } else {
+        None
+    };
 
     let supervisor_deps = SupervisorDeps {
         heartbeat: state.heartbeat.clone(),
@@ -239,9 +250,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let app = build_router(state, auth_token);
 
     // Validate TLS config before attempting to bind.
-    tls_config
-        .validate()
-        .map_err(GatewayError::Internal)?;
+    tls_config.validate().map_err(GatewayError::Internal)?;
 
     let mut supervisor = BackgroundSupervisor::new();
     supervisor.start(supervisor_deps);
@@ -320,7 +329,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/dashboard/summary", get(routes::dashboard_summary))
         .route("/api/dashboard/models", get(routes::dashboard_models))
         .route("/api/dashboard/sessions", get(routes::dashboard_sessions))
-        .route("/api/dashboard/diagnostics", get(routes::dashboard_diagnostics))
+        .route(
+            "/api/dashboard/diagnostics",
+            get(routes::dashboard_diagnostics),
+        )
         .route("/cron/status", get(routes::cron_status))
         .route("/cron", get(routes::cron_list).post(routes::cron_add))
         .route("/cron/wake", post(routes::cron_wake))
@@ -405,6 +417,18 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/stt/disable", post(routes::stt_disable))
         // Microsoft 365 routes
         .route("/ms365/auth/status", get(routes::ms365_auth_status))
+        .route(
+            "/ms365/planner/tasks",
+            post(routes::ms365_planner_create_task),
+        )
+        .route(
+            "/ms365/planner/tasks/{id}",
+            post(routes::ms365_planner_update_task),
+        )
+        .route(
+            "/ms365/planner/tasks/{id}/complete",
+            post(routes::ms365_planner_complete_task),
+        )
         // Config editor routes
         .route(
             "/config",

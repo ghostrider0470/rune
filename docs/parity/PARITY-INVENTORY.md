@@ -736,7 +736,7 @@ Required concepts:
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
-Status: CLI/API shape implemented (issue #206, slices 1–8, 10, 12–13). Calendar mutation surface (create/delete/respond) added in slice 12. OneDrive file search added in slice 13. Backend foundation begins with `/ms365/auth/status` only; the rest of the gateway `/ms365` family and Graph integration remain deferred.
+Status: CLI/API shape implemented (issue #206, slices 1–8, 10, 12–13). Calendar mutation surface (create/delete/respond) added in slice 12. OneDrive file search added in slice 13. Backend foundation now includes `/ms365/auth/status` plus Planner mutation routes for task create/update/complete to unblock #232; the rest of the gateway `/ms365` family remains deferred.
 
 ---
 

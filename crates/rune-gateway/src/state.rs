@@ -6,8 +6,8 @@ use std::time::Instant;
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
-    HookRegistry, PluginLoader, PluginRegistry,
-    SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
+    HookRegistry, PluginLoader, PluginRegistry, SessionEngine, SkillLoader, SkillRegistry,
+    TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -19,6 +19,7 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tts::TtsEngine;
 use tokio::sync::{RwLock, broadcast};
 
+use crate::ms365::Ms365PlannerService;
 use crate::pairing::DeviceRegistry;
 
 /// Events emitted for WebSocket subscribers.
@@ -87,4 +88,6 @@ pub struct AppState {
     pub tts_engine: Option<Arc<RwLock<TtsEngine>>>,
     /// Speech-to-text engine (constructed when STT API key is configured).
     pub stt_engine: Option<Arc<RwLock<SttEngine>>>,
+    /// Microsoft 365 Planner mutation backend.
+    pub ms365_planner_service: Arc<dyn Ms365PlannerService>,
 }

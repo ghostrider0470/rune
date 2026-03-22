@@ -5,6 +5,7 @@ mod auth;
 mod error;
 pub mod events;
 mod logging;
+pub mod ms365;
 pub mod pairing;
 mod routes;
 mod server;
@@ -24,7 +25,6 @@ pub use server::{GatewayHandle, Services, build_router, start};
 pub use state::{AppState, SessionEvent};
 pub use supervisor::BackgroundSupervisor;
 pub(crate) use supervisor::{SupervisorDeps, run_job_lifecycle};
-
 
 pub fn telegram_adapter_from_token(token: &str) -> rune_channels::TelegramAdapter {
     rune_channels::TelegramAdapter::new(token)
