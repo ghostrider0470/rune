@@ -15,11 +15,40 @@ use crate::definition::{ToolCall, ToolResult};
 use crate::error::ToolError;
 use crate::executor::ToolExecutor;
 use crate::memory_index::MemoryIndex;
+use crate::memory_ranking::{self, MemoryHit};
+
+/// Configuration for memory search ranking.
+#[derive(Clone, Debug)]
+pub struct MemorySearchConfig {
+    /// Enable temporal decay on search results (default: true).
+    pub temporal_decay_enabled: bool,
+    /// Half-life in days for temporal decay (default: 30).
+    pub half_life_days: f64,
+    /// Enable MMR diversity re-ranking (default: true).
+    pub mmr_enabled: bool,
+    /// Lambda for MMR: 1.0 = pure relevance, 0.0 = pure diversity (default: 0.7).
+    pub mmr_lambda: f64,
+    /// Enable query expansion (default: true).
+    pub query_expansion_enabled: bool,
+}
+
+impl Default for MemorySearchConfig {
+    fn default() -> Self {
+        Self {
+            temporal_decay_enabled: true,
+            half_life_days: memory_ranking::DEFAULT_HALF_LIFE_DAYS,
+            mmr_enabled: true,
+            mmr_lambda: memory_ranking::DEFAULT_MMR_LAMBDA,
+            query_expansion_enabled: true,
+        }
+    }
+}
 
 /// Executor for memory tools operating on workspace memory files.
 pub struct MemoryToolExecutor {
     workspace_root: PathBuf,
     hybrid_search: Option<Arc<dyn HybridMemorySearchBackend>>,
+    search_config: MemorySearchConfig,
 }
 
 #[async_trait]
@@ -150,6 +179,19 @@ impl MemoryToolExecutor {
         Self {
             workspace_root: workspace_root.into(),
             hybrid_search: None,
+            search_config: MemorySearchConfig::default(),
+        }
+    }
+
+    /// Create a memory tool executor with custom search ranking config.
+    pub fn with_config(
+        workspace_root: impl Into<PathBuf>,
+        search_config: MemorySearchConfig,
+    ) -> Self {
+        Self {
+            workspace_root: workspace_root.into(),
+            hybrid_search: None,
+            search_config,
         }
     }
 
@@ -166,6 +208,7 @@ impl MemoryToolExecutor {
         Self {
             workspace_root: workspace_root.into(),
             hybrid_search: Some(hybrid_search),
+            search_config: MemorySearchConfig::default(),
         }
     }
 
@@ -194,27 +237,56 @@ impl MemoryToolExecutor {
         files
     }
 
-    fn format_hybrid_results(&self, query: &str, results: Vec<HybridMemorySearchHit>) -> String {
+    fn format_results(query: &str, results: &[MemoryHit]) -> String {
         if results.is_empty() {
             format!("No results found for query: {query}")
         } else {
             results
-                .into_iter()
+                .iter()
                 .map(|hit| format!("Source: {}\n{}", hit.file_path, hit.chunk_text.trim()))
                 .collect::<Vec<_>>()
                 .join("\n---\n")
         }
     }
 
-    async fn local_keyword_search(&self, query: &str, max_results: usize) -> String {
+    /// Apply the ranking pipeline (temporal decay + MMR) to search results.
+    fn apply_ranking(&self, mut hits: Vec<MemoryHit>, max_results: usize) -> Vec<MemoryHit> {
+        if self.search_config.temporal_decay_enabled {
+            memory_ranking::apply_temporal_decay(&mut hits, self.search_config.half_life_days);
+            // Re-sort after decay so MMR sees the adjusted scores
+            hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        }
+
+        if self.search_config.mmr_enabled {
+            memory_ranking::mmr_rerank(hits, self.search_config.mmr_lambda, max_results)
+        } else {
+            hits.truncate(max_results);
+            hits
+        }
+    }
+
+    /// Optionally expand the query before searching.
+    fn maybe_expand_query<'a>(&self, query: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.search_config.query_expansion_enabled {
+            let expanded = memory_ranking::expand_query(query);
+            if expanded != query.to_lowercase() || expanded != query {
+                tracing::debug!(original = query, expanded = %expanded, "query expanded");
+            }
+            std::borrow::Cow::Owned(expanded)
+        } else {
+            std::borrow::Cow::Borrowed(query)
+        }
+    }
+
+    async fn local_keyword_search(&self, query: &str, max_results: usize) -> Vec<MemoryHit> {
         let query_lower = query.to_lowercase();
         let query_words: Vec<&str> = query_lower.split_whitespace().collect();
         if query_words.is_empty() {
-            return format!("No results found for query: {query}");
+            return Vec::new();
         }
 
         let files = self.memory_files().await;
-        let mut results: Vec<(String, usize, f64)> = Vec::new();
+        let mut results: Vec<MemoryHit> = Vec::new();
 
         for file_path in &files {
             let content = match tokio::fs::read_to_string(file_path).await {
@@ -242,33 +314,27 @@ impl MemoryToolExecutor {
                     let end = (i + 2).min(lines.len());
                     let snippet = lines[start..end].join("\n");
 
-                    results.push((
-                        format!("Source: {}#{}\n{}", rel_path, i + 1, snippet),
-                        i + 1,
+                    results.push(MemoryHit {
+                        file_path: format!("{}#{}", rel_path, i + 1),
+                        chunk_text: snippet,
                         score,
-                    ));
+                    });
                 }
             }
         }
 
-        results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(max_results);
-
-        if results.is_empty() {
-            format!("No results found for query: {query}")
-        } else {
-            results
-                .iter()
-                .map(|(snippet, _, _)| snippet.as_str())
-                .collect::<Vec<_>>()
-                .join("\n---\n")
-        }
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        // Return more than max_results so ranking pipeline can select diverse results
+        results.truncate(max_results * 3);
+        results
     }
 
     /// Search memory, preferring persisted hybrid search when configured.
+    ///
+    /// Pipeline: query expansion → search → temporal decay → MMR re-ranking → format.
     #[instrument(skip(self, call), fields(tool = "memory_search"))]
     async fn memory_search(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let query = call
+        let raw_query = call
             .arguments
             .get("query")
             .and_then(|v| v.as_str())
@@ -282,17 +348,36 @@ impl MemoryToolExecutor {
             .and_then(|v| v.as_u64())
             .unwrap_or(10) as usize;
 
-        let output = if let Some(backend) = &self.hybrid_search {
-            match backend.search(query, max_results).await {
-                Ok(results) => self.format_hybrid_results(query, results),
+        // Step 1: Query expansion
+        let query = self.maybe_expand_query(raw_query);
+
+        // Step 2: Search (hybrid or local keyword)
+        let hits = if let Some(backend) = &self.hybrid_search {
+            match backend.search(&query, max_results * 3).await {
+                Ok(results) => results
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, hit)| MemoryHit {
+                        file_path: hit.file_path,
+                        chunk_text: hit.chunk_text,
+                        // Assign score based on position (backend results are ranked)
+                        score: 1.0 / (1.0 + i as f64),
+                    })
+                    .collect(),
                 Err(err) => {
                     warn!(error = %err, "persisted hybrid memory search failed; falling back to local keyword scan");
-                    self.local_keyword_search(query, max_results).await
+                    self.local_keyword_search(&query, max_results).await
                 }
             }
         } else {
-            self.local_keyword_search(query, max_results).await
+            self.local_keyword_search(&query, max_results).await
         };
+
+        // Step 3: Temporal decay + MMR re-ranking
+        let ranked = self.apply_ranking(hits, max_results);
+
+        // Step 4: Format
+        let output = Self::format_results(raw_query, &ranked);
 
         Ok(ToolResult {
             tool_call_id: call.tool_call_id.clone(),
