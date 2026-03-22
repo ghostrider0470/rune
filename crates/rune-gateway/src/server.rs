@@ -406,10 +406,58 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/", get(routes::spa_handler))
         .fallback(routes::spa_handler);
 
+    // Content-negotiation layer: browser navigation (Accept: text/html)
+    // on API paths gets the SPA instead of JSON.
+    let content_negotiate = middleware::from_fn(content_negotiate_spa);
+
     Router::new()
         .merge(public_routes)
-        .merge(protected_routes)
+        .merge(protected_routes.layer(content_negotiate))
         .merge(spa_routes)
+}
+
+/// Content-negotiation middleware: if a browser navigates to an API path
+/// (Accept header contains text/html), serve the SPA index instead of JSON.
+/// This lets SPA client-side routes like `/sessions`, `/cron`, `/models` work
+/// on hard refresh without conflicting with the API handlers.
+async fn content_negotiate_spa(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::header;
+
+    // Only intercept GET requests (not POST/PUT/DELETE API calls)
+    if request.method() != axum::http::Method::GET {
+        return next.run(request).await;
+    }
+
+    // Skip paths that are clearly API-only (have /api/ prefix or are known API-only paths)
+    let path = request.uri().path();
+    if path.starts_with("/api/")
+        || path.starts_with("/gateway/")
+        || path.starts_with("/webhook/")
+        || path.starts_with("/devices/")
+        || path == "/health"
+        || path == "/ws"
+    {
+        return next.run(request).await;
+    }
+
+    // Check if browser is requesting HTML (navigation)
+    let accepts_html = request
+        .headers()
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.contains("text/html"))
+        .unwrap_or(false);
+
+    if accepts_html {
+        // Browser navigation — serve SPA index
+        return routes::spa_index().await;
+    }
+
+    // API/fetch request — pass through to the handler
+    next.run(request).await
 }
 
 /// Build a [`rustls::ServerConfig`] from PEM-encoded cert chain and private key files.

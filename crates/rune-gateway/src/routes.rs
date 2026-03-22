@@ -240,8 +240,25 @@ pub async fn spa_index() -> Response {
     spa_response_for_path("")
 }
 
-pub async fn spa_handler(uri: axum::http::Uri) -> Response {
-    spa_response_for_path(uri.path().trim_start_matches('/'))
+pub async fn spa_handler(
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+) -> Response {
+    let path = uri.path().trim_start_matches('/');
+
+    // If the request is for an API path or doesn't accept HTML, return 404
+    // so it doesn't accidentally serve the SPA for missing API endpoints.
+    let accepts_html = headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.contains("text/html"))
+        .unwrap_or(false);
+
+    if !accepts_html && !path.is_empty() {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+
+    spa_response_for_path(path)
 }
 
 fn spa_response_for_path(path: &str) -> Response {
