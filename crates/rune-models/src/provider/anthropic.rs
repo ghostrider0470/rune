@@ -169,6 +169,8 @@ impl ModelProvider for AnthropicProvider {
             AnthropicMode::Azure => {
                 req = req
                     .header("api-key", &self.api_key)
+                    .header("x-api-key", &self.api_key)
+                    .header("api-version", &self.api_version)
                     .header("anthropic-version", &self.api_version);
             }
         }
