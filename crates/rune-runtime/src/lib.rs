@@ -22,7 +22,7 @@ pub mod workspace;
 pub mod merge_queue;
 pub mod orchestrator;
 
-pub use compaction::{CompactionStrategy, NoOpCompaction};
+pub use compaction::{CompactionStrategy, NoOpCompaction, TokenBudgetCompaction};
 pub use context::ContextAssembler;
 pub use dispatcher::{DispatchDecision, MessageDispatcher, OrchestratorRegistry};
 pub use engine::SessionEngine;
