@@ -1122,7 +1122,7 @@ pub async fn get_session_status(
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
     if approval_mode == "on-miss" {
         unresolved.push(
-            "approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet".to_string(),
+            "approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable".to_string(),
         );
     }
     if security_mode == "allowlist" {
@@ -2268,6 +2268,25 @@ pub async fn heartbeat_disable(
     Ok(Json(ActionResponse {
         success: true,
         message: "heartbeat disabled".to_string(),
+    }))
+}
+
+/// `POST /heartbeat/interval` — set the heartbeat interval in seconds.
+pub async fn heartbeat_set_interval(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<ActionResponse>, GatewayError> {
+    let secs = body
+        .get("interval_secs")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| GatewayError::BadRequest("interval_secs required".into()))?;
+    if secs < 60 {
+        return Err(GatewayError::BadRequest("interval_secs must be >= 60".into()));
+    }
+    state.heartbeat.set_interval(secs).await;
+    Ok(Json(ActionResponse {
+        success: true,
+        message: format!("heartbeat interval set to {secs}s"),
     }))
 }
 

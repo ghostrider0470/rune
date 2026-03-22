@@ -403,6 +403,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/heartbeat/status", get(routes::heartbeat_status))
         .route("/heartbeat/enable", post(routes::heartbeat_enable))
         .route("/heartbeat/disable", post(routes::heartbeat_disable))
+        .route("/heartbeat/interval", post(routes::heartbeat_set_interval))
         // Reminder routes
         .route(
             "/reminders",
