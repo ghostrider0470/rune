@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use rune_core::TranscriptItem;
 use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
+use tracing::warn;
 
 use crate::compaction::CompactionStrategy;
 use crate::memory::MemoryContext;
@@ -151,6 +154,47 @@ impl ContextAssembler {
                 tool_calls: None,
             }),
             _ => None,
+        }
+    }
+}
+
+/// Ensures every `tool_call_id` in an Assistant message has a corresponding
+/// `Role::Tool` response. Injects synthetic tool responses for any orphaned
+/// tool calls. Model-agnostic — all providers require this invariant.
+fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
+    let mut i = 0;
+    while i < messages.len() {
+        let pending_ids: Vec<String> = match &messages[i] {
+            ChatMessage { role: Role::Assistant, tool_calls: Some(calls), .. } if !calls.is_empty() => {
+                calls.iter().map(|tc| tc.id.clone()).collect()
+            }
+            _ => { i += 1; continue; }
+        };
+
+        let mut outstanding: HashSet<String> = pending_ids.into_iter().collect();
+        let mut j = i + 1;
+        while j < messages.len() && messages[j].role == Role::Tool {
+            if let Some(ref id) = messages[j].tool_call_id { outstanding.remove(id); }
+            j += 1;
+        }
+
+        if !outstanding.is_empty() {
+            warn!(orphaned_count = outstanding.len(), "injecting synthetic tool responses for orphaned tool_call(s)");
+            let mut orphaned: Vec<String> = outstanding.into_iter().collect();
+            orphaned.sort();
+            let count = orphaned.len();
+            for (offset, id) in orphaned.into_iter().enumerate() {
+                messages.insert(j + offset, ChatMessage {
+                    role: Role::Tool,
+                    content: Some("[Tool call interrupted — no result available]".to_string()),
+                    name: None,
+                    tool_call_id: Some(id),
+                    tool_calls: None,
+                });
+            }
+            i = j + count;
+        } else {
+            i = j;
         }
     }
 }
