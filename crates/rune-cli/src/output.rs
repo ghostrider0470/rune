@@ -4343,6 +4343,66 @@ impl fmt::Display for Ms365PlannerTaskCompleteResponse {
 
 // ── Microsoft 365 To-Do ──────────────────────────────────────────
 
+/// Response from `rune ms365 todo create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoTaskCreateResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(default, alias = "id")]
+    pub task_id: Option<String>,
+}
+
+impl fmt::Display for Ms365TodoTaskCreateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} {}", self.message)?;
+        if let Some(task_id) = &self.task_id {
+            writeln!(f, "  Task ID:   {task_id}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 todo update`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoTaskUpdateResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(default, alias = "id")]
+    pub task_id: Option<String>,
+}
+
+impl fmt::Display for Ms365TodoTaskUpdateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} {}", self.message)?;
+        if let Some(task_id) = &self.task_id {
+            writeln!(f, "  Task ID:   {task_id}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 todo complete`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365TodoTaskCompleteResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(default, alias = "id")]
+    pub task_id: Option<String>,
+}
+
+impl fmt::Display for Ms365TodoTaskCompleteResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} {}", self.message)?;
+        if let Some(task_id) = &self.task_id {
+            writeln!(f, "  Task ID:   {task_id}")?;
+        }
+        Ok(())
+    }
+}
+
 /// A single To-Do task list summary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ms365TodoList {
@@ -7648,6 +7708,46 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["success"], true);
         assert_eq!(v["message"], "Planner task completed");
+        assert_eq!(v["task_id"], "task-1");
+    }
+
+    #[test]
+    fn render_ms365_todo_create_human() {
+        let r = Ms365TodoTaskCreateResponse {
+            success: true,
+            message: "To-Do task created".into(),
+            task_id: Some("task-1".into()),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("To-Do task created"));
+        assert!(out.contains("task-1"));
+    }
+
+    #[test]
+    fn render_ms365_todo_update_human() {
+        let r = Ms365TodoTaskUpdateResponse {
+            success: true,
+            message: "To-Do task updated".into(),
+            task_id: Some("task-1".into()),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("To-Do task updated"));
+        assert!(out.contains("task-1"));
+    }
+
+    #[test]
+    fn render_ms365_todo_complete_json() {
+        let r = Ms365TodoTaskCompleteResponse {
+            success: true,
+            message: "To-Do task completed".into(),
+            task_id: Some("task-1".into()),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["message"], "To-Do task completed");
         assert_eq!(v["task_id"], "task-1");
     }
 

@@ -1455,6 +1455,52 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_todo_task_read(&list_id, &id).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365TodoAction::Create {
+                    list_id,
+                    title,
+                    due_date,
+                    importance,
+                    body,
+                } => {
+                    let result = client
+                        .ms365_todo_task_create(
+                            &list_id,
+                            &title,
+                            due_date.as_deref(),
+                            importance.as_deref(),
+                            body.as_deref(),
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365TodoAction::Update {
+                    list_id,
+                    id,
+                    title,
+                    status,
+                    importance,
+                    due_date,
+                    body,
+                } => {
+                    let result = client
+                        .ms365_todo_task_update(
+                            &list_id,
+                            &id,
+                            crate::client::Ms365TodoTaskUpdateInput {
+                                title,
+                                status,
+                                importance,
+                                due_date,
+                                body,
+                            },
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365TodoAction::Complete { list_id, id } => {
+                    let result = client.ms365_todo_task_complete(&list_id, &id).await?;
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Teams { action } => match action {
                 Ms365TeamsAction::List { limit } => {

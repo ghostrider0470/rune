@@ -605,6 +605,63 @@ pub enum Ms365TodoAction {
         #[arg(long)]
         id: String,
     },
+    /// Create a new To-Do task.
+    Create {
+        /// Task list ID that will own the task.
+        #[arg(long)]
+        list_id: String,
+        /// Task title.
+        #[arg(long)]
+        title: String,
+        /// Optional due date-time (ISO 8601).
+        #[arg(long)]
+        due_date: Option<String>,
+        /// Optional task importance (for example `low`, `normal`, `high`).
+        #[arg(long)]
+        importance: Option<String>,
+        /// Optional task body/notes.
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Update To-Do task details or workflow status.
+    #[command(group(
+        ArgGroup::new("todo_task_update_changes")
+            .required(true)
+            .multiple(true)
+            .args(["title", "status", "importance", "due_date", "body"])
+    ))]
+    Update {
+        /// Task list ID that contains the task.
+        #[arg(long)]
+        list_id: String,
+        /// Task ID to update.
+        #[arg(long)]
+        id: String,
+        /// New task title.
+        #[arg(long)]
+        title: Option<String>,
+        /// New workflow status (for example `notStarted`, `inProgress`, `completed`).
+        #[arg(long)]
+        status: Option<String>,
+        /// New task importance.
+        #[arg(long)]
+        importance: Option<String>,
+        /// New due date-time (ISO 8601).
+        #[arg(long)]
+        due_date: Option<String>,
+        /// New task body/notes.
+        #[arg(long)]
+        body: Option<String>,
+    },
+    /// Mark a To-Do task complete.
+    Complete {
+        /// Task list ID that contains the task.
+        #[arg(long)]
+        list_id: String,
+        /// Task ID to mark complete.
+        #[arg(long)]
+        id: String,
+    },
 }
 
 /// SharePoint sites subcommands.
@@ -5474,6 +5531,137 @@ mod subagent_cli_tests {
                 action:
                     Ms365Action::Todo {
                         action: Ms365TodoAction::TaskRead { list_id, id },
+                    },
+            } => {
+                assert_eq!(list_id, "lst1");
+                assert_eq!(id, "task1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_todo_create() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "todo",
+            "create",
+            "--list-id",
+            "lst1",
+            "--title",
+            "Draft operator note",
+            "--due-date",
+            "2026-03-25T12:00:00Z",
+            "--importance",
+            "high",
+            "--body",
+            "Prepare the follow-on summary.",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Todo {
+                        action:
+                            Ms365TodoAction::Create {
+                                list_id,
+                                title,
+                                due_date,
+                                importance,
+                                body,
+                            },
+                    },
+            } => {
+                assert_eq!(list_id, "lst1");
+                assert_eq!(title, "Draft operator note");
+                assert_eq!(due_date.as_deref(), Some("2026-03-25T12:00:00Z"));
+                assert_eq!(importance.as_deref(), Some("high"));
+                assert_eq!(body.as_deref(), Some("Prepare the follow-on summary."));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_todo_update() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "todo",
+            "update",
+            "--list-id",
+            "lst1",
+            "--id",
+            "task1",
+            "--status",
+            "inProgress",
+            "--importance",
+            "high",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Todo {
+                        action:
+                            Ms365TodoAction::Update {
+                                list_id,
+                                id,
+                                title,
+                                status,
+                                importance,
+                                due_date,
+                                body,
+                            },
+                    },
+            } => {
+                assert_eq!(list_id, "lst1");
+                assert_eq!(id, "task1");
+                assert!(title.is_none());
+                assert_eq!(status.as_deref(), Some("inProgress"));
+                assert_eq!(importance.as_deref(), Some("high"));
+                assert!(due_date.is_none());
+                assert!(body.is_none());
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_todo_update_requires_change() {
+        let err = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "todo",
+            "update",
+            "--list-id",
+            "lst1",
+            "--id",
+            "task1",
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn parse_ms365_todo_complete() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "todo",
+            "complete",
+            "--list-id",
+            "lst1",
+            "--id",
+            "task1",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Todo {
+                        action: Ms365TodoAction::Complete { list_id, id },
                     },
             } => {
                 assert_eq!(list_id, "lst1");
