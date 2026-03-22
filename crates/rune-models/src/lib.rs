@@ -18,7 +18,7 @@ pub use provider::ollama::OllamaProvider;
 pub use provider::openai::OpenAiProvider;
 pub use types::{
     ChatMessage, CompletionRequest, CompletionResponse, FinishReason, FunctionCall,
-    FunctionDefinition, Role, ToolCallRequest, ToolDefinition, Usage,
+    FunctionDefinition, Role, StreamEvent, ToolCallRequest, ToolDefinition, Usage,
 };
 
 use rune_config::ModelProviderConfig;
@@ -351,6 +351,41 @@ impl ModelProvider for RoutedModelProvider {
         }
 
         Err(last_err)
+    }
+
+    async fn complete_stream(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ModelError> {
+        let Some(model_ref) = request.model.as_deref() else {
+            if self.providers.len() == 1 {
+                let provider = self
+                    .providers
+                    .values()
+                    .next()
+                    .expect("single provider should exist");
+                return provider.complete_stream(request).await;
+            }
+            return Err(ModelError::Configuration(
+                "model routing requires a selected model".into(),
+            ));
+        };
+
+        // For streaming, dispatch to primary only (no fallback chain).
+        let resolved = self
+            .models
+            .resolve_model(model_ref)
+            .map_err(map_resolution_error)?;
+        let provider = self.providers.get(&resolved.provider.name).ok_or_else(|| {
+            ModelError::Configuration(format!(
+                "provider '{}' is configured in the model inventory but not available",
+                resolved.provider.name
+            ))
+        })?;
+
+        let mut routed_request = request.clone();
+        routed_request.model = Some(resolved.raw_model.to_string());
+        provider.complete_stream(&routed_request).await
     }
 }
 
