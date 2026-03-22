@@ -3533,6 +3533,36 @@ pub async fn get_tool_execution(Path(id): Path<String>) -> Result<Json<Value>, G
     )))
 }
 
+// ── Microsoft 365 ───────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct Ms365AuthStatusResponse {
+    pub authenticated: bool,
+    pub tenant_id: Option<String>,
+    pub client_id: Option<String>,
+    pub user_principal: Option<String>,
+    pub scopes: Vec<String>,
+    pub token_expires_at: Option<String>,
+    pub token_valid: bool,
+}
+
+/// `GET /ms365/auth/status` — return Microsoft 365 auth/config readiness.
+pub async fn ms365_auth_status(
+    State(state): State<AppState>,
+) -> Result<Json<Ms365AuthStatusResponse>, GatewayError> {
+    let config = state.config.read().await;
+
+    Ok(Json(Ms365AuthStatusResponse {
+        authenticated: false,
+        tenant_id: config.ms365.tenant_id.clone(),
+        client_id: config.ms365.client_id.clone(),
+        user_principal: config.ms365.user_principal.clone(),
+        scopes: config.ms365.scopes.clone(),
+        token_expires_at: None,
+        token_valid: false,
+    }))
+}
+
 // ── Auth ────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]

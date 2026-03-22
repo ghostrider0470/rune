@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub models: ModelsConfig,
     pub channels: ChannelsConfig,
     #[serde(default)]
+    pub ms365: Ms365Config,
+    #[serde(default)]
     pub agents: AgentsConfig,
     #[serde(default)]
     pub runtime: RuntimeConfig,
@@ -376,6 +378,19 @@ impl Default for GatewayConfig {
             tls: TlsConfig::default(),
         }
     }
+}
+
+/// Microsoft 365 configuration used by the gateway status surface.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ms365Config {
+    #[serde(default)]
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub user_principal: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
 }
 
 /// TLS termination settings for the gateway.
