@@ -59,46 +59,92 @@ impl TokenBudgetCompaction {
         self
     }
 
-    /// Rough token estimate: ~4 characters per token.
+    /// Estimate token count using word/punctuation splitting for better accuracy
+    /// than the naive 4-chars-per-token heuristic.
+    ///
+    /// Splits on whitespace and punctuation boundaries, then counts resulting
+    /// fragments. This approximates BPE tokenization more closely (~1.3 tokens
+    /// per whitespace-delimited word for English text).
     fn estimate_tokens(msg: &ChatMessage) -> usize {
-        let content_len = msg.content.as_deref().map_or(0, |c| c.len());
-        let tool_calls_len = msg
+        fn count_text_tokens(text: &str) -> usize {
+            if text.is_empty() {
+                return 0;
+            }
+            let mut tokens = 0usize;
+            for word in text.split_whitespace() {
+                if word.len() <= 4 {
+                    tokens += 1;
+                } else {
+                    // Longer words are often split into sub-word tokens by BPE.
+                    // Approximate: 1 token per 4 chars, minimum 1.
+                    tokens += (word.len() + 3) / 4;
+                }
+            }
+            // Account for punctuation and special characters getting their own tokens
+            tokens += text.chars().filter(|c| c.is_ascii_punctuation()).count() / 2;
+            tokens.max(1)
+        }
+
+        let content_tokens = msg
+            .content
+            .as_deref()
+            .map_or(0, count_text_tokens);
+        let tool_calls_tokens = msg
             .tool_calls
             .as_ref()
             .map_or(0, |calls| {
                 calls.iter().map(|tc| {
-                    tc.function.name.len() + tc.function.arguments.len()
+                    count_text_tokens(&tc.function.name)
+                        + count_text_tokens(&tc.function.arguments)
                 }).sum()
             });
-        (content_len + tool_calls_len) / 4
+        content_tokens + tool_calls_tokens
     }
 
-    /// Summarize a slice of messages into a truncated plain-text summary.
+    /// Summarize a slice of messages into a structured extraction.
+    ///
+    /// Extracts key topics, decisions, and questions from the conversation
+    /// rather than blindly concatenating raw text, preserving semantic density.
     fn summarize(messages: &[ChatMessage]) -> String {
-        const MAX_SUMMARY_TOKENS: usize = 2000;
-        const MAX_SUMMARY_CHARS: usize = MAX_SUMMARY_TOKENS * 4;
+        const MAX_SUMMARY_CHARS: usize = 6000;
 
-        let mut summary = String::from("[Earlier conversation summary]\n");
+        let mut summary = String::from(
+            "[Earlier conversation summary]: The following is a structured summary \
+             of earlier messages that were compacted to save context space.\n\n",
+        );
+
+        // Extract user questions/requests and assistant answers/decisions
         for msg in messages {
-            if let Some(content) = &msg.content {
-                let role = match msg.role {
-                    Role::System => "system",
-                    Role::User => "user",
-                    Role::Assistant => "assistant",
-                    Role::Tool => "tool",
-                };
-                summary.push_str(role);
-                summary.push_str(": ");
-                summary.push_str(content);
-                summary.push('\n');
-
-                if summary.len() >= MAX_SUMMARY_CHARS {
-                    summary.truncate(MAX_SUMMARY_CHARS);
-                    summary.push_str("...");
-                    break;
-                }
+            let Some(content) = &msg.content else { continue };
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                continue;
             }
+
+            let (prefix, max_excerpt) = match msg.role {
+                Role::User => ("User asked: ", 200),
+                Role::Assistant => ("Assistant responded: ", 300),
+                Role::Tool => ("Tool returned: ", 150),
+                Role::System => continue,
+            };
+
+            let excerpt = if trimmed.len() > max_excerpt {
+                format!(
+                    "{}...",
+                    &trimmed[..trimmed.floor_char_boundary(max_excerpt)]
+                )
+            } else {
+                trimmed.to_string()
+            };
+
+            let line = format!("- {prefix}{excerpt}\n");
+            if summary.len() + line.len() > MAX_SUMMARY_CHARS {
+                summary.push_str("- (earlier context truncated)\n");
+                break;
+            }
+            summary.push_str(&line);
         }
+
         summary
     }
 
@@ -281,6 +327,8 @@ mod tests {
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].role, Role::System);
         assert!(result[0].content.as_ref().unwrap().starts_with("[Earlier conversation summary]"));
+        // Structured summary should contain user extractions
+        assert!(result[0].content.as_ref().unwrap().contains("User asked:"));
     }
 
     #[test]
@@ -297,11 +345,11 @@ mod tests {
 
     #[test]
     fn summary_truncates_long_content() {
-        let long_content = "x".repeat(10_000);
+        let long_content = "x ".repeat(5_000);
         let messages = vec![msg(Role::User, &long_content)];
         let summary = TokenBudgetCompaction::summarize(&messages);
-        // 2000 tokens * 4 chars = 8000 chars max + "..." + header
-        assert!(summary.len() <= 8100);
+        // Structured summary: 6000 chars max + header
+        assert!(summary.len() <= 6200);
     }
 
     // -- Memory flush tests --

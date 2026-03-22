@@ -440,6 +440,23 @@ impl SessionRepo for SqliteSessionRepo {
             .await
             .map_err(StoreError::from)
     }
+
+    async fn list_active_channel_sessions(&self) -> Result<Vec<SessionRow>, StoreError> {
+        self.conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {SESSION_COLS} FROM sessions \
+                     WHERE kind = 'Channel' \
+                     AND channel_ref IS NOT NULL \
+                     AND status NOT IN ('completed','failed','cancelled') \
+                     ORDER BY created_at DESC"
+                ))?;
+                stmt.query_map([], row_to_session)?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════

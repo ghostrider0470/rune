@@ -203,6 +203,20 @@ impl SessionRepo for PgSessionRepo {
             .map_err(StoreError::from)?;
         Ok(affected > 0)
     }
+
+    async fn list_active_channel_sessions(&self) -> Result<Vec<SessionRow>, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let terminal = vec!["completed", "failed", "cancelled"];
+        sessions::table
+            .filter(sessions::kind.eq("Channel"))
+            .filter(sessions::channel_ref.is_not_null())
+            .filter(sessions::status.ne_all(terminal))
+            .select(SessionRow::as_select())
+            .order(sessions::created_at.desc())
+            .load(&mut conn)
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 // ── PgTurnRepo ──────────────────────────────────────────────────────

@@ -351,6 +351,20 @@ impl SessionRepo for MemSessionRepo {
         sessions.retain(|session| session.id != id);
         Ok(sessions.len() != before)
     }
+
+    async fn list_active_channel_sessions(&self) -> Result<Vec<SessionRow>, StoreError> {
+        let sessions = self.sessions.lock().await;
+        let terminal = ["completed", "failed", "cancelled"];
+        Ok(sessions
+            .iter()
+            .filter(|s| {
+                s.kind == "Channel"
+                    && s.channel_ref.is_some()
+                    && !terminal.contains(&s.status.as_str())
+            })
+            .cloned()
+            .collect())
+    }
 }
 
 struct MemTurnRepo {
