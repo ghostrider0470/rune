@@ -59,6 +59,17 @@ impl TokenBudgetCompaction {
         self
     }
 
+    fn truncate_utf8_boundary(text: &str, max_len: usize) -> usize {
+        if max_len >= text.len() {
+            return text.len();
+        }
+        let mut idx = max_len;
+        while idx > 0 && !text.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        idx
+    }
+
     /// Estimate token count using word/punctuation splitting for better accuracy
     /// than the naive 4-chars-per-token heuristic.
     ///
@@ -77,7 +88,7 @@ impl TokenBudgetCompaction {
                 } else {
                     // Longer words are often split into sub-word tokens by BPE.
                     // Approximate: 1 token per 4 chars, minimum 1.
-                    tokens += (word.len() + 3) / 4;
+                    tokens += word.len().div_ceil(4);
                 }
             }
             // Account for punctuation and special characters getting their own tokens
@@ -131,7 +142,7 @@ impl TokenBudgetCompaction {
             let excerpt = if trimmed.len() > max_excerpt {
                 format!(
                     "{}...",
-                    &trimmed[..trimmed.floor_char_boundary(max_excerpt)]
+                    &trimmed[..Self::truncate_utf8_boundary(trimmed, max_excerpt)]
                 )
             } else {
                 trimmed.to_string()
@@ -179,7 +190,7 @@ impl TokenBudgetCompaction {
             // Truncate long individual messages to keep the note concise
             let max_msg_len = 300;
             let excerpt = if trimmed.len() > max_msg_len {
-                format!("{}...", &trimmed[..trimmed.floor_char_boundary(max_msg_len)])
+                format!("{}...", &trimmed[..Self::truncate_utf8_boundary(trimmed, max_msg_len)])
             } else {
                 trimmed.to_string()
             };
