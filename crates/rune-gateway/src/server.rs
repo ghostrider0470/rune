@@ -268,13 +268,15 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let public_routes = Router::new()
         .route("/health", get(routes::health))
-        .route("/status", get(routes::status))
         .route("/chat", get(webchat::webchat_handler))
         .route("/ws", get(ws::ws_handler))
         .route("/assets/{path}", get(routes::branded_asset))
         .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
         .route("/devices/pair/request", post(routes::device_pair_request))
-        // Dashboard SPA + API — public for operator visibility
+        .with_state(state.clone());
+
+    let protected_routes = Router::new()
+        .route("/status", get(routes::status))
         .route("/dashboard", get(routes::spa_index))
         .route("/ui", get(routes::spa_index))
         .route("/api/dashboard/summary", get(routes::dashboard_summary))
@@ -284,9 +286,6 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             "/api/dashboard/diagnostics",
             get(routes::dashboard_diagnostics),
         )
-        .with_state(state.clone());
-
-    let protected_routes = Router::new()
         .route("/gateway/health", get(routes::health))
         .route("/gateway/start", post(routes::gateway_start))
         .route("/gateway/stop", post(routes::gateway_stop))
