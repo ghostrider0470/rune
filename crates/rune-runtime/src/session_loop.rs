@@ -177,13 +177,23 @@ impl SessionLoop {
                     }
                     Err(e) => {
                         error!(session_id = %session.id, error = %e, "turn failed");
+                        let brief = {
+                            let full = e.to_string();
+                            if full.len() > 200 {
+                                format!("{}…", &full[..200])
+                            } else {
+                                full
+                            }
+                        };
                         let ch = self.channel.lock().await;
                         let _ = ch
                             .send(OutboundAction::Reply {
                                 channel_id: msg.channel_id,
                                 chat_id: msg.raw_chat_id.clone(),
                                 reply_to: msg.provider_message_id.clone(),
-                                content: format!("Turn failed: {e}"),
+                                content: format!(
+                                    "Sorry, I encountered an error: {brief}. Please try again."
+                                ),
                             })
                             .await;
                     }
