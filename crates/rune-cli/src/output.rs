@@ -14,11 +14,7 @@ impl OutputFormat {
     /// Create from the `--json` flag value.
     #[must_use]
     pub fn from_json_flag(json: bool) -> Self {
-        if json {
-            Self::Json
-        } else {
-            Self::Human
-        }
+        if json { Self::Json } else { Self::Human }
     }
 }
 
@@ -85,7 +81,11 @@ impl fmt::Display for DoctorCheck {
             "fail" => "✗",
             _ => "•",
         };
-        write!(f, "  {icon} {} [{}]: {}", self.name, self.status, self.message)
+        write!(
+            f,
+            "  {icon} {} [{}]: {}",
+            self.name, self.status, self.message
+        )
     }
 }
 
@@ -1283,11 +1283,7 @@ impl fmt::Display for ChannelLogoutResponse {
         if self.success {
             write!(f, "Channel `{}` logged out.", self.name)
         } else {
-            write!(
-                f,
-                "Channel `{}` logout failed: {}",
-                self.name, self.message
-            )
+            write!(f, "Channel `{}` logout failed: {}", self.name, self.message)
         }
     }
 }
@@ -1310,11 +1306,7 @@ impl fmt::Display for ChannelTestResponse {
             }
             Ok(())
         } else {
-            write!(
-                f,
-                "Channel `{}`: unreachable — {}",
-                self.name, self.message
-            )
+            write!(f, "Channel `{}`: unreachable — {}", self.name, self.message)
         }
     }
 }
@@ -1967,24 +1959,66 @@ impl fmt::Display for ConfigValidationResult {
 
 // ── Config admin responses (#30) ──────────────────────────────
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigReloadResponse { pub success: bool, pub detail: String }
-impl fmt::Display for ConfigReloadResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+pub struct ConfigReloadResponse {
+    pub success: bool,
+    pub detail: String,
+}
+impl fmt::Display for ConfigReloadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = if self.success { "✓" } else { "✗" };
+        write!(f, "{i} {}", self.detail)
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigDiffResponse { pub changed: bool, pub diff: String }
-impl fmt::Display for ConfigDiffResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.changed { write!(f, "{}", self.diff) } else { write!(f, "No differences.") } } }
+pub struct ConfigDiffResponse {
+    pub changed: bool,
+    pub diff: String,
+}
+impl fmt::Display for ConfigDiffResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.changed {
+            write!(f, "{}", self.diff)
+        } else {
+            write!(f, "No differences.")
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigEnvResponse { pub overrides: Vec<ConfigEnvOverride> }
+pub struct ConfigEnvResponse {
+    pub overrides: Vec<ConfigEnvOverride>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigEnvOverride { pub key: String, pub value: String, pub source: String }
-impl fmt::Display for ConfigEnvResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.overrides.is_empty() { return write!(f, "No environment overrides active."); } for o in &self.overrides { writeln!(f, "  {}: {} ({})", o.key, o.value, o.source)?; } Ok(()) } }
+pub struct ConfigEnvOverride {
+    pub key: String,
+    pub value: String,
+    pub source: String,
+}
+impl fmt::Display for ConfigEnvResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.overrides.is_empty() {
+            return write!(f, "No environment overrides active.");
+        }
+        for o in &self.overrides {
+            writeln!(f, "  {}: {} ({})", o.key, o.value, o.source)?;
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigExportResponse { pub destination: String, pub bytes_written: usize }
+pub struct ConfigExportResponse {
+    pub destination: String,
+    pub bytes_written: usize,
+}
 impl fmt::Display for ConfigExportResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.destination == "-" {
             Ok(()) // content already printed to stdout
         } else {
-            write!(f, "Exported resolved config to {} ({} bytes)", self.destination, self.bytes_written)
+            write!(
+                f,
+                "Exported resolved config to {} ({} bytes)",
+                self.destination, self.bytes_written
+            )
         }
     }
 }
@@ -2025,28 +2059,107 @@ impl fmt::Display for SetupResponse {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackupCreateResponse { pub success: bool, pub backup_id: String, pub detail: String }
-impl fmt::Display for BackupCreateResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "✓ Backup {} created: {}", self.backup_id, self.detail) } }
+pub struct BackupCreateResponse {
+    pub success: bool,
+    pub backup_id: String,
+    pub detail: String,
+}
+impl fmt::Display for BackupCreateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "✓ Backup {} created: {}", self.backup_id, self.detail)
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackupSummary { pub id: String, pub label: Option<String>, pub created_at: String, pub size_bytes: Option<u64> }
+pub struct BackupSummary {
+    pub id: String,
+    pub label: Option<String>,
+    pub created_at: String,
+    pub size_bytes: Option<u64>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackupListResponse { pub backups: Vec<BackupSummary> }
-impl fmt::Display for BackupListResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.backups.is_empty() { return write!(f, "No backups found."); } for b in &self.backups { write!(f, "  {} ({})", b.id, b.created_at)?; if let Some(ref l) = b.label { write!(f, " [{l}]")?; } writeln!(f)?; } Ok(()) } }
+pub struct BackupListResponse {
+    pub backups: Vec<BackupSummary>,
+}
+impl fmt::Display for BackupListResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.backups.is_empty() {
+            return write!(f, "No backups found.");
+        }
+        for b in &self.backups {
+            write!(f, "  {} ({})", b.id, b.created_at)?;
+            if let Some(ref l) = b.label {
+                write!(f, " [{l}]")?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackupRestoreResponse { pub success: bool, pub backup_id: String, pub detail: String }
-impl fmt::Display for BackupRestoreResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} Restore {}: {}", self.backup_id, self.detail) } }
+pub struct BackupRestoreResponse {
+    pub success: bool,
+    pub backup_id: String,
+    pub detail: String,
+}
+impl fmt::Display for BackupRestoreResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = if self.success { "✓" } else { "✗" };
+        write!(f, "{i} Restore {}: {}", self.backup_id, self.detail)
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateCheckResponse { pub available: bool, pub current_version: String, pub latest_version: Option<String>, pub detail: String }
-impl fmt::Display for UpdateCheckResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { if self.available { write!(f, "Update available: {} → {}", self.current_version, self.latest_version.as_deref().unwrap_or("?")) } else { write!(f, "✓ Up to date ({})", self.current_version) } } }
+pub struct UpdateCheckResponse {
+    pub available: bool,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub detail: String,
+}
+impl fmt::Display for UpdateCheckResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.available {
+            write!(
+                f,
+                "Update available: {} → {}",
+                self.current_version,
+                self.latest_version.as_deref().unwrap_or("?")
+            )
+        } else {
+            write!(f, "✓ Up to date ({})", self.current_version)
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateApplyResponse { pub success: bool, pub detail: String }
-impl fmt::Display for UpdateApplyResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+pub struct UpdateApplyResponse {
+    pub success: bool,
+    pub detail: String,
+}
+impl fmt::Display for UpdateApplyResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = if self.success { "✓" } else { "✗" };
+        write!(f, "{i} {}", self.detail)
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateStatusResponse { pub current_version: String, pub detail: String }
-impl fmt::Display for UpdateStatusResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{} — {}", self.current_version, self.detail) } }
+pub struct UpdateStatusResponse {
+    pub current_version: String,
+    pub detail: String,
+}
+impl fmt::Display for UpdateStatusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} — {}", self.current_version, self.detail)
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResetResponse { pub success: bool, pub detail: String }
-impl fmt::Display for ResetResponse { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { let i = if self.success { "✓" } else { "✗" }; write!(f, "{i} {}", self.detail) } }
+pub struct ResetResponse {
+    pub success: bool,
+    pub detail: String,
+}
+impl fmt::Display for ResetResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = if self.success { "✓" } else { "✗" };
+        write!(f, "{i} {}", self.detail)
+    }
+}
 
 /// Location of the local config file used for mutations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3338,7 +3451,11 @@ impl fmt::Display for SecurityAuditCheck {
             "fail" => "✗",
             _ => "•",
         };
-        write!(f, "  {icon} {} [{}]: {}", self.name, self.status, self.detail)
+        write!(
+            f,
+            "  {icon} {} [{}]: {}",
+            self.name, self.status, self.detail
+        )
     }
 }
 
@@ -3367,7 +3484,11 @@ pub struct Ms365MailMessage {
 
 impl fmt::Display for Ms365MailMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "  {} | {} | {}", self.received_at, self.from, self.subject)
+        write!(
+            f,
+            "  {} | {} | {}",
+            self.received_at, self.from, self.subject
+        )
     }
 }
 
@@ -3381,7 +3502,11 @@ pub struct Ms365MailUnreadResponse {
 
 impl fmt::Display for Ms365MailUnreadResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Unread mail in {}: {} message(s)", self.folder, self.total)?;
+        writeln!(
+            f,
+            "Unread mail in {}: {} message(s)",
+            self.folder, self.total
+        )?;
         if self.messages.is_empty() {
             writeln!(f, "  (none)")?;
         } else {
@@ -3407,7 +3532,11 @@ pub struct Ms365CalendarEvent {
 impl fmt::Display for Ms365CalendarEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let loc = self.location.as_deref().unwrap_or("-");
-        write!(f, "  {} - {} | {} | {}", self.start, self.end, self.subject, loc)
+        write!(
+            f,
+            "  {} - {} | {} | {}",
+            self.start, self.end, self.subject, loc
+        )
     }
 }
 
@@ -3421,7 +3550,11 @@ pub struct Ms365CalendarUpcomingResponse {
 
 impl fmt::Display for Ms365CalendarUpcomingResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Upcoming events (next {}h): {} event(s)", self.window_hours, self.total)?;
+        writeln!(
+            f,
+            "Upcoming events (next {}h): {} event(s)",
+            self.window_hours, self.total
+        )?;
         if self.events.is_empty() {
             writeln!(f, "  (none)")?;
         } else {
@@ -3458,8 +3591,16 @@ impl fmt::Display for Ms365MailReadResponse {
         }
         writeln!(f, "Received:    {}", self.received_at)?;
         writeln!(f, "Importance:  {}", self.importance)?;
-        writeln!(f, "Read:        {}", if self.is_read { "yes" } else { "no" })?;
-        writeln!(f, "Attachments: {}", if self.has_attachments { "yes" } else { "no" })?;
+        writeln!(
+            f,
+            "Read:        {}",
+            if self.is_read { "yes" } else { "no" }
+        )?;
+        writeln!(
+            f,
+            "Attachments: {}",
+            if self.has_attachments { "yes" } else { "no" }
+        )?;
         writeln!(f)?;
         writeln!(f, "{}", self.body_preview)?;
         Ok(())
@@ -3562,7 +3703,11 @@ pub struct Ms365AuthStatusResponse {
 impl fmt::Display for Ms365AuthStatusResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "MS365 Auth Status")?;
-        writeln!(f, "  Authenticated: {}", if self.authenticated { "yes" } else { "no" })?;
+        writeln!(
+            f,
+            "  Authenticated: {}",
+            if self.authenticated { "yes" } else { "no" }
+        )?;
         if let Some(t) = &self.tenant_id {
             writeln!(f, "  Tenant ID:     {t}")?;
         }
@@ -3575,7 +3720,11 @@ impl fmt::Display for Ms365AuthStatusResponse {
         if !self.scopes.is_empty() {
             writeln!(f, "  Scopes:        {}", self.scopes.join(", "))?;
         }
-        writeln!(f, "  Token valid:   {}", if self.token_valid { "yes" } else { "no" })?;
+        writeln!(
+            f,
+            "  Token valid:   {}",
+            if self.token_valid { "yes" } else { "no" }
+        )?;
         if let Some(exp) = &self.token_expires_at {
             writeln!(f, "  Token expires: {exp}")?;
         }
@@ -3594,7 +3743,11 @@ pub struct Ms365MailFolder {
 
 impl fmt::Display for Ms365MailFolder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "  {} ({} total, {} unread)", self.display_name, self.total_count, self.unread_count)
+        write!(
+            f,
+            "  {} ({} total, {} unread)",
+            self.display_name, self.total_count, self.unread_count
+        )
     }
 }
 
@@ -3675,7 +3828,14 @@ pub struct Ms365MailAttachmentSummary {
 impl fmt::Display for Ms365MailAttachmentSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let inline = if self.is_inline { " (inline)" } else { "" };
-        write!(f, "  {} — {} [{}]{}", self.name, format_bytes(self.size), self.content_type, inline)
+        write!(
+            f,
+            "  {} — {} [{}]{}",
+            self.name,
+            format_bytes(self.size),
+            self.content_type,
+            inline
+        )
     }
 }
 
@@ -3689,7 +3849,11 @@ pub struct Ms365MailAttachmentsResponse {
 
 impl fmt::Display for Ms365MailAttachmentsResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Message {} — {} attachment(s)", self.message_id, self.total)?;
+        writeln!(
+            f,
+            "Message {} — {} attachment(s)",
+            self.message_id, self.total
+        )?;
         for att in &self.attachments {
             writeln!(f, "{att}")?;
             writeln!(f, "    id: {}", att.id)?;
@@ -3718,7 +3882,11 @@ impl fmt::Display for Ms365MailAttachmentReadResponse {
         writeln!(f, "  Message:      {}", self.message_id)?;
         writeln!(f, "  Type:         {}", self.content_type)?;
         writeln!(f, "  Size:         {}", format_bytes(self.size))?;
-        writeln!(f, "  Inline:       {}", if self.is_inline { "yes" } else { "no" })?;
+        writeln!(
+            f,
+            "  Inline:       {}",
+            if self.is_inline { "yes" } else { "no" }
+        )?;
         if let Some(ref modified) = self.last_modified {
             writeln!(f, "  Modified:     {modified}")?;
         }
@@ -3764,7 +3932,13 @@ pub struct Ms365FileItem {
 impl fmt::Display for Ms365FileItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = if self.is_folder { "DIR " } else { "FILE" };
-        write!(f, "  {kind}  {:<40} {:>10}  {}", self.name, format_bytes(self.size), self.last_modified)
+        write!(
+            f,
+            "  {kind}  {:<40} {:>10}  {}",
+            self.name,
+            format_bytes(self.size),
+            self.last_modified
+        )
     }
 }
 
@@ -3845,7 +4019,14 @@ impl fmt::Display for Ms365FileSearchItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = if self.is_folder { "DIR " } else { "FILE" };
         let parent = self.parent_path.as_deref().unwrap_or("");
-        write!(f, "  {kind}  {:<40} {:>10}  {}  {}", self.name, format_bytes(self.size), self.last_modified, parent)
+        write!(
+            f,
+            "  {kind}  {:<40} {:>10}  {}  {}",
+            self.name,
+            format_bytes(self.size),
+            self.last_modified,
+            parent
+        )
     }
 }
 
@@ -3859,7 +4040,11 @@ pub struct Ms365FilesSearchResponse {
 
 impl fmt::Display for Ms365FilesSearchResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "OneDrive search: \"{}\"  ({} result(s))", self.query, self.total)?;
+        writeln!(
+            f,
+            "OneDrive search: \"{}\"  ({} result(s))",
+            self.query, self.total
+        )?;
         if self.items.is_empty() {
             writeln!(f, "  (no matches)")?;
         } else {
@@ -3941,7 +4126,11 @@ pub struct Ms365UserSummary {
 impl fmt::Display for Ms365UserSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let title = self.job_title.as_deref().unwrap_or("–");
-        write!(f, "  {} <{}> — {title}", self.display_name, self.user_principal_name)
+        write!(
+            f,
+            "  {} <{}> — {title}",
+            self.display_name, self.user_principal_name
+        )
     }
 }
 
@@ -4019,7 +4208,11 @@ impl fmt::Display for Ms365PlannerTaskSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let assignee = self.assigned_to.as_deref().unwrap_or("unassigned");
         let due = self.due_date.as_deref().unwrap_or("no due date");
-        write!(f, "  [{}%] {} — {assignee}, {due}", self.percent_complete, self.title)
+        write!(
+            f,
+            "  [{}%] {} — {assignee}, {due}",
+            self.percent_complete, self.title
+        )
     }
 }
 
@@ -4088,6 +4281,66 @@ impl fmt::Display for Ms365PlannerTaskReadResponse {
     }
 }
 
+/// Response from `rune ms365 planner create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerTaskCreateResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(default, alias = "id")]
+    pub task_id: Option<String>,
+}
+
+impl fmt::Display for Ms365PlannerTaskCreateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} {}", self.message)?;
+        if let Some(task_id) = &self.task_id {
+            writeln!(f, "  Task ID:   {task_id}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 planner update`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerTaskUpdateResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(default, alias = "id")]
+    pub task_id: Option<String>,
+}
+
+impl fmt::Display for Ms365PlannerTaskUpdateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} {}", self.message)?;
+        if let Some(task_id) = &self.task_id {
+            writeln!(f, "  Task ID:   {task_id}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Response from `rune ms365 planner complete`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365PlannerTaskCompleteResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(default, alias = "id")]
+    pub task_id: Option<String>,
+}
+
+impl fmt::Display for Ms365PlannerTaskCompleteResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        writeln!(f, "{icon} {}", self.message)?;
+        if let Some(task_id) = &self.task_id {
+            writeln!(f, "  Task ID:   {task_id}")?;
+        }
+        Ok(())
+    }
+}
+
 // ── Microsoft 365 To-Do ──────────────────────────────────────────
 
 /// A single To-Do task list summary.
@@ -4140,7 +4393,11 @@ pub struct Ms365TodoTaskSummary {
 impl fmt::Display for Ms365TodoTaskSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let due = self.due_date.as_deref().unwrap_or("no due date");
-        write!(f, "  [{}] {} — {}, {due}", self.status, self.title, self.importance)
+        write!(
+            f,
+            "  [{}] {} — {}, {due}",
+            self.status, self.title, self.importance
+        )
     }
 }
 
@@ -4188,7 +4445,11 @@ impl fmt::Display for Ms365TodoTaskReadResponse {
         writeln!(f, "  List:       {}", self.list_id)?;
         writeln!(f, "  Status:     {}", self.status)?;
         writeln!(f, "  Importance: {}", self.importance)?;
-        writeln!(f, "  Reminder:   {}", if self.is_reminder_on { "yes" } else { "no" })?;
+        writeln!(
+            f,
+            "  Reminder:   {}",
+            if self.is_reminder_on { "yes" } else { "no" }
+        )?;
         if let Some(ref due) = self.due_date {
             writeln!(f, "  Due:        {due}")?;
         }
@@ -4340,7 +4601,11 @@ pub struct Ms365SiteListItemsResponse {
 
 impl fmt::Display for Ms365SiteListItemsResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Site {} / list {} — {} item(s)", self.site_id, self.list_id, self.total)?;
+        writeln!(
+            f,
+            "Site {} / list {} — {} item(s)",
+            self.site_id, self.list_id, self.total
+        )?;
         for item in &self.items {
             writeln!(f, "{item}")?;
             writeln!(f, "    id: {}", item.id)?;
@@ -4484,7 +4749,11 @@ pub struct Ms365TeamsMessagesResponse {
 
 impl fmt::Display for Ms365TeamsMessagesResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Team {} / channel {} — {} message(s)", self.team_id, self.channel_id, self.total)?;
+        writeln!(
+            f,
+            "Team {} / channel {} — {} message(s)",
+            self.team_id, self.channel_id, self.total
+        )?;
         for msg in &self.messages {
             writeln!(f, "{msg}")?;
             writeln!(f, "    id: {}", msg.id)?;
@@ -4580,7 +4849,11 @@ pub struct SecretsReloadResponse {
 impl fmt::Display for SecretsReloadResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let icon = if self.success { "✓" } else { "✗" };
-        write!(f, "{icon} {} ({} secret(s) reloaded)", self.detail, self.reloaded)
+        write!(
+            f,
+            "{icon} {} ({} secret(s) reloaded)",
+            self.detail, self.reloaded
+        )
     }
 }
 
@@ -4645,7 +4918,11 @@ pub struct SecretsApplyResponse {
 impl fmt::Display for SecretsApplyResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let icon = if self.success { "✓" } else { "✗" };
-        write!(f, "{icon} {} ({} secret(s) applied)", self.detail, self.applied)
+        write!(
+            f,
+            "{icon} {} ({} secret(s) applied)",
+            self.detail, self.applied
+        )
     }
 }
 
@@ -4675,7 +4952,6 @@ impl fmt::Display for ConfigureResponse {
         Ok(())
     }
 }
-
 
 /// Response for `logs tail`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5451,7 +5727,9 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Logs"));
         assert!(out.contains("Entries: 1"));
-        assert!(out.contains("2026-03-20T09:00:00Z | WARN | source=gateway | gateway restart pending"));
+        assert!(
+            out.contains("2026-03-20T09:00:00Z | WARN | source=gateway | gateway restart pending")
+        );
     }
 
     #[test]
@@ -6925,9 +7203,7 @@ mod tests {
 
     #[test]
     fn render_sandbox_list_empty() {
-        let resp = SandboxListResponse {
-            boundaries: vec![],
-        };
+        let resp = SandboxListResponse { boundaries: vec![] };
         let out = render(&resp, OutputFormat::Human);
         assert!(out.contains("No sandbox boundaries configured"));
     }
@@ -7248,7 +7524,10 @@ mod tests {
 
     #[test]
     fn render_ms365_mail_send_human() {
-        let r = Ms365MailSendResponse { success: true, message: "Message sent".into() };
+        let r = Ms365MailSendResponse {
+            success: true,
+            message: "Message sent".into(),
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Message sent"));
@@ -7256,7 +7535,10 @@ mod tests {
 
     #[test]
     fn render_ms365_mail_reply_human() {
-        let r = Ms365MailReplyResponse { success: true, message: "Reply sent".into() };
+        let r = Ms365MailReplyResponse {
+            success: true,
+            message: "Reply sent".into(),
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Reply sent"));
@@ -7264,7 +7546,10 @@ mod tests {
 
     #[test]
     fn render_ms365_mail_forward_human() {
-        let r = Ms365MailForwardResponse { success: true, message: "Message forwarded".into() };
+        let r = Ms365MailForwardResponse {
+            success: true,
+            message: "Message forwarded".into(),
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Message forwarded"));
@@ -7272,7 +7557,10 @@ mod tests {
 
     #[test]
     fn render_ms365_calendar_create_human() {
-        let r = Ms365CalendarCreateResponse { success: true, message: "Event created".into() };
+        let r = Ms365CalendarCreateResponse {
+            success: true,
+            message: "Event created".into(),
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Event created"));
@@ -7280,7 +7568,10 @@ mod tests {
 
     #[test]
     fn render_ms365_calendar_create_failure() {
-        let r = Ms365CalendarCreateResponse { success: false, message: "Failed to create event".into() };
+        let r = Ms365CalendarCreateResponse {
+            success: false,
+            message: "Failed to create event".into(),
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✗"));
         assert!(out.contains("Failed to create event"));
@@ -7288,7 +7579,10 @@ mod tests {
 
     #[test]
     fn render_ms365_calendar_delete_human() {
-        let r = Ms365CalendarDeleteResponse { success: true, message: "Event deleted".into() };
+        let r = Ms365CalendarDeleteResponse {
+            success: true,
+            message: "Event deleted".into(),
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Event deleted"));
@@ -7296,7 +7590,10 @@ mod tests {
 
     #[test]
     fn render_ms365_calendar_respond_human() {
-        let r = Ms365CalendarRespondResponse { success: true, message: "Response sent: accepted".into() };
+        let r = Ms365CalendarRespondResponse {
+            success: true,
+            message: "Response sent: accepted".into(),
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("✓"));
         assert!(out.contains("Response sent: accepted"));
@@ -7304,11 +7601,54 @@ mod tests {
 
     #[test]
     fn render_ms365_calendar_create_json() {
-        let r = Ms365CalendarCreateResponse { success: true, message: "Event created".into() };
+        let r = Ms365CalendarCreateResponse {
+            success: true,
+            message: "Event created".into(),
+        };
         let out = render(&r, OutputFormat::Json);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["success"], true);
         assert_eq!(v["message"], "Event created");
+    }
+
+    #[test]
+    fn render_ms365_planner_create_human() {
+        let r = Ms365PlannerTaskCreateResponse {
+            success: true,
+            message: "Planner task created".into(),
+            task_id: Some("task-1".into()),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Planner task created"));
+        assert!(out.contains("task-1"));
+    }
+
+    #[test]
+    fn render_ms365_planner_update_human() {
+        let r = Ms365PlannerTaskUpdateResponse {
+            success: true,
+            message: "Planner task updated".into(),
+            task_id: Some("task-1".into()),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("✓"));
+        assert!(out.contains("Planner task updated"));
+        assert!(out.contains("task-1"));
+    }
+
+    #[test]
+    fn render_ms365_planner_complete_json() {
+        let r = Ms365PlannerTaskCompleteResponse {
+            success: true,
+            message: "Planner task completed".into(),
+            task_id: Some("task-1".into()),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["message"], "Planner task completed");
+        assert_eq!(v["task_id"], "task-1");
     }
 
     #[test]
@@ -7366,7 +7706,8 @@ mod tests {
             attachments: vec![Ms365MailAttachmentSummary {
                 id: "att-1".into(),
                 name: "doc.docx".into(),
-                content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document".into(),
+                content_type:
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document".into(),
                 size: 51200,
                 is_inline: false,
             }],
@@ -7528,7 +7869,10 @@ mod tests {
 
     #[test]
     fn render_ms365_users_list_empty() {
-        let r = Ms365UsersListResponse { users: vec![], total: 0 };
+        let r = Ms365UsersListResponse {
+            users: vec![],
+            total: 0,
+        };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("0 user(s)"));
         assert!(out.contains("(none)"));
@@ -7608,39 +7952,38 @@ mod tests {
     }
 }
 
+#[test]
+fn render_logs_tail() {
+    let r = LogsTailResponse {
+        entries: vec![serde_json::json!({"timestamp":"T1","level":"INFO","message":"hello"})],
+        source: "gateway".into(),
+    };
+    let h = render(&r, OutputFormat::Human);
+    assert!(h.contains("hello"));
+    assert!(h.contains("gateway"));
+}
 
-    #[test]
-    fn render_logs_tail() {
-        let r = LogsTailResponse {
-            entries: vec![serde_json::json!({"timestamp":"T1","level":"INFO","message":"hello"})],
-            source: "gateway".into(),
-        };
-        let h = render(&r, OutputFormat::Human);
-        assert!(h.contains("hello"));
-        assert!(h.contains("gateway"));
-    }
+#[test]
+fn render_logs_search() {
+    let r = LogsSearchResponse {
+        query: "err".into(),
+        entries: vec![serde_json::json!({"timestamp":"T1","level":"ERROR","message":"err found"})],
+        total: 1,
+    };
+    let h = render(&r, OutputFormat::Human);
+    assert!(h.contains("err"));
+}
 
-    #[test]
-    fn render_logs_search() {
-        let r = LogsSearchResponse {
-            query: "err".into(),
-            entries: vec![serde_json::json!({"timestamp":"T1","level":"ERROR","message":"err found"})],
-            total: 1,
-        };
-        let h = render(&r, OutputFormat::Human);
-        assert!(h.contains("err"));
-    }
-
-    #[test]
-    fn render_logs_export() {
-        let r = LogsExportResponse {
-            success: true,
-            path: "/tmp/out.json".into(),
-            message: "Exported 10 entries".into(),
-        };
-        let h = render(&r, OutputFormat::Human);
-        assert!(h.contains("Exported"));
-    }
+#[test]
+fn render_logs_export() {
+    let r = LogsExportResponse {
+        success: true,
+        path: "/tmp/out.json".into(),
+        message: "Exported 10 entries".into(),
+    };
+    let h = render(&r, OutputFormat::Human);
+    assert!(h.contains("Exported"));
+}
 
 #[cfg(test)]
 mod subagent_output_tests {
@@ -7648,80 +7991,144 @@ mod subagent_output_tests {
 
     #[test]
     fn render_agent_spawn_human() {
-        let r = AgentSpawnResponse { session_id:"c1".into(), parent_session_id:"p1".into(), mode:"coding".into(), policy:"inherit".into(), status:"spawned".into() };
+        let r = AgentSpawnResponse {
+            session_id: "c1".into(),
+            parent_session_id: "p1".into(),
+            mode: "coding".into(),
+            policy: "inherit".into(),
+            status: "spawned".into(),
+        };
         let out = render(&r, OutputFormat::Human);
-        assert!(out.contains("Subagent spawned.")); assert!(out.contains("c1")); assert!(out.contains("p1"));
+        assert!(out.contains("Subagent spawned."));
+        assert!(out.contains("c1"));
+        assert!(out.contains("p1"));
     }
 
     #[test]
     fn render_agent_spawn_json() {
-        let r = AgentSpawnResponse { session_id:"c1".into(), parent_session_id:"p1".into(), mode:"coding".into(), policy:"inherit".into(), status:"spawned".into() };
+        let r = AgentSpawnResponse {
+            session_id: "c1".into(),
+            parent_session_id: "p1".into(),
+            mode: "coding".into(),
+            policy: "inherit".into(),
+            status: "spawned".into(),
+        };
         let out = render(&r, OutputFormat::Json);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["session_id"], "c1"); assert_eq!(v["parent_session_id"], "p1");
+        assert_eq!(v["session_id"], "c1");
+        assert_eq!(v["parent_session_id"], "p1");
     }
 
     #[test]
     fn render_agent_steer_accepted() {
-        let r = AgentSteerResponse { session_id:"c1".into(), accepted:true, detail:"ok".into() };
+        let r = AgentSteerResponse {
+            session_id: "c1".into(),
+            accepted: true,
+            detail: "ok".into(),
+        };
         assert!(render(&r, OutputFormat::Human).contains("Instruction delivered to c1."));
     }
 
     #[test]
     fn render_agent_steer_rejected() {
-        let r = AgentSteerResponse { session_id:"c1".into(), accepted:false, detail:"no".into() };
+        let r = AgentSteerResponse {
+            session_id: "c1".into(),
+            accepted: false,
+            detail: "no".into(),
+        };
         assert!(render(&r, OutputFormat::Human).contains("Steer rejected"));
     }
 
     #[test]
     fn render_agent_kill_ok() {
-        let r = AgentKillResponse { session_id:"c1".into(), killed:true, detail:"done".into() };
+        let r = AgentKillResponse {
+            session_id: "c1".into(),
+            killed: true,
+            detail: "done".into(),
+        };
         let out = render(&r, OutputFormat::Human);
-        assert!(out.contains("terminated")); assert!(out.contains("c1"));
+        assert!(out.contains("terminated"));
+        assert!(out.contains("c1"));
     }
 
     #[test]
     fn render_agent_kill_fail() {
-        let r = AgentKillResponse { session_id:"c1".into(), killed:false, detail:"nope".into() };
+        let r = AgentKillResponse {
+            session_id: "c1".into(),
+            killed: false,
+            detail: "nope".into(),
+        };
         assert!(render(&r, OutputFormat::Human).contains("Kill failed"));
     }
 
     #[test]
     fn render_agent_run_output() {
-        let r = AgentRunResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"completed".into(), output:Some("Done.".into()) };
+        let r = AgentRunResponse {
+            session_id: "s1".into(),
+            turn_id: "t1".into(),
+            status: "completed".into(),
+            output: Some("Done.".into()),
+        };
         let out = render(&r, OutputFormat::Human);
-        assert!(out.contains("Agent turn completed.")); assert!(out.contains("t1")); assert!(out.contains("Done."));
+        assert!(out.contains("Agent turn completed."));
+        assert!(out.contains("t1"));
+        assert!(out.contains("Done."));
     }
 
     #[test]
     fn render_agent_run_no_output() {
-        let r = AgentRunResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"running".into(), output:None };
+        let r = AgentRunResponse {
+            session_id: "s1".into(),
+            turn_id: "t1".into(),
+            status: "running".into(),
+            output: None,
+        };
         assert!(!render(&r, OutputFormat::Human).contains("Output:"));
     }
 
     #[test]
     fn render_agent_result_output() {
-        let r = AgentResultResponse { session_id:"s1".into(), turn_id:"t1".into(), status:"completed".into(), output:Some("Res".into()) };
+        let r = AgentResultResponse {
+            session_id: "s1".into(),
+            turn_id: "t1".into(),
+            status: "completed".into(),
+            output: Some("Res".into()),
+        };
         let out = render(&r, OutputFormat::Human);
-        assert!(out.contains("Turn result:")); assert!(out.contains("Res"));
+        assert!(out.contains("Turn result:"));
+        assert!(out.contains("Res"));
     }
 
     #[test]
     fn render_acp_send_delivered() {
-        let r = AcpSendResponse { message_id:"m1".into(), from:"a".into(), to:"b".into(), delivered:true };
+        let r = AcpSendResponse {
+            message_id: "m1".into(),
+            from: "a".into(),
+            to: "b".into(),
+            delivered: true,
+        };
         let out = render(&r, OutputFormat::Human);
-        assert!(out.contains("ACP message sent.")); assert!(out.contains("delivered"));
+        assert!(out.contains("ACP message sent."));
+        assert!(out.contains("delivered"));
     }
 
     #[test]
     fn render_acp_send_queued() {
-        let r = AcpSendResponse { message_id:"m1".into(), from:"a".into(), to:"b".into(), delivered:false };
+        let r = AcpSendResponse {
+            message_id: "m1".into(),
+            from: "a".into(),
+            to: "b".into(),
+            delivered: false,
+        };
         assert!(render(&r, OutputFormat::Human).contains("queued"));
     }
 
     #[test]
     fn render_acp_ack_ok() {
-        let r = AcpAckResponse { message_id:"m1".into(), acknowledged:true };
+        let r = AcpAckResponse {
+            message_id: "m1".into(),
+            acknowledged: true,
+        };
         assert!(render(&r, OutputFormat::Human).contains("m1"));
     }
 }
@@ -7744,15 +8151,23 @@ pub struct PluginSummary {
 impl fmt::Display for PluginSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status = if self.enabled { "enabled" } else { "disabled" };
-        write!(f, "  {} v{} [{}] — {}", self.name, self.version, status, self.description)
+        write!(
+            f,
+            "  {} v{} [{}] — {}",
+            self.name, self.version, status, self.description
+        )
     }
 }
 
 impl fmt::Display for PluginListResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.plugins.is_empty() { return write!(f, "No plugins installed."); }
+        if self.plugins.is_empty() {
+            return write!(f, "No plugins installed.");
+        }
         writeln!(f, "Installed plugins ({}):", self.plugins.len())?;
-        for p in &self.plugins { writeln!(f, "{p}")?; }
+        for p in &self.plugins {
+            writeln!(f, "{p}")?;
+        }
         Ok(())
     }
 }
@@ -7774,7 +8189,15 @@ impl fmt::Display for PluginInfoResponse {
         writeln!(f, "  Version:  {}", self.version)?;
         writeln!(f, "  Enabled:  {}", self.enabled)?;
         writeln!(f, "  Source:   {}", self.source)?;
-        writeln!(f, "  Manifest: {}", if self.manifest_valid { "valid" } else { "invalid" })?;
+        writeln!(
+            f,
+            "  Manifest: {}",
+            if self.manifest_valid {
+                "valid"
+            } else {
+                "invalid"
+            }
+        )?;
         write!(f, "  {}", self.description)
     }
 }
@@ -7814,15 +8237,23 @@ pub struct HookSummary {
 impl fmt::Display for HookSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status = if self.enabled { "enabled" } else { "disabled" };
-        write!(f, "  {} [{}] on {} — {}", self.name, status, self.event, self.description)
+        write!(
+            f,
+            "  {} [{}] on {} — {}",
+            self.name, status, self.event, self.description
+        )
     }
 }
 
 impl fmt::Display for HookListResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.hooks.is_empty() { return write!(f, "No hooks configured."); }
+        if self.hooks.is_empty() {
+            return write!(f, "No hooks configured.");
+        }
         writeln!(f, "Configured hooks ({}):", self.hooks.len())?;
-        for h in &self.hooks { writeln!(f, "{h}")?; }
+        for h in &self.hooks {
+            writeln!(f, "{h}")?;
+        }
         Ok(())
     }
 }
@@ -7858,7 +8289,11 @@ pub struct HookCheckResponse {
 
 impl fmt::Display for HookCheckResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Hook check: {} total, {} valid, {} invalid", self.total, self.valid, self.invalid)?;
+        writeln!(
+            f,
+            "Hook check: {} total, {} valid, {} invalid",
+            self.total, self.valid, self.invalid
+        )?;
         write!(f, "  {}", self.detail)
     }
 }

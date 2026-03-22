@@ -524,6 +524,57 @@ pub enum Ms365PlannerAction {
         #[arg(long)]
         id: String,
     },
+    /// Create a new Planner task.
+    Create {
+        /// Plan ID that will own the task.
+        #[arg(long)]
+        plan_id: String,
+        /// Task title.
+        #[arg(long)]
+        title: String,
+        /// Optional bucket ID for the new task.
+        #[arg(long)]
+        bucket_id: Option<String>,
+        /// Optional due date-time (ISO 8601).
+        #[arg(long)]
+        due_date: Option<String>,
+        /// Optional task description/body.
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Update Planner task details or progress.
+    #[command(group(
+        ArgGroup::new("planner_task_update_changes")
+            .required(true)
+            .multiple(true)
+            .args(["title", "bucket_id", "due_date", "description", "percent_complete"])
+    ))]
+    Update {
+        /// Task ID to update.
+        #[arg(long)]
+        id: String,
+        /// New task title.
+        #[arg(long)]
+        title: Option<String>,
+        /// New bucket ID.
+        #[arg(long)]
+        bucket_id: Option<String>,
+        /// New due date-time (ISO 8601).
+        #[arg(long)]
+        due_date: Option<String>,
+        /// New task description/body.
+        #[arg(long)]
+        description: Option<String>,
+        /// Progress percentage from 0 to 100.
+        #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100))]
+        percent_complete: Option<u8>,
+    },
+    /// Mark a Planner task complete.
+    Complete {
+        /// Task ID to mark complete.
+        #[arg(long)]
+        id: String,
+    },
 }
 
 /// Microsoft To-Do subcommands.
@@ -704,26 +755,40 @@ pub enum PluginsAction {
     /// List installed plugins.
     List,
     /// Show details for a specific plugin.
-    Info { /// Plugin name.
-        name: String },
+    Info {
+        /// Plugin name.
+        name: String,
+    },
     /// Install a plugin from a path or URL.
-    Install { /// Plugin source (local path or URL).
-        source: String },
+    Install {
+        /// Plugin source (local path or URL).
+        source: String,
+    },
     /// Uninstall a plugin.
-    Uninstall { /// Plugin name.
-        name: String },
+    Uninstall {
+        /// Plugin name.
+        name: String,
+    },
     /// Enable an installed plugin.
-    Enable { /// Plugin name.
-        name: String },
+    Enable {
+        /// Plugin name.
+        name: String,
+    },
     /// Disable an installed plugin.
-    Disable { /// Plugin name.
-        name: String },
+    Disable {
+        /// Plugin name.
+        name: String,
+    },
     /// Update an installed plugin.
-    Update { /// Plugin name.
-        name: String },
+    Update {
+        /// Plugin name.
+        name: String,
+    },
     /// Run diagnostic checks on a plugin.
-    Doctor { /// Plugin name.
-        name: String },
+    Doctor {
+        /// Plugin name.
+        name: String,
+    },
 }
 
 /// Hook lifecycle actions.
@@ -732,22 +797,32 @@ pub enum HooksAction {
     /// List configured hooks.
     List,
     /// Show details for a specific hook.
-    Info { /// Hook name.
-        name: String },
+    Info {
+        /// Hook name.
+        name: String,
+    },
     /// Validate hook configuration and report issues.
     Check,
     /// Enable a configured hook.
-    Enable { /// Hook name.
-        name: String },
+    Enable {
+        /// Hook name.
+        name: String,
+    },
     /// Disable a configured hook.
-    Disable { /// Hook name.
-        name: String },
+    Disable {
+        /// Hook name.
+        name: String,
+    },
     /// Install a hook from a path or URL.
-    Install { /// Hook source (local path or URL).
-        source: String },
+    Install {
+        /// Hook source (local path or URL).
+        source: String,
+    },
     /// Update an installed hook.
-    Update { /// Hook name.
-        name: String },
+    Update {
+        /// Hook name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Args)]
@@ -1816,7 +1891,6 @@ pub enum SecretsAction {
         input: String,
     },
 }
-
 
 #[derive(Debug, Subcommand)]
 pub enum BackupAction {
@@ -3262,7 +3336,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn parse_config_reload() {
         let cli = Cli::try_parse_from(["rune", "config", "reload"]).unwrap();
@@ -3300,7 +3373,9 @@ mod tests {
     fn parse_config_export_default() {
         let cli = Cli::try_parse_from(["rune", "config", "export"]).unwrap();
         match cli.command {
-            Command::Config { action: ConfigAction::Export { output } } => {
+            Command::Config {
+                action: ConfigAction::Export { output },
+            } => {
                 assert_eq!(output, "-");
             }
             other => panic!("unexpected command: {other:?}"),
@@ -3311,7 +3386,9 @@ mod tests {
     fn parse_config_export_file() {
         let cli = Cli::try_parse_from(["rune", "config", "export", "/tmp/out.toml"]).unwrap();
         match cli.command {
-            Command::Config { action: ConfigAction::Export { output } } => {
+            Command::Config {
+                action: ConfigAction::Export { output },
+            } => {
                 assert_eq!(output, "/tmp/out.toml");
             }
             other => panic!("unexpected command: {other:?}"),
@@ -3321,14 +3398,21 @@ mod tests {
     #[test]
     fn parse_process_list() {
         let cli = Cli::try_parse_from(["rune", "process", "list"]).unwrap();
-        assert!(matches!(cli.command, Command::Process { action: ProcessAction::List }));
+        assert!(matches!(
+            cli.command,
+            Command::Process {
+                action: ProcessAction::List
+            }
+        ));
     }
 
     #[test]
     fn parse_process_get() {
         let cli = Cli::try_parse_from(["rune", "process", "get", "abc123"]).unwrap();
         match cli.command {
-            Command::Process { action: ProcessAction::Get { id } } => assert_eq!(id, "abc123"),
+            Command::Process {
+                action: ProcessAction::Get { id },
+            } => assert_eq!(id, "abc123"),
             other => panic!("unexpected command: {other:?}"),
         }
     }
@@ -3337,7 +3421,9 @@ mod tests {
     fn parse_process_kill() {
         let cli = Cli::try_parse_from(["rune", "process", "kill", "abc123"]).unwrap();
         match cli.command {
-            Command::Process { action: ProcessAction::Kill { id } } => assert_eq!(id, "abc123"),
+            Command::Process {
+                action: ProcessAction::Kill { id },
+            } => assert_eq!(id, "abc123"),
             other => panic!("unexpected command: {other:?}"),
         }
     }
@@ -3346,7 +3432,9 @@ mod tests {
     fn parse_process_log() {
         let cli = Cli::try_parse_from(["rune", "process", "log", "abc123"]).unwrap();
         match cli.command {
-            Command::Process { action: ProcessAction::Log { id } } => assert_eq!(id, "abc123"),
+            Command::Process {
+                action: ProcessAction::Log { id },
+            } => assert_eq!(id, "abc123"),
             other => panic!("unexpected command: {other:?}"),
         }
     }
@@ -4046,38 +4134,44 @@ mod tests {
     #[test]
     fn message_edit_requires_message_id_channel_and_text() {
         // Missing --text
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "edit",
-            "--message-id",
-            "msg-1",
-            "--channel",
-            "telegram",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from([
+                "rune",
+                "message",
+                "edit",
+                "--message-id",
+                "msg-1",
+                "--channel",
+                "telegram",
+            ])
+            .is_err()
+        );
         // Missing --channel
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "edit",
-            "--message-id",
-            "msg-1",
-            "--text",
-            "hello",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from([
+                "rune",
+                "message",
+                "edit",
+                "--message-id",
+                "msg-1",
+                "--text",
+                "hello",
+            ])
+            .is_err()
+        );
         // Missing --message-id
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "edit",
-            "--channel",
-            "telegram",
-            "--text",
-            "hello",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from([
+                "rune",
+                "message",
+                "edit",
+                "--channel",
+                "telegram",
+                "--text",
+                "hello",
+            ])
+            .is_err()
+        );
         // Missing all
         assert!(Cli::try_parse_from(["rune", "message", "edit"]).is_err());
     }
@@ -4146,15 +4240,17 @@ mod tests {
 
     #[test]
     fn message_pin_rejects_unpin_flag() {
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "pin",
-            "--message-id",
-            "msg-77",
-            "--unpin"
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from([
+                "rune",
+                "message",
+                "pin",
+                "--message-id",
+                "msg-77",
+                "--unpin"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -4462,26 +4558,23 @@ mod tests {
     #[test]
     fn message_thread_reply_requires_thread_id_channel_text() {
         assert!(Cli::try_parse_from(["rune", "message", "thread", "reply"]).is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "thread",
-            "reply",
-            "--thread-id",
-            "thr-1",
-        ])
-        .is_err());
-        assert!(Cli::try_parse_from([
-            "rune",
-            "message",
-            "thread",
-            "reply",
-            "--thread-id",
-            "thr-1",
-            "--channel",
-            "telegram",
-        ])
-        .is_err());
+        assert!(
+            Cli::try_parse_from(["rune", "message", "thread", "reply", "--thread-id", "thr-1",])
+                .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "rune",
+                "message",
+                "thread",
+                "reply",
+                "--thread-id",
+                "thr-1",
+                "--channel",
+                "telegram",
+            ])
+            .is_err()
+        );
     }
 
     // ── Message voice (#74) ────────────────────────────────────────
@@ -4577,10 +4670,10 @@ mod tests {
         assert!(
             Cli::try_parse_from(["rune", "message", "voice", "send", "--text", "hello"]).is_err()
         );
-        assert!(Cli::try_parse_from(
-            ["rune", "message", "voice", "send", "--channel", "telegram",]
-        )
-        .is_err());
+        assert!(
+            Cli::try_parse_from(["rune", "message", "voice", "send", "--channel", "telegram",])
+                .is_err()
+        );
         assert!(Cli::try_parse_from(["rune", "message", "voice", "send"]).is_err());
     }
 
@@ -4854,11 +4947,26 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_agents_spawn() {
-        let cli = Cli::try_parse_from(["rune","agents","spawn","--parent","sess-1","--task","do stuff"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "rune", "agents", "spawn", "--parent", "sess-1", "--task", "do stuff",
+        ])
+        .unwrap();
         match cli.command {
-            Command::Agents { action: AgentsAction::Spawn { parent, task, mode, policy, provider } } => {
-                assert_eq!(parent, "sess-1"); assert_eq!(task, "do stuff");
-                assert_eq!(mode, "default"); assert_eq!(policy, "inherit"); assert!(provider.is_none());
+            Command::Agents {
+                action:
+                    AgentsAction::Spawn {
+                        parent,
+                        task,
+                        mode,
+                        policy,
+                        provider,
+                    },
+            } => {
+                assert_eq!(parent, "sess-1");
+                assert_eq!(task, "do stuff");
+                assert_eq!(mode, "default");
+                assert_eq!(policy, "inherit");
+                assert!(provider.is_none());
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4866,10 +4974,14 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_agents_steer() {
-        let cli = Cli::try_parse_from(["rune","agents","steer","child-1","--message","focus"]).unwrap();
+        let cli = Cli::try_parse_from(["rune", "agents", "steer", "child-1", "--message", "focus"])
+            .unwrap();
         match cli.command {
-            Command::Agents { action: AgentsAction::Steer { id, message } } => {
-                assert_eq!(id, "child-1"); assert_eq!(message, "focus");
+            Command::Agents {
+                action: AgentsAction::Steer { id, message },
+            } => {
+                assert_eq!(id, "child-1");
+                assert_eq!(message, "focus");
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4877,10 +4989,14 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_agents_kill() {
-        let cli = Cli::try_parse_from(["rune","agents","kill","child-1","--reason","timeout"]).unwrap();
+        let cli = Cli::try_parse_from(["rune", "agents", "kill", "child-1", "--reason", "timeout"])
+            .unwrap();
         match cli.command {
-            Command::Agents { action: AgentsAction::Kill { id, reason } } => {
-                assert_eq!(id, "child-1"); assert_eq!(reason.as_deref(), Some("timeout"));
+            Command::Agents {
+                action: AgentsAction::Kill { id, reason },
+            } => {
+                assert_eq!(id, "child-1");
+                assert_eq!(reason.as_deref(), Some("timeout"));
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4888,11 +5004,23 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_agent_run() {
-        let cli = Cli::try_parse_from(["rune","agent","run","--session","s1","--message","go"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "agent", "run", "--session", "s1", "--message", "go"])
+                .unwrap();
         match cli.command {
-            Command::Agent { action: AgentAction::Run { session, message, max_turns, wait } } => {
-                assert_eq!(session, "s1"); assert_eq!(message, "go");
-                assert_eq!(max_turns, 1); assert!(wait);
+            Command::Agent {
+                action:
+                    AgentAction::Run {
+                        session,
+                        message,
+                        max_turns,
+                        wait,
+                    },
+            } => {
+                assert_eq!(session, "s1");
+                assert_eq!(message, "go");
+                assert_eq!(max_turns, 1);
+                assert!(wait);
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4900,10 +5028,15 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_agent_result() {
-        let cli = Cli::try_parse_from(["rune","agent","result","--session","s1","--turn","t1"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "agent", "result", "--session", "s1", "--turn", "t1"])
+                .unwrap();
         match cli.command {
-            Command::Agent { action: AgentAction::Result { session, turn } } => {
-                assert_eq!(session, "s1"); assert_eq!(turn, "t1");
+            Command::Agent {
+                action: AgentAction::Result { session, turn },
+            } => {
+                assert_eq!(session, "s1");
+                assert_eq!(turn, "t1");
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4911,10 +5044,25 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_acp_send() {
-        let cli = Cli::try_parse_from(["rune","acp","send","--from","a","--to","b","--payload",r#"{"x":1}"#]).unwrap();
+        let cli = Cli::try_parse_from([
+            "rune",
+            "acp",
+            "send",
+            "--from",
+            "a",
+            "--to",
+            "b",
+            "--payload",
+            r#"{"x":1}"#,
+        ])
+        .unwrap();
         match cli.command {
-            Command::Acp { action: AcpAction::Send { from, to, payload } } => {
-                assert_eq!(from, "a"); assert_eq!(to, "b"); assert_eq!(payload, r#"{"x":1}"#);
+            Command::Acp {
+                action: AcpAction::Send { from, to, payload },
+            } => {
+                assert_eq!(from, "a");
+                assert_eq!(to, "b");
+                assert_eq!(payload, r#"{"x":1}"#);
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4922,16 +5070,30 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_acp_inbox() {
-        let cli = Cli::try_parse_from(["rune","acp","inbox","--session","a"]).unwrap();
-        assert!(matches!(cli.command, Command::Acp { action: AcpAction::Inbox { .. } }));
+        let cli = Cli::try_parse_from(["rune", "acp", "inbox", "--session", "a"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Acp {
+                action: AcpAction::Inbox { .. }
+            }
+        ));
     }
 
     #[test]
     fn parse_acp_ack() {
-        let cli = Cli::try_parse_from(["rune","acp","ack","--message-id","m1","--session","a"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "acp", "ack", "--message-id", "m1", "--session", "a"])
+                .unwrap();
         match cli.command {
-            Command::Acp { action: AcpAction::Ack { message_id, session } } => {
-                assert_eq!(message_id, "m1"); assert_eq!(session, "a");
+            Command::Acp {
+                action:
+                    AcpAction::Ack {
+                        message_id,
+                        session,
+                    },
+            } => {
+                assert_eq!(message_id, "m1");
+                assert_eq!(session, "a");
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -4946,14 +5108,21 @@ mod subagent_cli_tests {
     #[test]
     fn parse_backup_create() {
         let cli = Cli::try_parse_from(["rune", "backup", "create"]).unwrap();
-        assert!(matches!(cli.command, Command::Backup { action: BackupAction::Create { label: None } }));
+        assert!(matches!(
+            cli.command,
+            Command::Backup {
+                action: BackupAction::Create { label: None }
+            }
+        ));
     }
 
     #[test]
     fn parse_backup_create_with_label() {
         let cli = Cli::try_parse_from(["rune", "backup", "create", "--label", "nightly"]).unwrap();
         match cli.command {
-            Command::Backup { action: BackupAction::Create { label } } => assert_eq!(label.as_deref(), Some("nightly")),
+            Command::Backup {
+                action: BackupAction::Create { label },
+            } => assert_eq!(label.as_deref(), Some("nightly")),
             other => panic!("unexpected: {other:?}"),
         }
     }
@@ -4961,14 +5130,22 @@ mod subagent_cli_tests {
     #[test]
     fn parse_backup_list() {
         let cli = Cli::try_parse_from(["rune", "backup", "list"]).unwrap();
-        assert!(matches!(cli.command, Command::Backup { action: BackupAction::List }));
+        assert!(matches!(
+            cli.command,
+            Command::Backup {
+                action: BackupAction::List
+            }
+        ));
     }
 
     #[test]
     fn parse_backup_restore() {
-        let cli = Cli::try_parse_from(["rune", "backup", "restore", "bk-001", "--confirm"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "backup", "restore", "bk-001", "--confirm"]).unwrap();
         match cli.command {
-            Command::Backup { action: BackupAction::Restore { id, confirm } } => {
+            Command::Backup {
+                action: BackupAction::Restore { id, confirm },
+            } => {
                 assert_eq!(id, "bk-001");
                 assert!(confirm);
             }
@@ -4979,19 +5156,34 @@ mod subagent_cli_tests {
     #[test]
     fn parse_update_check() {
         let cli = Cli::try_parse_from(["rune", "update", "check"]).unwrap();
-        assert!(matches!(cli.command, Command::Update { action: UpdateAction::Check }));
+        assert!(matches!(
+            cli.command,
+            Command::Update {
+                action: UpdateAction::Check
+            }
+        ));
     }
 
     #[test]
     fn parse_update_apply() {
         let cli = Cli::try_parse_from(["rune", "update", "apply"]).unwrap();
-        assert!(matches!(cli.command, Command::Update { action: UpdateAction::Apply }));
+        assert!(matches!(
+            cli.command,
+            Command::Update {
+                action: UpdateAction::Apply
+            }
+        ));
     }
 
     #[test]
     fn parse_update_status() {
         let cli = Cli::try_parse_from(["rune", "update", "status"]).unwrap();
-        assert!(matches!(cli.command, Command::Update { action: UpdateAction::Status }));
+        assert!(matches!(
+            cli.command,
+            Command::Update {
+                action: UpdateAction::Status
+            }
+        ));
     }
 
     #[test]
@@ -5016,7 +5208,12 @@ mod subagent_cli_tests {
     fn parse_ms365_mail_read() {
         let cli = Cli::try_parse_from(["rune", "ms365", "mail", "read", "--id", "abc123"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Mail { action: Ms365MailAction::Read { id } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Mail {
+                        action: Ms365MailAction::Read { id },
+                    },
+            } => {
                 assert_eq!(id, "abc123");
             }
             other => panic!("unexpected: {other:?}"),
@@ -5025,9 +5222,15 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_calendar_read() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "calendar", "read", "--id", "evt456"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "ms365", "calendar", "read", "--id", "evt456"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Calendar { action: Ms365CalendarAction::Read { id } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Calendar {
+                        action: Ms365CalendarAction::Read { id },
+                    },
+            } => {
                 assert_eq!(id, "evt456");
             }
             other => panic!("unexpected: {other:?}"),
@@ -5039,7 +5242,11 @@ mod subagent_cli_tests {
         let cli = Cli::try_parse_from(["rune", "ms365", "auth", "status"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Ms365 { action: Ms365Action::Auth { action: Ms365AuthAction::Status } }
+            Command::Ms365 {
+                action: Ms365Action::Auth {
+                    action: Ms365AuthAction::Status
+                }
+            }
         ));
     }
 
@@ -5047,7 +5254,12 @@ mod subagent_cli_tests {
     fn parse_ms365_planner_plans() {
         let cli = Cli::try_parse_from(["rune", "ms365", "planner", "plans"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Planner { action: Ms365PlannerAction::Plans { limit } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Planner {
+                        action: Ms365PlannerAction::Plans { limit },
+                    },
+            } => {
                 assert_eq!(limit, 25);
             }
             other => panic!("unexpected: {other:?}"),
@@ -5056,9 +5268,15 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_planner_tasks() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "planner", "tasks", "--plan-id", "p1"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "ms365", "planner", "tasks", "--plan-id", "p1"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Planner { action: Ms365PlannerAction::Tasks { plan_id, limit } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Planner {
+                        action: Ms365PlannerAction::Tasks { plan_id, limit },
+                    },
+            } => {
                 assert_eq!(plan_id, "p1");
                 assert_eq!(limit, 50);
             }
@@ -5068,10 +5286,124 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_planner_task_read() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "planner", "task-read", "--id", "t1"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "ms365", "planner", "task-read", "--id", "t1"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Planner { action: Ms365PlannerAction::TaskRead { id } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Planner {
+                        action: Ms365PlannerAction::TaskRead { id },
+                    },
+            } => {
                 assert_eq!(id, "t1");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_planner_create() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "planner",
+            "create",
+            "--plan-id",
+            "plan-1",
+            "--title",
+            "Write summary",
+            "--bucket-id",
+            "bucket-1",
+            "--due-date",
+            "2026-03-25T12:00:00Z",
+            "--description",
+            "Prepare status update",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Planner {
+                        action:
+                            Ms365PlannerAction::Create {
+                                plan_id,
+                                title,
+                                bucket_id,
+                                due_date,
+                                description,
+                            },
+                    },
+            } => {
+                assert_eq!(plan_id, "plan-1");
+                assert_eq!(title, "Write summary");
+                assert_eq!(bucket_id.as_deref(), Some("bucket-1"));
+                assert_eq!(due_date.as_deref(), Some("2026-03-25T12:00:00Z"));
+                assert_eq!(description.as_deref(), Some("Prepare status update"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_planner_update() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "planner",
+            "update",
+            "--id",
+            "task-1",
+            "--title",
+            "Updated title",
+            "--percent-complete",
+            "60",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Planner {
+                        action:
+                            Ms365PlannerAction::Update {
+                                id,
+                                title,
+                                bucket_id,
+                                due_date,
+                                description,
+                                percent_complete,
+                            },
+                    },
+            } => {
+                assert_eq!(id, "task-1");
+                assert_eq!(title.as_deref(), Some("Updated title"));
+                assert!(bucket_id.is_none());
+                assert!(due_date.is_none());
+                assert!(description.is_none());
+                assert_eq!(percent_complete, Some(60));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ms365_planner_update_requires_change() {
+        let err = Cli::try_parse_from(["rune", "ms365", "planner", "update", "--id", "task-1"])
+            .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn parse_ms365_planner_complete() {
+        let cli = Cli::try_parse_from(["rune", "ms365", "planner", "complete", "--id", "task-1"])
+            .unwrap();
+        match cli.command {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Planner {
+                        action: Ms365PlannerAction::Complete { id },
+                    },
+            } => {
+                assert_eq!(id, "task-1");
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -5082,7 +5414,11 @@ mod subagent_cli_tests {
         let cli = Cli::try_parse_from(["rune", "ms365", "mail", "folders"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Ms365 { action: Ms365Action::Mail { action: Ms365MailAction::Folders } }
+            Command::Ms365 {
+                action: Ms365Action::Mail {
+                    action: Ms365MailAction::Folders
+                }
+            }
         ));
     }
 
@@ -5090,7 +5426,12 @@ mod subagent_cli_tests {
     fn parse_ms365_todo_lists() {
         let cli = Cli::try_parse_from(["rune", "ms365", "todo", "lists"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Todo { action: Ms365TodoAction::Lists { limit } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Todo {
+                        action: Ms365TodoAction::Lists { limit },
+                    },
+            } => {
                 assert_eq!(limit, 25);
             }
             other => panic!("unexpected: {other:?}"),
@@ -5099,9 +5440,15 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_todo_tasks() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "todo", "tasks", "--list-id", "lst1"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "ms365", "todo", "tasks", "--list-id", "lst1"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Todo { action: Ms365TodoAction::Tasks { list_id, limit } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Todo {
+                        action: Ms365TodoAction::Tasks { list_id, limit },
+                    },
+            } => {
                 assert_eq!(list_id, "lst1");
                 assert_eq!(limit, 50);
             }
@@ -5111,9 +5458,24 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_todo_task_read() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "todo", "task-read", "--list-id", "lst1", "--id", "task1"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "todo",
+            "task-read",
+            "--list-id",
+            "lst1",
+            "--id",
+            "task1",
+        ])
+        .unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Todo { action: Ms365TodoAction::TaskRead { list_id, id } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Todo {
+                        action: Ms365TodoAction::TaskRead { list_id, id },
+                    },
+            } => {
                 assert_eq!(list_id, "lst1");
                 assert_eq!(id, "task1");
             }
@@ -5125,7 +5487,12 @@ mod subagent_cli_tests {
     fn parse_ms365_teams_list() {
         let cli = Cli::try_parse_from(["rune", "ms365", "teams", "list"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::List { limit } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Teams {
+                        action: Ms365TeamsAction::List { limit },
+                    },
+            } => {
                 assert_eq!(limit, 25);
             }
             other => panic!("unexpected: {other:?}"),
@@ -5134,9 +5501,15 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_teams_channels() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "teams", "channels", "--team-id", "t1"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "ms365", "teams", "channels", "--team-id", "t1"]).unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::Channels { team_id, limit } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Teams {
+                        action: Ms365TeamsAction::Channels { team_id, limit },
+                    },
+            } => {
                 assert_eq!(team_id, "t1");
                 assert_eq!(limit, 50);
             }
@@ -5146,9 +5519,24 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_teams_channel_read() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "teams", "channel-read", "--team-id", "t1", "--id", "ch1"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "teams",
+            "channel-read",
+            "--team-id",
+            "t1",
+            "--id",
+            "ch1",
+        ])
+        .unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::ChannelRead { team_id, id } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Teams {
+                        action: Ms365TeamsAction::ChannelRead { team_id, id },
+                    },
+            } => {
                 assert_eq!(team_id, "t1");
                 assert_eq!(id, "ch1");
             }
@@ -5158,9 +5546,29 @@ mod subagent_cli_tests {
 
     #[test]
     fn parse_ms365_teams_messages() {
-        let cli = Cli::try_parse_from(["rune", "ms365", "teams", "messages", "--team-id", "t1", "--channel-id", "ch1"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "teams",
+            "messages",
+            "--team-id",
+            "t1",
+            "--channel-id",
+            "ch1",
+        ])
+        .unwrap();
         match cli.command {
-            Command::Ms365 { action: Ms365Action::Teams { action: Ms365TeamsAction::Messages { team_id, channel_id, limit } } } => {
+            Command::Ms365 {
+                action:
+                    Ms365Action::Teams {
+                        action:
+                            Ms365TeamsAction::Messages {
+                                team_id,
+                                channel_id,
+                                limit,
+                            },
+                    },
+            } => {
                 assert_eq!(team_id, "t1");
                 assert_eq!(channel_id, "ch1");
                 assert_eq!(limit, 25);

@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download. Eleventh and twelfth slices: mail send/reply/forward and calendar create/delete/respond mutations. Thirteenth slice: OneDrive file search. Fourteenth slice: OneDrive file download.
+First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download. Eleventh and twelfth slices: mail send/reply/forward and calendar create/delete/respond mutations. Thirteenth slice: OneDrive file search. Fourteenth slice: OneDrive file download. Fifteenth slice: Planner task create/update/complete mutations.
 
 Observed subcommands:
 
@@ -696,6 +696,9 @@ Observed subcommands:
 - `ms365 planner plans` — list Planner plans accessible to the authenticated user
 - `ms365 planner tasks --plan-id <id>` — list tasks in a Planner plan
 - `ms365 planner task-read --id <id>` — read a single Planner task by ID
+- `ms365 planner create --plan-id <id> --title <text> [--bucket-id <id>] [--due-date <iso8601>] [--description <text>]` — create a Planner task
+- `ms365 planner update --id <id> [--title <text>] [--bucket-id <id>] [--due-date <iso8601>] [--description <text>] [--percent-complete <0-100>]` — update Planner task details or progress
+- `ms365 planner complete --id <id>` — mark a Planner task complete
 - `ms365 todo lists` — list Microsoft To-Do task lists
 - `ms365 todo tasks --list-id <id>` — list tasks in a To-Do list
 - `ms365 todo task-read --list-id <id> --id <id>` — read a single To-Do task by ID
@@ -723,6 +726,7 @@ Required concepts:
 - single-item read-detail by ID (`--id`)
 - users/org directory inspection (me, list, read by ID/UPN)
 - Planner plan discovery and task enumeration by plan ID
+- Planner task creation, detail/progress update, and explicit completion
 - To-Do list discovery and task enumeration by list ID
 - SharePoint site discovery, detail read, list/library enumeration, and list item browsing
 - Teams discovery, channel enumeration, channel detail, and channel message listing
@@ -736,7 +740,11 @@ Required concepts:
 
 Parity level: **close** — operator workflow and practical outcomes match; naming/format may differ from upstream.
 
+<<<<<<< HEAD
 Status: CLI/API shape implemented (issue #206, slices 1–8, 10, 12–13). Calendar mutation surface (create/delete/respond) added in slice 12. OneDrive file search added in slice 13. Backend foundation now includes `/ms365/auth/status` plus Planner mutation routes for task create/update/complete to unblock #232; the rest of the gateway `/ms365` family remains deferred.
+=======
+Status: CLI/API shape implemented (issue #206, slices 1–8, 10, 12–15). Calendar mutation surface (create/delete/respond) added in slice 12. OneDrive file search added in slice 13. OneDrive file download added in slice 14. Planner task mutation surface (create/update/complete) added in slice 15. Backend foundation begins with `/ms365/auth/status` only; the rest of the gateway `/ms365` family and Graph integration remain deferred.
+>>>>>>> 44a7fbc (feat(cli): salvage ms365 planner mutation surface (#232))
 
 ---
 

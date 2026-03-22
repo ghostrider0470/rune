@@ -3,8 +3,8 @@
 pub mod cli;
 pub mod client;
 pub mod doctor;
-pub mod memory;
 mod logs;
+pub mod memory;
 pub mod output;
 
 use anyhow::{Context, Result};
@@ -24,29 +24,27 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
 pub use cli::Cli;
 use cli::{
-    AcpAction, AgentAction, AgentsAction, ApprovalsAction, HooksAction, ChannelsAction, Command,
-    CompletionAction, CompletionShell,
-    ConfigAction, CronAction, CronDeliveryMode, DoctorAction, GatewayAction,
-    GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction, LogsAction, LogsArgs,
-    MemoryAction, MessageAction, MessageTagAction, MessageThreadAction, MessageVoiceAction,
-    ModelsAction, Ms365Action, Ms365AuthAction, Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction, Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, ProcessAction,
-    RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction,
-    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, PluginsAction,
-    BackupAction, UpdateAction,
+    AcpAction, AgentAction, AgentsAction, ApprovalsAction, BackupAction, ChannelsAction, Command,
+    CompletionAction, CompletionShell, ConfigAction, CronAction, CronDeliveryMode, DoctorAction,
+    GatewayAction, GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction,
+    HooksAction, LogsAction, LogsArgs, MemoryAction, MessageAction, MessageTagAction,
+    MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
+    Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
+    Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
+    RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction, SkillsAction,
+    SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
 };
 use output::{
-    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse,
-    ChannelLogFile, ChannelLogsResponse,
-    ChannelResolveResponse, ChannelStatusResponse,
-    DashboardChannelsSummary,
+    ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
+    ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
     DashboardModelsSummary, DashboardResponse, DashboardSessionsSummary, HeartbeatPresenceResponse,
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
     ModelFallbackChainDetail, ModelFallbacksResponse, ModelListResponse, ModelProviderDetail,
-    ModelScanResponse, ModelSetImageResponse, ModelSetResponse, ModelStatusResponse,
-    OutputFormat, TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
+    ModelScanResponse, ModelSetImageResponse, ModelSetResponse, ModelStatusResponse, OutputFormat,
+    TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
 };
 
 /// Initialize a workspace directory with default files.
@@ -815,7 +813,9 @@ async fn init_workspace(
         let spells_toml: Vec<String> = tpl.spells.iter().map(|s| format!("\"{s}\"")).collect();
         let config_content = format!(
             "# Auto-generated from template: {}\n\n[agent]\nmode = \"{}\"\nspells = [{}]\n",
-            tpl.name, tpl.mode, spells_toml.join(", ")
+            tpl.name,
+            tpl.mode,
+            spells_toml.join(", ")
         );
         let config_path = path.join("config.toml");
         if !config_path.exists() {
@@ -974,12 +974,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 since,
             }) => {
                 let result = client
-                    .logs_query(
-                        level.as_deref(),
-                        source.as_deref(),
-                        limit,
-                        since.as_deref(),
-                    )
+                    .logs_query(level.as_deref(), source.as_deref(), limit, since.as_deref())
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -1037,28 +1032,68 @@ pub async fn run(cli: Cli) -> Result<()> {
                 since,
             }) => {
                 let result = client
-                    .logs_query(
-                        level.as_deref(),
-                        source.as_deref(),
-                        limit,
-                        since.as_deref(),
-                    )
+                    .logs_query(level.as_deref(), source.as_deref(), limit, since.as_deref())
                     .await?;
                 println!("{}", render(&result, format));
             }
-            LogsAction::Tail { level, source, follow, lines } => {
+            LogsAction::Tail {
+                level,
+                source,
+                follow,
+                lines,
+            } => {
                 let http = reqwest::Client::new();
-                let result = logs::tail(&cli.gateway_url, &http, level.as_deref(), source.as_deref(), follow, lines).await?;
+                let result = logs::tail(
+                    &cli.gateway_url,
+                    &http,
+                    level.as_deref(),
+                    source.as_deref(),
+                    follow,
+                    lines,
+                )
+                .await?;
                 println!("{}", render(&result, format));
             }
-            LogsAction::Search { query, level, source, limit } => {
+            LogsAction::Search {
+                query,
+                level,
+                source,
+                limit,
+            } => {
                 let http = reqwest::Client::new();
-                let result = logs::search(&cli.gateway_url, &http, &query, level.as_deref(), source.as_deref(), limit).await?;
+                let result = logs::search(
+                    &cli.gateway_url,
+                    &http,
+                    &query,
+                    level.as_deref(),
+                    source.as_deref(),
+                    limit,
+                )
+                .await?;
                 println!("{}", render(&result, format));
             }
-            LogsAction::Export { format: fmt, level, source, since, until, limit, output } => {
+            LogsAction::Export {
+                format: fmt,
+                level,
+                source,
+                since,
+                until,
+                limit,
+                output,
+            } => {
                 let http = reqwest::Client::new();
-                let result = logs::export(&cli.gateway_url, &http, &fmt, level.as_deref(), source.as_deref(), since.as_deref(), until.as_deref(), limit, output.as_deref()).await?;
+                let result = logs::export(
+                    &cli.gateway_url,
+                    &http,
+                    &fmt,
+                    level.as_deref(),
+                    source.as_deref(),
+                    since.as_deref(),
+                    until.as_deref(),
+                    limit,
+                    output.as_deref(),
+                )
+                .await?;
                 println!("{}", render(&result, format));
             }
         },
@@ -1108,7 +1143,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             };
             println!("{}", render(&dashboard, format));
         }
-        Command::Init { path, template, non_interactive } => {
+        Command::Init {
+            path,
+            template,
+            non_interactive,
+        } => {
             let target = std::path::Path::new(&path);
             init_workspace(target, template.as_deref(), non_interactive).await?;
         }
@@ -1187,19 +1226,43 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_mail_folders().await?;
                     println!("{}", render(&result, format));
                 }
-                Ms365MailAction::Send { to, subject, body, cc } => {
-                    let to: Vec<String> = to.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-                    let cc: Vec<String> = cc.unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                Ms365MailAction::Send {
+                    to,
+                    subject,
+                    body,
+                    cc,
+                } => {
+                    let to: Vec<String> = to
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let cc: Vec<String> = cc
+                        .unwrap_or_default()
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
                     let result = client.ms365_mail_send(&to, &subject, &body, &cc).await?;
                     println!("{}", render(&result, format));
                 }
-                Ms365MailAction::Reply { id, body, reply_all } => {
+                Ms365MailAction::Reply {
+                    id,
+                    body,
+                    reply_all,
+                } => {
                     let result = client.ms365_mail_reply(&id, &body, reply_all).await?;
                     println!("{}", render(&result, format));
                 }
                 Ms365MailAction::Forward { id, to, comment } => {
-                    let to: Vec<String> = to.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-                    let result = client.ms365_mail_forward(&id, &to, comment.as_deref()).await?;
+                    let to: Vec<String> = to
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let result = client
+                        .ms365_mail_forward(&id, &to, comment.as_deref())
+                        .await?;
                     println!("{}", render(&result, format));
                 }
                 Ms365MailAction::Attachments { id } => {
@@ -1210,10 +1273,17 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_mail_attachment_read(&message_id, &id).await?;
                     println!("{}", render(&result, format));
                 }
-                Ms365MailAction::AttachmentDownload { message_id, id, output } => {
-                    let (filename, bytes) = client.ms365_mail_attachment_download(&message_id, &id).await?;
+                Ms365MailAction::AttachmentDownload {
+                    message_id,
+                    id,
+                    output,
+                } => {
+                    let (filename, bytes) = client
+                        .ms365_mail_attachment_download(&message_id, &id)
+                        .await?;
                     let dest = output.unwrap_or_else(|| filename.clone());
-                    tokio::fs::write(&dest, &bytes).await
+                    tokio::fs::write(&dest, &bytes)
+                        .await
                         .with_context(|| format!("failed to write attachment to {dest}"))?;
                     let result = crate::output::Ms365MailAttachmentDownloadResponse {
                         attachment_id: id,
@@ -1233,17 +1303,44 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_calendar_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
-                Ms365CalendarAction::Create { subject, start, end, attendees, location, body } => {
-                    let attendees: Vec<String> = attendees.unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-                    let result = client.ms365_calendar_create(&subject, &start, &end, &attendees, location.as_deref(), body.as_deref()).await?;
+                Ms365CalendarAction::Create {
+                    subject,
+                    start,
+                    end,
+                    attendees,
+                    location,
+                    body,
+                } => {
+                    let attendees: Vec<String> = attendees
+                        .unwrap_or_default()
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let result = client
+                        .ms365_calendar_create(
+                            &subject,
+                            &start,
+                            &end,
+                            &attendees,
+                            location.as_deref(),
+                            body.as_deref(),
+                        )
+                        .await?;
                     println!("{}", render(&result, format));
                 }
                 Ms365CalendarAction::Delete { id } => {
                     let result = client.ms365_calendar_delete(&id).await?;
                     println!("{}", render(&result, format));
                 }
-                Ms365CalendarAction::Respond { id, response, comment } => {
-                    let result = client.ms365_calendar_respond(&id, &response, comment.as_deref()).await?;
+                Ms365CalendarAction::Respond {
+                    id,
+                    response,
+                    comment,
+                } => {
+                    let result = client
+                        .ms365_calendar_respond(&id, &response, comment.as_deref())
+                        .await?;
                     println!("{}", render(&result, format));
                 }
             },
@@ -1263,7 +1360,8 @@ pub async fn run(cli: Cli) -> Result<()> {
                 Ms365FilesAction::Download { id, output } => {
                     let (filename, bytes) = client.ms365_files_download(&id).await?;
                     let dest = output.unwrap_or_else(|| filename.clone());
-                    tokio::fs::write(&dest, &bytes).await
+                    tokio::fs::write(&dest, &bytes)
+                        .await
                         .with_context(|| format!("failed to write OneDrive file to {dest}"))?;
                     let result = crate::output::Ms365FileDownloadResponse {
                         item_id: id,
@@ -1301,6 +1399,48 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_planner_task_read(&id).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365PlannerAction::Create {
+                    plan_id,
+                    title,
+                    bucket_id,
+                    due_date,
+                    description,
+                } => {
+                    let result = client
+                        .ms365_planner_task_create(
+                            &plan_id,
+                            &title,
+                            bucket_id.as_deref(),
+                            due_date.as_deref(),
+                            description.as_deref(),
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365PlannerAction::Update {
+                    id,
+                    title,
+                    bucket_id,
+                    due_date,
+                    description,
+                    percent_complete,
+                } => {
+                    let result = client
+                        .ms365_planner_task_update(
+                            &id,
+                            title.as_deref(),
+                            bucket_id.as_deref(),
+                            due_date.as_deref(),
+                            description.as_deref(),
+                            percent_complete,
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
+                Ms365PlannerAction::Complete { id } => {
+                    let result = client.ms365_planner_task_complete(&id).await?;
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Todo { action } => match action {
                 Ms365TodoAction::Lists { limit } => {
@@ -1329,8 +1469,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_teams_channel_read(&team_id, &id).await?;
                     println!("{}", render(&result, format));
                 }
-                Ms365TeamsAction::Messages { team_id, channel_id, limit } => {
-                    let result = client.ms365_teams_messages(&team_id, &channel_id, limit).await?;
+                Ms365TeamsAction::Messages {
+                    team_id,
+                    channel_id,
+                    limit,
+                } => {
+                    let result = client
+                        .ms365_teams_messages(&team_id, &channel_id, limit)
+                        .await?;
                     println!("{}", render(&result, format));
                 }
             },
@@ -1347,8 +1493,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_sites_lists(&site_id, limit).await?;
                     println!("{}", render(&result, format));
                 }
-                Ms365SitesAction::ListItems { site_id, list_id, limit } => {
-                    let result = client.ms365_sites_list_items(&site_id, &list_id, limit).await?;
+                Ms365SitesAction::ListItems {
+                    site_id,
+                    list_id,
+                    limit,
+                } => {
+                    let result = client
+                        .ms365_sites_list_items(&site_id, &list_id, limit)
+                        .await?;
                     println!("{}", render(&result, format));
                 }
             },
@@ -1499,9 +1651,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 // Apply filters.
                 let mut entries: Vec<_> = all
                     .into_iter()
-                    .filter(|e| {
-                        kind.as_ref().is_none_or(|k| e.kind.eq_ignore_ascii_case(k))
-                    })
+                    .filter(|e| kind.as_ref().is_none_or(|k| e.kind.eq_ignore_ascii_case(k)))
                     .filter(|e| {
                         turn.as_ref().is_none_or(|t| {
                             e.turn_id.as_deref().is_some_and(|tid| tid == t.as_str())
@@ -1636,8 +1786,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
             AgentsAction::Tree { limit } => {
-                let sessions = client.sessions_list(None, None, Some("subagent"), None, limit).await?;
-                let root = sessions.sessions.first().map(|s| s.id.clone()).unwrap_or_default();
+                let sessions = client
+                    .sessions_list(None, None, Some("subagent"), None, limit)
+                    .await?;
+                let root = sessions
+                    .sessions
+                    .first()
+                    .map(|s| s.id.clone())
+                    .unwrap_or_default();
                 let result = client.sessions_tree(&root).await?;
                 println!("{}", render(&result, format));
             }
@@ -1863,12 +2019,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 thread,
             } => {
                 let result = client
-                    .message_send(
-                        &channel,
-                        &text,
-                        session.as_deref(),
-                        thread.as_deref(),
-                    )
+                    .message_send(&channel, &text, session.as_deref(), thread.as_deref())
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -1879,12 +2030,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 limit,
             } => {
                 let result = client
-                    .message_search(
-                        &query,
-                        channel.as_deref(),
-                        session.as_deref(),
-                        limit,
-                    )
+                    .message_search(&query, channel.as_deref(), session.as_deref(), limit)
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -1923,12 +2069,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 session,
             } => {
                 let result = client
-                    .message_edit(
-                        &message_id,
-                        &channel,
-                        &text,
-                        session.as_deref(),
-                    )
+                    .message_edit(&message_id, &channel, &text, session.as_deref())
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -1938,12 +2079,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 session,
             } => {
                 let result = client
-                    .message_pin(
-                        &message_id,
-                        false,
-                        channel.as_deref(),
-                        session.as_deref(),
-                    )
+                    .message_pin(&message_id, false, channel.as_deref(), session.as_deref())
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -1953,12 +2089,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 session,
             } => {
                 let result = client
-                    .message_pin(
-                        &message_id,
-                        true,
-                        channel.as_deref(),
-                        session.as_deref(),
-                    )
+                    .message_pin(&message_id, true, channel.as_deref(), session.as_deref())
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -2006,12 +2137,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     session,
                 } => {
                     let result = client
-                        .message_thread_reply(
-                            &thread_id,
-                            &channel,
-                            &text,
-                            session.as_deref(),
-                        )
+                        .message_thread_reply(&thread_id, &channel, &text, session.as_deref())
                         .await?;
                     println!("{}", render(&result, format));
                 }
@@ -2036,9 +2162,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                             let output_path = if let Some(ref path) = output {
                                 tokio::fs::write(path, &bytes)
                                     .await
-                                    .with_context(|| {
-                                        format!("failed to write audio to {path}")
-                                    })?;
+                                    .with_context(|| format!("failed to write audio to {path}"))?;
                                 Some(path.clone())
                             } else {
                                 None
@@ -2106,11 +2230,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 session,
             } => {
                 let result = client
-                    .message_list_reactions(
-                        &message_id,
-                        channel.as_deref(),
-                        session.as_deref(),
-                    )
+                    .message_list_reactions(&message_id, channel.as_deref(), session.as_deref())
                     .await?;
                 println!("{}", render(&result, format));
             }
@@ -2122,12 +2242,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     session,
                 } => {
                     let result = client
-                        .message_tag_add(
-                            &message_id,
-                            &tag,
-                            channel.as_deref(),
-                            session.as_deref(),
-                        )
+                        .message_tag_add(&message_id, &tag, channel.as_deref(), session.as_deref())
                         .await?;
                     println!("{}", render(&result, format));
                 }
@@ -2153,11 +2268,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     session,
                 } => {
                     let result = client
-                        .message_tag_list(
-                            &message_id,
-                            channel.as_deref(),
-                            session.as_deref(),
-                        )
+                        .message_tag_list(&message_id, channel.as_deref(), session.as_deref())
                         .await?;
                     println!("{}", render(&result, format));
                 }
@@ -2283,7 +2394,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                 max_turns,
                 wait,
             } => {
-                let result = client.agent_run(&session, &message, max_turns, wait).await?;
+                let result = client
+                    .agent_run(&session, &message, max_turns, wait)
+                    .await?;
                 println!("{}", render(&result, format));
             }
             AgentAction::Result { session, turn } => {
@@ -2570,10 +2683,7 @@ models = ["dall-e-3"]
 
         let response = set_default_image_model("dall-e-3").unwrap();
         assert!(response.changed);
-        assert_eq!(
-            response.default_image_model,
-            "hamza-eastus2/dall-e-3"
-        );
+        assert_eq!(response.default_image_model, "hamza-eastus2/dall-e-3");
         assert!(response.previous_image_model.is_none());
 
         let updated = std::fs::read_to_string(&config_path).unwrap();
@@ -2712,21 +2822,26 @@ models = ["gpt-5.4"]
     fn generate_completion_string(shell: cli::CompletionShell) -> String {
         let mut buf = Vec::new();
         let mut command = cli::Cli::command();
-        clap_complete::generate(
-            completion_shell(shell),
-            &mut command,
-            "rune",
-            &mut buf,
-        );
+        clap_complete::generate(completion_shell(shell), &mut command, "rune", &mut buf);
         String::from_utf8(buf).expect("completion script should be valid UTF-8")
     }
 
     #[test]
     fn bash_completion_contains_subcommands() {
         let script = generate_completion_string(cli::CompletionShell::Bash);
-        assert!(!script.is_empty(), "bash completion script must not be empty");
+        assert!(
+            !script.is_empty(),
+            "bash completion script must not be empty"
+        );
         // The script should reference key top-level subcommands.
-        for cmd in ["gateway", "status", "completion", "config", "doctor", "skills"] {
+        for cmd in [
+            "gateway",
+            "status",
+            "completion",
+            "config",
+            "doctor",
+            "skills",
+        ] {
             assert!(
                 script.contains(cmd),
                 "bash completion missing subcommand `{cmd}`",
@@ -2737,8 +2852,18 @@ models = ["gpt-5.4"]
     #[test]
     fn zsh_completion_contains_subcommands() {
         let script = generate_completion_string(cli::CompletionShell::Zsh);
-        assert!(!script.is_empty(), "zsh completion script must not be empty");
-        for cmd in ["gateway", "status", "completion", "config", "doctor", "skills"] {
+        assert!(
+            !script.is_empty(),
+            "zsh completion script must not be empty"
+        );
+        for cmd in [
+            "gateway",
+            "status",
+            "completion",
+            "config",
+            "doctor",
+            "skills",
+        ] {
             assert!(
                 script.contains(cmd),
                 "zsh completion missing subcommand `{cmd}`",
@@ -2749,8 +2874,18 @@ models = ["gpt-5.4"]
     #[test]
     fn fish_completion_contains_subcommands() {
         let script = generate_completion_string(cli::CompletionShell::Fish);
-        assert!(!script.is_empty(), "fish completion script must not be empty");
-        for cmd in ["gateway", "status", "completion", "config", "doctor", "skills"] {
+        assert!(
+            !script.is_empty(),
+            "fish completion script must not be empty"
+        );
+        for cmd in [
+            "gateway",
+            "status",
+            "completion",
+            "config",
+            "doctor",
+            "skills",
+        ] {
             assert!(
                 script.contains(cmd),
                 "fish completion missing subcommand `{cmd}`",

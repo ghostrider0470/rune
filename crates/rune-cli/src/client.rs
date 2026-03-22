@@ -10,26 +10,21 @@ use serde_json::json;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
 use crate::output::{
-    ActionResult, AgentDetailResponse, AgentListResponse, AgentSummary,
-    ApprovalListResponse, ApprovalPoliciesResponse, ApprovalPolicySummary,
-    ApprovalRequestSummary, ConfigFileResponse, ConfigGetResponse, ConfigMutationResponse,
-    ConfigValidationResult, CronJobDetailResponse, CronJobSummary, CronListResponse,
-    CronRunSummary, CronRunsResponse, CronStatusResponse, DoctorReport, GatewayCallResponse,
-    GatewayConfigResponse, GatewayDiscoverResponse, GatewayProbeResponse,
-    GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
-    LogsQueryResponse,
-    SystemEventListResponse,
-    ModelScanProviderResult, ModelScanResponse, MessageSearchHit, MessageSearchResponse,
-    MessageSendResponse, ReminderSummary, RemindersListResponse, ScannedModelDetail,
-    SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary,
-    SandboxExplainResponse, SandboxListResponse, SandboxRecreateResponse,
-    SecretsApplyResponse, SecretsAuditResponse, SecretsConfigureResponse, SecretsReloadResponse,
-    SecurityAuditResponse, ConfigureResponse,
-    AgentSpawnResponse, AgentSteerResponse, AgentKillResponse,
-    AgentRunResponse, AgentResultResponse,
-    AcpSendResponse, AcpInboxResponse, AcpInboxMessage, AcpAckResponse,
-    SessionTreeNode, SessionTreeResponse, SkillCheckResponse, SkillInfoResponse,
-    SkillListResponse, SkillSummary, StatusResponse,
+    AcpAckResponse, AcpInboxMessage, AcpInboxResponse, AcpSendResponse, ActionResult,
+    AgentDetailResponse, AgentKillResponse, AgentListResponse, AgentResultResponse,
+    AgentRunResponse, AgentSpawnResponse, AgentSteerResponse, AgentSummary, ApprovalListResponse,
+    ApprovalPoliciesResponse, ApprovalPolicySummary, ApprovalRequestSummary, ConfigFileResponse,
+    ConfigGetResponse, ConfigMutationResponse, ConfigValidationResult, ConfigureResponse,
+    CronJobDetailResponse, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
+    CronStatusResponse, DoctorReport, GatewayCallResponse, GatewayConfigResponse,
+    GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
+    HeartbeatStatusResponse, LogsQueryResponse, MessageSearchHit, MessageSearchResponse,
+    MessageSendResponse, ModelScanProviderResult, ModelScanResponse, ReminderSummary,
+    RemindersListResponse, SandboxExplainResponse, SandboxListResponse, SandboxRecreateResponse,
+    ScannedModelDetail, SecretsApplyResponse, SecretsAuditResponse, SecretsConfigureResponse,
+    SecretsReloadResponse, SecurityAuditResponse, SessionDetailResponse, SessionListResponse,
+    SessionStatusCard, SessionSummary, SessionTreeNode, SessionTreeResponse, SkillCheckResponse,
+    SkillInfoResponse, SkillListResponse, SkillSummary, StatusResponse, SystemEventListResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -610,9 +605,7 @@ impl GatewayClient {
 
     /// Aggregate persisted session-turn token usage. Monetary cost is intentionally not derived yet.
     pub async fn gateway_usage_cost(&self) -> Result<GatewayUsageCostResponse> {
-        let sessions = self
-            .sessions_list(None, None, None, None, 500)
-            .await?;
+        let sessions = self.sessions_list(None, None, None, None, 500).await?;
         let mut total_turns = 0usize;
         let mut prompt_tokens = 0u64;
         let mut completion_tokens = 0u64;
@@ -1153,10 +1146,7 @@ impl GatewayClient {
                 success: true,
                 channel: channel.to_string(),
                 message_id: v["id"].as_str().map(String::from),
-                detail: v["detail"]
-                    .as_str()
-                    .unwrap_or("Message sent")
-                    .to_string(),
+                detail: v["detail"].as_str().unwrap_or("Message sent").to_string(),
             })
         } else {
             let status = resp.status();
@@ -1178,10 +1168,8 @@ impl GatewayClient {
         session: Option<&str>,
         limit: u64,
     ) -> Result<MessageSearchResponse> {
-        let mut params: Vec<(&str, String)> = vec![
-            ("q", query.to_string()),
-            ("limit", limit.to_string()),
-        ];
+        let mut params: Vec<(&str, String)> =
+            vec![("q", query.to_string()), ("limit", limit.to_string())];
         if let Some(ch) = channel {
             params.push(("channel", ch.to_string()));
         }
@@ -1265,10 +1253,7 @@ impl GatewayClient {
                     channel: r["channel"].as_str().unwrap_or("?").to_string(),
                     success: r["success"].as_bool().unwrap_or(false),
                     message_id: r["id"].as_str().map(String::from),
-                    detail: r["detail"]
-                        .as_str()
-                        .unwrap_or("sent")
-                        .to_string(),
+                    detail: r["detail"].as_str().unwrap_or("sent").to_string(),
                 })
                 .collect::<Vec<_>>();
             let succeeded = results.iter().filter(|r| r.success).count();
@@ -1323,10 +1308,7 @@ impl GatewayClient {
                 .context("invalid JSON from POST /messages/react")?;
             Ok(MessageReactResponse {
                 success: true,
-                message_id: v["message_id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["message_id"].as_str().unwrap_or(message_id).to_string(),
                 emoji: v["emoji"].as_str().unwrap_or(emoji).to_string(),
                 removed: v["removed"].as_bool().unwrap_or(remove),
                 detail: v["detail"]
@@ -1382,15 +1364,9 @@ impl GatewayClient {
                 .context("invalid JSON from PATCH /messages/{id}")?;
             Ok(MessageEditResponse {
                 success: true,
-                message_id: v["id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["id"].as_str().unwrap_or(message_id).to_string(),
                 channel: channel.to_string(),
-                detail: v["detail"]
-                    .as_str()
-                    .unwrap_or("Message edited")
-                    .to_string(),
+                detail: v["detail"].as_str().unwrap_or("Message edited").to_string(),
             })
         } else {
             let status = resp.status();
@@ -1440,10 +1416,7 @@ impl GatewayClient {
                 .context("invalid JSON from POST /messages/pin")?;
             Ok(MessagePinResponse {
                 success: true,
-                message_id: v["message_id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["message_id"].as_str().unwrap_or(message_id).to_string(),
                 pinned: !v["unpinned"].as_bool().unwrap_or(unpin),
                 detail: v["detail"]
                     .as_str()
@@ -1493,10 +1466,7 @@ impl GatewayClient {
                 .context("invalid JSON from DELETE /messages/{id}")?;
             Ok(MessageDeleteResponse {
                 success: true,
-                message_id: v["id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["id"].as_str().unwrap_or(message_id).to_string(),
                 channel: channel.to_string(),
                 detail: v["detail"]
                     .as_str()
@@ -1542,14 +1512,8 @@ impl GatewayClient {
                 .context("invalid JSON from GET /messages/{id}")?;
             Ok(MessageReadResponse {
                 success: true,
-                message_id: v["id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
-                channel: v["channel"]
-                    .as_str()
-                    .unwrap_or(channel)
-                    .to_string(),
+                message_id: v["id"].as_str().unwrap_or(message_id).to_string(),
+                channel: v["channel"].as_str().unwrap_or(channel).to_string(),
                 sender: v["sender"].as_str().map(ToString::to_string),
                 text: v["text"].as_str().map(ToString::to_string),
                 timestamp: v["timestamp"].as_str().map(ToString::to_string),
@@ -1617,9 +1581,7 @@ impl GatewayClient {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let total = body["total"]
-                .as_u64()
-                .unwrap_or(messages.len() as u64) as usize;
+            let total = body["total"].as_u64().unwrap_or(messages.len() as u64) as usize;
             Ok(MessageThreadListResponse {
                 thread_id: thread_id.to_string(),
                 total,
@@ -1665,10 +1627,7 @@ impl GatewayClient {
                 success: true,
                 thread_id: thread_id.to_string(),
                 message_id: v["id"].as_str().map(ToString::to_string),
-                detail: v["detail"]
-                    .as_str()
-                    .unwrap_or("Reply sent")
-                    .to_string(),
+                detail: v["detail"].as_str().unwrap_or("Reply sent").to_string(),
             })
         } else {
             let status = resp.status();
@@ -1715,16 +1674,10 @@ impl GatewayClient {
                 .context("invalid JSON from POST /messages/{id}/tags")?;
             Ok(MessageTagResponse {
                 success: true,
-                message_id: v["message_id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["message_id"].as_str().unwrap_or(message_id).to_string(),
                 tag: v["tag"].as_str().unwrap_or(tag).to_string(),
                 added: true,
-                detail: v["detail"]
-                    .as_str()
-                    .unwrap_or("Tag added")
-                    .to_string(),
+                detail: v["detail"].as_str().unwrap_or("Tag added").to_string(),
             })
         } else {
             let status = resp.status();
@@ -1770,16 +1723,10 @@ impl GatewayClient {
                 .context("invalid JSON from DELETE /messages/{id}/tags/{tag}")?;
             Ok(MessageTagResponse {
                 success: true,
-                message_id: v["message_id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["message_id"].as_str().unwrap_or(message_id).to_string(),
                 tag: v["tag"].as_str().unwrap_or(tag).to_string(),
                 added: false,
-                detail: v["detail"]
-                    .as_str()
-                    .unwrap_or("Tag removed")
-                    .to_string(),
+                detail: v["detail"].as_str().unwrap_or("Tag removed").to_string(),
             })
         } else {
             let status = resp.status();
@@ -1831,18 +1778,13 @@ impl GatewayClient {
                 })
                 .unwrap_or_default();
             Ok(MessageTagListResponse {
-                message_id: v["message_id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["message_id"].as_str().unwrap_or(message_id).to_string(),
                 tags,
             })
         } else {
             let status = resp.status();
             let body_text = resp.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "GET /messages/{message_id}/tags returned HTTP {status}: {body_text}"
-            );
+            anyhow::bail!("GET /messages/{message_id}/tags returned HTTP {status}: {body_text}");
         }
     }
 
@@ -1894,10 +1836,7 @@ impl GatewayClient {
                 })
                 .unwrap_or_default();
             Ok(MessageReactionListResponse {
-                message_id: v["message_id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
+                message_id: v["message_id"].as_str().unwrap_or(message_id).to_string(),
                 reactions,
             })
         } else {
@@ -1938,14 +1877,8 @@ impl GatewayClient {
                 .context("invalid JSON from POST /messages/{id}/ack")?;
             Ok(MessageAckResponse {
                 success: true,
-                message_id: v["message_id"]
-                    .as_str()
-                    .unwrap_or(message_id)
-                    .to_string(),
-                channel: v["channel"]
-                    .as_str()
-                    .unwrap_or(channel)
-                    .to_string(),
+                message_id: v["message_id"].as_str().unwrap_or(message_id).to_string(),
+                channel: v["channel"].as_str().unwrap_or(channel).to_string(),
                 detail: v["detail"]
                     .as_str()
                     .unwrap_or("Message acknowledged")
@@ -1964,9 +1897,7 @@ impl GatewayClient {
     }
 
     /// `GET /tts/status`
-    pub async fn message_voice_status(
-        &self,
-    ) -> Result<crate::output::MessageVoiceStatusResponse> {
+    pub async fn message_voice_status(&self) -> Result<crate::output::MessageVoiceStatusResponse> {
         use crate::output::{MessageVoiceStatusResponse, TtsVoiceDetail};
 
         let resp = self
@@ -2097,10 +2028,7 @@ impl GatewayClient {
     }
 
     /// `POST /sessions` — create a new session via the gateway.
-    pub async fn sessions_create(
-        &self,
-        kind: &str,
-    ) -> Result<SessionDetailResponse> {
+    pub async fn sessions_create(&self, kind: &str) -> Result<SessionDetailResponse> {
         let resp = self
             .http
             .post(self.url("/sessions"))
@@ -2194,7 +2122,10 @@ impl GatewayClient {
     }
 
     /// `GET /sessions/:id/transcript` — fetch full session transcript.
-    pub async fn sessions_transcript(&self, id: &str) -> Result<Vec<crate::output::TranscriptEntry>> {
+    pub async fn sessions_transcript(
+        &self,
+        id: &str,
+    ) -> Result<Vec<crate::output::TranscriptEntry>> {
         let resp = self
             .http
             .get(self.url(&format!("/sessions/{id}/transcript")))
@@ -2280,9 +2211,7 @@ impl GatewayClient {
             Ok(AgentDetailResponse {
                 id: v["id"].as_str().unwrap_or("?").to_string(),
                 status: v["status"].as_str().unwrap_or("unknown").to_string(),
-                parent_session_id: v["requester_session_id"]
-                    .as_str()
-                    .map(String::from),
+                parent_session_id: v["requester_session_id"].as_str().map(String::from),
                 created_at: v["created_at"].as_str().map(String::from),
                 turn_count: v["turn_count"].as_u64().map(|n| n as u32),
                 latest_model: v["latest_model"].as_str().map(String::from),
@@ -2474,7 +2403,10 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await.context("invalid JSON from /security/audit")?)
+            Ok(resp
+                .json()
+                .await
+                .context("invalid JSON from /security/audit")?)
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2506,7 +2438,10 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await.context("invalid JSON from /sandbox/recreate")?)
+            Ok(resp
+                .json()
+                .await
+                .context("invalid JSON from /sandbox/recreate")?)
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2521,7 +2456,10 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await.context("invalid JSON from /sandbox/explain")?)
+            Ok(resp
+                .json()
+                .await
+                .context("invalid JSON from /sandbox/explain")?)
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2538,7 +2476,10 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await.context("invalid JSON from /secrets/reload")?)
+            Ok(resp
+                .json()
+                .await
+                .context("invalid JSON from /secrets/reload")?)
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2553,7 +2494,10 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await.context("invalid JSON from /secrets/audit")?)
+            Ok(resp
+                .json()
+                .await
+                .context("invalid JSON from /secrets/audit")?)
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2568,7 +2512,10 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await.context("invalid JSON from /secrets/configure")?)
+            Ok(resp
+                .json()
+                .await
+                .context("invalid JSON from /secrets/configure")?)
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2584,7 +2531,10 @@ impl GatewayClient {
             .await
             .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            Ok(resp.json().await.context("invalid JSON from /secrets/apply")?)
+            Ok(resp
+                .json()
+                .await
+                .context("invalid JSON from /secrets/apply")?)
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -2756,11 +2706,7 @@ impl GatewayClient {
     }
 
     /// `GET /agents/:id/turns/:turn_id` — retrieve a turn result.
-    pub async fn agent_result(
-        &self,
-        session: &str,
-        turn: &str,
-    ) -> Result<AgentResultResponse> {
+    pub async fn agent_result(&self, session: &str, turn: &str) -> Result<AgentResultResponse> {
         let resp = self
             .http
             .get(self.url(&format!("/agents/{session}/turns/{turn}")))
@@ -2788,12 +2734,7 @@ impl GatewayClient {
     // ── ACP bridge ───────────────────────────────────────────────────
 
     /// `POST /acp/send` — send an ACP message between sessions.
-    pub async fn acp_send(
-        &self,
-        from: &str,
-        to: &str,
-        payload: &str,
-    ) -> Result<AcpSendResponse> {
+    pub async fn acp_send(&self, from: &str, to: &str, payload: &str) -> Result<AcpSendResponse> {
         let payload_value: serde_json::Value =
             serde_json::from_str(payload).context("invalid JSON payload for ACP send")?;
         let resp = self
@@ -2842,15 +2783,9 @@ impl GatewayClient {
                 .map(|arr| {
                     arr.iter()
                         .map(|m| AcpInboxMessage {
-                            message_id: m["message_id"]
-                                .as_str()
-                                .unwrap_or("?")
-                                .to_string(),
+                            message_id: m["message_id"].as_str().unwrap_or("?").to_string(),
                             from: m["from"].as_str().unwrap_or("?").to_string(),
-                            received_at: m["received_at"]
-                                .as_str()
-                                .unwrap_or("?")
-                                .to_string(),
+                            received_at: m["received_at"].as_str().unwrap_or("?").to_string(),
                             payload: m["payload"].clone(),
                         })
                         .collect()
@@ -2893,64 +2828,187 @@ impl GatewayClient {
 
     // ── Config admin (#30) ──────────────────────────────────────
     pub async fn config_reload(&self) -> Result<crate::output::ConfigReloadResponse> {
-        let r = self.http.post(self.url("/config/reload")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .post(self.url("/config/reload"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn config_diff(&self) -> Result<crate::output::ConfigDiffResponse> {
-        let r = self.http.get(self.url("/config/diff")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/config/diff"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn config_env(&self) -> Result<crate::output::ConfigEnvResponse> {
-        let r = self.http.get(self.url("/config/env")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/config/env"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn config_export(&self) -> Result<crate::output::ConfigExportResponse> {
-        let r = self.http.get(self.url("/config/export")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/config/export"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
 
     // ── Processes (#39) ────────────────────────────────────────
     pub async fn process_list(&self) -> Result<serde_json::Value> {
-        let r = self.http.get(self.url("/processes")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/processes"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn process_get(&self, id: &str) -> Result<serde_json::Value> {
-        let r = self.http.get(self.url(&format!("/processes/{id}"))).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url(&format!("/processes/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn process_log(&self, id: &str) -> Result<String> {
-        let r = self.http.get(self.url(&format!("/processes/{id}/log"))).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.text().await.context("text")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url(&format!("/processes/{id}/log")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.text().await.context("text")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn process_kill(&self, id: &str) -> Result<crate::output::ActionResult> {
-        let r = self.http.post(self.url(&format!("/processes/{id}/kill"))).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .post(self.url(&format!("/processes/{id}/kill")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
 
     // ── Microsoft 365 (#206) ────────────────────────────────────
-    pub async fn ms365_mail_unread(&self, limit: u32, folder: &str) -> Result<crate::output::Ms365MailUnreadResponse> {
-        let r = self.http.get(self.url("/ms365/mail/unread"))
+    pub async fn ms365_mail_unread(
+        &self,
+        limit: u32,
+        folder: &str,
+    ) -> Result<crate::output::Ms365MailUnreadResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/mail/unread"))
             .query(&[("limit", limit.to_string()), ("folder", folder.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_calendar_upcoming(&self, limit: u32, hours: u32) -> Result<crate::output::Ms365CalendarUpcomingResponse> {
-        let r = self.http.get(self.url("/ms365/calendar/upcoming"))
+    pub async fn ms365_calendar_upcoming(
+        &self,
+        limit: u32,
+        hours: u32,
+    ) -> Result<crate::output::Ms365CalendarUpcomingResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/calendar/upcoming"))
             .query(&[("limit", limit.to_string()), ("hours", hours.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn ms365_mail_read(&self, id: &str) -> Result<crate::output::Ms365MailReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/mail/messages/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_calendar_read(&self, id: &str) -> Result<crate::output::Ms365CalendarReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/calendar/events/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_calendar_read(
+        &self,
+        id: &str,
+    ) -> Result<crate::output::Ms365CalendarReadResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/calendar/events/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_calendar_create(&self, subject: &str, start: &str, end: &str, attendees: &[String], location: Option<&str>, body: Option<&str>) -> Result<crate::output::Ms365CalendarCreateResponse> {
+    pub async fn ms365_calendar_create(
+        &self,
+        subject: &str,
+        start: &str,
+        end: &str,
+        attendees: &[String],
+        location: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<crate::output::Ms365CalendarCreateResponse> {
         let mut payload = serde_json::json!({
             "subject": subject,
             "start": start,
@@ -2963,123 +3021,300 @@ impl GatewayClient {
         if let Some(b) = body {
             payload["body"] = serde_json::json!(b);
         }
-        let r = self.http.post(self.url("/ms365/calendar/events"))
+        let r = self
+            .http
+            .post(self.url("/ms365/calendar/events"))
             .json(&payload)
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_calendar_delete(&self, id: &str) -> Result<crate::output::Ms365CalendarDeleteResponse> {
-        let r = self.http.post(self.url(&format!("/ms365/calendar/events/{id}/delete")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_calendar_delete(
+        &self,
+        id: &str,
+    ) -> Result<crate::output::Ms365CalendarDeleteResponse> {
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/calendar/events/{id}/delete")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_calendar_respond(&self, id: &str, response: &str, comment: Option<&str>) -> Result<crate::output::Ms365CalendarRespondResponse> {
+    pub async fn ms365_calendar_respond(
+        &self,
+        id: &str,
+        response: &str,
+        comment: Option<&str>,
+    ) -> Result<crate::output::Ms365CalendarRespondResponse> {
         let mut payload = serde_json::json!({
             "response": response,
         });
         if let Some(c) = comment {
             payload["comment"] = serde_json::json!(c);
         }
-        let r = self.http.post(self.url(&format!("/ms365/calendar/events/{id}/respond")))
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/calendar/events/{id}/respond")))
             .json(&payload)
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn ms365_auth_status(&self) -> Result<crate::output::Ms365AuthStatusResponse> {
-        let r = self.http.get(self.url("/ms365/auth/status"))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/ms365/auth/status"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn ms365_mail_folders(&self) -> Result<crate::output::Ms365MailFoldersResponse> {
-        let r = self.http.get(self.url("/ms365/mail/folders"))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/ms365/mail/folders"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_mail_send(&self, to: &[String], subject: &str, body: &str, cc: &[String]) -> Result<crate::output::Ms365MailSendResponse> {
+    pub async fn ms365_mail_send(
+        &self,
+        to: &[String],
+        subject: &str,
+        body: &str,
+        cc: &[String],
+    ) -> Result<crate::output::Ms365MailSendResponse> {
         let payload = serde_json::json!({
             "to": to,
             "subject": subject,
             "body": body,
             "cc": cc,
         });
-        let r = self.http.post(self.url("/ms365/mail/send"))
+        let r = self
+            .http
+            .post(self.url("/ms365/mail/send"))
             .json(&payload)
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_mail_reply(&self, id: &str, body: &str, reply_all: bool) -> Result<crate::output::Ms365MailReplyResponse> {
+    pub async fn ms365_mail_reply(
+        &self,
+        id: &str,
+        body: &str,
+        reply_all: bool,
+    ) -> Result<crate::output::Ms365MailReplyResponse> {
         let payload = serde_json::json!({
             "body": body,
             "reply_all": reply_all,
         });
-        let r = self.http.post(self.url(&format!("/ms365/mail/messages/{id}/reply")))
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/mail/messages/{id}/reply")))
             .json(&payload)
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_mail_forward(&self, id: &str, to: &[String], comment: Option<&str>) -> Result<crate::output::Ms365MailForwardResponse> {
+    pub async fn ms365_mail_forward(
+        &self,
+        id: &str,
+        to: &[String],
+        comment: Option<&str>,
+    ) -> Result<crate::output::Ms365MailForwardResponse> {
         let mut payload = serde_json::json!({
             "to": to,
         });
         if let Some(c) = comment {
             payload["comment"] = serde_json::json!(c);
         }
-        let r = self.http.post(self.url(&format!("/ms365/mail/messages/{id}/forward")))
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/mail/messages/{id}/forward")))
             .json(&payload)
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_mail_attachments(&self, message_id: &str) -> Result<crate::output::Ms365MailAttachmentsResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_mail_attachments(
+        &self,
+        message_id: &str,
+    ) -> Result<crate::output::Ms365MailAttachmentsResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_mail_attachment_read(&self, message_id: &str, attachment_id: &str) -> Result<crate::output::Ms365MailAttachmentReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments/{attachment_id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_mail_attachment_read(
+        &self,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<crate::output::Ms365MailAttachmentReadResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!(
+                "/ms365/mail/messages/{message_id}/attachments/{attachment_id}"
+            )))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     /// Download raw attachment content. Returns (filename, bytes).
-    pub async fn ms365_mail_attachment_download(&self, message_id: &str, attachment_id: &str) -> Result<(String, Vec<u8>)> {
+    pub async fn ms365_mail_attachment_download(
+        &self,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<(String, Vec<u8>)> {
         let meta: crate::output::Ms365MailAttachmentReadResponse = {
-            let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments/{attachment_id}")))
-                .send().await.context("gateway")?;
-            if r.status().is_success() { r.json().await.context("json")? } else { bail!("HTTP {}", r.status()); }
+            let r = self
+                .http
+                .get(self.url(&format!(
+                    "/ms365/mail/messages/{message_id}/attachments/{attachment_id}"
+                )))
+                .send()
+                .await
+                .context("gateway")?;
+            if r.status().is_success() {
+                r.json().await.context("json")?
+            } else {
+                bail!("HTTP {}", r.status());
+            }
         };
-        let r = self.http.get(self.url(&format!("/ms365/mail/messages/{message_id}/attachments/{attachment_id}/content")))
-            .send().await.context("gateway")?;
+        let r = self
+            .http
+            .get(self.url(&format!(
+                "/ms365/mail/messages/{message_id}/attachments/{attachment_id}/content"
+            )))
+            .send()
+            .await
+            .context("gateway")?;
         if r.status().is_success() {
             Ok((meta.name, r.bytes().await.context("bytes")?.to_vec()))
         } else {
             bail!("HTTP {}", r.status());
         }
     }
-    pub async fn ms365_files_list(&self, path: &str, limit: u32) -> Result<crate::output::Ms365FilesListResponse> {
-        let r = self.http.get(self.url("/ms365/files"))
+    pub async fn ms365_files_list(
+        &self,
+        path: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365FilesListResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/files"))
             .query(&[("path", path.to_string()), ("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn ms365_files_read(&self, id: &str) -> Result<crate::output::Ms365FileReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/files/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/files/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_files_search(&self, query: &str, limit: u32) -> Result<crate::output::Ms365FilesSearchResponse> {
-        let r = self.http.get(self.url("/ms365/files/search"))
+    pub async fn ms365_files_search(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365FilesSearchResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/files/search"))
             .query(&[("query", query.to_string()), ("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     /// Download a OneDrive file's content. Returns (filename, bytes).
     pub async fn ms365_files_download(&self, id: &str) -> Result<(String, Vec<u8>)> {
         let meta: crate::output::Ms365FileReadResponse = {
-            let r = self.http.get(self.url(&format!("/ms365/files/{id}")))
-                .send().await.context("gateway")?;
-            if r.status().is_success() { r.json().await.context("json")? } else { bail!("HTTP {}", r.status()); }
+            let r = self
+                .http
+                .get(self.url(&format!("/ms365/files/{id}")))
+                .send()
+                .await
+                .context("gateway")?;
+            if r.status().is_success() {
+                r.json().await.context("json")?
+            } else {
+                bail!("HTTP {}", r.status());
+            }
         };
-        let r = self.http.get(self.url(&format!("/ms365/files/{id}/content")))
-            .send().await.context("gateway")?;
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/files/{id}/content")))
+            .send()
+            .await
+            .context("gateway")?;
         if r.status().is_success() {
             Ok((meta.name, r.bytes().await.context("bytes")?.to_vec()))
         } else {
@@ -3087,137 +3322,497 @@ impl GatewayClient {
         }
     }
     pub async fn ms365_users_me(&self) -> Result<crate::output::Ms365UserProfileResponse> {
-        let r = self.http.get(self.url("/ms365/users/me"))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/ms365/users/me"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_users_list(&self, limit: u32) -> Result<crate::output::Ms365UsersListResponse> {
-        let r = self.http.get(self.url("/ms365/users"))
+    pub async fn ms365_users_list(
+        &self,
+        limit: u32,
+    ) -> Result<crate::output::Ms365UsersListResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/users"))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_users_read(&self, id: &str) -> Result<crate::output::Ms365UserProfileResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/users/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_users_read(
+        &self,
+        id: &str,
+    ) -> Result<crate::output::Ms365UserProfileResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/users/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_planner_plans(&self, limit: u32) -> Result<crate::output::Ms365PlannerPlansResponse> {
-        let r = self.http.get(self.url("/ms365/planner/plans"))
+    pub async fn ms365_planner_plans(
+        &self,
+        limit: u32,
+    ) -> Result<crate::output::Ms365PlannerPlansResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/planner/plans"))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_planner_tasks(&self, plan_id: &str, limit: u32) -> Result<crate::output::Ms365PlannerTasksResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/planner/plans/{plan_id}/tasks")))
+    pub async fn ms365_planner_tasks(
+        &self,
+        plan_id: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365PlannerTasksResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/planner/plans/{plan_id}/tasks")))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_planner_task_read(&self, id: &str) -> Result<crate::output::Ms365PlannerTaskReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/planner/tasks/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_planner_task_read(
+        &self,
+        id: &str,
+    ) -> Result<crate::output::Ms365PlannerTaskReadResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/planner/tasks/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_todo_lists(&self, limit: u32) -> Result<crate::output::Ms365TodoListsResponse> {
-        let r = self.http.get(self.url("/ms365/todo/lists"))
+    pub async fn ms365_planner_task_create(
+        &self,
+        plan_id: &str,
+        title: &str,
+        bucket_id: Option<&str>,
+        due_date: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<crate::output::Ms365PlannerTaskCreateResponse> {
+        let mut payload = serde_json::json!({
+            "plan_id": plan_id,
+            "title": title,
+        });
+        if let Some(bucket_id) = bucket_id {
+            payload["bucket_id"] = serde_json::json!(bucket_id);
+        }
+        if let Some(due_date) = due_date {
+            payload["due_date"] = serde_json::json!(due_date);
+        }
+        if let Some(description) = description {
+            payload["description"] = serde_json::json!(description);
+        }
+        let r = self
+            .http
+            .post(self.url("/ms365/planner/tasks"))
+            .json(&payload)
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
+    pub async fn ms365_planner_task_update(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        bucket_id: Option<&str>,
+        due_date: Option<&str>,
+        description: Option<&str>,
+        percent_complete: Option<u8>,
+    ) -> Result<crate::output::Ms365PlannerTaskUpdateResponse> {
+        let mut payload = serde_json::json!({});
+        if let Some(title) = title {
+            payload["title"] = serde_json::json!(title);
+        }
+        if let Some(bucket_id) = bucket_id {
+            payload["bucket_id"] = serde_json::json!(bucket_id);
+        }
+        if let Some(due_date) = due_date {
+            payload["due_date"] = serde_json::json!(due_date);
+        }
+        if let Some(description) = description {
+            payload["description"] = serde_json::json!(description);
+        }
+        if let Some(percent_complete) = percent_complete {
+            payload["percent_complete"] = serde_json::json!(percent_complete);
+        }
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/planner/tasks/{id}")))
+            .json(&payload)
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
+    pub async fn ms365_planner_task_complete(
+        &self,
+        id: &str,
+    ) -> Result<crate::output::Ms365PlannerTaskCompleteResponse> {
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/planner/tasks/{id}/complete")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
+    pub async fn ms365_todo_lists(
+        &self,
+        limit: u32,
+    ) -> Result<crate::output::Ms365TodoListsResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/todo/lists"))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_todo_tasks(&self, list_id: &str, limit: u32) -> Result<crate::output::Ms365TodoTasksResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/todo/lists/{list_id}/tasks")))
+    pub async fn ms365_todo_tasks(
+        &self,
+        list_id: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365TodoTasksResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/todo/lists/{list_id}/tasks")))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_todo_task_read(&self, list_id: &str, id: &str) -> Result<crate::output::Ms365TodoTaskReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/todo/lists/{list_id}/tasks/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_todo_task_read(
+        &self,
+        list_id: &str,
+        id: &str,
+    ) -> Result<crate::output::Ms365TodoTaskReadResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/todo/lists/{list_id}/tasks/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
 
-    pub async fn ms365_sites_list(&self, limit: u32) -> Result<crate::output::Ms365SitesListResponse> {
-        let r = self.http.get(self.url("/ms365/sites"))
+    pub async fn ms365_sites_list(
+        &self,
+        limit: u32,
+    ) -> Result<crate::output::Ms365SitesListResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/sites"))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn ms365_sites_read(&self, id: &str) -> Result<crate::output::Ms365SiteReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/sites/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/sites/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_sites_lists(&self, site_id: &str, limit: u32) -> Result<crate::output::Ms365SiteListsResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/sites/{site_id}/lists")))
+    pub async fn ms365_sites_lists(
+        &self,
+        site_id: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365SiteListsResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/sites/{site_id}/lists")))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_sites_list_items(&self, site_id: &str, list_id: &str, limit: u32) -> Result<crate::output::Ms365SiteListItemsResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/sites/{site_id}/lists/{list_id}/items")))
+    pub async fn ms365_sites_list_items(
+        &self,
+        site_id: &str,
+        list_id: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365SiteListItemsResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/sites/{site_id}/lists/{list_id}/items")))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
 
-    pub async fn ms365_teams_list(&self, limit: u32) -> Result<crate::output::Ms365TeamsListResponse> {
-        let r = self.http.get(self.url("/ms365/teams"))
+    pub async fn ms365_teams_list(
+        &self,
+        limit: u32,
+    ) -> Result<crate::output::Ms365TeamsListResponse> {
+        let r = self
+            .http
+            .get(self.url("/ms365/teams"))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_teams_channels(&self, team_id: &str, limit: u32) -> Result<crate::output::Ms365TeamsChannelsResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/teams/{team_id}/channels")))
+    pub async fn ms365_teams_channels(
+        &self,
+        team_id: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365TeamsChannelsResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/teams/{team_id}/channels")))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_teams_channel_read(&self, team_id: &str, id: &str) -> Result<crate::output::Ms365TeamsChannelReadResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/teams/{team_id}/channels/{id}")))
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn ms365_teams_channel_read(
+        &self,
+        team_id: &str,
+        id: &str,
+    ) -> Result<crate::output::Ms365TeamsChannelReadResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!("/ms365/teams/{team_id}/channels/{id}")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn ms365_teams_messages(&self, team_id: &str, channel_id: &str, limit: u32) -> Result<crate::output::Ms365TeamsMessagesResponse> {
-        let r = self.http.get(self.url(&format!("/ms365/teams/{team_id}/channels/{channel_id}/messages")))
+    pub async fn ms365_teams_messages(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        limit: u32,
+    ) -> Result<crate::output::Ms365TeamsMessagesResponse> {
+        let r = self
+            .http
+            .get(self.url(&format!(
+                "/ms365/teams/{team_id}/channels/{channel_id}/messages"
+            )))
             .query(&[("limit", limit.to_string())])
-            .send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
 
     // ── Lifecycle (#74, #70) ────────────────────────────────────
     pub async fn setup(&self) -> Result<crate::output::SetupResponse> {
-        let r = self.http.post(self.url("/setup")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .post(self.url("/setup"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
-    pub async fn backup_create(&self, label: Option<&str>) -> Result<crate::output::BackupCreateResponse> {
-        let mut b = json!({}); if let Some(l) = label { b["label"] = json!(l); }
-        let r = self.http.post(self.url("/backups")).json(&b).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    pub async fn backup_create(
+        &self,
+        label: Option<&str>,
+    ) -> Result<crate::output::BackupCreateResponse> {
+        let mut b = json!({});
+        if let Some(l) = label {
+            b["label"] = json!(l);
+        }
+        let r = self
+            .http
+            .post(self.url("/backups"))
+            .json(&b)
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn backup_list(&self) -> Result<crate::output::BackupListResponse> {
-        let r = self.http.get(self.url("/backups")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/backups"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn backup_restore(&self, id: &str) -> Result<crate::output::BackupRestoreResponse> {
-        let r = self.http.post(self.url(&format!("/backups/{id}/restore"))).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .post(self.url(&format!("/backups/{id}/restore")))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn update_check(&self) -> Result<crate::output::UpdateCheckResponse> {
-        let r = self.http.get(self.url("/update/check")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/update/check"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn update_apply(&self) -> Result<crate::output::UpdateApplyResponse> {
-        let r = self.http.post(self.url("/update/apply")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .post(self.url("/update/apply"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn update_status(&self) -> Result<crate::output::UpdateStatusResponse> {
-        let r = self.http.get(self.url("/update/status")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .get(self.url("/update/status"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
     pub async fn reset(&self) -> Result<crate::output::ResetResponse> {
-        let r = self.http.post(self.url("/reset")).send().await.context("gateway")?;
-        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+        let r = self
+            .http
+            .post(self.url("/reset"))
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
     }
 }
 
@@ -5169,6 +5764,93 @@ mod tests {
         assert!(resp.detail.contains("Thread not found"));
     }
 
+    #[tokio::test]
+    async fn ms365_planner_task_create_posts_expected_payload() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ms365/planner/tasks"))
+            .and(body_json(json!({
+                "plan_id": "plan-1",
+                "title": "Draft follow-up",
+                "bucket_id": "bucket-1",
+                "due_date": "2026-03-25T12:00:00Z",
+                "description": "Prepare operator summary"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "Planner task created",
+                "task_id": "task-1"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .ms365_planner_task_create(
+                "plan-1",
+                "Draft follow-up",
+                Some("bucket-1"),
+                Some("2026-03-25T12:00:00Z"),
+                Some("Prepare operator summary"),
+            )
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.task_id.as_deref(), Some("task-1"));
+    }
+
+    #[tokio::test]
+    async fn ms365_planner_task_update_posts_only_changed_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ms365/planner/tasks/task-1"))
+            .and(body_json(json!({
+                "title": "Updated summary",
+                "percent_complete": 60
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "Planner task updated",
+                "task_id": "task-1"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client
+            .ms365_planner_task_update(
+                "task-1",
+                Some("Updated summary"),
+                None,
+                None,
+                None,
+                Some(60),
+            )
+            .await
+            .unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.task_id.as_deref(), Some("task-1"));
+    }
+
+    #[tokio::test]
+    async fn ms365_planner_task_complete_posts_expected_route() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ms365/planner/tasks/task-1/complete"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "message": "Planner task completed",
+                "task_id": "task-1"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.ms365_planner_task_complete("task-1").await.unwrap();
+        assert!(resp.success);
+        assert_eq!(resp.task_id.as_deref(), Some("task-1"));
+    }
+
     // ── Security ──────────────────────────────────────────────────
 
     #[tokio::test]
@@ -5332,10 +6014,7 @@ mod tests {
             .await;
 
         let client = GatewayClient::new(&server.uri());
-        let resp = client
-            .secrets_apply(json!({"secrets": []}))
-            .await
-            .unwrap();
+        let resp = client.secrets_apply(json!({"secrets": []})).await.unwrap();
         assert!(resp.success);
         assert_eq!(resp.applied, 2);
     }
@@ -5400,7 +6079,10 @@ mod subagent_tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"session_id":"child-1","parent_session_id":"sess-1","mode":"coding","policy":"inherit","status":"spawned"})))
             .mount(&server).await;
         let c = GatewayClient::new(&server.uri());
-        let r = c.agent_spawn("sess-1","coding","inherit","test",None).await.unwrap();
+        let r = c
+            .agent_spawn("sess-1", "coding", "inherit", "test", None)
+            .await
+            .unwrap();
         assert_eq!(r.session_id, "child-1");
         assert_eq!(r.parent_session_id, "sess-1");
     }
@@ -5408,64 +6090,90 @@ mod subagent_tests {
     #[tokio::test]
     async fn agent_steer_ok() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/agents/child-1/steer"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"accepted":true,"detail":"ok"})))
-            .mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/agents/child-1/steer"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"accepted":true,"detail":"ok"})),
+            )
+            .mount(&server)
+            .await;
         let c = GatewayClient::new(&server.uri());
-        let r = c.agent_steer("child-1","focus").await.unwrap();
+        let r = c.agent_steer("child-1", "focus").await.unwrap();
         assert!(r.accepted);
     }
 
     #[tokio::test]
     async fn agent_steer_404() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/agents/x/steer"))
-            .respond_with(ResponseTemplate::new(404)).mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/agents/x/steer"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
         let c = GatewayClient::new(&server.uri());
-        assert!(c.agent_steer("x","hi").await.is_err());
+        assert!(c.agent_steer("x", "hi").await.is_err());
     }
 
     #[tokio::test]
     async fn agent_kill_ok() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/agents/child-1/kill"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"killed":true,"detail":"done"})))
-            .mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/agents/child-1/kill"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"killed":true,"detail":"done"})),
+            )
+            .mount(&server)
+            .await;
         let c = GatewayClient::new(&server.uri());
-        let r = c.agent_kill("child-1",Some("timeout")).await.unwrap();
+        let r = c.agent_kill("child-1", Some("timeout")).await.unwrap();
         assert!(r.killed);
     }
 
     #[tokio::test]
     async fn agent_run_ok() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/agents/s1/run"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"turn_id":"t1","status":"completed","output":"ok"})))
-            .mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/agents/s1/run"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"turn_id":"t1","status":"completed","output":"ok"})),
+            )
+            .mount(&server)
+            .await;
         let c = GatewayClient::new(&server.uri());
-        let r = c.agent_run("s1","go",1,true).await.unwrap();
+        let r = c.agent_run("s1", "go", 1, true).await.unwrap();
         assert_eq!(r.turn_id, "t1");
     }
 
     #[tokio::test]
     async fn agent_result_ok() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/agents/s1/turns/t1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status":"completed","output":"res"})))
-            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/agents/s1/turns/t1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"status":"completed","output":"res"})),
+            )
+            .mount(&server)
+            .await;
         let c = GatewayClient::new(&server.uri());
-        let r = c.agent_result("s1","t1").await.unwrap();
+        let r = c.agent_result("s1", "t1").await.unwrap();
         assert_eq!(r.output.as_deref(), Some("res"));
     }
 
     #[tokio::test]
     async fn acp_send_ok() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/acp/send"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message_id":"m1","delivered":true})))
-            .mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/acp/send"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"message_id":"m1","delivered":true})),
+            )
+            .mount(&server)
+            .await;
         let c = GatewayClient::new(&server.uri());
-        let r = c.acp_send("a","b",r#"{"x":1}"#).await.unwrap();
+        let r = c.acp_send("a", "b", r#"{"x":1}"#).await.unwrap();
         assert!(r.delivered);
     }
 
@@ -5483,11 +6191,13 @@ mod subagent_tests {
     #[tokio::test]
     async fn acp_ack_ok() {
         let server = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/acp/ack"))
+        Mock::given(method("POST"))
+            .and(path("/acp/ack"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"acknowledged":true})))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
         let c = GatewayClient::new(&server.uri());
-        let r = c.acp_ack("m1","a").await.unwrap();
+        let r = c.acp_ack("m1", "a").await.unwrap();
         assert!(r.acknowledged);
     }
 }
@@ -5497,24 +6207,44 @@ mod subagent_tests {
 impl GatewayClient {
     /// `GET /plugins` — list installed plugins.
     pub async fn plugins_list(&self) -> Result<crate::output::PluginListResponse> {
-        let resp = self.http.get(self.url("/plugins")).send().await.context("failed to reach gateway")?;
+        let resp = self
+            .http
+            .get(self.url("/plugins"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
         if resp.status().is_success() {
             let v: serde_json::Value = resp.json().await.context("invalid JSON from /plugins")?;
-            let plugins = v["plugins"].as_array().unwrap_or(&vec![]).iter().map(|p| crate::output::PluginSummary {
-                name: p["name"].as_str().unwrap_or("?").to_string(),
-                version: p["version"].as_str().unwrap_or("0.0.0").to_string(),
-                enabled: p["enabled"].as_bool().unwrap_or(false),
-                description: p["description"].as_str().unwrap_or("").to_string(),
-            }).collect();
+            let plugins = v["plugins"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|p| crate::output::PluginSummary {
+                    name: p["name"].as_str().unwrap_or("?").to_string(),
+                    version: p["version"].as_str().unwrap_or("0.0.0").to_string(),
+                    enabled: p["enabled"].as_bool().unwrap_or(false),
+                    description: p["description"].as_str().unwrap_or("").to_string(),
+                })
+                .collect();
             Ok(crate::output::PluginListResponse { plugins })
-        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
     }
 
     /// `GET /plugins/:name` — show plugin details.
     pub async fn plugins_info(&self, name: &str) -> Result<crate::output::PluginInfoResponse> {
-        let resp = self.http.get(self.url(&format!("/plugins/{name}"))).send().await.context("failed to reach gateway")?;
+        let resp = self
+            .http
+            .get(self.url(&format!("/plugins/{name}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            let v: serde_json::Value = resp.json().await.context("invalid JSON from /plugins/:name")?;
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /plugins/:name")?;
             Ok(crate::output::PluginInfoResponse {
                 name: v["name"].as_str().unwrap_or("?").to_string(),
                 version: v["version"].as_str().unwrap_or("0.0.0").to_string(),
@@ -5523,46 +6253,82 @@ impl GatewayClient {
                 source: v["source"].as_str().unwrap_or("unknown").to_string(),
                 manifest_valid: v["manifest_valid"].as_bool().unwrap_or(true),
             })
-        } else if resp.status() == reqwest::StatusCode::NOT_FOUND { bail!("Plugin '{name}' not found."); }
-        else { bail!("Gateway returned HTTP {}", resp.status()); }
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Plugin '{name}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
     }
 
     /// `POST /plugins/:action` — plugin lifecycle mutation.
-    pub async fn plugins_mutate(&self, action: &str, name_or_source: &str) -> Result<crate::output::PluginMutationResponse> {
-        let resp = self.http.post(self.url(&format!("/plugins/{action}")))
+    pub async fn plugins_mutate(
+        &self,
+        action: &str,
+        name_or_source: &str,
+    ) -> Result<crate::output::PluginMutationResponse> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/plugins/{action}")))
             .json(&serde_json::json!({"name": name_or_source}))
-            .send().await.context("failed to reach gateway")?;
+            .send()
+            .await
+            .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            let v: serde_json::Value = resp.json().await.context("invalid JSON from POST /plugins/:action")?;
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /plugins/:action")?;
             Ok(crate::output::PluginMutationResponse {
                 success: v["success"].as_bool().unwrap_or(true),
                 plugin: v["plugin"].as_str().unwrap_or(name_or_source).to_string(),
                 action: action.to_string(),
                 detail: v["detail"].as_str().unwrap_or("done").to_string(),
             })
-        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
     }
 
     /// `GET /hooks` — list configured hooks.
     pub async fn hooks_list(&self) -> Result<crate::output::HookListResponse> {
-        let resp = self.http.get(self.url("/hooks")).send().await.context("failed to reach gateway")?;
+        let resp = self
+            .http
+            .get(self.url("/hooks"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
         if resp.status().is_success() {
             let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks")?;
-            let hooks = v["hooks"].as_array().unwrap_or(&vec![]).iter().map(|h| crate::output::HookSummary {
-                name: h["name"].as_str().unwrap_or("?").to_string(),
-                event: h["event"].as_str().unwrap_or("?").to_string(),
-                enabled: h["enabled"].as_bool().unwrap_or(false),
-                description: h["description"].as_str().unwrap_or("").to_string(),
-            }).collect();
+            let hooks = v["hooks"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|h| crate::output::HookSummary {
+                    name: h["name"].as_str().unwrap_or("?").to_string(),
+                    event: h["event"].as_str().unwrap_or("?").to_string(),
+                    enabled: h["enabled"].as_bool().unwrap_or(false),
+                    description: h["description"].as_str().unwrap_or("").to_string(),
+                })
+                .collect();
             Ok(crate::output::HookListResponse { hooks })
-        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
     }
 
     /// `GET /hooks/:name` — show hook details.
     pub async fn hooks_info(&self, name: &str) -> Result<crate::output::HookInfoResponse> {
-        let resp = self.http.get(self.url(&format!("/hooks/{name}"))).send().await.context("failed to reach gateway")?;
+        let resp = self
+            .http
+            .get(self.url(&format!("/hooks/{name}")))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks/:name")?;
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /hooks/:name")?;
             Ok(crate::output::HookInfoResponse {
                 name: v["name"].as_str().unwrap_or("?").to_string(),
                 event: v["event"].as_str().unwrap_or("?").to_string(),
@@ -5570,41 +6336,63 @@ impl GatewayClient {
                 description: v["description"].as_str().unwrap_or("").to_string(),
                 source: v["source"].as_str().unwrap_or("unknown").to_string(),
             })
-        } else if resp.status() == reqwest::StatusCode::NOT_FOUND { bail!("Hook '{name}' not found."); }
-        else { bail!("Gateway returned HTTP {}", resp.status()); }
+        } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            bail!("Hook '{name}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
     }
 
     /// `GET /hooks/check` — validate hook configuration.
     pub async fn hooks_check(&self) -> Result<crate::output::HookCheckResponse> {
-        let resp = self.http.get(self.url("/hooks/check")).send().await.context("failed to reach gateway")?;
+        let resp = self
+            .http
+            .get(self.url("/hooks/check"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            let v: serde_json::Value = resp.json().await.context("invalid JSON from /hooks/check")?;
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from /hooks/check")?;
             Ok(crate::output::HookCheckResponse {
                 total: v["total"].as_u64().unwrap_or(0) as usize,
                 valid: v["valid"].as_u64().unwrap_or(0) as usize,
                 invalid: v["invalid"].as_u64().unwrap_or(0) as usize,
                 detail: v["detail"].as_str().unwrap_or("check complete").to_string(),
             })
-        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
     }
 
     /// `POST /hooks/:action` — hook lifecycle mutation.
-    pub async fn hooks_mutate(&self, action: &str, name_or_source: &str) -> Result<crate::output::HookMutationResponse> {
-        let resp = self.http.post(self.url(&format!("/hooks/{action}")))
+    pub async fn hooks_mutate(
+        &self,
+        action: &str,
+        name_or_source: &str,
+    ) -> Result<crate::output::HookMutationResponse> {
+        let resp = self
+            .http
+            .post(self.url(&format!("/hooks/{action}")))
             .json(&serde_json::json!({"name": name_or_source}))
-            .send().await.context("failed to reach gateway")?;
+            .send()
+            .await
+            .context("failed to reach gateway")?;
         if resp.status().is_success() {
-            let v: serde_json::Value = resp.json().await.context("invalid JSON from POST /hooks/:action")?;
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /hooks/:action")?;
             Ok(crate::output::HookMutationResponse {
                 success: v["success"].as_bool().unwrap_or(true),
                 hook: v["hook"].as_str().unwrap_or(name_or_source).to_string(),
                 action: action.to_string(),
                 detail: v["detail"].as_str().unwrap_or("done").to_string(),
             })
-        } else { bail!("Gateway returned HTTP {}", resp.status()); }
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
     }
-
-
-
-
 }
