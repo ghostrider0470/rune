@@ -26,7 +26,8 @@ use serde_json::Value;
 
 use crate::error::GatewayError;
 use crate::ms365::{
-    CreatePlannerTaskRequest, Ms365PlannerServiceError, PlannerTask, UpdatePlannerTaskRequest,
+    CreatePlannerTaskRequest, CreateTodoTaskRequest, Ms365PlannerServiceError,
+    Ms365TodoServiceError, PlannerTask, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
 use crate::state::{AppState, SessionEvent};
@@ -3567,6 +3568,11 @@ pub struct Ms365PlannerTaskMutationResponse {
     pub task: PlannerTask,
 }
 
+#[derive(Serialize)]
+pub struct Ms365TodoTaskMutationResponse {
+    pub task: TodoTask,
+}
+
 /// `POST /ms365/planner/tasks` — create a Microsoft Planner task.
 pub async fn ms365_planner_create_task(
     State(state): State<AppState>,
@@ -3613,6 +3619,53 @@ pub async fn ms365_planner_complete_task(
     Ok(Json(Ms365PlannerTaskMutationResponse { task }))
 }
 
+/// `POST /ms365/todo/lists/{list_id}/tasks` — create a Microsoft To-Do task.
+pub async fn ms365_todo_create_task(
+    State(state): State<AppState>,
+    Path(list_id): Path<String>,
+    Json(request): Json<CreateTodoTaskRequest>,
+) -> Result<(StatusCode, Json<Ms365TodoTaskMutationResponse>), GatewayError> {
+    let task = state
+        .ms365_todo_service
+        .create_task(&list_id, request)
+        .await
+        .map_err(map_ms365_todo_service_error)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(Ms365TodoTaskMutationResponse { task }),
+    ))
+}
+
+/// `POST /ms365/todo/lists/{list_id}/tasks/{id}` — update a Microsoft To-Do task.
+pub async fn ms365_todo_update_task(
+    State(state): State<AppState>,
+    Path((list_id, id)): Path<(String, String)>,
+    Json(request): Json<UpdateTodoTaskRequest>,
+) -> Result<Json<Ms365TodoTaskMutationResponse>, GatewayError> {
+    let task = state
+        .ms365_todo_service
+        .update_task(&list_id, &id, request)
+        .await
+        .map_err(map_ms365_todo_service_error)?;
+
+    Ok(Json(Ms365TodoTaskMutationResponse { task }))
+}
+
+/// `POST /ms365/todo/lists/{list_id}/tasks/{id}/complete` — mark a Microsoft To-Do task complete.
+pub async fn ms365_todo_complete_task(
+    State(state): State<AppState>,
+    Path((list_id, id)): Path<(String, String)>,
+) -> Result<Json<Ms365TodoTaskMutationResponse>, GatewayError> {
+    let task = state
+        .ms365_todo_service
+        .complete_task(&list_id, &id)
+        .await
+        .map_err(map_ms365_todo_service_error)?;
+
+    Ok(Json(Ms365TodoTaskMutationResponse { task }))
+}
+
 fn map_ms365_planner_service_error(error: Ms365PlannerServiceError) -> GatewayError {
     match error {
         Ms365PlannerServiceError::Validation(message)
@@ -3621,6 +3674,18 @@ fn map_ms365_planner_service_error(error: Ms365PlannerServiceError) -> GatewayEr
         | Ms365PlannerServiceError::Upstream(message) => GatewayError::Internal(message),
         Ms365PlannerServiceError::Unauthorized => GatewayError::Unauthorized,
         Ms365PlannerServiceError::Forbidden(message) => GatewayError::Forbidden(message),
+    }
+}
+
+fn map_ms365_todo_service_error(error: Ms365TodoServiceError) -> GatewayError {
+    match error {
+        Ms365TodoServiceError::Validation(message) | Ms365TodoServiceError::NotFound(message) => {
+            GatewayError::BadRequest(message)
+        }
+        Ms365TodoServiceError::NotConfigured(message)
+        | Ms365TodoServiceError::Upstream(message) => GatewayError::Internal(message),
+        Ms365TodoServiceError::Unauthorized => GatewayError::Unauthorized,
+        Ms365TodoServiceError::Forbidden(message) => GatewayError::Forbidden(message),
     }
 }
 

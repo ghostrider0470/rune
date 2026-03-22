@@ -32,7 +32,7 @@ use tokio::sync::RwLock;
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
-use crate::ms365::Ms365PlannerService;
+use crate::ms365::{Ms365PlannerService, Ms365TodoService};
 use crate::pairing::DeviceRegistry;
 use crate::routes;
 use crate::state::{AppState, SessionEvent};
@@ -82,6 +82,7 @@ pub struct Services {
     pub capabilities: Capabilities,
     pub device_repo: Arc<dyn DeviceRepo>,
     pub ms365_planner_service: Arc<dyn Ms365PlannerService>,
+    pub ms365_todo_service: Arc<dyn Ms365TodoService>,
 }
 
 /// Start the gateway HTTP server.
@@ -201,6 +202,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         tts_engine,
         stt_engine,
         ms365_planner_service: services.ms365_planner_service,
+        ms365_todo_service: services.ms365_todo_service,
     };
 
     // Build operator delivery for heartbeat/scheduled output to Telegram.
@@ -428,6 +430,18 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route(
             "/ms365/planner/tasks/{id}/complete",
             post(routes::ms365_planner_complete_task),
+        )
+        .route(
+            "/ms365/todo/lists/{list_id}/tasks",
+            post(routes::ms365_todo_create_task),
+        )
+        .route(
+            "/ms365/todo/lists/{list_id}/tasks/{id}",
+            post(routes::ms365_todo_update_task),
+        )
+        .route(
+            "/ms365/todo/lists/{list_id}/tasks/{id}/complete",
+            post(routes::ms365_todo_complete_task),
         )
         // Config editor routes
         .route(

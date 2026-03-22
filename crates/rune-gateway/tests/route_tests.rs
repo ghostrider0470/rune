@@ -35,8 +35,9 @@ use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
 use rune_gateway::ms365::{
-    CreatePlannerTaskRequest, Ms365PlannerService, Ms365PlannerServiceError, PlannerTask,
-    UpdatePlannerTaskRequest,
+    CreatePlannerTaskRequest, CreateTodoTaskRequest, Ms365PlannerService, Ms365PlannerServiceError,
+    Ms365TodoService, Ms365TodoServiceError, PlannerTask, TodoTask, UpdatePlannerTaskRequest,
+    UpdateTodoTaskRequest,
 };
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
 
@@ -753,12 +754,37 @@ enum PlannerMutationCall {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TodoMutationCall {
+    Create {
+        list_id: String,
+        request: CreateTodoTaskRequest,
+    },
+    Update {
+        list_id: String,
+        id: String,
+        request: UpdateTodoTaskRequest,
+    },
+    Complete {
+        list_id: String,
+        id: String,
+    },
+}
+
 #[derive(Debug)]
 struct FakeMs365PlannerService {
     create_response: Result<PlannerTask, Ms365PlannerServiceError>,
     update_response: Result<PlannerTask, Ms365PlannerServiceError>,
     complete_response: Result<PlannerTask, Ms365PlannerServiceError>,
     calls: Mutex<Vec<PlannerMutationCall>>,
+}
+
+#[derive(Debug)]
+struct FakeMs365TodoService {
+    create_response: Result<TodoTask, Ms365TodoServiceError>,
+    update_response: Result<TodoTask, Ms365TodoServiceError>,
+    complete_response: Result<TodoTask, Ms365TodoServiceError>,
+    calls: Mutex<Vec<TodoMutationCall>>,
 }
 
 impl Default for FakeMs365PlannerService {
@@ -772,6 +798,23 @@ impl Default for FakeMs365PlannerService {
             )),
             complete_response: Err(Ms365PlannerServiceError::NotConfigured(
                 "test planner service not configured".to_string(),
+            )),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for FakeMs365TodoService {
+    fn default() -> Self {
+        Self {
+            create_response: Err(Ms365TodoServiceError::NotConfigured(
+                "test todo service not configured".to_string(),
+            )),
+            update_response: Err(Ms365TodoServiceError::NotConfigured(
+                "test todo service not configured".to_string(),
+            )),
+            complete_response: Err(Ms365TodoServiceError::NotConfigured(
+                "test todo service not configured".to_string(),
             )),
             calls: Mutex::new(Vec::new()),
         }
@@ -801,6 +844,33 @@ impl FakeMs365PlannerService {
     }
 
     async fn calls(&self) -> Vec<PlannerMutationCall> {
+        self.calls.lock().await.clone()
+    }
+}
+
+impl FakeMs365TodoService {
+    fn with_create_response(response: Result<TodoTask, Ms365TodoServiceError>) -> Self {
+        Self {
+            create_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_update_response(response: Result<TodoTask, Ms365TodoServiceError>) -> Self {
+        Self {
+            update_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_complete_response(response: Result<TodoTask, Ms365TodoServiceError>) -> Self {
+        Self {
+            complete_response: response,
+            ..Self::default()
+        }
+    }
+
+    async fn calls(&self) -> Vec<TodoMutationCall> {
         self.calls.lock().await.clone()
     }
 }
@@ -839,6 +909,47 @@ impl Ms365PlannerService for FakeMs365PlannerService {
     }
 }
 
+#[async_trait]
+impl Ms365TodoService for FakeMs365TodoService {
+    async fn create_task(
+        &self,
+        list_id: &str,
+        request: CreateTodoTaskRequest,
+    ) -> Result<TodoTask, Ms365TodoServiceError> {
+        self.calls.lock().await.push(TodoMutationCall::Create {
+            list_id: list_id.to_string(),
+            request,
+        });
+        self.create_response.clone()
+    }
+
+    async fn update_task(
+        &self,
+        list_id: &str,
+        id: &str,
+        request: UpdateTodoTaskRequest,
+    ) -> Result<TodoTask, Ms365TodoServiceError> {
+        self.calls.lock().await.push(TodoMutationCall::Update {
+            list_id: list_id.to_string(),
+            id: id.to_string(),
+            request,
+        });
+        self.update_response.clone()
+    }
+
+    async fn complete_task(
+        &self,
+        list_id: &str,
+        id: &str,
+    ) -> Result<TodoTask, Ms365TodoServiceError> {
+        self.calls.lock().await.push(TodoMutationCall::Complete {
+            list_id: list_id.to_string(),
+            id: id.to_string(),
+        });
+        self.complete_response.clone()
+    }
+}
+
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 const TEST_AUTH_TOKEN: &str = "test-secret-token";
@@ -855,17 +966,53 @@ fn test_ms365_planner_service() -> Arc<dyn Ms365PlannerService> {
     Arc::new(FakeMs365PlannerService::default())
 }
 
+fn test_ms365_todo_service() -> Arc<dyn Ms365TodoService> {
+    Arc::new(FakeMs365TodoService::default())
+}
+
 fn build_test_app_parts(
     config: AppConfig,
     auth_token: Option<String>,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
-    build_test_app_parts_with_planner_service(config, auth_token, test_ms365_planner_service())
+    build_test_app_parts_with_ms365_services(
+        config,
+        auth_token,
+        test_ms365_planner_service(),
+        test_ms365_todo_service(),
+    )
 }
 
 fn build_test_app_parts_with_planner_service(
+    config: AppConfig,
+    auth_token: Option<String>,
+    ms365_planner_service: Arc<dyn Ms365PlannerService>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services(
+        config,
+        auth_token,
+        ms365_planner_service,
+        test_ms365_todo_service(),
+    )
+}
+
+fn build_test_app_parts_with_todo_service(
+    config: AppConfig,
+    auth_token: Option<String>,
+    ms365_todo_service: Arc<dyn Ms365TodoService>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services(
+        config,
+        auth_token,
+        test_ms365_planner_service(),
+        ms365_todo_service,
+    )
+}
+
+fn build_test_app_parts_with_ms365_services(
     mut config: AppConfig,
     auth_token: Option<String>,
     ms365_planner_service: Arc<dyn Ms365PlannerService>,
+    ms365_todo_service: Arc<dyn Ms365TodoService>,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -941,6 +1088,7 @@ fn build_test_app_parts_with_planner_service(
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service,
+        ms365_todo_service,
     };
 
     (build_router(state, auth_token), device_repo)
@@ -968,6 +1116,21 @@ fn sample_planner_task(id: &str) -> PlannerTask {
         created_at: Some("2026-03-22T10:15:00Z".to_string()),
         priority: Some(5),
         description: Some("Collect user-facing changes.".to_string()),
+    }
+}
+
+fn sample_todo_task(list_id: &str, id: &str) -> TodoTask {
+    TodoTask {
+        id: id.to_string(),
+        list_id: list_id.to_string(),
+        title: "Draft operator checklist".to_string(),
+        status: "inProgress".to_string(),
+        importance: "high".to_string(),
+        is_reminder_on: false,
+        due_date: Some("2026-03-30T12:00:00Z".to_string()),
+        completed_at: None,
+        created_at: Some("2026-03-22T10:15:00Z".to_string()),
+        body_preview: Some("Line up the backend follow-on work.".to_string()),
     }
 }
 
@@ -1045,6 +1208,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1148,6 +1312,7 @@ enabled: true
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1263,6 +1428,7 @@ async fn status_reports_configured_lane_capacities() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -1355,6 +1521,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1481,6 +1648,7 @@ async fn ws_rpc_health_reports_session_count() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1586,6 +1754,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1710,6 +1879,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1851,6 +2021,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1939,6 +2110,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2024,6 +2196,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2169,6 +2342,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2310,6 +2484,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2416,6 +2591,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3071,6 +3247,201 @@ async fn ms365_planner_mutation_routes_require_auth_when_gateway_token_enabled()
     let response = app
         .oneshot(
             Request::post("/ms365/planner/tasks/task-complete-1/complete")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn ms365_todo_create_task_forwards_request_and_returns_created_task() {
+    let todo_service = Arc::new(FakeMs365TodoService::with_create_response(Ok(
+        sample_todo_task("list-123", "task-create-1"),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_todo_service(AppConfig::default(), None, todo_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/todo/lists/list-123/tasks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "title": "Draft operator checklist",
+                        "body_preview": "Line up the backend follow-on work.",
+                        "due_date": "2026-03-30T12:00:00Z",
+                        "importance": "high",
+                        "status": "inProgress"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let json = body_json(response).await;
+    assert_eq!(json["task"]["id"], "task-create-1");
+    assert_eq!(json["task"]["list_id"], "list-123");
+    assert_eq!(json["task"]["status"], "inProgress");
+
+    let calls = todo_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![TodoMutationCall::Create {
+            list_id: "list-123".to_string(),
+            request: CreateTodoTaskRequest {
+                title: "Draft operator checklist".to_string(),
+                body_preview: Some("Line up the backend follow-on work.".to_string()),
+                due_date: Some("2026-03-30T12:00:00Z".to_string()),
+                importance: Some("high".to_string()),
+                status: Some("inProgress".to_string()),
+            },
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_todo_update_task_forwards_request_and_returns_updated_task() {
+    let todo_service = Arc::new(FakeMs365TodoService::with_update_response(Ok(
+        sample_todo_task("list-123", "task-update-1"),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_todo_service(AppConfig::default(), None, todo_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/todo/lists/list-123/tasks/task-update-1")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "title": "Finalize operator checklist",
+                        "status": "completed"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["task"]["id"], "task-update-1");
+    assert_eq!(json["task"]["list_id"], "list-123");
+
+    let calls = todo_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![TodoMutationCall::Update {
+            list_id: "list-123".to_string(),
+            id: "task-update-1".to_string(),
+            request: UpdateTodoTaskRequest {
+                title: Some("Finalize operator checklist".to_string()),
+                body_preview: None,
+                due_date: None,
+                importance: None,
+                status: Some("completed".to_string()),
+            },
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_todo_update_task_rejects_empty_patch() {
+    let todo_service = Arc::new(FakeMs365TodoService::with_update_response(Err(
+        Ms365TodoServiceError::Validation(
+            "todo task update requires at least one mutable field".to_string(),
+        ),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_todo_service(AppConfig::default(), None, todo_service);
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/todo/lists/list-123/tasks/task-update-1")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("todo task update requires at least one mutable field")
+    );
+}
+
+#[tokio::test]
+async fn ms365_todo_complete_task_forwards_ids_and_returns_completed_task() {
+    let mut task = sample_todo_task("list-123", "task-complete-1");
+    task.status = "completed".to_string();
+    task.completed_at = Some("2026-03-22T11:30:00Z".to_string());
+
+    let todo_service = Arc::new(FakeMs365TodoService::with_complete_response(Ok(task)));
+    let (app, _device_repo) =
+        build_test_app_parts_with_todo_service(AppConfig::default(), None, todo_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/todo/lists/list-123/tasks/task-complete-1/complete")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["task"]["id"], "task-complete-1");
+    assert_eq!(json["task"]["status"], "completed");
+
+    let calls = todo_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![TodoMutationCall::Complete {
+            list_id: "list-123".to_string(),
+            id: "task-complete-1".to_string(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_todo_mutation_routes_require_auth_when_gateway_token_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/ms365/todo/lists/list-123/tasks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "title": "Draft operator checklist"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/todo/lists/list-123/tasks/task-complete-1/complete")
                 .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -4069,6 +4440,7 @@ async fn send_message_and_transcript_with_shared_state() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -4294,6 +4666,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -5294,6 +5667,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -5543,6 +5917,7 @@ async fn reminders_list_includes_outcome_fields() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -5643,6 +6018,7 @@ async fn reminders_cancel_returns_success() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -5758,6 +6134,7 @@ async fn agent_steer_success() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -5906,6 +6283,7 @@ async fn agent_kill_success() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let app = build_router(state, None);
@@ -6052,6 +6430,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         tts_engine: None,
         stt_engine: None,
         ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
