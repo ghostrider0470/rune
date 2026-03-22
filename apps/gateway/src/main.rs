@@ -27,7 +27,9 @@ use rune_config::{
     AppConfig, MemoryLevel, ModelBootstrap, PathsProfile, RuntimeMode, StorageBackend,
 };
 use rune_core::ToolCategory;
-use rune_gateway::ms365::{GraphMs365PlannerService, GraphMs365TodoService};
+use rune_gateway::ms365::{
+    GraphMs365MailService, GraphMs365PlannerService, GraphMs365TodoService,
+};
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
 use rune_mcp::{McpManager, McpToolExecutor};
@@ -720,6 +722,7 @@ async fn build_services(
         device_repo,
         ms365_planner_service: Arc::new(GraphMs365PlannerService::new()),
         ms365_todo_service: Arc::new(GraphMs365TodoService::new()),
+        ms365_mail_service: Arc::new(GraphMs365MailService::new()),
     };
 
     Ok((services, embedded_pg, session_loop))

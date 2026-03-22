@@ -26,8 +26,9 @@ use serde_json::Value;
 
 use crate::error::GatewayError;
 use crate::ms365::{
-    CreatePlannerTaskRequest, CreateTodoTaskRequest, Ms365PlannerServiceError,
-    Ms365TodoServiceError, PlannerTask, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
+    CreatePlannerTaskRequest, CreateTodoTaskRequest, ForwardMailRequest, Ms365MailServiceError,
+    Ms365PlannerServiceError, Ms365TodoServiceError, PlannerTask, ReplyMailRequest,
+    SendMailRequest, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
 use crate::state::{AppState, SessionEvent};
@@ -3564,6 +3565,65 @@ pub async fn ms365_auth_status(
 }
 
 #[derive(Serialize)]
+pub struct Ms365MailMutationResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+/// `POST /ms365/mail/send` — send a Microsoft 365 mail message.
+pub async fn ms365_mail_send(
+    State(state): State<AppState>,
+    Json(request): Json<SendMailRequest>,
+) -> Result<Json<Ms365MailMutationResponse>, GatewayError> {
+    state
+        .ms365_mail_service
+        .send_mail(request)
+        .await
+        .map_err(map_ms365_mail_service_error)?;
+
+    Ok(Json(Ms365MailMutationResponse {
+        success: true,
+        message: "Message sent".to_string(),
+    }))
+}
+
+/// `POST /ms365/mail/messages/{id}/reply` — reply to a Microsoft 365 mail message.
+pub async fn ms365_mail_reply(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<ReplyMailRequest>,
+) -> Result<Json<Ms365MailMutationResponse>, GatewayError> {
+    state
+        .ms365_mail_service
+        .reply_to_message(&id, request)
+        .await
+        .map_err(map_ms365_mail_service_error)?;
+
+    Ok(Json(Ms365MailMutationResponse {
+        success: true,
+        message: "Reply sent".to_string(),
+    }))
+}
+
+/// `POST /ms365/mail/messages/{id}/forward` — forward a Microsoft 365 mail message.
+pub async fn ms365_mail_forward(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<ForwardMailRequest>,
+) -> Result<Json<Ms365MailMutationResponse>, GatewayError> {
+    state
+        .ms365_mail_service
+        .forward_message(&id, request)
+        .await
+        .map_err(map_ms365_mail_service_error)?;
+
+    Ok(Json(Ms365MailMutationResponse {
+        success: true,
+        message: "Message forwarded".to_string(),
+    }))
+}
+
+#[derive(Serialize)]
 pub struct Ms365PlannerTaskMutationResponse {
     pub task: PlannerTask,
 }
@@ -3674,6 +3734,18 @@ fn map_ms365_planner_service_error(error: Ms365PlannerServiceError) -> GatewayEr
         | Ms365PlannerServiceError::Upstream(message) => GatewayError::Internal(message),
         Ms365PlannerServiceError::Unauthorized => GatewayError::Unauthorized,
         Ms365PlannerServiceError::Forbidden(message) => GatewayError::Forbidden(message),
+    }
+}
+
+fn map_ms365_mail_service_error(error: Ms365MailServiceError) -> GatewayError {
+    match error {
+        Ms365MailServiceError::Validation(message) | Ms365MailServiceError::NotFound(message) => {
+            GatewayError::BadRequest(message)
+        }
+        Ms365MailServiceError::NotConfigured(message)
+        | Ms365MailServiceError::Upstream(message) => GatewayError::Internal(message),
+        Ms365MailServiceError::Unauthorized => GatewayError::Unauthorized,
+        Ms365MailServiceError::Forbidden(message) => GatewayError::Forbidden(message),
     }
 }
 
