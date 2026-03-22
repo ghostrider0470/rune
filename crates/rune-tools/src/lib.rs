@@ -21,6 +21,7 @@ pub mod spawn_tool;
 mod stubs;
 pub mod subagent_tool;
 pub mod web_fetch_tool;
+pub mod acp_tool;
 
 pub use definition::{ToolCall, ToolDefinition, ToolResult};
 pub use error::ToolError;

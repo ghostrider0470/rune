@@ -1494,6 +1494,11 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
+            "acp_dispatch" => {
+                rune_tools::acp_tool::AcpToolExecutor::new(self.workspace_root.clone())
+                    .execute(call)
+                    .await
+            }
             other if other.contains("__") => match &self.mcp {
                 Some(mcp) => mcp.execute(call).await,
                 None => Err(ToolError::UnknownTool {
@@ -1763,6 +1768,35 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
                 "required": ["operation"]
             }),
             category: ToolCategory::ProcessExec,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "acp_dispatch".into(),
+            description: "Dispatch a coding task to an external AI agent (Claude Code CLI or Codex CLI). The agent runs as a subprocess with full tool access and returns its output. Use for complex coding tasks that benefit from a dedicated agent with its own context window.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "description": "Which agent to use: 'claude-code' or 'codex' (default: claude-code)",
+                        "enum": ["claude-code", "codex"]
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "The coding task to dispatch. Be specific and include context."
+                    },
+                    "workdir": {
+                        "type": "string",
+                        "description": "Working directory for the agent (defaults to workspace root)"
+                    },
+                    "timeout_secs": {
+                        "type": "integer",
+                        "description": "Timeout in seconds (default: 600 = 10 minutes)"
+                    }
+                },
+                "required": ["task"]
+            }),
+            category: ToolCategory::External,
             requires_approval: false,
         },
     ];
