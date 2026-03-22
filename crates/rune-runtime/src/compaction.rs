@@ -1,4 +1,8 @@
+use std::path::{Path, PathBuf};
+
+use chrono::Utc;
 use rune_models::{ChatMessage, Role};
+use tracing::{debug, warn};
 
 /// Strategy for compacting/pruning transcript history before prompt assembly.
 pub trait CompactionStrategy: Send + Sync {
@@ -20,12 +24,19 @@ impl CompactionStrategy for NoOpCompaction {
 /// Token-budget compaction: when estimated tokens exceed a threshold, the
 /// oldest messages beyond a preserved tail are summarized into a single
 /// system message.
+///
+/// When a `workspace_root` is configured, compaction also flushes a structured
+/// summary to today's daily memory notes (`memory/YYYY-MM-DD.md`) so that
+/// context is not permanently lost when messages are dropped.
 #[derive(Debug)]
 pub struct TokenBudgetCompaction {
     /// Maximum context window size in tokens.
     context_window: usize,
     /// Number of recent messages to always preserve verbatim.
     preserve_tail: usize,
+    /// Workspace root for memory flush. When `Some`, compaction writes a
+    /// summary to today's daily notes before dropping messages.
+    workspace_root: Option<PathBuf>,
 }
 
 impl TokenBudgetCompaction {
@@ -37,7 +48,15 @@ impl TokenBudgetCompaction {
         Self {
             context_window,
             preserve_tail,
+            workspace_root: None,
         }
+    }
+
+    /// Enable memory flush: compaction will write a summary to today's daily
+    /// notes before dropping messages.
+    pub fn with_memory_flush(mut self, workspace_root: impl Into<PathBuf>) -> Self {
+        self.workspace_root = Some(workspace_root.into());
+        self
     }
 
     /// Rough token estimate: ~4 characters per token.
@@ -82,6 +101,87 @@ impl TokenBudgetCompaction {
         }
         summary
     }
+
+    /// Create a structured memory flush note from messages being dropped.
+    ///
+    /// Extracts key points from the conversation: user questions, assistant
+    /// decisions/answers, and tool results — producing a concise note suitable
+    /// for daily memory.
+    fn build_flush_note(messages: &[ChatMessage]) -> String {
+        const MAX_FLUSH_CHARS: usize = 4000;
+
+        let mut note = String::from("\n## [Session context summary]\n\n");
+        let mut chars_written = note.len();
+
+        for msg in messages {
+            let Some(content) = &msg.content else {
+                continue;
+            };
+
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let prefix = match msg.role {
+                Role::User => "- **User**: ",
+                Role::Assistant => "- **Assistant**: ",
+                Role::Tool => "- **Tool**: ",
+                Role::System => continue, // Skip system messages in flush
+            };
+
+            // Truncate long individual messages to keep the note concise
+            let max_msg_len = 300;
+            let excerpt = if trimmed.len() > max_msg_len {
+                format!("{}...", &trimmed[..trimmed.floor_char_boundary(max_msg_len)])
+            } else {
+                trimmed.to_string()
+            };
+
+            let line = format!("{prefix}{excerpt}\n");
+            if chars_written + line.len() > MAX_FLUSH_CHARS {
+                note.push_str("- *(truncated — more context was dropped)*\n");
+                break;
+            }
+            note.push_str(&line);
+            chars_written += line.len();
+        }
+
+        note
+    }
+
+    /// Flush a summary to today's daily memory notes.
+    fn flush_to_memory(workspace_root: &Path, flush_note: &str) {
+        let today = Utc::now().date_naive();
+        let memory_dir = workspace_root.join("memory");
+        let daily_path = memory_dir.join(format!("{}.md", today.format("%Y-%m-%d")));
+
+        // Ensure memory directory exists
+        if let Err(e) = std::fs::create_dir_all(&memory_dir) {
+            warn!(error = %e, "failed to create memory directory for compaction flush");
+            return;
+        }
+
+        // Append to existing daily notes, or create new file
+        let existing = std::fs::read_to_string(&daily_path).unwrap_or_default();
+        let new_content = if existing.is_empty() {
+            format!("# {}\n{flush_note}", today.format("%Y-%m-%d"))
+        } else {
+            format!("{existing}{flush_note}")
+        };
+
+        match std::fs::write(&daily_path, new_content) {
+            Ok(()) => debug!(
+                path = %daily_path.display(),
+                "flushed compaction summary to daily memory"
+            ),
+            Err(e) => warn!(
+                error = %e,
+                path = %daily_path.display(),
+                "failed to flush compaction summary to daily memory"
+            ),
+        }
+    }
 }
 
 impl Default for TokenBudgetCompaction {
@@ -89,6 +189,7 @@ impl Default for TokenBudgetCompaction {
         Self {
             context_window: 128_000,
             preserve_tail: 20,
+            workspace_root: None,
         }
     }
 }
@@ -111,6 +212,12 @@ impl CompactionStrategy for TokenBudgetCompaction {
         let split_at = len - self.preserve_tail;
         let (old, recent) = messages.split_at(split_at);
 
+        // Memory flush: persist a structured summary before dropping messages
+        if let Some(workspace_root) = &self.workspace_root {
+            let flush_note = Self::build_flush_note(old);
+            Self::flush_to_memory(workspace_root, &flush_note);
+        }
+
         let summary_text = Self::summarize(old);
         let summary_msg = ChatMessage {
             role: Role::System,
@@ -130,6 +237,7 @@ impl CompactionStrategy for TokenBudgetCompaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     fn msg(role: Role, content: &str) -> ChatMessage {
         ChatMessage {
@@ -194,5 +302,110 @@ mod tests {
         let summary = TokenBudgetCompaction::summarize(&messages);
         // 2000 tokens * 4 chars = 8000 chars max + "..." + header
         assert!(summary.len() <= 8100);
+    }
+
+    // -- Memory flush tests --
+
+    #[test]
+    fn flush_note_captures_user_and_assistant() {
+        let messages = vec![
+            msg(Role::User, "What database should we use?"),
+            msg(Role::Assistant, "I recommend PostgreSQL for this workload."),
+            msg(Role::User, "What about SQLite?"),
+            msg(Role::Assistant, "SQLite works for single-node, but PG scales better."),
+        ];
+
+        let note = TokenBudgetCompaction::build_flush_note(&messages);
+        assert!(note.contains("[Session context summary]"));
+        assert!(note.contains("**User**"));
+        assert!(note.contains("**Assistant**"));
+        assert!(note.contains("database"));
+        assert!(note.contains("PostgreSQL"));
+    }
+
+    #[test]
+    fn flush_note_skips_system_messages() {
+        let messages = vec![
+            msg(Role::System, "You are a helpful assistant."),
+            msg(Role::User, "Hello"),
+        ];
+
+        let note = TokenBudgetCompaction::build_flush_note(&messages);
+        assert!(!note.contains("helpful assistant"));
+        assert!(note.contains("Hello"));
+    }
+
+    #[test]
+    fn flush_note_truncates_long_messages() {
+        let long = "x".repeat(500);
+        let messages = vec![msg(Role::User, &long)];
+
+        let note = TokenBudgetCompaction::build_flush_note(&messages);
+        // Should be truncated to ~300 chars + "..."
+        assert!(note.contains("..."));
+        assert!(note.len() < 500);
+    }
+
+    #[test]
+    fn compaction_flushes_to_daily_memory() {
+        let tmp = TempDir::new().unwrap();
+        let compaction = TokenBudgetCompaction::new(100, 2)
+            .with_memory_flush(tmp.path());
+
+        let mut messages = Vec::new();
+        for i in 0..30 {
+            let role = if i % 2 == 0 { Role::User } else { Role::Assistant };
+            messages.push(msg(role, &format!("message {} with padding to inflate token count for compaction", i)));
+        }
+
+        let result = compaction.compact(messages);
+        assert_eq!(result.len(), 3); // 1 summary + 2 tail
+
+        // Check that a daily memory file was created
+        let today = Utc::now().date_naive();
+        let daily_path = tmp.path().join("memory").join(format!("{}.md", today.format("%Y-%m-%d")));
+        assert!(daily_path.exists(), "daily memory file should exist after compaction flush");
+
+        let content = std::fs::read_to_string(&daily_path).unwrap();
+        assert!(content.contains("[Session context summary]"));
+        assert!(content.contains("message"));
+    }
+
+    #[test]
+    fn compaction_appends_to_existing_daily_memory() {
+        let tmp = TempDir::new().unwrap();
+        let memory_dir = tmp.path().join("memory");
+        std::fs::create_dir_all(&memory_dir).unwrap();
+
+        let today = Utc::now().date_naive();
+        let daily_path = memory_dir.join(format!("{}.md", today.format("%Y-%m-%d")));
+        std::fs::write(&daily_path, "# Existing notes\n\n- Did some work\n").unwrap();
+
+        let compaction = TokenBudgetCompaction::new(100, 2)
+            .with_memory_flush(tmp.path());
+
+        let mut messages = Vec::new();
+        for i in 0..30 {
+            messages.push(msg(Role::User, &format!("message {} with padding to inflate token count for compaction", i)));
+        }
+
+        compaction.compact(messages);
+
+        let content = std::fs::read_to_string(&daily_path).unwrap();
+        assert!(content.starts_with("# Existing notes"));
+        assert!(content.contains("[Session context summary]"));
+    }
+
+    #[test]
+    fn no_flush_without_workspace_root() {
+        // Default compaction without workspace_root should not crash
+        let compaction = TokenBudgetCompaction::new(100, 2);
+        let mut messages = Vec::new();
+        for i in 0..30 {
+            messages.push(msg(Role::User, &format!("message {} with padding to inflate token count", i)));
+        }
+
+        let result = compaction.compact(messages);
+        assert_eq!(result.len(), 3);
     }
 }
