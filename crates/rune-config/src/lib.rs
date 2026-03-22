@@ -179,17 +179,23 @@ impl AppConfig {
     }
 
     /// When mode resolves to Standalone and paths are still at Docker defaults,
-    /// swap to `~/.rune/*`.
+    /// swap to `~/.rune/*`.  Also fixes individual paths that remain at Docker
+    /// defaults when the user partially overrode the `[paths]` section.
     pub fn adjust_paths_for_mode(&mut self, resolved_mode: &RuntimeMode) {
         if *resolved_mode != RuntimeMode::Standalone {
             return;
         }
-        if self.paths != PathsConfig::default() {
-            return; // user overrode, don't touch
+        let Some(home) = home_dir() else { return };
+        let standalone = standalone_paths_root(&home);
+
+        if self.paths == PathsConfig::default() {
+            self.paths = standalone;
+            return;
         }
-        if let Some(home) = home_dir() {
-            self.paths = standalone_paths_root(&home);
-        }
+
+        // Partial override: fix individual paths still at Docker defaults.
+        let docker = PathsConfig::default();
+        self.paths.replace_docker_defaults(&docker, &standalone);
     }
 
     /// Return the configured default model before any runtime auto-detection.
@@ -1110,6 +1116,29 @@ impl PathsProfile {
 }
 
 impl PathsConfig {
+    /// Replace any path that still equals its Docker default with the
+    /// corresponding standalone path.  This handles configs where the user
+    /// overrode *some* paths but left others (like `plugins_dir`) absent.
+    pub fn replace_docker_defaults(&mut self, docker: &Self, standalone: &Self) {
+        macro_rules! fix {
+            ($field:ident) => {
+                if self.$field == docker.$field {
+                    self.$field = standalone.$field.clone();
+                }
+            };
+        }
+        fix!(db_dir);
+        fix!(sessions_dir);
+        fix!(memory_dir);
+        fix!(media_dir);
+        fix!(skills_dir);
+        fix!(plugins_dir);
+        fix!(logs_dir);
+        fix!(backups_dir);
+        fix!(config_dir);
+        fix!(secrets_dir);
+    }
+
     #[must_use]
     pub fn profile(&self) -> PathsProfile {
         if *self == PathsConfig::default() {
@@ -2751,12 +2780,14 @@ models = ["gpt-5.4", "gpt-image-1"]
     }
 
     #[test]
-    fn adjust_paths_noop_when_paths_customized() {
+    fn adjust_paths_preserves_custom_but_fixes_docker_defaults() {
         let mut config = AppConfig::default();
         config.paths.db_dir = PathBuf::from("/custom/db");
-        let original_paths = config.paths.clone();
         config.adjust_paths_for_mode(&RuntimeMode::Standalone);
-        assert_eq!(config.paths, original_paths);
+        // Custom path is preserved.
+        assert_eq!(config.paths.db_dir, PathBuf::from("/custom/db"));
+        // Docker-default paths are replaced with standalone equivalents.
+        assert_ne!(config.paths.plugins_dir, PathBuf::from("/data/plugins"));
     }
 
     #[test]
