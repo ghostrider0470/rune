@@ -277,7 +277,7 @@ function ChatPage() {
   }, []);
 
   return (
-    <div className="flex h-[100dvh] flex-col gap-4 overflow-hidden">
+    <div className="flex h-full flex-col gap-4 overflow-hidden">
       <section className="shrink-0 overflow-hidden rounded-3xl border border-primary/20 bg-gradient-to-br from-background via-background to-primary/5 shadow-[0_24px_80px_rgba(249,115,22,0.10)]">
         <div className="grid gap-4 px-4 py-4 sm:px-6 sm:py-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8 lg:py-6">
           <div className="space-y-3 sm:space-y-4">
