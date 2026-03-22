@@ -37,7 +37,7 @@ pub const DEFAULT_HALF_LIFE_DAYS: f64 = 30.0;
 /// - `MEMORY.md` is evergreen (no decay).
 /// - Daily notes decay with configurable half-life.
 /// - Score multiplier = `0.5^(age_days / half_life_days)`.
-pub fn apply_temporal_decay(results: &mut Vec<MemoryHit>, half_life_days: f64) {
+pub fn apply_temporal_decay(results: &mut [MemoryHit], half_life_days: f64) {
     let today = Utc::now().date_naive();
     for hit in results.iter_mut() {
         if let Some(decay) = compute_decay_factor(&hit.file_path, today, half_life_days) {
