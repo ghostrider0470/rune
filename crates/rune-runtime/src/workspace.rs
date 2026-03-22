@@ -101,8 +101,25 @@ fn default_files_for_session(session_kind: SessionKind) -> Vec<String> {
         "IDENTITY.md".into(),
     ];
 
+    // Direct (main) sessions get MEMORY.md for long-term continuity
+    if matches!(session_kind, SessionKind::Direct) {
+        files.push("MEMORY.md".into());
+        files.push("agent-orchestration-runbook.md".into());
+    }
+
+    // Scheduled sessions get the heartbeat prompt
     if matches!(session_kind, SessionKind::Scheduled) {
         files.push("HEARTBEAT.md".into());
+    }
+
+    // All session types get today's and yesterday's daily notes
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    files.push(format!("memory/{today}.md"));
+    if let Some(yesterday) = chrono::Local::now()
+        .date_naive()
+        .pred_opt()
+    {
+        files.push(format!("memory/{}.md", yesterday.format("%Y-%m-%d")));
     }
 
     files

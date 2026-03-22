@@ -1668,6 +1668,36 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
             category: ToolCategory::SessionControl,
             requires_approval: false,
         },
+        ToolDefinition {
+            name: "web_fetch".into(),
+            description: "Fetch a URL via HTTP. Supports GET/POST, custom headers, request body. Returns status, headers, and body (truncated to 50KB).".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "URL to fetch" },
+                    "method": { "type": "string", "description": "HTTP method (GET or POST)", "default": "GET" },
+                    "headers": { "type": "object", "description": "Custom request headers" },
+                    "body": { "type": "string", "description": "Request body for POST" }
+                },
+                "required": ["url"]
+            }),
+            category: ToolCategory::External,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "git".into(),
+            description: "Run git operations in the workspace. Supports: status, diff, add, commit, push, pull, log, branch, checkout, merge.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "operation": { "type": "string", "description": "Git operation (status, diff, add, commit, push, pull, log, branch, checkout, merge)" },
+                    "args": { "description": "Arguments for the operation (string or array of strings)" }
+                },
+                "required": ["operation"]
+            }),
+            category: ToolCategory::ProcessExec,
+            requires_approval: false,
+        },
     ];
 
     for tool in builtins {
