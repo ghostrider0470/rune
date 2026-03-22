@@ -1423,6 +1423,44 @@ impl ToolExecutor for AppToolExecutor {
             }
             "process" => self.process.execute(call).await,
             "memory_search" | "memory_get" => self.memory.execute(call).await,
+            "memory_write" => {
+                // Append to today's daily note file (memory/YYYY-MM-DD.md)
+                let text = call.arguments.get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if text.trim().is_empty() {
+                    return Ok(rune_tools::ToolResult {
+                        tool_call_id: call.tool_call_id.clone(),
+                        output: "Error: text is required".into(),
+                        is_error: true,
+                        tool_execution_id: None,
+                    });
+                }
+                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                let memory_dir = self.workspace_root.join("memory");
+                let _ = std::fs::create_dir_all(&memory_dir);
+                let path = memory_dir.join(format!("{today}.md"));
+                let mut content = std::fs::read_to_string(&path).unwrap_or_default();
+                if !content.is_empty() && !content.ends_with('\n') {
+                    content.push('\n');
+                }
+                content.push_str(&format!("\n- {text}\n"));
+                match std::fs::write(&path, &content) {
+                    Ok(()) => Ok(rune_tools::ToolResult {
+                        tool_call_id: call.tool_call_id.clone(),
+                        output: format!("Appended to memory/{today}.md"),
+                        is_error: false,
+                        tool_execution_id: None,
+                    }),
+                    Err(e) => Ok(rune_tools::ToolResult {
+                        tool_call_id: call.tool_call_id.clone(),
+                        output: format!("Failed to write: {e}"),
+                        is_error: true,
+                        tool_execution_id: None,
+                    }),
+                }
+            }
             "browse" => execute_browse_tool(call, &self.browse).await,
             "sessions_list" | "sessions_history" | "session_status" => {
                 self.session.execute(call).await
@@ -1571,6 +1609,19 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
                     "lines": { "type": "integer" }
                 },
                 "required": ["path"]
+            }),
+            category: ToolCategory::MemoryAccess,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "memory_write".into(),
+            description: "Append a note to today's daily memory file (memory/YYYY-MM-DD.md). Use this to record decisions, lessons learned, important events, and context that should persist across sessions. APPEND-ONLY — never overwrites existing content.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "The note to append to today's daily memory" }
+                },
+                "required": ["text"]
             }),
             category: ToolCategory::MemoryAccess,
             requires_approval: false,
