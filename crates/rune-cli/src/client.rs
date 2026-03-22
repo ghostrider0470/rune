@@ -3065,6 +3065,12 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    pub async fn ms365_files_search(&self, query: &str, limit: u32) -> Result<crate::output::Ms365FilesSearchResponse> {
+        let r = self.http.get(self.url("/ms365/files/search"))
+            .query(&[("query", query.to_string()), ("limit", limit.to_string())])
+            .send().await.context("gateway")?;
+        if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
+    }
     pub async fn ms365_users_me(&self) -> Result<crate::output::Ms365UserProfileResponse> {
         let r = self.http.get(self.url("/ms365/users/me"))
             .send().await.context("gateway")?;

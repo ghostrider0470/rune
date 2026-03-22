@@ -3829,6 +3829,48 @@ impl fmt::Display for Ms365FileReadResponse {
     }
 }
 
+/// A single search-result item returned by OneDrive search.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365FileSearchItem {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub is_folder: bool,
+    pub last_modified: String,
+    pub web_url: Option<String>,
+    pub parent_path: Option<String>,
+}
+
+impl fmt::Display for Ms365FileSearchItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = if self.is_folder { "DIR " } else { "FILE" };
+        let parent = self.parent_path.as_deref().unwrap_or("");
+        write!(f, "  {kind}  {:<40} {:>10}  {}  {}", self.name, format_bytes(self.size), self.last_modified, parent)
+    }
+}
+
+/// Response from `rune ms365 files search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365FilesSearchResponse {
+    pub items: Vec<Ms365FileSearchItem>,
+    pub query: String,
+    pub total: u32,
+}
+
+impl fmt::Display for Ms365FilesSearchResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "OneDrive search: \"{}\"  ({} result(s))", self.query, self.total)?;
+        if self.items.is_empty() {
+            writeln!(f, "  (no matches)")?;
+        } else {
+            for item in &self.items {
+                writeln!(f, "{item}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 // ── MS365 Users/Org ─────────────────────────────────────────────
 
 /// A single user profile (used by `me`, `read`, and inside list responses).
@@ -7457,6 +7499,62 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["users"][0]["display_name"], "Alice");
         assert_eq!(v["total"], 1);
+    }
+
+    #[test]
+    fn render_ms365_files_search_human() {
+        let r = Ms365FilesSearchResponse {
+            items: vec![Ms365FileSearchItem {
+                id: "item-1".into(),
+                name: "report.docx".into(),
+                size: 2048,
+                is_folder: false,
+                last_modified: "2026-03-20T10:00:00Z".into(),
+                web_url: Some("https://example.com/report.docx".into()),
+                parent_path: Some("/Documents".into()),
+            }],
+            query: "report".into(),
+            total: 1,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("OneDrive search: \"report\""));
+        assert!(out.contains("1 result(s)"));
+        assert!(out.contains("report.docx"));
+        assert!(out.contains("FILE"));
+        assert!(out.contains("/Documents"));
+    }
+
+    #[test]
+    fn render_ms365_files_search_empty() {
+        let r = Ms365FilesSearchResponse {
+            items: vec![],
+            query: "nonexistent".into(),
+            total: 0,
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("(no matches)"));
+    }
+
+    #[test]
+    fn render_ms365_files_search_json() {
+        let r = Ms365FilesSearchResponse {
+            items: vec![Ms365FileSearchItem {
+                id: "item-1".into(),
+                name: "notes.txt".into(),
+                size: 512,
+                is_folder: false,
+                last_modified: "2026-03-20T10:00:00Z".into(),
+                web_url: None,
+                parent_path: None,
+            }],
+            query: "notes".into(),
+            total: 1,
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["query"], "notes");
+        assert_eq!(v["total"], 1);
+        assert_eq!(v["items"][0]["name"], "notes.txt");
     }
 }
 
