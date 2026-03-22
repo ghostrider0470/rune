@@ -60,6 +60,17 @@ fn validate_azure_api_version(version: &str) -> Result<(), ModelError> {
     Ok(())
 }
 
+/// Check whether a URL points to an Azure endpoint (AI Foundry, Azure OpenAI,
+/// or any `*.azure.com` / `*.azure-api.net` host).  Used by the OpenAI-compatible
+/// provider path and the default fallback to switch from `Authorization: Bearer`
+/// to the `api-key` header that Azure expects.
+fn is_azure_url(url: &str) -> bool {
+    let lower = url.to_lowercase();
+    lower.contains(".azure.com")
+        || lower.contains(".azure-api.net")
+        || lower.contains("azure.cognitiveservices")
+}
+
 /// Validate that an Azure provider has a non-empty endpoint URL.
 fn validate_azure_endpoint(base_url: &str, provider_kind: &str) -> Result<(), ModelError> {
     if base_url.trim().is_empty() {
@@ -169,8 +180,7 @@ pub fn provider_from_config(
         }
         "openai" => {
             let api_key = resolve_api_key(cfg)?;
-            let is_azure = cfg.base_url.contains(".azure.com") || cfg.base_url.contains("azure");
-            if is_azure {
+            if is_azure_url(&cfg.base_url) {
                 Ok(Box::new(OpenAiProvider::azure(&cfg.base_url, &api_key)))
             } else {
                 Ok(Box::new(OpenAiProvider::new(&cfg.base_url, &api_key)))
@@ -244,7 +254,12 @@ pub fn provider_from_config(
         }
         _ => {
             let api_key = resolve_api_key(cfg)?;
-            Ok(Box::new(OpenAiProvider::new(&cfg.base_url, &api_key)))
+            let is_azure = is_azure_url(&cfg.base_url);
+            if is_azure {
+                Ok(Box::new(OpenAiProvider::azure(&cfg.base_url, &api_key)))
+            } else {
+                Ok(Box::new(OpenAiProvider::new(&cfg.base_url, &api_key)))
+            }
         }
     }
 }
