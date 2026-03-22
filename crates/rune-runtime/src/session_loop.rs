@@ -163,11 +163,40 @@ impl SessionLoop {
                     }
                 };
 
-                match self
+                // Set up a streaming channel so we can progressively edit
+                // the placeholder message as the model generates text.
+                let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+
+                // Spawn a background task that edits the placeholder with
+                // accumulated text, throttled to at most one edit per 500ms
+                // to stay within Telegram rate limits.
+                let edit_handle = if let Some(ref ph_id) = placeholder_id {
+                    let channel = self.channel.clone();
+                    let channel_id = msg.channel_id;
+                    let chat_id = msg.raw_chat_id.clone();
+                    let ph_id = ph_id.clone();
+
+                    Some(tokio::spawn(progressive_edit_loop(
+                        channel, channel_id, chat_id, ph_id, chunk_rx,
+                    )))
+                } else {
+                    // No placeholder — drain chunks so the sender never blocks.
+                    Some(tokio::spawn(drain_chunks(chunk_rx)))
+                };
+
+                let result = self
                     .turn_executor
-                    .execute(session.id, &enriched_content, None)
-                    .await
-                {
+                    .execute_streaming(session.id, &enriched_content, None, chunk_tx)
+                    .await;
+
+                // Wait for the progressive edit task to finish (it exits when
+                // the chunk_tx sender is dropped, i.e. when execute_streaming
+                // returns above).
+                if let Some(handle) = edit_handle {
+                    let _ = handle.await;
+                }
+
+                match result {
                     Ok((turn, usage)) => {
                         debug!(
                             turn_id = %turn.id,
@@ -178,7 +207,9 @@ impl SessionLoop {
 
                         if let Some(reply) = self.get_last_assistant_message(session.id).await {
                             let ch = self.channel.lock().await;
-                            // If we sent a placeholder, edit it; otherwise send a new reply.
+                            // Final edit with the authoritative response from
+                            // the transcript (ensures consistency after tool
+                            // calls or partial streaming).
                             let result = if let Some(ref ph_id) = placeholder_id {
                                 ch.send(OutboundAction::Edit {
                                     channel_id: msg.channel_id,
@@ -627,4 +658,71 @@ impl SessionLoop {
         }
         None
     }
+}
+
+// ── Streaming helpers ───────────────────────────────────────────────
+
+/// Progressively edit a Telegram placeholder message as text chunks arrive.
+///
+/// Throttles edits to at most one every 500 ms to stay within Telegram Bot API
+/// rate limits (~30 messages per second per chat). The very first chunk always
+/// triggers an immediate edit so the user sees output as fast as possible.
+async fn progressive_edit_loop(
+    channel: Arc<Mutex<Box<dyn rune_channels::ChannelAdapter>>>,
+    channel_id: rune_core::ChannelId,
+    chat_id: String,
+    message_id: String,
+    mut chunk_rx: tokio::sync::mpsc::Receiver<String>,
+) {
+    use std::time::Duration;
+    use tokio::time::Instant;
+
+    let throttle = Duration::from_millis(500);
+    // Set last_edit far enough in the past so the first chunk triggers an edit.
+    let mut last_edit = Instant::now() - throttle;
+    let mut accumulated = String::new();
+
+    loop {
+        match chunk_rx.recv().await {
+            Some(chunk) => {
+                accumulated.push_str(&chunk);
+
+                if last_edit.elapsed() >= throttle {
+                    let ch = channel.lock().await;
+                    let _ = ch
+                        .send(OutboundAction::Edit {
+                            channel_id,
+                            chat_id: chat_id.clone(),
+                            message_id: message_id.clone(),
+                            new_content: accumulated.clone(),
+                        })
+                        .await;
+                    last_edit = Instant::now();
+                }
+            }
+            None => {
+                // Sender dropped — streaming finished. One final edit to
+                // flush any remaining text that was accumulated after the
+                // last throttled edit.
+                if !accumulated.is_empty() {
+                    let ch = channel.lock().await;
+                    let _ = ch
+                        .send(OutboundAction::Edit {
+                            channel_id,
+                            chat_id: chat_id.clone(),
+                            message_id: message_id.clone(),
+                            new_content: accumulated,
+                        })
+                        .await;
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// Drain a chunk receiver without doing anything. Used when there is no
+/// placeholder message to edit (so the sender never blocks).
+async fn drain_chunks(mut rx: tokio::sync::mpsc::Receiver<String>) {
+    while rx.recv().await.is_some() {}
 }

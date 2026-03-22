@@ -134,6 +134,42 @@ pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, Mod
     })
 }
 
+// ── SSE streaming types (OpenAI-compatible) ─────────────────────────
+
+/// A single chunk from the OpenAI streaming API (SSE `data:` payload).
+#[derive(Deserialize)]
+pub(crate) struct StreamChunkResponse {
+    pub choices: Option<Vec<StreamChunkChoice>>,
+    pub usage: Option<ApiUsage>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct StreamChunkChoice {
+    pub delta: Option<StreamDelta>,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct StreamDelta {
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<StreamToolCallDelta>>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct StreamToolCallDelta {
+    pub index: Option<usize>,
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub call_type: Option<String>,
+    pub function: Option<StreamFunctionDelta>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct StreamFunctionDelta {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+}
+
 // ── Anthropic error format ──────────────────────────────────────────
 
 /// Anthropic API error envelope: `{ "type": "error", "error": { "type": "...", "message": "..." } }`.

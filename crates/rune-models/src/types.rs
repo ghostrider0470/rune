@@ -96,3 +96,12 @@ pub struct CompletionResponse {
     pub finish_reason: Option<FinishReason>,
     pub tool_calls: Vec<ToolCallRequest>,
 }
+
+/// Events emitted during streaming completion.
+#[derive(Clone, Debug)]
+pub enum StreamEvent {
+    /// A chunk of text content from the model.
+    TextDelta(String),
+    /// Streaming is complete; carries the assembled final response.
+    Done(CompletionResponse),
+}

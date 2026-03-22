@@ -9,7 +9,7 @@ use rune_core::{
     ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, ToolCallId, TranscriptItem,
     TriggerKind, TurnId, TurnStatus,
 };
-use rune_models::{CompletionRequest, ModelProvider};
+use rune_models::{CompletionRequest, ModelProvider, StreamEvent};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
 use rune_store::repos::{ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo};
 use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
@@ -161,6 +161,30 @@ impl TurnExecutor {
             user_message,
             model_ref,
             TriggerKind::UserMessage,
+            None,
+        )
+        .await
+    }
+
+    /// Execute a turn with streaming — text deltas are forwarded to `chunk_tx`
+    /// as they arrive from the model provider. The caller can progressively
+    /// update a UI (e.g. edit a Telegram message) while the model generates.
+    ///
+    /// Falls back to non-streaming transparently if the provider does not
+    /// support streaming or if the response contains tool calls.
+    pub async fn execute_streaming(
+        &self,
+        session_id: Uuid,
+        user_message: &str,
+        model_ref: Option<&str>,
+        chunk_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        self.execute_triggered(
+            session_id,
+            user_message,
+            model_ref,
+            TriggerKind::UserMessage,
+            Some(chunk_tx),
         )
         .await
     }
@@ -172,6 +196,7 @@ impl TurnExecutor {
         user_message: &str,
         model_ref: Option<&str>,
         trigger_kind: TriggerKind,
+        chunk_tx: Option<tokio::sync::mpsc::Sender<String>>,
     ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
         let turn_id = TurnId::new();
         let now = Utc::now();
@@ -228,7 +253,7 @@ impl TurnExecutor {
         // 4. Run the model/tool loop
         let mut usage = UsageAccumulator::new();
         let result = self
-            .run_turn_loop(session_id, turn_id, effective_model.as_deref(), &mut usage)
+            .run_turn_loop(session_id, turn_id, effective_model.as_deref(), &mut usage, chunk_tx.as_ref())
             .await;
 
         // Persist usage totals even on failed turns so operator surfaces remain durable.
@@ -468,6 +493,7 @@ impl TurnExecutor {
                 TurnId::from(turn_uuid),
                 effective_model.as_deref(),
                 &mut usage,
+                None,
             )
             .await;
 
@@ -523,6 +549,7 @@ impl TurnExecutor {
         turn_id: TurnId,
         model_ref: Option<&str>,
         usage: &mut UsageAccumulator,
+        chunk_tx: Option<&tokio::sync::mpsc::Sender<String>>,
     ) -> Result<TurnLoopOutcome, RuntimeError> {
         let session = self.session_repo.find_by_id(session_id).await?;
         let session_kind = parse_session_kind(&session.kind)?;
@@ -597,42 +624,38 @@ impl TurnExecutor {
                 },
             };
 
-            // Call model with retry on transient errors
-            let response = {
-                const MAX_RETRIES: u32 = 3;
-                const BACKOFF_SECS: [u64; 3] = [1, 3, 10];
-                let mut last_err = None;
-                let mut resp = None;
-
-                for attempt in 0..=MAX_RETRIES {
-                    match self.model_provider.complete(&request).await {
-                        Ok(r) => {
-                            resp = Some(r);
-                            break;
+            // Call model — try streaming when a chunk sender is available,
+            // otherwise use the non-streaming path with retries.
+            let response = if let Some(tx) = chunk_tx {
+                match self.model_provider.complete_stream(&request).await {
+                    Ok(mut rx) => {
+                        let mut final_response = None;
+                        while let Some(event) = rx.recv().await {
+                            match event {
+                                StreamEvent::TextDelta(delta) => {
+                                    let _ = tx.send(delta).await;
+                                }
+                                StreamEvent::Done(resp) => {
+                                    final_response = Some(resp);
+                                    break;
+                                }
+                            }
                         }
-                        Err(e) => {
-                            if attempt < MAX_RETRIES && e.is_retriable() {
-                                let delay = BACKOFF_SECS[attempt as usize];
-                                warn!(
-                                    error = %e,
-                                    attempt = attempt + 1,
-                                    max_retries = MAX_RETRIES,
-                                    backoff_secs = delay,
-                                    "transient model error, retrying"
-                                );
-                                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                                last_err = Some(e);
-                            } else {
-                                error!(error = %e, "model call failed");
-                                return Err(RuntimeError::Model(e));
+                        match final_response {
+                            Some(resp) => resp,
+                            None => {
+                                warn!("stream ended without Done event, falling back to non-streaming");
+                                self.complete_with_retries(&request).await?
                             }
                         }
                     }
+                    Err(e) => {
+                        warn!(error = %e, "streaming request failed, falling back to non-streaming");
+                        self.complete_with_retries(&request).await?
+                    }
                 }
-
-                resp.ok_or_else(|| {
-                    RuntimeError::Model(last_err.unwrap())
-                })?
+            } else {
+                self.complete_with_retries(&request).await?
             };
 
             usage.add(&response.usage);
@@ -882,6 +905,41 @@ impl TurnExecutor {
 
             return Ok(TurnLoopOutcome::Completed);
         }
+    }
+
+    /// Non-streaming model call with transient-error retries and exponential backoff.
+    async fn complete_with_retries(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<rune_models::CompletionResponse, RuntimeError> {
+        const MAX_RETRIES: u32 = 3;
+        const BACKOFF_SECS: [u64; 3] = [1, 3, 10];
+        let mut last_err = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            match self.model_provider.complete(request).await {
+                Ok(r) => return Ok(r),
+                Err(e) => {
+                    if attempt < MAX_RETRIES && e.is_retriable() {
+                        let delay = BACKOFF_SECS[attempt as usize];
+                        warn!(
+                            error = %e,
+                            attempt = attempt + 1,
+                            max_retries = MAX_RETRIES,
+                            backoff_secs = delay,
+                            "transient model error, retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                        last_err = Some(e);
+                    } else {
+                        error!(error = %e, "model call failed");
+                        return Err(RuntimeError::Model(e));
+                    }
+                }
+            }
+        }
+
+        Err(RuntimeError::Model(last_err.unwrap()))
     }
 
     /// Append a transcript item, auto-incrementing the sequence number.
