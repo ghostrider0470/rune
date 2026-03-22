@@ -568,6 +568,7 @@ async fn build_services(
         approval,
         tool_approval_repo: tool_approval_repo.clone(),
         global_approval_mode: config.approval.mode.as_str().to_string(),
+        workspace_root: workspace_root.clone(),
     });
 
     // Resolve system prompt: agent config → hardcoded default
@@ -1184,6 +1185,8 @@ struct AppToolExecutor {
     tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
     /// Global approval mode from config — "yolo" skips all approvals.
     global_approval_mode: String,
+    /// Workspace root for tools that need it (git, etc.)
+    workspace_root: std::path::PathBuf,
 }
 
 #[derive(Clone)]
@@ -1426,6 +1429,17 @@ impl ToolExecutor for AppToolExecutor {
             }
             "sessions_spawn" | "sessions_send" => self.spawn.execute(call).await,
             "subagents" => self.subagents.execute(call).await,
+            "web_fetch" => {
+                match rune_tools::web_fetch_tool::WebFetchToolExecutor::new() {
+                    Ok(executor) => executor.execute(call).await,
+                    Err(e) => Err(e),
+                }
+            }
+            "git" => {
+                rune_tools::git_tool::GitToolExecutor::new(
+                    self.workspace_root.clone()
+                ).execute(call).await
+            }
             other if other.contains("__") => match &self.mcp {
                 Some(mcp) => mcp.execute(call).await,
                 None => Err(ToolError::UnknownTool {
