@@ -376,8 +376,73 @@ impl TelegramAdapter {
         })
     }
 
-    /// Send a message via Telegram Bot API.
+    /// Telegram's maximum message length.
+    const MAX_MESSAGE_LEN: usize = 4096;
+
+    /// Split text into chunks that fit within Telegram's message limit.
+    /// Tries to split at paragraph breaks, then sentence boundaries, then hard-cuts.
+    fn split_message(text: &str) -> Vec<&str> {
+        if text.len() <= Self::MAX_MESSAGE_LEN {
+            return vec![text];
+        }
+
+        let mut chunks = Vec::new();
+        let mut remaining = text;
+
+        while remaining.len() > Self::MAX_MESSAGE_LEN {
+            let window = &remaining[..Self::MAX_MESSAGE_LEN];
+
+            // Try paragraph break (double newline)
+            let split_at = window
+                .rfind("\n\n")
+                .filter(|&pos| pos > 0)
+                // Try single newline
+                .or_else(|| window.rfind('\n').filter(|&pos| pos > 0))
+                // Try sentence boundary (". " to avoid splitting on decimals)
+                .or_else(|| window.rfind(". ").map(|pos| pos + 1).filter(|&pos| pos > 0))
+                // Hard split at limit
+                .unwrap_or(Self::MAX_MESSAGE_LEN);
+
+            chunks.push(remaining[..split_at].trim_end());
+            remaining = remaining[split_at..].trim_start();
+        }
+
+        if !remaining.is_empty() {
+            chunks.push(remaining);
+        }
+
+        chunks
+    }
+
+    /// Send a message via Telegram Bot API, splitting if over 4096 chars.
     async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        reply_to: Option<&str>,
+    ) -> Result<DeliveryReceipt, ChannelError> {
+        let chunks = Self::split_message(text);
+        let mut last_receipt = None;
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            // Only the first chunk gets the reply_to
+            let chunk_reply_to = if i == 0 { reply_to } else { None };
+            let receipt = self.send_single_message(chat_id, chunk, chunk_reply_to).await?;
+            last_receipt = Some(receipt);
+
+            // Small delay between chunks to avoid rate limits
+            if i + 1 < chunks.len() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+
+        last_receipt.ok_or_else(|| ChannelError::Provider {
+            message: "no chunks to send".into(),
+        })
+    }
+
+    /// Send a single message chunk via Telegram Bot API.
+    async fn send_single_message(
         &self,
         chat_id: &str,
         text: &str,
@@ -858,5 +923,49 @@ mod tests {
     fn adapter_with_custom_base_url() {
         let adapter = TelegramAdapter::with_base_url("token", "http://localhost:8080");
         assert_eq!(adapter.base_url, "http://localhost:8080");
+    }
+
+    #[test]
+    fn split_message_short_text() {
+        let chunks = TelegramAdapter::split_message("hello world");
+        assert_eq!(chunks, vec!["hello world"]);
+    }
+
+    #[test]
+    fn split_message_at_paragraph_boundary() {
+        let para1 = "a".repeat(3000);
+        let para2 = "b".repeat(2000);
+        let text = format!("{para1}\n\n{para2}");
+        let chunks = TelegramAdapter::split_message(&text);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], para1);
+        assert_eq!(chunks[1], para2);
+    }
+
+    #[test]
+    fn split_message_at_newline() {
+        let line1 = "a".repeat(3000);
+        let line2 = "b".repeat(2000);
+        let text = format!("{line1}\n{line2}");
+        let chunks = TelegramAdapter::split_message(&text);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], line1);
+        assert_eq!(chunks[1], line2);
+    }
+
+    #[test]
+    fn split_message_hard_cut() {
+        let text = "a".repeat(5000);
+        let chunks = TelegramAdapter::split_message(&text);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), 4096);
+        assert_eq!(chunks[1].len(), 904);
+    }
+
+    #[test]
+    fn split_message_exactly_at_limit() {
+        let text = "a".repeat(4096);
+        let chunks = TelegramAdapter::split_message(&text);
+        assert_eq!(chunks.len(), 1);
     }
 }
