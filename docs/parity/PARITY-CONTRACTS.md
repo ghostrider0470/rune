@@ -226,8 +226,8 @@ Do not mark a subsystem parity-complete without black-box evidence.
 
 ### External surfaces
 
-- cron APIs/CLI, including inspection and wake/system-event queueing
-- reminder APIs/CLI
+- cron APIs/CLI, including inspection and wake/system-event queueing, with any narrower-than-gateway CLI create/edit surface called out explicitly
+- reminder APIs/CLI, including terminal-outcome inspection for delivered/missed/cancelled reminders
 - heartbeat status/enable/disable APIs plus CLI presence/last/status workflows
 - run-now, wake, and inspection workflows
 - history views

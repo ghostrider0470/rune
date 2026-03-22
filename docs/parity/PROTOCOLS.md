@@ -972,8 +972,8 @@ Run-history expectations:
 Current surface note:
 
 - gateway create/update accepts full schedule and payload schemas
-- current CLI `cron add` creates one-shot `system_event` jobs only
-- current CLI `cron edit` is limited to name and delivery-mode mutation
+- current CLI `cron add` creates one-shot `system_event` jobs only, though it now allows `--session-target main|isolated` plus `--delivery-mode none|announce|webhook` and optional `--webhook-url`
+- current CLI `cron edit` is limited to name, delivery-mode, and webhook-URL mutation
 - `cron wake` and `system event` share the same wake-queueing surface
 - schedule edits and disable/re-enable transitions recompute `next_run_at` from the current schedule definition rather than preserving stale cadence
 - due jobs are claimed atomically before execution via `claimed_at`; stale claims expire after the configured lease duration (default 300 s) for crash recovery

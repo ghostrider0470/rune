@@ -223,6 +223,7 @@ Reproduce proactive automation behavior.
 - reminder outcomes persist as delivered / missed / cancelled rather than disappearing into logs only
 - reminder targets route execution: `"main"` executes in the stable scheduled main session, `"isolated"` creates a one-shot subagent session; unknown targets fall back to `"main"` with a warning
 - due jobs and reminders are claimed atomically before execution; stale claims expire after the configured lease duration for crash recovery; concurrent supervisor ticks cannot duplicate execution
+- docs and parity inventory must stay explicit about the remaining operator-surface gap: the gateway accepts richer cron create/update schemas than the current CLI create/edit flows expose
 
 ### Recommended parity tests
 
