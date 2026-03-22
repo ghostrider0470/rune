@@ -603,6 +603,7 @@ async fn build_services(
     }
 
     turn_executor = turn_executor.with_lane_queue(lane_queue.clone());
+    turn_executor = turn_executor.with_approval_mode(config.approval.mode.as_str());
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
 
     let turn_executor = Arc::new(turn_executor);

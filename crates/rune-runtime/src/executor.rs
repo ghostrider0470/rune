@@ -50,6 +50,8 @@ pub struct TurnExecutor {
     skill_registry: Option<Arc<SkillRegistry>>,
     tool_approval_policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
     hook_registry: Option<Arc<HookRegistry>>,
+    /// Global approval mode — "yolo" auto-approves all tool calls.
+    approval_mode: String,
 }
 
 impl TurnExecutor {
@@ -81,7 +83,15 @@ impl TurnExecutor {
             skill_registry: None,
             tool_approval_policy_repo: None,
             hook_registry: None,
+            approval_mode: "on-miss".to_string(),
         }
+    }
+
+    /// Set the global approval mode. When set to "yolo", all tool approval
+    /// gates are automatically bypassed in the turn loop.
+    pub fn with_approval_mode(mut self, mode: impl Into<String>) -> Self {
+        self.approval_mode = mode.into();
+        self
     }
 
     /// Set the default model name for completion requests.
@@ -688,36 +698,57 @@ impl TurnExecutor {
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,
                         Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
+                            // Yolo mode: auto-approve everything without
+                            // persisting an approval record or checking policies.
+                            let is_yolo = self.approval_mode == "yolo";
+
                             // Check for a persisted allow-always policy before
                             // halting the turn loop.  This lets a prior
                             // allow-always decision auto-approve matching future
                             // tool calls without operator intervention.
-                            let has_allow_always = if let Some(ref repo) =
-                                self.tool_approval_policy_repo
-                            {
-                                matches!(
-                                    repo.get_policy(&tool).await,
-                                    Ok(Some(ref p)) if p.decision == "allow_always"
-                                )
+                            let has_allow_always = if !is_yolo {
+                                if let Some(ref repo) = self.tool_approval_policy_repo {
+                                    matches!(
+                                        repo.get_policy(&tool).await,
+                                        Ok(Some(ref p)) if p.decision == "allow_always"
+                                    )
+                                } else {
+                                    false
+                                }
                             } else {
                                 false
                             };
 
-                            if has_allow_always {
-                                info!(
-                                    tool = %tool,
-                                    "auto-approved by persisted allow-always policy"
-                                );
+                            if is_yolo || has_allow_always {
+                                if is_yolo {
+                                    info!(
+                                        tool = %tool,
+                                        "auto-approved by yolo mode"
+                                    );
+                                } else {
+                                    info!(
+                                        tool = %tool,
+                                        "auto-approved by persisted allow-always policy"
+                                    );
+                                }
 
                                 // Audit: record auto-approval in the transcript
                                 // so it is visible in the conversation history.
                                 let auto_approval_id = ApprovalId::new();
+                                let decision = if is_yolo {
+                                    ApprovalDecision::AllowOnce
+                                } else {
+                                    ApprovalDecision::AllowAlways
+                                };
+                                let note = if is_yolo {
+                                    format!("auto-approved: yolo mode for {tool}")
+                                } else {
+                                    format!("auto-approved: persisted allow-always policy for {tool}")
+                                };
                                 let response = TranscriptItem::ApprovalResponse {
                                     approval_id: auto_approval_id,
-                                    decision: ApprovalDecision::AllowAlways,
-                                    note: Some(format!(
-                                        "auto-approved: persisted allow-always policy for {tool}"
-                                    )),
+                                    decision,
+                                    note: Some(note),
                                 };
                                 self.append_transcript(
                                     session_id,
