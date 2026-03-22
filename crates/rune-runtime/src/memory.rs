@@ -20,6 +20,8 @@ pub struct MemoryContext {
     pub today: Option<String>,
     /// Yesterday's daily notes.
     pub yesterday: Option<String>,
+    /// Lessons learned from past interactions (from memory/lessons.md).
+    pub lessons: Option<String>,
     /// Whether to include the memory curation instruction (Direct sessions only).
     pub include_curation_instruction: bool,
 }
@@ -27,7 +29,7 @@ pub struct MemoryContext {
 /// Instruction appended to the system prompt for Direct sessions, telling
 /// the agent to periodically curate its long-term memory.
 const MEMORY_CURATION_INSTRUCTION: &str = "\
-## Memory Curation
+## Memory Curation & Self-Improvement
 
 You should periodically review your daily notes (memory/YYYY-MM-DD.md files from the \
 last 7 days) and curate MEMORY.md with important patterns, decisions, and lessons learned. \
@@ -35,9 +37,15 @@ When curating:
 - Move recurring themes and validated decisions into MEMORY.md
 - Remove stale or one-off entries that are no longer relevant
 - Keep MEMORY.md concise and actionable — it is loaded into every Direct session
-- Write corrections and lessons to memory/lessons.md when you notice mistakes or learn \
-from user feedback
-- You can perform this curation proactively during idle moments or when explicitly asked";
+- You can perform this curation proactively during idle moments or when explicitly asked
+
+### Feedback Capture
+When the user corrects your behavior, expresses dissatisfaction, or you notice a mistake:
+- Write the lesson to memory/lessons.md using the memory_write tool
+- Format as: what went wrong, why, and what to do differently next time
+- These lessons are loaded into every Direct session so you can learn from them
+- Also capture positive patterns: when the user confirms an approach worked well, \
+note it so you can repeat the behavior";
 
 impl MemoryContext {
     /// Format memory context for injection into the system prompt.
@@ -59,6 +67,12 @@ impl MemoryContext {
         if let Some(yesterday) = &self.yesterday {
             if !yesterday.trim().is_empty() {
                 parts.push(format!("## Yesterday's Notes\n{yesterday}"));
+            }
+        }
+
+        if let Some(lessons) = &self.lessons {
+            if !lessons.trim().is_empty() {
+                parts.push(format!("## Lessons Learned\n{lessons}"));
             }
         }
 
@@ -97,9 +111,13 @@ impl MemoryLoader {
         // Privacy boundary: MEMORY.md only for direct (main) sessions
         if session_kind == SessionKind::Direct {
             ctx.long_term = self.read_file("MEMORY.md").await;
+            ctx.lessons = self.read_file("memory/lessons.md").await;
             ctx.include_curation_instruction = true;
             if ctx.long_term.is_some() {
                 debug!("loaded MEMORY.md for direct session");
+            }
+            if ctx.lessons.is_some() {
+                debug!("loaded memory/lessons.md for direct session");
             }
         } else {
             debug!(
@@ -213,6 +231,7 @@ mod tests {
             long_term: Some("long term content".into()),
             today: Some("today content".into()),
             yesterday: Some("yesterday content".into()),
+            ..Default::default()
         };
 
         let formatted = ctx.format_for_prompt();
