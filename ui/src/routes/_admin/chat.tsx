@@ -387,7 +387,7 @@ function ChatPage() {
         </div>
       </section>
 
-      <div className="grid min-h-[calc(100dvh-17.5rem)] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="grid h-[calc(100dvh-17.5rem)] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-3 lg:hidden">
           <div className="grid grid-cols-1 gap-2 rounded-3xl border border-border/70 bg-card/80 p-3 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur sm:grid-cols-2">
             <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-background/70 px-3 py-2">
@@ -431,7 +431,7 @@ function ChatPage() {
           />
         </div>
 
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-border/70 bg-card/80 shadow-[0_20px_60px_rgba(15,23,42,0.10)] backdrop-blur">
+        <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-border/70 bg-card/80 shadow-[0_20px_60px_rgba(15,23,42,0.10)] backdrop-blur">
           <header className="border-b border-border/70 bg-background/80 px-4 py-3 sm:px-5">
             <div className="flex flex-wrap items-center gap-3">
               <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
