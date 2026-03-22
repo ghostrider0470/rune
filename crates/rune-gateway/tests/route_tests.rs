@@ -2581,6 +2581,33 @@ async fn auth_rejection_on_bad_token() {
 }
 
 #[tokio::test]
+async fn dashboard_api_requires_auth_when_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/api/dashboard/summary")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/summary")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn auth_accepts_valid_token() {
     let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
 
