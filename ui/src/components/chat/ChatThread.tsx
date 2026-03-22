@@ -194,6 +194,8 @@ function getLaneMeta(entry: TranscriptEntry) {
 }
 
 const SCROLL_THRESHOLD = 80;
+const INITIAL_VISIBLE_GROUPS = 30;
+const LOAD_MORE_GROUPS = 20;
 
 export function ChatThread({
   entries,
@@ -208,6 +210,7 @@ export function ChatThread({
   const endRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [visibleGroupCount, setVisibleGroupCount] = useState(INITIAL_VISIBLE_GROUPS);
   const prevLengthRef = useRef(entries.length);
 
   const checkScrollPosition = useCallback(() => {
@@ -238,7 +241,31 @@ export function ChatThread({
     setHasNewMessages(false);
   }, []);
 
-  const groups = groupEntries(entries);
+  const allGroups = groupEntries(entries);
+
+  // Only render the last N groups; load more when user scrolls to top
+  const startIndex = Math.max(0, allGroups.length - visibleGroupCount);
+  const groups = allGroups.slice(startIndex);
+  const hasMoreAbove = startIndex > 0;
+
+  // Reset visible count when switching sessions (entries change drastically)
+  useEffect(() => {
+    setVisibleGroupCount(INITIAL_VISIBLE_GROUPS);
+  }, [entries.length === 0]);
+
+  const handleLoadMore = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const prevScrollHeight = el.scrollHeight;
+    setVisibleGroupCount((prev) => prev + LOAD_MORE_GROUPS);
+    // Preserve scroll position after loading more above
+    requestAnimationFrame(() => {
+      if (el) {
+        const newScrollHeight = el.scrollHeight;
+        el.scrollTop += newScrollHeight - prevScrollHeight;
+      }
+    });
+  }, []);
 
   if (isLoading) {
     return (
@@ -278,6 +305,18 @@ export function ChatThread({
           focusMode ? "px-3 sm:px-8 lg:px-12" : "px-2.5 sm:px-4",
         )}
       >
+        {hasMoreAbove && (
+          <div className="flex justify-center py-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLoadMore}
+              className="gap-1.5 rounded-full text-xs text-muted-foreground"
+            >
+              Load earlier messages ({startIndex} more)
+            </Button>
+          </div>
+        )}
         {groups.map((group, gi) => {
           if (group.type === "date_divider") {
             return (
