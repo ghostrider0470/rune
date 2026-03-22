@@ -3071,6 +3071,21 @@ impl GatewayClient {
             .send().await.context("gateway")?;
         if r.status().is_success() { Ok(r.json().await.context("json")?) } else { bail!("HTTP {}", r.status()); }
     }
+    /// Download a OneDrive file's content. Returns (filename, bytes).
+    pub async fn ms365_files_download(&self, id: &str) -> Result<(String, Vec<u8>)> {
+        let meta: crate::output::Ms365FileReadResponse = {
+            let r = self.http.get(self.url(&format!("/ms365/files/{id}")))
+                .send().await.context("gateway")?;
+            if r.status().is_success() { r.json().await.context("json")? } else { bail!("HTTP {}", r.status()); }
+        };
+        let r = self.http.get(self.url(&format!("/ms365/files/{id}/content")))
+            .send().await.context("gateway")?;
+        if r.status().is_success() {
+            Ok((meta.name, r.bytes().await.context("bytes")?.to_vec()))
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
     pub async fn ms365_users_me(&self) -> Result<crate::output::Ms365UserProfileResponse> {
         let r = self.http.get(self.url("/ms365/users/me"))
             .send().await.context("gateway")?;

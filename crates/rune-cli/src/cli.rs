@@ -469,6 +469,15 @@ pub enum Ms365FilesAction {
         #[arg(long, default_value_t = 25)]
         limit: u32,
     },
+    /// Download a file's content to a local file.
+    Download {
+        /// File/item ID to download.
+        #[arg(long)]
+        id: String,
+        /// Output file path (defaults to the file's name in the current directory).
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 /// Users/org inspection subcommands.

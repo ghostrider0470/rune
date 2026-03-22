@@ -1260,6 +1260,19 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let result = client.ms365_files_search(&query, limit).await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365FilesAction::Download { id, output } => {
+                    let (filename, bytes) = client.ms365_files_download(&id).await?;
+                    let dest = output.unwrap_or_else(|| filename.clone());
+                    tokio::fs::write(&dest, &bytes).await
+                        .with_context(|| format!("failed to write OneDrive file to {dest}"))?;
+                    let result = crate::output::Ms365FileDownloadResponse {
+                        item_id: id,
+                        filename,
+                        size: bytes.len() as u64,
+                        saved_to: dest,
+                    };
+                    println!("{}", render(&result, format));
+                }
             },
             Ms365Action::Users { action } => match action {
                 Ms365UsersAction::Me => {

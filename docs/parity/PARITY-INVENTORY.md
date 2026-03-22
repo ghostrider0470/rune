@@ -676,7 +676,7 @@ Important distinction:
 
 ### Microsoft 365 (`ms365`)
 
-First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download. Eleventh and twelfth slices: mail send/reply/forward and calendar create/delete/respond mutations. Thirteenth slice: OneDrive file search.
+First through tenth parity slices: read-only mail and calendar surfaces (list + read-detail), auth/config inspection, mail folder listing, OneDrive file list/read, users/org directory inspection, Planner plans/tasks, To-Do lists/tasks, SharePoint sites inspection, Teams inspection, and mail attachment listing/read/download. Eleventh and twelfth slices: mail send/reply/forward and calendar create/delete/respond mutations. Thirteenth slice: OneDrive file search. Fourteenth slice: OneDrive file download.
 
 Observed subcommands:
 
@@ -689,6 +689,7 @@ Observed subcommands:
 - `ms365 files list` — list files/folders in a OneDrive path
 - `ms365 files read --id <item_id>` — read metadata for a single OneDrive item
 - `ms365 files search --query <text> [--limit <n>]` — search OneDrive files by name or content
+- `ms365 files download --id <item_id> [--output <path>]` — download a OneDrive file's content to a local file
 - `ms365 users me` — show authenticated user's profile
 - `ms365 users list` — list users in the organization directory
 - `ms365 users read --id <user_id>` — read a single user's profile by ID or UPN
@@ -718,7 +719,7 @@ Required concepts:
 - mailbox folder discovery and selection (`--folder`)
 - result limiting (`--limit`)
 - calendar look-ahead window (`--hours`)
-- OneDrive folder path browsing (`--path`) and file search (`--query`)
+- OneDrive folder path browsing (`--path`), file search (`--query`), and content download
 - single-item read-detail by ID (`--id`)
 - users/org directory inspection (me, list, read by ID/UPN)
 - Planner plan discovery and task enumeration by plan ID
@@ -726,6 +727,7 @@ Required concepts:
 - SharePoint site discovery, detail read, list/library enumeration, and list item browsing
 - Teams discovery, channel enumeration, channel detail, and channel message listing
 - mail attachment listing by message ID, single-attachment metadata read, and content download
+- OneDrive file content download by item ID with optional output path
 - calendar event creation (subject, start/end, attendees, location, body)
 - calendar event deletion by ID
 - calendar invitation response (accept, decline, tentative) with optional comment

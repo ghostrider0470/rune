@@ -3871,6 +3871,25 @@ impl fmt::Display for Ms365FilesSearchResponse {
     }
 }
 
+/// Response for `ms365 files download`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365FileDownloadResponse {
+    pub item_id: String,
+    pub filename: String,
+    pub size: u64,
+    pub saved_to: String,
+}
+
+impl fmt::Display for Ms365FileDownloadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "✓ Downloaded: {}", self.filename)?;
+        writeln!(f, "  Item ID:    {}", self.item_id)?;
+        writeln!(f, "  Size:       {}", format_bytes(self.size))?;
+        writeln!(f, "  Saved to:   {}", self.saved_to)?;
+        Ok(())
+    }
+}
+
 // ── MS365 Users/Org ─────────────────────────────────────────────
 
 /// A single user profile (used by `me`, `read`, and inside list responses).
@@ -7388,6 +7407,37 @@ mod tests {
         assert_eq!(v["filename"], "report.pdf");
         assert_eq!(v["size"], 204800);
         assert_eq!(v["saved_to"], "/tmp/report.pdf");
+    }
+
+    #[test]
+    fn render_ms365_file_download_human() {
+        let r = Ms365FileDownloadResponse {
+            item_id: "item-abc".into(),
+            filename: "budget.xlsx".into(),
+            size: 102400,
+            saved_to: "/tmp/budget.xlsx".into(),
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Downloaded: budget.xlsx"));
+        assert!(out.contains("100.0 KB"));
+        assert!(out.contains("/tmp/budget.xlsx"));
+        assert!(out.contains("item-abc"));
+    }
+
+    #[test]
+    fn render_ms365_file_download_json() {
+        let r = Ms365FileDownloadResponse {
+            item_id: "item-abc".into(),
+            filename: "budget.xlsx".into(),
+            size: 102400,
+            saved_to: "/tmp/budget.xlsx".into(),
+        };
+        let out = render(&r, OutputFormat::Json);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["filename"], "budget.xlsx");
+        assert_eq!(v["size"], 102400);
+        assert_eq!(v["saved_to"], "/tmp/budget.xlsx");
+        assert_eq!(v["item_id"], "item-abc");
     }
 
     #[test]
