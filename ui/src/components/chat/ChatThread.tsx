@@ -1,4 +1,5 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -194,8 +195,120 @@ function getLaneMeta(entry: TranscriptEntry) {
 }
 
 const SCROLL_THRESHOLD = 80;
-const INITIAL_VISIBLE_GROUPS = 30;
-const LOAD_MORE_GROUPS = 20;
+
+function estimateGroupHeight(group: EntryGroup): number {
+  if (group.type === "date_divider") return 40;
+  if (group.type === "tool_pair") return 80;
+  return 120;
+}
+
+function GroupRenderer({
+  group,
+  onInspectTool,
+  selectedToolEntryId,
+  showThinking,
+}: {
+  group: EntryGroup;
+  onInspectTool?: (entry: TranscriptEntry, pairedEntry?: TranscriptEntry) => void;
+  selectedToolEntryId?: string | null;
+  showThinking: boolean;
+}) {
+  if (group.type === "date_divider") {
+    return (
+      <div className="flex items-center gap-2 px-0.5 py-1 sm:gap-3 sm:px-1">
+        <Separator className="flex-1 bg-border/60" />
+        <span className="rounded-full border border-border/70 bg-background/85 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground sm:px-3 sm:text-[10px]">
+          {group.dateLabel}
+        </span>
+        <Separator className="flex-1 bg-border/60" />
+      </div>
+    );
+  }
+
+  const leadEntry = group.entries[0];
+  const lane = getLaneMeta(leadEntry);
+
+  if (group.type === "message") {
+    const entry = group.entries[0];
+    return (
+      <div className="space-y-1.5 sm:space-y-2">
+        <div
+          className={cn(
+            "hidden px-1 sm:flex",
+            normalizeTranscriptKind(entry.kind) === "user" ? "justify-end" : "justify-start",
+          )}
+        >
+          <Badge
+            variant="outline"
+            className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
+          >
+            {lane.icon}
+            {lane.label}
+          </Badge>
+        </div>
+        <ChatMessage
+          entry={entry}
+          isLive={isLiveEntry(entry)}
+          showThinking={showThinking}
+        />
+      </div>
+    );
+  }
+
+  if (group.type === "tool_pair") {
+    return (
+      <div className="space-y-1.5 px-0.5 sm:space-y-2 sm:px-2">
+        <Badge
+          variant="outline"
+          className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
+        >
+          {lane.icon}
+          {lane.label}
+        </Badge>
+        <div className="flex flex-col gap-1">
+          {group.entries.map((entry, ei) => {
+            const pairedEntry =
+              ei === 0 && group.entries.length > 1
+                ? group.entries[1]
+                : ei > 0
+                  ? group.entries[0]
+                  : undefined;
+
+            return (
+              <ToolCard
+                key={entry.id}
+                entry={entry}
+                pairedEntry={pairedEntry}
+                onInspect={onInspectTool}
+                isSelected={selectedToolEntryId === entry.id}
+              />
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5 sm:space-y-2">
+      <Badge
+        variant="outline"
+        className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
+      >
+        {lane.icon}
+        {lane.label}
+      </Badge>
+      {group.entries.map((entry) => (
+        <ChatMessage
+          key={entry.id}
+          entry={entry}
+          isLive={isLiveEntry(entry)}
+          showThinking={showThinking}
+        />
+      ))}
+    </div>
+  );
+}
 
 export function ChatThread({
   entries,
@@ -207,11 +320,18 @@ export function ChatThread({
   focusMode = false,
 }: ChatThreadProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
-  const [visibleGroupCount, setVisibleGroupCount] = useState(INITIAL_VISIBLE_GROUPS);
   const prevLengthRef = useRef(entries.length);
+
+  const allGroups = useMemo(() => groupEntries(entries), [entries]);
+
+  const virtualizer = useVirtualizer({
+    count: allGroups.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: (index) => estimateGroupHeight(allGroups[index]),
+    overscan: 10,
+  });
 
   const checkScrollPosition = useCallback(() => {
     const el = containerRef.current;
@@ -225,47 +345,19 @@ export function ChatThread({
     if (entries.length > prevLengthRef.current) {
       if (isAtBottom) {
         requestAnimationFrame(() => {
-          endRef.current?.scrollIntoView({ behavior: "smooth" });
+          virtualizer.scrollToIndex(allGroups.length - 1, { align: "end", behavior: "smooth" });
         });
       } else {
-        requestAnimationFrame(() => {
-          setHasNewMessages(true);
-        });
+        setHasNewMessages(true);
       }
     }
     prevLengthRef.current = entries.length;
-  }, [entries.length, isAtBottom]);
+  }, [entries.length, isAtBottom, allGroups.length, virtualizer]);
 
   const scrollToBottom = useCallback(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    virtualizer.scrollToIndex(allGroups.length - 1, { align: "end", behavior: "smooth" });
     setHasNewMessages(false);
-  }, []);
-
-  const allGroups = groupEntries(entries);
-
-  // Only render the last N groups; load more when user scrolls to top
-  const startIndex = Math.max(0, allGroups.length - visibleGroupCount);
-  const groups = allGroups.slice(startIndex);
-  const hasMoreAbove = startIndex > 0;
-
-  // Reset visible count when switching sessions (entries change drastically)
-  useEffect(() => {
-    setVisibleGroupCount(INITIAL_VISIBLE_GROUPS);
-  }, [entries.length === 0]);
-
-  const handleLoadMore = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const prevScrollHeight = el.scrollHeight;
-    setVisibleGroupCount((prev) => prev + LOAD_MORE_GROUPS);
-    // Preserve scroll position after loading more above
-    requestAnimationFrame(() => {
-      if (el) {
-        const newScrollHeight = el.scrollHeight;
-        el.scrollTop += newScrollHeight - prevScrollHeight;
-      }
-    });
-  }, []);
+  }, [virtualizer, allGroups.length]);
 
   if (isLoading) {
     return (
@@ -295,126 +387,51 @@ export function ChatThread({
     );
   }
 
+  const virtualItems = virtualizer.getVirtualItems();
+
   return (
     <div className={cn("relative min-h-0 flex-1 overflow-hidden bg-gradient-to-b from-background/40 to-background", className)}>
       <div
         ref={containerRef}
         onScroll={checkScrollPosition}
         className={cn(
-          "flex h-full flex-col gap-3 overflow-y-auto py-3 scroll-pb-28 sm:gap-4 sm:py-4 sm:scroll-pb-6",
+          "h-full overflow-y-auto",
           focusMode ? "px-3 sm:px-8 lg:px-12" : "px-2.5 sm:px-4",
         )}
       >
-        {hasMoreAbove && (
-          <div className="flex justify-center py-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLoadMore}
-              className="gap-1.5 rounded-full text-xs text-muted-foreground"
-            >
-              Load earlier messages ({startIndex} more)
-            </Button>
-          </div>
-        )}
-        {groups.map((group, gi) => {
-          if (group.type === "date_divider") {
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          {virtualItems.map((virtualRow) => {
+            const group = allGroups[virtualRow.index];
             return (
-              <div key={`date-${gi}`} className="flex items-center gap-2 px-0.5 py-1 sm:gap-3 sm:px-1">
-                <Separator className="flex-1 bg-border/60" />
-                <span className="rounded-full border border-border/70 bg-background/85 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground sm:px-3 sm:text-[10px]">
-                  {group.dateLabel}
-                </span>
-                <Separator className="flex-1 bg-border/60" />
-              </div>
-            );
-          }
-
-          const leadEntry = group.entries[0];
-          const lane = getLaneMeta(leadEntry);
-
-          if (group.type === "message") {
-            const entry = group.entries[0];
-            return (
-              <div key={entry.id} className="space-y-1.5 sm:space-y-2">
-                <div
-                  className={cn(
-                    "hidden px-1 sm:flex",
-                    normalizeTranscriptKind(entry.kind) === "user" ? "justify-end" : "justify-start",
-                  )}
-                >
-                  <Badge
-                    variant="outline"
-                    className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
-                  >
-                    {lane.icon}
-                    {lane.label}
-                  </Badge>
-                </div>
-                <ChatMessage
-                  entry={entry}
-                  isLive={isLiveEntry(entry)}
-                  showThinking={showThinking}
-                />
-              </div>
-            );
-          }
-
-          if (group.type === "tool_pair") {
-            return (
-              <div key={`tool-group-${gi}`} className="space-y-1.5 px-0.5 sm:space-y-2 sm:px-2">
-                <Badge
-                  variant="outline"
-                  className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
-                >
-                  {lane.icon}
-                  {lane.label}
-                </Badge>
-                <div className="flex flex-col gap-1">
-                  {group.entries.map((entry, ei) => {
-                    const pairedEntry =
-                      ei === 0 && group.entries.length > 1
-                        ? group.entries[1]
-                        : ei > 0
-                          ? group.entries[0]
-                          : undefined;
-
-                    return (
-                      <ToolCard
-                        key={entry.id}
-                        entry={entry}
-                        pairedEntry={pairedEntry}
-                        onInspect={onInspectTool}
-                        isSelected={selectedToolEntryId === entry.id}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          }
-
-          return (
-            <div key={`other-${gi}`} className="space-y-1.5 sm:space-y-2">
-              <Badge
-                variant="outline"
-                className={cn("gap-1 rounded-full px-2.5 py-1 text-[10px]", lane.badgeClass)}
+              <div
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+                className="py-1.5 sm:py-2"
               >
-                {lane.icon}
-                {lane.label}
-              </Badge>
-              {group.entries.map((entry) => (
-                <ChatMessage
-                  key={entry.id}
-                  entry={entry}
-                  isLive={isLiveEntry(entry)}
+                <GroupRenderer
+                  group={group}
+                  onInspectTool={onInspectTool}
+                  selectedToolEntryId={selectedToolEntryId}
                   showThinking={showThinking}
                 />
-              ))}
-            </div>
-          );
-        })}
-        <div ref={endRef} />
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {hasNewMessages && (
