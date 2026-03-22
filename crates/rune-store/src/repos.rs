@@ -57,6 +57,11 @@ pub trait SessionRepo: Send + Sync {
 
     /// Delete a session by ID. Returns true if a row was removed.
     async fn delete(&self, id: Uuid) -> Result<bool, StoreError>;
+
+    /// List all non-terminal Channel sessions that have a channel_ref.
+    /// Used on startup to pre-populate the in-memory session index so that
+    /// existing conversations resume after a gateway restart.
+    async fn list_active_channel_sessions(&self) -> Result<Vec<SessionRow>, StoreError>;
 }
 
 // ── Turn repository ───────────────────────────────────────────────────

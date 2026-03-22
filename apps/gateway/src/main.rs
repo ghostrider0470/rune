@@ -3218,6 +3218,20 @@ mod tests {
             rows.retain(|row| row.id != id);
             Ok(rows.len() != before)
         }
+
+        async fn list_active_channel_sessions(&self) -> Result<Vec<SessionRow>, StoreError> {
+            let rows = self.sessions.lock().await;
+            let terminal = ["completed", "failed", "cancelled"];
+            Ok(rows
+                .iter()
+                .filter(|s| {
+                    s.kind == "Channel"
+                        && s.channel_ref.is_some()
+                        && !terminal.contains(&s.status.as_str())
+                })
+                .cloned()
+                .collect())
+        }
     }
 
     struct MemTranscriptRepo {
