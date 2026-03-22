@@ -136,16 +136,32 @@ impl SessionLoop {
 
                 info!(session_id = %session.id, len = enriched_content.len(), "executing turn");
 
-                // Send typing indicator before executing the turn
-                {
+                // Send a "Thinking…" placeholder reply so the user gets immediate feedback.
+                let placeholder_id = {
                     let ch = self.channel.lock().await;
+                    // Also triggers typing indicator implicitly via the message.
                     let _ = ch
                         .send(OutboundAction::SendTypingIndicator {
                             channel_id: msg.channel_id,
                             chat_id: msg.raw_chat_id.clone(),
                         })
                         .await;
-                }
+                    match ch
+                        .send(OutboundAction::Reply {
+                            channel_id: msg.channel_id,
+                            chat_id: msg.raw_chat_id.clone(),
+                            reply_to: msg.provider_message_id.clone(),
+                            content: "Thinking…".to_string(),
+                        })
+                        .await
+                    {
+                        Ok(receipt) => Some(receipt.provider_message_id),
+                        Err(e) => {
+                            warn!(error = %e, "failed to send placeholder message");
+                            None
+                        }
+                    }
+                };
 
                 match self
                     .turn_executor
@@ -162,17 +178,37 @@ impl SessionLoop {
 
                         if let Some(reply) = self.get_last_assistant_message(session.id).await {
                             let ch = self.channel.lock().await;
-                            if let Err(e) = ch
-                                .send(OutboundAction::Reply {
+                            // If we sent a placeholder, edit it; otherwise send a new reply.
+                            let result = if let Some(ref ph_id) = placeholder_id {
+                                ch.send(OutboundAction::Edit {
+                                    channel_id: msg.channel_id,
+                                    chat_id: msg.raw_chat_id.clone(),
+                                    message_id: ph_id.clone(),
+                                    new_content: reply,
+                                })
+                                .await
+                            } else {
+                                ch.send(OutboundAction::Reply {
                                     channel_id: msg.channel_id,
                                     chat_id: msg.raw_chat_id.clone(),
                                     reply_to: msg.provider_message_id.clone(),
                                     content: reply,
                                 })
                                 .await
-                            {
+                            };
+                            if let Err(e) = result {
                                 error!(error = %e, "failed to send reply");
                             }
+                        } else if let Some(ref ph_id) = placeholder_id {
+                            // No assistant message — remove the placeholder.
+                            let ch = self.channel.lock().await;
+                            let _ = ch
+                                .send(OutboundAction::Delete {
+                                    channel_id: msg.channel_id,
+                                    chat_id: msg.raw_chat_id.clone(),
+                                    message_id: ph_id.clone(),
+                                })
+                                .await;
                         }
                     }
                     Err(e) => {
@@ -185,17 +221,30 @@ impl SessionLoop {
                                 full
                             }
                         };
+                        let error_content = format!(
+                            "Sorry, I encountered an error: {brief}. Please try again."
+                        );
                         let ch = self.channel.lock().await;
-                        let _ = ch
-                            .send(OutboundAction::Reply {
-                                channel_id: msg.channel_id,
-                                chat_id: msg.raw_chat_id.clone(),
-                                reply_to: msg.provider_message_id.clone(),
-                                content: format!(
-                                    "Sorry, I encountered an error: {brief}. Please try again."
-                                ),
-                            })
-                            .await;
+                        // Edit the placeholder with the error, or send a new reply.
+                        if let Some(ref ph_id) = placeholder_id {
+                            let _ = ch
+                                .send(OutboundAction::Edit {
+                                    channel_id: msg.channel_id,
+                                    chat_id: msg.raw_chat_id.clone(),
+                                    message_id: ph_id.clone(),
+                                    new_content: error_content,
+                                })
+                                .await;
+                        } else {
+                            let _ = ch
+                                .send(OutboundAction::Reply {
+                                    channel_id: msg.channel_id,
+                                    chat_id: msg.raw_chat_id.clone(),
+                                    reply_to: msg.provider_message_id.clone(),
+                                    content: error_content,
+                                })
+                                .await;
+                        }
                     }
                 }
             }
