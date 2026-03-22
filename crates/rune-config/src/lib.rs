@@ -35,6 +35,8 @@ pub struct AppConfig {
     pub mcp_servers: Vec<McpServerConfig>,
     pub memory: MemoryConfig,
     #[serde(default)]
+    pub mem0: Mem0Config,
+    #[serde(default)]
     pub browser: BrowserConfig,
     pub media: MediaConfig,
     pub logging: LoggingConfig,
@@ -88,6 +90,8 @@ impl AppConfig {
         out.channels.whatsapp_access_token = mask(&self.channels.whatsapp_access_token);
         out.channels.whatsapp_app_secret = mask(&self.channels.whatsapp_app_secret);
         out.channels.whatsapp_verify_token = mask(&self.channels.whatsapp_verify_token);
+        out.mem0.embedding_api_key = mask(&self.mem0.embedding_api_key);
+        out.mem0.postgres_url = mask(&self.mem0.postgres_url);
         out
     }
 
@@ -1422,6 +1426,110 @@ impl SecurityConfig {
             (true, true) => "trust-spells",
             (false, false) => "no-sandbox",
             (false, true) => "unrestricted",
+        }
+    }
+}
+
+/// Mem0-style auto-capture/recall memory configuration.
+///
+/// When enabled, the runtime automatically recalls similar facts before each
+/// turn and captures new facts after each turn, giving the agent persistent
+/// cross-session memory powered by pgvector embeddings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Mem0Config {
+    /// Master switch — set to `true` to enable auto-recall and auto-capture.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// PostgreSQL connection string (must have pgvector extension).
+    #[serde(default)]
+    pub postgres_url: Option<String>,
+
+    /// Azure OpenAI embedding endpoint (without query string).
+    #[serde(default)]
+    pub embedding_endpoint: Option<String>,
+
+    /// API key for the embedding endpoint.
+    #[serde(default)]
+    pub embedding_api_key: Option<String>,
+
+    /// Embedding model name sent in the request body.
+    #[serde(default = "Mem0Config::default_embedding_model")]
+    pub embedding_model: String,
+
+    /// Embedding vector dimensionality.
+    #[serde(default = "Mem0Config::default_embedding_dims")]
+    pub embedding_dims: usize,
+
+    /// Azure API version query parameter.
+    #[serde(default = "Mem0Config::default_api_version")]
+    pub api_version: String,
+
+    /// Maximum number of memories returned by recall.
+    #[serde(default = "Mem0Config::default_top_k")]
+    pub top_k: usize,
+
+    /// Minimum cosine similarity for recall results.
+    #[serde(default = "Mem0Config::default_similarity_threshold")]
+    pub similarity_threshold: f64,
+
+    /// Cosine similarity above which a new fact is considered a duplicate.
+    #[serde(default = "Mem0Config::default_dedup_threshold")]
+    pub dedup_threshold: f64,
+}
+
+/// `Eq` is required because `AppConfig` derives `Eq`. Configuration
+/// floats are always well-behaved (no NaN), so this is sound.
+impl PartialEq for Mem0Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.enabled == other.enabled
+            && self.postgres_url == other.postgres_url
+            && self.embedding_endpoint == other.embedding_endpoint
+            && self.embedding_api_key == other.embedding_api_key
+            && self.embedding_model == other.embedding_model
+            && self.embedding_dims == other.embedding_dims
+            && self.api_version == other.api_version
+            && self.top_k == other.top_k
+            && self.similarity_threshold.to_bits() == other.similarity_threshold.to_bits()
+            && self.dedup_threshold.to_bits() == other.dedup_threshold.to_bits()
+    }
+}
+impl Eq for Mem0Config {}
+
+impl Mem0Config {
+    fn default_embedding_model() -> String {
+        "text-embedding-3-large".to_string()
+    }
+    fn default_embedding_dims() -> usize {
+        3072
+    }
+    fn default_api_version() -> String {
+        "2024-02-01".to_string()
+    }
+    fn default_top_k() -> usize {
+        10
+    }
+    fn default_similarity_threshold() -> f64 {
+        0.3
+    }
+    fn default_dedup_threshold() -> f64 {
+        0.85
+    }
+}
+
+impl Default for Mem0Config {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            postgres_url: None,
+            embedding_endpoint: None,
+            embedding_api_key: None,
+            embedding_model: Self::default_embedding_model(),
+            embedding_dims: Self::default_embedding_dims(),
+            api_version: Self::default_api_version(),
+            top_k: Self::default_top_k(),
+            similarity_threshold: Self::default_similarity_threshold(),
+            dedup_threshold: Self::default_dedup_threshold(),
         }
     }
 }

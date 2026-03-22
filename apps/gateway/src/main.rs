@@ -36,8 +36,8 @@ use rune_models::{
     RoutedModelProvider, Usage,
 };
 use rune_runtime::{
-    ContextAssembler, LaneQueue, NoOpCompaction, SessionEngine, TelegramFileDownloader,
-    TurnExecutor,
+    ContextAssembler, LaneQueue, Mem0Engine, NoOpCompaction, SessionEngine,
+    TelegramFileDownloader, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
@@ -607,6 +607,19 @@ async fn build_services(
     turn_executor = turn_executor.with_lane_queue(lane_queue.clone());
     turn_executor = turn_executor.with_approval_mode(config.approval.mode.as_str());
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
+
+    // Mem0 auto-capture/recall memory engine
+    if config.mem0.enabled {
+        match Mem0Engine::try_connect(&config.mem0, model_provider.clone()).await {
+            Some(engine) => {
+                turn_executor = turn_executor.with_mem0(engine);
+                info!("mem0 auto-capture/recall memory engine enabled");
+            }
+            None => {
+                warn!("mem0 enabled in config but failed to initialize — continuing without it");
+            }
+        }
+    }
 
     let turn_executor = Arc::new(turn_executor);
 

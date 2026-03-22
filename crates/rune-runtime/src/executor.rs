@@ -19,6 +19,7 @@ use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::lane_queue::{Lane, LaneQueue};
+use crate::mem0::Mem0Engine;
 use crate::memory::MemoryLoader;
 use crate::session_metadata::selected_model;
 use crate::skill::SkillRegistry;
@@ -50,6 +51,8 @@ pub struct TurnExecutor {
     skill_registry: Option<Arc<SkillRegistry>>,
     tool_approval_policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
     hook_registry: Option<Arc<HookRegistry>>,
+    /// Mem0 auto-capture/recall engine for persistent cross-session memory.
+    mem0: Option<Arc<Mem0Engine>>,
     /// Global approval mode — "yolo" auto-approves all tool calls.
     approval_mode: String,
 }
@@ -83,6 +86,7 @@ impl TurnExecutor {
             skill_registry: None,
             tool_approval_policy_repo: None,
             hook_registry: None,
+            mem0: None,
             approval_mode: "on-miss".to_string(),
         }
     }
@@ -140,6 +144,12 @@ impl TurnExecutor {
     /// Attach a hook registry for emitting pre/post tool call and session lifecycle events.
     pub fn with_hook_registry(mut self, registry: Arc<HookRegistry>) -> Self {
         self.hook_registry = Some(registry);
+        self
+    }
+
+    /// Attach a Mem0 engine for auto-recall and auto-capture of persistent memories.
+    pub fn with_mem0(mut self, engine: Arc<Mem0Engine>) -> Self {
+        self.mem0 = Some(engine);
         self
     }
 
@@ -286,6 +296,43 @@ impl TurnExecutor {
 
         // If the loop failed, propagate the error
         result?;
+
+        // Mem0 capture: extract and store facts from this turn (background).
+        if let Some(ref mem0) = self.mem0 {
+            if matches!(final_status, TurnStatus::Completed) {
+                let mem0 = mem0.clone();
+                let user_msg = user_message.to_string();
+                let sess_id = session_id;
+
+                // Grab the assistant's final response from transcript
+                let transcript_repo = self.transcript_repo.clone();
+                tokio::spawn(async move {
+                    let assistant_msg = match transcript_repo.list_by_session(sess_id).await {
+                        Ok(rows) => rows
+                            .iter()
+                            .rev()
+                            .find_map(|row| {
+                                let item: TranscriptItem =
+                                    serde_json::from_value(row.payload.clone()).ok()?;
+                                if let TranscriptItem::AssistantMessage { content } = item {
+                                    Some(content)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_default(),
+                        Err(e) => {
+                            warn!(error = %e, "mem0 capture: failed to read transcript");
+                            return;
+                        }
+                    };
+
+                    if !user_msg.is_empty() && !assistant_msg.is_empty() {
+                        mem0.capture(&user_msg, &assistant_msg, sess_id).await;
+                    }
+                });
+            }
+        }
 
         Ok((final_turn, usage))
     }
@@ -563,6 +610,36 @@ impl TurnExecutor {
             .await;
         let memory_context = MemoryLoader::new(&workspace_root).load(session_kind).await;
 
+        // Mem0 recall: find semantically similar memories before the first
+        // model call. We fetch the user message from the most recent
+        // transcript entry so we can embed the current query.
+        let mem0_prompt_section = if let Some(ref mem0) = self.mem0 {
+            let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;
+            let user_msg = transcript_rows
+                .iter()
+                .rev()
+                .find_map(|row| {
+                    let item: rune_core::TranscriptItem =
+                        serde_json::from_value(row.payload.clone()).ok()?;
+                    if let rune_core::TranscriptItem::UserMessage { message } = item {
+                        Some(message.content)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+
+            if !user_msg.is_empty() {
+                let memories = mem0.recall(&user_msg).await;
+                let section = Mem0Engine::format_for_prompt(&memories);
+                if section.is_empty() { None } else { Some(section) }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut iterations: u32 = 0;
 
         loop {
@@ -587,7 +664,12 @@ impl TurnExecutor {
                 Some(registry) => registry.system_prompt_fragment().await,
                 None => None,
             };
-            let extra_system_sections: Vec<String> = skill_prompt_fragment.into_iter().collect();
+            let mut extra_system_sections: Vec<String> = skill_prompt_fragment.into_iter().collect();
+
+            // Inject recalled mem0 memories into the system prompt
+            if let Some(ref section) = mem0_prompt_section {
+                extra_system_sections.push(section.clone());
+            }
 
             let messages = self.context_assembler.assemble(
                 &transcript_rows,
