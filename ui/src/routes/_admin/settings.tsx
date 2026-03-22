@@ -47,10 +47,10 @@ function SettingsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Gateway configuration and controls</p>
+        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <p className="mt-1 text-muted-foreground">Gateway configuration and controls</p>
       </div>
 
       {/* Heartbeat */}
@@ -80,7 +80,7 @@ function SettingsPage() {
                 />
               </div>
               <Separator />
-              <dl className="space-y-2 text-sm">
+              <dl className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Interval</dt>
                   <dd>{heartbeat.interval_seconds}s</dd>

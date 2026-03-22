@@ -17,6 +17,7 @@ import { Route as AdminSettingsRouteImport } from './routes/_admin/settings'
 import { Route as AdminSessionsRouteImport } from './routes/_admin/sessions'
 import { Route as AdminRemindersRouteImport } from './routes/_admin/reminders'
 import { Route as AdminModelsRouteImport } from './routes/_admin/models'
+import { Route as AdminMemoryRouteImport } from './routes/_admin/memory'
 import { Route as AdminLogsRouteImport } from './routes/_admin/logs'
 import { Route as AdminDiagnosticsRouteImport } from './routes/_admin/diagnostics'
 import { Route as AdminDebugRouteImport } from './routes/_admin/debug'
@@ -65,6 +66,11 @@ const AdminRemindersRoute = AdminRemindersRouteImport.update({
 const AdminModelsRoute = AdminModelsRouteImport.update({
   id: '/models',
   path: '/models',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminMemoryRoute = AdminMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminLogsRoute = AdminLogsRouteImport.update({
@@ -129,6 +135,7 @@ export interface FileRoutesByFullPath {
   '/debug': typeof AdminDebugRoute
   '/diagnostics': typeof AdminDiagnosticsRoute
   '/logs': typeof AdminLogsRoute
+  '/memory': typeof AdminMemoryRoute
   '/models': typeof AdminModelsRoute
   '/reminders': typeof AdminRemindersRoute
   '/sessions': typeof AdminSessionsRouteWithChildren
@@ -147,6 +154,7 @@ export interface FileRoutesByTo {
   '/debug': typeof AdminDebugRoute
   '/diagnostics': typeof AdminDiagnosticsRoute
   '/logs': typeof AdminLogsRoute
+  '/memory': typeof AdminMemoryRoute
   '/models': typeof AdminModelsRoute
   '/reminders': typeof AdminRemindersRoute
   '/sessions': typeof AdminSessionsRouteWithChildren
@@ -168,6 +176,7 @@ export interface FileRoutesById {
   '/_admin/debug': typeof AdminDebugRoute
   '/_admin/diagnostics': typeof AdminDiagnosticsRoute
   '/_admin/logs': typeof AdminLogsRoute
+  '/_admin/memory': typeof AdminMemoryRoute
   '/_admin/models': typeof AdminModelsRoute
   '/_admin/reminders': typeof AdminRemindersRoute
   '/_admin/sessions': typeof AdminSessionsRouteWithChildren
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
     | '/debug'
     | '/diagnostics'
     | '/logs'
+    | '/memory'
     | '/models'
     | '/reminders'
     | '/sessions'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
     | '/debug'
     | '/diagnostics'
     | '/logs'
+    | '/memory'
     | '/models'
     | '/reminders'
     | '/sessions'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '/_admin/debug'
     | '/_admin/diagnostics'
     | '/_admin/logs'
+    | '/_admin/memory'
     | '/_admin/models'
     | '/_admin/reminders'
     | '/_admin/sessions'
@@ -298,6 +310,13 @@ declare module '@tanstack/react-router' {
       path: '/models'
       fullPath: '/models'
       preLoaderRoute: typeof AdminModelsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/memory': {
+      id: '/_admin/memory'
+      path: '/memory'
+      fullPath: '/memory'
+      preLoaderRoute: typeof AdminMemoryRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_admin/logs': {
@@ -395,6 +414,7 @@ interface AdminRouteChildren {
   AdminDebugRoute: typeof AdminDebugRoute
   AdminDiagnosticsRoute: typeof AdminDiagnosticsRoute
   AdminLogsRoute: typeof AdminLogsRoute
+  AdminMemoryRoute: typeof AdminMemoryRoute
   AdminModelsRoute: typeof AdminModelsRoute
   AdminRemindersRoute: typeof AdminRemindersRoute
   AdminSessionsRoute: typeof AdminSessionsRouteWithChildren
@@ -414,6 +434,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminDebugRoute: AdminDebugRoute,
   AdminDiagnosticsRoute: AdminDiagnosticsRoute,
   AdminLogsRoute: AdminLogsRoute,
+  AdminMemoryRoute: AdminMemoryRoute,
   AdminModelsRoute: AdminModelsRoute,
   AdminRemindersRoute: AdminRemindersRoute,
   AdminSessionsRoute: AdminSessionsRouteWithChildren,

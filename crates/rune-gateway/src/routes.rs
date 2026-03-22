@@ -3906,6 +3906,47 @@ pub async fn memory_search(
     }))
 }
 
+/// `GET /api/memory/graph` — knowledge graph of Mem0 memories.
+///
+/// Returns nodes (memories) and edges (cosine similarity above threshold)
+/// for Obsidian-style visualization.
+pub async fn memory_graph(
+    State(state): State<AppState>,
+    Query(params): Query<MemoryGraphQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    let threshold = params.threshold.unwrap_or(0.45);
+    let neighbors = params.neighbors.unwrap_or(5).min(20) as i64;
+
+    let graph = mem0.graph(threshold, neighbors).await;
+
+    Ok(Json(json!({
+        "nodes": graph.nodes.iter().map(|n| json!({
+            "id": n.id.to_string(),
+            "fact": n.fact,
+            "category": n.category,
+            "session_id": n.source_session_id.map(|s| s.to_string()),
+            "created_at": n.created_at.to_rfc3339(),
+            "access_count": n.access_count,
+        })).collect::<Vec<_>>(),
+        "edges": graph.edges.iter().map(|e| json!({
+            "source": e.source.to_string(),
+            "target": e.target.to_string(),
+            "similarity": e.similarity,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct MemoryGraphQuery {
+    pub threshold: Option<f64>,
+    pub neighbors: Option<usize>,
+}
+
 // ── Logs ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

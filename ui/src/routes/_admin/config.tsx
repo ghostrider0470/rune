@@ -67,11 +67,11 @@ function ConfigPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="space-y-8">
+      <div className="flex items-center justify-between gap-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Configuration</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight">Configuration</h1>
+          <p className="mt-1 text-muted-foreground">
             Live application configuration (secrets redacted).
           </p>
         </div>
@@ -93,7 +93,7 @@ function ConfigPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="form" className="space-y-4">
+        <TabsContent value="form" className="space-y-6">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -139,7 +139,7 @@ function ConfigPage() {
               <CardTitle className="text-base">
                 {editMode ? "Edit Configuration" : "Full Configuration"}
               </CardTitle>
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <Button
                   variant="outline"
                   size="sm"
@@ -159,7 +159,7 @@ function ConfigPage() {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-2">
+            <CardContent className="space-y-3">
               {saveError && (
                 <p className="text-sm text-red-600">{saveError}</p>
               )}

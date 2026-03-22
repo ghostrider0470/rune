@@ -55,11 +55,11 @@ function RemindersPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Reminders</h1>
-          <p className="text-muted-foreground">Scheduled reminder notifications</p>
+          <h1 className="text-3xl font-bold tracking-tight">Reminders</h1>
+          <p className="mt-1 text-muted-foreground">Scheduled reminder notifications</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
@@ -73,7 +73,7 @@ function RemindersPage() {
               <DialogTitle>Create Reminder</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Message</Label>
                 <Textarea
                   value={message}
@@ -81,7 +81,7 @@ function RemindersPage() {
                   placeholder="Reminder message..."
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Fire At</Label>
                 <Input
                   type="datetime-local"
@@ -121,31 +121,31 @@ function RemindersPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Message</TableHead>
-                  <TableHead>Target</TableHead>
-                  <TableHead>Fire At</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="py-3.5">Message</TableHead>
+                  <TableHead className="py-3.5">Target</TableHead>
+                  <TableHead className="py-3.5">Fire At</TableHead>
+                  <TableHead className="py-3.5">Status</TableHead>
+                  <TableHead className="py-3.5 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {reminders.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="max-w-xs truncate text-sm">
+                    <TableCell className="max-w-xs truncate py-3 text-sm">
                       {r.message}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-3">
                       <Badge variant="outline">{r.target}</Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="py-3 text-xs text-muted-foreground">
                       {new Date(r.fire_at).toLocaleString()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-3">
                       <Badge variant={r.delivered ? "secondary" : "default"}>
                         {r.delivered ? "Delivered" : "Pending"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="py-3 text-right">
                       {!r.delivered && (
                         <Button
                           variant="ghost"

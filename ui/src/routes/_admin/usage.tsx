@@ -95,11 +95,11 @@ function UsagePage() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Usage</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight">Usage</h1>
+          <p className="mt-1 text-muted-foreground">
             Token usage and cost analytics
           </p>
         </div>
@@ -115,7 +115,7 @@ function UsagePage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -215,13 +215,13 @@ function UsagePage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>
+                  <TableHead className="py-3.5">
                     {groupBy === "model" ? "Model" : "Date"}
                   </TableHead>
-                  <TableHead className="text-right">Prompt</TableHead>
-                  <TableHead className="text-right">Completion</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">Requests</TableHead>
+                  <TableHead className="py-3.5 text-right">Prompt</TableHead>
+                  <TableHead className="py-3.5 text-right">Completion</TableHead>
+                  <TableHead className="py-3.5 text-right">Total</TableHead>
+                  <TableHead className="py-3.5 text-right">Requests</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -229,21 +229,21 @@ function UsagePage() {
                   .sort((a, b) => b.total_tokens - a.total_tokens)
                   .map((row) => (
                     <TableRow key={row.label}>
-                      <TableCell>
+                      <TableCell className="py-3">
                         <Badge variant="outline" className="font-mono text-xs">
                           {row.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
+                      <TableCell className="py-3 text-right font-mono text-sm">
                         {row.prompt_tokens.toLocaleString()}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
+                      <TableCell className="py-3 text-right font-mono text-sm">
                         {row.completion_tokens.toLocaleString()}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm font-medium">
+                      <TableCell className="py-3 text-right font-mono text-sm font-medium">
                         {row.total_tokens.toLocaleString()}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
+                      <TableCell className="py-3 text-right font-mono text-sm">
                         {row.request_count.toLocaleString()}
                       </TableCell>
                     </TableRow>

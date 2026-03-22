@@ -160,13 +160,13 @@ function CronPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Cron Jobs</h1>
-          <p className="text-muted-foreground">Scheduled tasks and automation</p>
+          <h1 className="text-3xl font-bold tracking-tight">Cron Jobs</h1>
+          <p className="mt-1 text-muted-foreground">Scheduled tasks and automation</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-3">
           <Dialog open={wakeOpen} onOpenChange={setWakeOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" className="gap-2">
@@ -179,7 +179,7 @@ function CronPage() {
                 <DialogTitle>Wake Trigger</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 pt-4">
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Message</Label>
                   <Textarea
                     value={wakeText}
@@ -210,7 +210,7 @@ function CronPage() {
                 <DialogTitle>Create Cron Job</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 pt-4">
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Name</Label>
                   <Input
                     value={newName}
@@ -218,7 +218,7 @@ function CronPage() {
                     placeholder="Job name"
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Cron Expression</Label>
                   <Input
                     value={newExpr}
@@ -226,7 +226,7 @@ function CronPage() {
                     placeholder="0 */5 * * * *"
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Session Target</Label>
                   <Input
                     value={newTarget}
@@ -234,7 +234,7 @@ function CronPage() {
                     placeholder="isolated or main"
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Message</Label>
                   <Textarea
                     value={newMessage}
@@ -258,13 +258,13 @@ function CronPage() {
       {/* Status bar */}
       {status && (
         <div className="flex flex-wrap gap-3">
-          <Badge variant="outline" className="gap-1">
+          <Badge variant="outline" className="gap-2">
             Total: {status.total_jobs}
           </Badge>
-          <Badge variant="outline" className="gap-1">
+          <Badge variant="outline" className="gap-2">
             Enabled: {status.enabled_jobs}
           </Badge>
-          <Badge variant={status.due_jobs > 0 ? "default" : "outline"} className="gap-1">
+          <Badge variant={status.due_jobs > 0 ? "default" : "outline"} className="gap-2">
             Due: {status.due_jobs}
           </Badge>
         </div>

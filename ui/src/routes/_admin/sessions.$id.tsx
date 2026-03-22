@@ -89,9 +89,9 @@ function SessionDetailPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Session</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Session</h1>
         <code className="rounded bg-muted px-2 py-1 text-sm">{id ? `${id.slice(0, 12)}...` : "unknown"}</code>
         <Link
           to="/chat"
@@ -242,7 +242,7 @@ function SessionDetailPage() {
           <Separator className="my-4" />
 
           {/* Message input */}
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <Textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}

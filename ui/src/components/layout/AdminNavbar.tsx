@@ -18,6 +18,7 @@ import {
   Bot,
   Wrench,
   Settings2,
+  BrainCircuit,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,7 @@ const navItems: NavItem[] = [
   { label: "Sessions", href: "/sessions", icon: MessageSquare, match: "prefix" },
   { label: "Models", href: "/models", icon: Cpu, match: "prefix" },
   { label: "Cron", href: "/cron", icon: Clock, match: "prefix" },
+  { label: "Memory", href: "/memory", icon: BrainCircuit, match: "prefix" },
   { label: "Approvals", href: "/approvals", icon: ShieldCheck, match: "prefix" },
   { label: "Diagnostics", href: "/diagnostics", icon: AlertTriangle, match: "prefix" },
 ];
@@ -103,7 +105,7 @@ export function AdminNavbar() {
       <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 pointer-events-none z-0" />
 
       <div className="relative z-10 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-14 items-center justify-between sm:h-16">
+        <div className="flex h-16 items-center justify-between sm:h-18">
           {/* Left: Logo + Admin badge + nav links */}
           <div className="flex items-center gap-4">
             <Link
@@ -126,7 +128,7 @@ export function AdminNavbar() {
             </Link>
 
             {/* Desktop nav links */}
-            <div className="hidden lg:flex items-center gap-1">
+            <div className="hidden lg:flex items-center gap-1.5">
               {navItems.map((item) => {
                 const active = isActive(pathname, item);
                 const Icon = item.icon;
@@ -136,7 +138,7 @@ export function AdminNavbar() {
                     to={item.href}
                     search={item.href === "/chat" ? chatLinkSearch : undefined}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium transition-colors",
                       active
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -156,7 +158,7 @@ export function AdminNavbar() {
                     to={item.href}
                     search={item.href === "/chat" ? chatLinkSearch : undefined}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium transition-colors",
                       active
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -186,7 +188,7 @@ export function AdminNavbar() {
                 side="right"
                 className="inset-y-auto top-[calc(3.5rem+env(safe-area-inset-top))] h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] w-screen max-w-none border-l-0 bg-background p-0 [&>button]:hidden sm:top-[calc(4rem+env(safe-area-inset-top))] sm:h-[calc(100dvh-4rem-env(safe-area-inset-top))] sm:max-w-none"
               >
-                <SheetHeader className="border-b px-5 pb-4 pt-4">
+                <SheetHeader className="border-b px-6 pb-5 pt-5">
                   <SheetTitle className="px-0 pt-0">
                     <div className="text-left">
                       <p className="text-xs text-muted-foreground uppercase tracking-wider">
@@ -199,9 +201,9 @@ export function AdminNavbar() {
                   </SheetTitle>
                 </SheetHeader>
 
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
-                  <div className="mx-auto grid w-full max-w-md gap-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-                    <div className="grid gap-2">
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+                  <div className="mx-auto grid w-full max-w-md gap-5 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+                    <div className="grid gap-3">
                       {allItems.map((item) => {
                         const active = isActive(pathname, item);
                         const Icon = item.icon;

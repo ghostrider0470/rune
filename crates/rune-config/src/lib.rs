@@ -1476,6 +1476,11 @@ pub struct Mem0Config {
     /// Cosine similarity above which a new fact is considered a duplicate.
     #[serde(default = "Mem0Config::default_dedup_threshold")]
     pub dedup_threshold: f64,
+
+    /// Model used for fact extraction (e.g. "gpt-5.4").  Passed as-is to
+    /// the routing provider.  If empty, defaults to "gpt-5.4".
+    #[serde(default = "Mem0Config::default_extraction_model")]
+    pub extraction_model: String,
 }
 
 /// `Eq` is required because `AppConfig` derives `Eq`. Configuration
@@ -1492,6 +1497,7 @@ impl PartialEq for Mem0Config {
             && self.top_k == other.top_k
             && self.similarity_threshold.to_bits() == other.similarity_threshold.to_bits()
             && self.dedup_threshold.to_bits() == other.dedup_threshold.to_bits()
+            && self.extraction_model == other.extraction_model
     }
 }
 impl Eq for Mem0Config {}
@@ -1515,6 +1521,9 @@ impl Mem0Config {
     fn default_dedup_threshold() -> f64 {
         0.85
     }
+    fn default_extraction_model() -> String {
+        "gpt-5.4".to_string()
+    }
 }
 
 impl Default for Mem0Config {
@@ -1530,6 +1539,7 @@ impl Default for Mem0Config {
             top_k: Self::default_top_k(),
             similarity_threshold: Self::default_similarity_threshold(),
             dedup_threshold: Self::default_dedup_threshold(),
+            extraction_model: Self::default_extraction_model(),
         }
     }
 }

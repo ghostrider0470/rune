@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use rune_config::Mem0Config;
 use rune_models::ModelProvider;
 use serde::{Deserialize, Serialize};
+use tokio_postgres::types::Type;
 use tokio_postgres::Client;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -27,6 +28,21 @@ pub struct Memory {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub access_count: i32,
+}
+
+/// A graph of memories: nodes + similarity edges for visualization.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MemoryGraph {
+    pub nodes: Vec<Memory>,
+    pub edges: Vec<MemoryEdge>,
+}
+
+/// A similarity edge between two memories.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MemoryEdge {
+    pub source: Uuid,
+    pub target: Uuid,
+    pub similarity: f64,
 }
 
 /// Mem0 engine that manages the full recall/capture lifecycle.
@@ -227,13 +243,15 @@ impl Mem0Engine {
         let embedding_str = format_vector(&embedding);
         let client = self.client.lock().await;
 
+        // Use query_typed so tokio-postgres sends the vector literal as TEXT
+        // and lets Postgres handle the ::vector cast in the SQL.
         let rows = match client
-            .query(
+            .query_typed(
                 RECALL_SQL,
                 &[
-                    &embedding_str,
-                    &self.config.similarity_threshold,
-                    &(self.config.top_k as i64),
+                    (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                    (&self.config.similarity_threshold as &(dyn tokio_postgres::types::ToSql + Sync), Type::FLOAT8),
+                    (&(self.config.top_k as i64) as &(dyn tokio_postgres::types::ToSql + Sync), Type::INT8),
                 ],
             )
             .await
@@ -314,6 +332,113 @@ impl Mem0Engine {
             "mem0 capture: facts stored for session"
         );
         stored
+    }
+
+    /// Return all memories (for graph visualization and admin dashboards).
+    pub async fn list_all(&self) -> Vec<Memory> {
+        let client = self.client.lock().await;
+        let rows = match client
+            .query(
+                "SELECT id, fact, category, source_session_id, created_at, updated_at, access_count FROM rune_memories ORDER BY created_at DESC",
+                &[],
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "mem0 list_all: query failed");
+                return Vec::new();
+            }
+        };
+
+        rows.iter()
+            .map(|row| Memory {
+                id: row.get("id"),
+                fact: row.get("fact"),
+                category: row.get("category"),
+                source_session_id: row.get("source_session_id"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                access_count: row.get("access_count"),
+            })
+            .collect()
+    }
+
+    /// Build a knowledge graph: nodes (memories) + edges (cosine similarity above threshold).
+    ///
+    /// Uses a single LATERAL JOIN query to find the K nearest neighbors per node,
+    /// with `a.id < b.id` to deduplicate edges at the SQL level.
+    pub async fn graph(&self, edge_threshold: f64, neighbors_k: i64) -> MemoryGraph {
+        let client = self.client.lock().await;
+
+        // Get all memories
+        let rows = match client
+            .query(
+                "SELECT id, fact, category, source_session_id, created_at, updated_at, access_count FROM rune_memories ORDER BY created_at DESC",
+                &[],
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "mem0 graph: node query failed");
+                return MemoryGraph { nodes: vec![], edges: vec![] };
+            }
+        };
+
+        let nodes: Vec<Memory> = rows
+            .iter()
+            .map(|row| Memory {
+                id: row.get("id"),
+                fact: row.get("fact"),
+                category: row.get("category"),
+                source_session_id: row.get("source_session_id"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                access_count: row.get("access_count"),
+            })
+            .collect();
+
+        // Single query: for each node, find top-K neighbors with similarity > threshold.
+        // a.id < b.id deduplicates edges (A-B only appears once).
+        let edge_rows = match client
+            .query_typed(
+                r#"SELECT a.id AS source_id, b.id AS target_id,
+                          1 - (a.embedding <=> b.embedding) AS similarity
+                   FROM rune_memories a
+                   JOIN LATERAL (
+                       SELECT b.id, b.embedding
+                       FROM rune_memories b
+                       WHERE b.id > a.id
+                         AND 1 - (a.embedding <=> b.embedding) > $1
+                       ORDER BY a.embedding <=> b.embedding
+                       LIMIT $2
+                   ) b ON true"#,
+                &[
+                    (&edge_threshold as &(dyn tokio_postgres::types::ToSql + Sync), Type::FLOAT8),
+                    (&neighbors_k as &(dyn tokio_postgres::types::ToSql + Sync), Type::INT8),
+                ],
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(error = %e, "mem0 graph: edge query failed");
+                return MemoryGraph { nodes, edges: vec![] };
+            }
+        };
+
+        let edges: Vec<MemoryEdge> = edge_rows
+            .iter()
+            .map(|row| MemoryEdge {
+                source: row.get("source_id"),
+                target: row.get("target_id"),
+                similarity: row.get("similarity"),
+            })
+            .collect();
+
+        debug!(nodes = nodes.len(), edges = edges.len(), "mem0 graph built");
+        MemoryGraph { nodes, edges }
     }
 
     /// Format recalled memories for injection into the system prompt.
@@ -418,7 +543,7 @@ impl Mem0Engine {
                     tool_calls: None,
                 },
             ],
-            model: None, // use the provider's default
+            model: Some(self.config.extraction_model.clone()),
             temperature: Some(0.0),
             max_tokens: Some(1024),
             tools: None,
@@ -465,9 +590,12 @@ impl Mem0Engine {
 
         // Check for near-duplicate
         let dedup_rows = client
-            .query(
+            .query_typed(
                 DEDUP_CHECK_SQL,
-                &[&embedding_str, &self.config.dedup_threshold],
+                &[
+                    (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                    (&self.config.dedup_threshold as &(dyn tokio_postgres::types::ToSql + Sync), Type::FLOAT8),
+                ],
             )
             .await
             .map_err(|e| format!("dedup check failed: {e}"))?;
@@ -478,14 +606,14 @@ impl Mem0Engine {
 
             // Update the existing memory with the newer, potentially better phrasing
             client
-                .execute(
+                .query_typed(
                     UPDATE_MEMORY_SQL,
                     &[
-                        &existing_id,
-                        &fact.fact,
-                        &fact.category,
-                        &embedding_str,
-                        &now,
+                        (&existing_id as &(dyn tokio_postgres::types::ToSql + Sync), Type::UUID),
+                        (&fact.fact as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                        (&fact.category as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                        (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                        (&now as &(dyn tokio_postgres::types::ToSql + Sync), Type::TIMESTAMPTZ),
                     ],
                 )
                 .await
@@ -498,18 +626,19 @@ impl Mem0Engine {
         // Insert new memory
         let id = Uuid::now_v7();
         let now = Utc::now();
+        let session_opt = Some(session_id);
 
         client
-            .execute(
+            .query_typed(
                 INSERT_MEMORY_SQL,
                 &[
-                    &id,
-                    &fact.fact,
-                    &fact.category,
-                    &embedding_str,
-                    &Some(session_id),
-                    &now,
-                    &now,
+                    (&id as &(dyn tokio_postgres::types::ToSql + Sync), Type::UUID),
+                    (&fact.fact as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                    (&fact.category as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                    (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
+                    (&session_opt as &(dyn tokio_postgres::types::ToSql + Sync), Type::UUID),
+                    (&now as &(dyn tokio_postgres::types::ToSql + Sync), Type::TIMESTAMPTZ),
+                    (&now as &(dyn tokio_postgres::types::ToSql + Sync), Type::TIMESTAMPTZ),
                 ],
             )
             .await

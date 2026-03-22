@@ -80,10 +80,10 @@ function ApprovalsPage() {
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-6 sm:space-y-8">
       <div className="space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">Approvals</h1>
-        <p className="text-muted-foreground">Pending approvals and tool policies</p>
+        <h1 className="text-3xl font-bold tracking-tight">Approvals</h1>
+        <p className="mt-1 text-muted-foreground">Pending approvals and tool policies</p>
       </div>
 
       {/* Pending approvals */}
@@ -128,7 +128,7 @@ function ApprovalsPage() {
                         </pre>
                       )}
                     </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <Button
                         size="sm"
                         onClick={() => submitApprovalDecision(approval.id, "approve")}
@@ -175,7 +175,7 @@ function ApprovalsPage() {
                 <DialogTitle>Set Approval Policy</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 pt-4">
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Tool Name</Label>
                   <Input
                     value={policyTool}
@@ -183,7 +183,7 @@ function ApprovalsPage() {
                     placeholder="e.g. bash, write_file"
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Decision</Label>
                   <Select value={policyDecision} onValueChange={setPolicyDecision}>
                     <SelectTrigger>
@@ -217,16 +217,16 @@ function ApprovalsPage() {
               <Table className="min-w-[36rem]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Tool</TableHead>
-                    <TableHead>Policy</TableHead>
-                    <TableHead>Set At</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="py-3.5">Tool</TableHead>
+                    <TableHead className="py-3.5">Policy</TableHead>
+                    <TableHead className="py-3.5">Set At</TableHead>
+                    <TableHead className="py-3.5 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {policies.map((p) => (
                     <TableRow key={p.tool_name}>
-                      <TableCell className="font-mono text-sm">{p.tool_name}</TableCell>
+                      <TableCell className="py-3 font-mono text-sm">{p.tool_name}</TableCell>
                       <TableCell>
                         <Badge
                           variant={
@@ -240,10 +240,10 @@ function ApprovalsPage() {
                           {p.decision}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="py-3 text-xs text-muted-foreground">
                         {new Date(p.decided_at).toLocaleString()}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="py-3 text-right">
                         <Button
                           variant="ghost"
                           size="icon"

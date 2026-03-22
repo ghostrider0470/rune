@@ -34,10 +34,10 @@ function AgentsPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
-        <p className="text-muted-foreground">
+        <h1 className="text-3xl font-bold tracking-tight">Agents</h1>
+        <p className="mt-1 text-muted-foreground">
           Configured agents and their settings
         </p>
       </div>
@@ -64,18 +64,18 @@ function AgentsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Workspace</TableHead>
-                  <TableHead>System Prompt</TableHead>
-                  <TableHead>Default</TableHead>
+                  <TableHead className="py-3.5">ID</TableHead>
+                  <TableHead className="py-3.5">Model</TableHead>
+                  <TableHead className="py-3.5">Workspace</TableHead>
+                  <TableHead className="py-3.5">System Prompt</TableHead>
+                  <TableHead className="py-3.5">Default</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {agents.map((agent) => (
                   <TableRow key={agent.id}>
-                    <TableCell className="font-medium">{agent.id}</TableCell>
-                    <TableCell>
+                    <TableCell className="py-3 font-medium">{agent.id}</TableCell>
+                    <TableCell className="py-3">
                       {agent.model ? (
                         <Badge variant="outline" className="font-mono text-xs">
                           {agent.model}
@@ -84,10 +84,10 @@ function AgentsPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="max-w-[200px] truncate font-mono text-xs">
+                    <TableCell className="max-w-[200px] truncate py-3 font-mono text-xs">
                       {agent.workspace ?? "—"}
                     </TableCell>
-                    <TableCell className="max-w-[200px] truncate text-xs">
+                    <TableCell className="max-w-[200px] truncate py-3 text-xs">
                       {agent.system_prompt ? (
                         <span title={agent.system_prompt}>
                           {agent.system_prompt.slice(0, 80)}
@@ -97,7 +97,7 @@ function AgentsPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-3">
                       {agent.default && (
                         <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
                       )}

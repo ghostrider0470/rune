@@ -21,10 +21,10 @@ function ModelsPage() {
   const { data: models, isLoading } = useDashboardModels();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Models</h1>
-        <p className="text-muted-foreground">Configured model providers and backends</p>
+        <h1 className="text-3xl font-bold tracking-tight">Models</h1>
+        <p className="mt-1 text-muted-foreground">Configured model providers and backends</p>
       </div>
 
       <Card>

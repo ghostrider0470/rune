@@ -153,6 +153,11 @@ impl TurnExecutor {
         self
     }
 
+    /// Access the Mem0 engine (if connected).
+    pub fn mem0(&self) -> Option<&Arc<Mem0Engine>> {
+        self.mem0.as_ref()
+    }
+
     /// Execute a turn for the given session, triggered by a user message.
     ///
     /// Returns the completed turn row and accumulated usage.

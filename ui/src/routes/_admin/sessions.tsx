@@ -63,11 +63,11 @@ function SessionsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Sessions</h1>
-          <p className="text-muted-foreground">Active and recent sessions</p>
+          <h1 className="text-3xl font-bold tracking-tight">Sessions</h1>
+          <p className="mt-1 text-muted-foreground">Active and recent sessions</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
@@ -81,7 +81,7 @@ function SessionsPage() {
               <DialogTitle>Create Session</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Kind</Label>
                 <Input
                   value={newKind}
@@ -89,7 +89,7 @@ function SessionsPage() {
                   placeholder="interactive"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Channel (optional)</Label>
                 <Input
                   value={newChannel}
@@ -111,7 +111,7 @@ function SessionsPage() {
 
       {/* Filters */}
       <Card>
-        <CardContent className="flex flex-wrap gap-4 pt-6">
+        <CardContent className="flex flex-wrap gap-6 pt-6">
           <div className="space-y-1">
             <Label className="text-xs">Active (minutes)</Label>
             <Input

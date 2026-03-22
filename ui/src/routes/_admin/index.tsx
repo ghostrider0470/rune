@@ -51,14 +51,14 @@ function DashboardPage() {
   const { data: diagnostics } = useDashboardDiagnostics();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Gateway overview and system health</p>
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <p className="mt-1 text-muted-foreground">Gateway overview and system health</p>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Gateway Status</CardTitle>
@@ -129,22 +129,22 @@ function DashboardPage() {
       {/* Info badges */}
       {summary && (
         <div className="flex flex-wrap gap-2">
-          <Badge variant="outline" className="gap-1">
+          <Badge variant="outline" className="gap-2">
             <Shield className="h-3 w-3" />
             Auth: {summary.auth_enabled ? "enabled" : "disabled"}
           </Badge>
-          <Badge variant="outline" className="gap-1">
+          <Badge variant="outline" className="gap-2">
             <Users className="h-3 w-3" />
             WS subscribers: {summary.ws_subscribers}
           </Badge>
           {summary.channels.map((ch) => (
-            <Badge key={ch} variant="outline" className="gap-1">
+            <Badge key={ch} variant="outline" className="gap-2">
               <Radio className="h-3 w-3" />
               {ch}
             </Badge>
           ))}
           {summary.default_model && (
-            <Badge variant="outline" className="gap-1">
+            <Badge variant="outline" className="gap-2">
               <Cpu className="h-3 w-3" />
               {summary.default_model}
             </Badge>
@@ -256,7 +256,7 @@ function DashboardPage() {
           <CardContent>
             <div className="flex flex-wrap gap-2">
               {models.map((m, i) => (
-                <Badge key={i} variant={m.is_default ? "default" : "outline"} className="gap-1">
+                <Badge key={i} variant={m.is_default ? "default" : "outline"} className="gap-2">
                   {m.is_default && <CheckCircle2 className="h-3 w-3" />}
                   {m.model_id}
                   <span className="text-muted-foreground">({m.provider_kind})</span>

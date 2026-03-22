@@ -305,13 +305,13 @@ function LogsPage() {
   const ConnectionIcon = connectionBadge.icon;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Logs</h1>
-          <p className="text-muted-foreground">Real-time gateway log stream with local filtering</p>
+          <h1 className="text-3xl font-bold tracking-tight">Logs</h1>
+          <p className="mt-1 text-muted-foreground">Real-time gateway log stream with local filtering</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           <Badge variant={connectionBadge.variant} className="gap-1.5">
             <ConnectionIcon
               className={cn(
@@ -346,7 +346,7 @@ function LogsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardContent className="pt-6">
             <div className="text-sm text-muted-foreground">Buffered entries</div>

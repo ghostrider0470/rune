@@ -33,10 +33,10 @@ function DiagnosticsPage() {
   const { data: diagnostics, isLoading: diagLoading } = useDashboardDiagnostics();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Diagnostics</h1>
-        <p className="text-muted-foreground">System health and configuration details</p>
+        <h1 className="text-3xl font-bold tracking-tight">Diagnostics</h1>
+        <p className="mt-1 text-muted-foreground">System health and configuration details</p>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

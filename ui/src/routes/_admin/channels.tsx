@@ -13,14 +13,14 @@ function ChannelsPage() {
   const { data: summary, isLoading } = useDashboardSummary();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Channels</h1>
-        <p className="text-muted-foreground">Configured communication channels</p>
+        <h1 className="text-3xl font-bold tracking-tight">Channels</h1>
+        <p className="mt-1 text-muted-foreground">Configured communication channels</p>
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-32" />
           ))}
@@ -35,7 +35,7 @@ function ChannelsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {summary.channels.map((channel) => (
             <Card key={channel}>
               <CardHeader className="flex flex-row items-center gap-3 pb-2">

@@ -103,10 +103,10 @@ function DebugPage() {
   }, [method, path, body]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Debug</h1>
-        <p className="text-muted-foreground">
+        <h1 className="text-3xl font-bold tracking-tight">Debug</h1>
+        <p className="mt-1 text-muted-foreground">
           System inspection and API testing
         </p>
       </div>
@@ -128,8 +128,8 @@ function DebugPage() {
         </TabsList>
 
         {/* Status tab */}
-        <TabsContent value="status" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
+        <TabsContent value="status" className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -169,13 +169,13 @@ function DebugPage() {
         </TabsContent>
 
         {/* API Tester tab */}
-        <TabsContent value="api" className="space-y-4">
+        <TabsContent value="api" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Request</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <Select value={method} onValueChange={setMethod}>
                   <SelectTrigger className="w-28">
                     <SelectValue />
@@ -215,7 +215,7 @@ function DebugPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Response</CardTitle>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <Badge
                       variant={
                         result.status >= 200 && result.status < 300
@@ -255,7 +255,7 @@ function DebugPage() {
         </TabsContent>
 
         {/* WebSocket tab */}
-        <TabsContent value="ws" className="space-y-4">
+        <TabsContent value="ws" className="space-y-6">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -276,7 +276,7 @@ function DebugPage() {
                     </Badge>
                   )}
                 </CardTitle>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                   <Input
                     value={wsSessionId}
                     onChange={(e) => setWsSessionId(e.target.value)}
@@ -310,7 +310,7 @@ function DebugPage() {
                       key={i}
                       className="border-b border-border/30 px-1 py-1 hover:bg-muted/40"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
                         <Badge variant="outline" className="text-[10px]">
                           {evt.kind}
                         </Badge>

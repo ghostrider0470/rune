@@ -83,7 +83,7 @@ export function AdminBottomNav() {
       className="fixed bottom-0 left-0 right-0 z-40 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 lg:hidden"
     >
       <div className="mx-auto w-full max-w-lg rounded-2xl border border-primary/20 bg-background/92 shadow-[0_10px_35px_rgba(15,23,42,0.18)] backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="flex items-center justify-between px-3 py-2.5">
+        <div className="flex items-center justify-between px-4 py-3">
           {navItems.map((item) => {
             const active = isActive(item);
             return (
@@ -93,7 +93,7 @@ export function AdminBottomNav() {
                 search={item.href === "/chat" ? chatLinkSearch : undefined}
                 aria-label={item.label}
                 className={cn(
-                  "relative flex min-h-12 min-w-[44px] flex-1 flex-col items-center justify-center gap-1.5 rounded-xl text-xs font-medium transition-all duration-200",
+                  "relative flex min-h-14 min-w-[48px] flex-1 flex-col items-center justify-center gap-2 rounded-xl text-xs font-medium transition-all duration-200",
                   designSystem.effects.focusRing,
                   active
                     ? "bg-primary/10 text-primary"
