@@ -20,7 +20,24 @@ pub struct MemoryContext {
     pub today: Option<String>,
     /// Yesterday's daily notes.
     pub yesterday: Option<String>,
+    /// Whether to include the memory curation instruction (Direct sessions only).
+    pub include_curation_instruction: bool,
 }
+
+/// Instruction appended to the system prompt for Direct sessions, telling
+/// the agent to periodically curate its long-term memory.
+const MEMORY_CURATION_INSTRUCTION: &str = "\
+## Memory Curation
+
+You should periodically review your daily notes (memory/YYYY-MM-DD.md files from the \
+last 7 days) and curate MEMORY.md with important patterns, decisions, and lessons learned. \
+When curating:
+- Move recurring themes and validated decisions into MEMORY.md
+- Remove stale or one-off entries that are no longer relevant
+- Keep MEMORY.md concise and actionable — it is loaded into every Direct session
+- Write corrections and lessons to memory/lessons.md when you notice mistakes or learn \
+from user feedback
+- You can perform this curation proactively during idle moments or when explicitly asked";
 
 impl MemoryContext {
     /// Format memory context for injection into the system prompt.
@@ -43,6 +60,10 @@ impl MemoryContext {
             if !yesterday.trim().is_empty() {
                 parts.push(format!("## Yesterday's Notes\n{yesterday}"));
             }
+        }
+
+        if self.include_curation_instruction {
+            parts.push(MEMORY_CURATION_INSTRUCTION.to_string());
         }
 
         if parts.is_empty() {
@@ -76,6 +97,7 @@ impl MemoryLoader {
         // Privacy boundary: MEMORY.md only for direct (main) sessions
         if session_kind == SessionKind::Direct {
             ctx.long_term = self.read_file("MEMORY.md").await;
+            ctx.include_curation_instruction = true;
             if ctx.long_term.is_some() {
                 debug!("loaded MEMORY.md for direct session");
             }

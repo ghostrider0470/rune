@@ -104,6 +104,7 @@ fn default_files_for_session(session_kind: SessionKind) -> Vec<String> {
     // Direct (main) sessions get MEMORY.md for long-term continuity
     if matches!(session_kind, SessionKind::Direct) {
         files.push("MEMORY.md".into());
+        files.push("memory/lessons.md".into());
         files.push("agent-orchestration-runbook.md".into());
     }
 
