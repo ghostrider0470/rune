@@ -1486,11 +1486,13 @@ pub async fn run(cli: Cli) -> Result<()> {
                         .ms365_todo_task_update(
                             &list_id,
                             &id,
-                            title.as_deref(),
-                            status.as_deref(),
-                            importance.as_deref(),
-                            due_date.as_deref(),
-                            body.as_deref(),
+                            crate::client::Ms365TodoTaskUpdateInput {
+                                title,
+                                status,
+                                importance,
+                                due_date,
+                                body,
+                            },
                         )
                         .await?;
                     println!("{}", render(&result, format));

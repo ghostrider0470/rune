@@ -34,6 +34,16 @@ pub struct GatewayClient {
     pub(crate) http: Client,
 }
 
+
+#[derive(Debug, Clone, Default)]
+pub struct Ms365TodoTaskUpdateInput {
+    pub title: Option<String>,
+    pub status: Option<String>,
+    pub importance: Option<String>,
+    pub due_date: Option<String>,
+    pub body: Option<String>,
+}
+
 impl GatewayClient {
     /// Create a new gateway client pointing at the given base URL.
     #[must_use]
@@ -3595,26 +3605,22 @@ impl GatewayClient {
         &self,
         list_id: &str,
         id: &str,
-        title: Option<&str>,
-        status: Option<&str>,
-        importance: Option<&str>,
-        due_date: Option<&str>,
-        body: Option<&str>,
+        update: Ms365TodoTaskUpdateInput,
     ) -> Result<crate::output::Ms365TodoTaskUpdateResponse> {
         let mut payload = serde_json::json!({});
-        if let Some(title) = title {
+        if let Some(title) = update.title.as_deref() {
             payload["title"] = serde_json::json!(title);
         }
-        if let Some(status) = status {
+        if let Some(status) = update.status.as_deref() {
             payload["status"] = serde_json::json!(status);
         }
-        if let Some(importance) = importance {
+        if let Some(importance) = update.importance.as_deref() {
             payload["importance"] = serde_json::json!(importance);
         }
-        if let Some(due_date) = due_date {
+        if let Some(due_date) = update.due_date.as_deref() {
             payload["due_date"] = serde_json::json!(due_date);
         }
-        if let Some(body) = body {
+        if let Some(body) = update.body.as_deref() {
             payload["body"] = serde_json::json!(body);
         }
         let r = self
@@ -5996,11 +6002,11 @@ mod tests {
             .ms365_todo_task_update(
                 "list-1",
                 "task-1",
-                None,
-                Some("inProgress"),
-                Some("high"),
-                None,
-                None,
+                Ms365TodoTaskUpdateInput {
+                    status: Some("inProgress".to_string()),
+                    importance: Some("high".to_string()),
+                    ..Ms365TodoTaskUpdateInput::default()
+                },
             )
             .await
             .unwrap();
