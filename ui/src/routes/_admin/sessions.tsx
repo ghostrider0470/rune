@@ -22,8 +22,8 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "@tanstack/react-router";
-import { useSessions, useCreateSession } from "@/hooks/use-sessions";
-import { MessageSquare, Plus } from "lucide-react";
+import { useSessions, useCreateSession, useDeleteSession } from "@/hooks/use-sessions";
+import { MessageSquare, Plus, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/sessions")({
   component: SessionsPage,
@@ -44,6 +44,7 @@ function SessionsPage() {
   });
 
   const createSession = useCreateSession();
+  const deleteSession = useDeleteSession();
 
   const handleCreate = () => {
     createSession.mutate(
@@ -171,6 +172,7 @@ function SessionsPage() {
                   <TableHead>Turns</TableHead>
                   <TableHead>Model</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead className="w-12"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -218,6 +220,20 @@ function SessionsPage() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(s.created_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          if (window.confirm("Delete this session?")) {
+                            deleteSession.mutate(s.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

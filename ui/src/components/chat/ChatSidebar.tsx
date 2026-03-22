@@ -12,6 +12,7 @@ import {
   CircleDot,
   Sparkles,
   ChevronRight,
+  Trash2,
   Wrench,
   Clock3,
   Copy,
@@ -29,6 +30,7 @@ interface ChatSidebarProps {
   activeSessionId?: string;
   onSelectSession?: (id: string) => void;
   onCreateSession?: () => void;
+  onDeleteSession?: (id: string) => void;
   isCreating?: boolean;
   className?: string;
   mode?: "sessions" | "inspector";
@@ -221,6 +223,7 @@ export function ChatSidebar({
   activeSessionId,
   onSelectSession,
   onCreateSession,
+  onDeleteSession,
   isCreating,
   className,
   mode = "sessions",
@@ -450,6 +453,30 @@ export function ChatSidebar({
                       >
                         {session.status}
                       </Badge>
+                      {onDeleteSession && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm("Delete this session and its transcript?")) {
+                              onDeleteSession(session.id);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.stopPropagation();
+                              if (window.confirm("Delete this session and its transcript?")) {
+                                onDeleteSession(session.id);
+                              }
+                            }
+                          }}
+                          className="hidden rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:inline-flex"
+                          title="Delete session"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </span>
+                      )}
                       <ChevronRight
                         className={cn(
                           "h-4 w-4 shrink-0 text-muted-foreground transition-transform",

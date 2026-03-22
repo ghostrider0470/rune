@@ -31,6 +31,7 @@ import {
   useChatSend,
   useChatMergedTranscript,
 } from "@/hooks/use-chat";
+import { useDeleteSession } from "@/hooks/use-sessions";
 import { useA2ui } from "@/hooks/use-a2ui";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatThread } from "@/components/chat/ChatThread";
@@ -118,6 +119,7 @@ function ChatPage() {
 
   const { state: a2uiState } = useA2ui(rawEvents);
   const sendMutation = useChatSend(activeSessionId);
+  const deleteMutation = useDeleteSession();
 
   const activeSession = useMemo(
     () => sessions?.find((session) => session.id === activeSessionId),
@@ -167,6 +169,20 @@ function ChatPage() {
       },
     );
   }, [createSession, setActiveSessionId]);
+
+  const handleDeleteSession = useCallback(
+    (id: string) => {
+      deleteMutation.mutate(id, {
+        onSuccess: () => {
+          if (activeSessionId === id) {
+            const remaining = sessions?.filter((s) => s.id !== id);
+            setActiveSessionId(remaining?.[0]?.id, true);
+          }
+        },
+      });
+    },
+    [activeSessionId, deleteMutation, sessions, setActiveSessionId],
+  );
 
   const handleSelectSession = useCallback(
     (id: string) => {
@@ -425,6 +441,7 @@ function ChatPage() {
             isLoading={sessionsLoading}
             activeSessionId={activeSessionId}
             onSelectSession={handleSelectSession}
+            onDeleteSession={handleDeleteSession}
             onCreateSession={handleCreateSession}
             isCreating={createSession.isPending}
             className="h-full"
@@ -450,6 +467,7 @@ function ChatPage() {
                     isLoading={sessionsLoading}
                     activeSessionId={activeSessionId}
                     onSelectSession={handleSelectSession}
+            onDeleteSession={handleDeleteSession}
                     onCreateSession={handleCreateSession}
                     isCreating={createSession.isPending}
                     className="border-r-0"

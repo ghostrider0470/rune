@@ -68,6 +68,20 @@ export function useCreateSession() {
   });
 }
 
+export function useDeleteSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      api.delete(`/sessions/${sessionId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+    },
+  });
+}
+
 export function useSendMessage(sessionId: string) {
   const queryClient = useQueryClient();
 
