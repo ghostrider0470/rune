@@ -9,6 +9,12 @@ run_migrations = true
 [channels]
 # telegram_token = "YOUR_BOT_TOKEN"
 
+[ms365]
+# tenant_id = "00000000-0000-0000-0000-000000000000"
+# client_id = "11111111-1111-1111-1111-111111111111"
+# user_principal = "user@example.com"
+# scopes = ["User.Read", "Mail.Read", "Calendars.Read"]
+
 [models]
 default_model = "oc-01-anthropic/claude-sonnet-4-6"
 

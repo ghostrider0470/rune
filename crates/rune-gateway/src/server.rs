@@ -403,6 +403,8 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/stt/transcribe", post(routes::stt_transcribe))
         .route("/stt/enable", post(routes::stt_enable))
         .route("/stt/disable", post(routes::stt_disable))
+        // Microsoft 365 routes
+        .route("/ms365/auth/status", get(routes::ms365_auth_status))
         // Config editor routes
         .route(
             "/config",

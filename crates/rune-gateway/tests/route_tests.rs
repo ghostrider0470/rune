@@ -2635,6 +2635,90 @@ async fn health_is_public_even_with_auth() {
 }
 
 #[tokio::test]
+async fn ms365_auth_status_returns_unconfigured_response() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/auth/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["authenticated"], false);
+    assert_eq!(json["tenant_id"], Value::Null);
+    assert_eq!(json["client_id"], Value::Null);
+    assert_eq!(json["user_principal"], Value::Null);
+    assert_eq!(json["scopes"], serde_json::json!([]));
+    assert_eq!(json["token_valid"], false);
+    assert_eq!(json["token_expires_at"], Value::Null);
+}
+
+#[tokio::test]
+async fn ms365_auth_status_returns_configured_response() {
+    let mut config = AppConfig::default();
+    config.ms365.tenant_id = Some("tenant-123".to_string());
+    config.ms365.client_id = Some("client-456".to_string());
+    config.ms365.user_principal = Some("user@example.com".to_string());
+    config.ms365.scopes = vec!["Mail.Read".to_string(), "Calendars.Read".to_string()];
+
+    let app = build_test_app_with_config(config, None);
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/auth/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["authenticated"], false);
+    assert_eq!(json["tenant_id"], "tenant-123");
+    assert_eq!(json["client_id"], "client-456");
+    assert_eq!(json["user_principal"], "user@example.com");
+    assert_eq!(
+        json["scopes"],
+        serde_json::json!(["Mail.Read", "Calendars.Read"])
+    );
+    assert_eq!(json["token_valid"], false);
+    assert_eq!(json["token_expires_at"], Value::Null);
+}
+
+#[tokio::test]
+async fn ms365_auth_status_requires_auth_when_gateway_token_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/ms365/auth/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/auth/status")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn device_management_requires_gateway_token_even_when_auth_enabled() {
     let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
 
