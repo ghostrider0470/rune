@@ -159,7 +159,7 @@ impl MergeQueue {
         // 2. Checkout default branch and squash-merge.
         git.checkout(&self.default_branch)
             .await
-            .map_err(|e| OrchestratorError::Io(e))?;
+            .map_err(OrchestratorError::Io)?;
 
         if let Err(_e) = git.squash_merge(&entry.branch, entry.pr_number).await {
             return Ok(MergeResult::CiFailed {
