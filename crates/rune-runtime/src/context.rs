@@ -127,20 +127,32 @@ impl ContextAssembler {
 
     fn item_to_chat_message(&self, item: TranscriptItem) -> Option<ChatMessage> {
         match item {
-            TranscriptItem::UserMessage { message } => Some(ChatMessage {
-                role: Role::User,
-                content: Some(message.content),
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            }),
-            TranscriptItem::AssistantMessage { content } => Some(ChatMessage {
-                role: Role::Assistant,
-                content: Some(content),
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            }),
+            TranscriptItem::UserMessage { message } => {
+                // OpenAI rejects user messages with empty content.
+                // This can happen with media-only messages or commands.
+                if message.content.trim().is_empty() {
+                    return None;
+                }
+                Some(ChatMessage {
+                    role: Role::User,
+                    content: Some(message.content),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                })
+            }
+            TranscriptItem::AssistantMessage { content } => {
+                if content.trim().is_empty() {
+                    return None;
+                }
+                Some(ChatMessage {
+                    role: Role::Assistant,
+                    content: Some(content),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                })
+            }
             // ToolRequest is handled by the grouping logic in assemble()
             TranscriptItem::ToolRequest { .. } => None,
             TranscriptItem::ToolResult {
