@@ -121,6 +121,7 @@ impl ContextAssembler {
             }
         }
 
+        sanitize_tool_calls(&mut messages);
         compaction.compact(messages)
     }
 
