@@ -16,7 +16,7 @@ Heartbeats, cron jobs, wake events, reminders, and periodic tasks.
 Workspace memory files, semantic retrieval, indexing, and safe recall APIs.
 
 ## 6. Tools
-Filesystem tools, process tools, scheduler tools, session tools, memory tools, and future browser/media tools.
+Filesystem tools, process tools, scheduler tools, session tools, memory tools, ACP dispatch (Claude Code / Codex CLI), and future browser/media tools.
 
 ## 7. Skills / plugins
 Prompt-triggered skills plus executable extensions.

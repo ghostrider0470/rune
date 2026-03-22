@@ -61,7 +61,7 @@
 | `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack`, `list-reactions` shipped | #74 |
 | `agent` | — | **Not started** | Direct agent-turn invocation | #70 |
 | `agents` | `rune agents` | **Partial** | `list`, `show`, `status`, `tree`, `templates`, `start --template` shipped. `steer`/`kill` remain blocked because no client-facing transport surface exists yet to send those control actions, even though internal lifecycle/session logic already exists. | #63/#70 |
-| `acp` | — | **Not started** | ACP bridge/client | #70 |
+| `acp` | `acp_dispatch` tool | **Partial** | Tool dispatches tasks to Claude Code / Codex CLIs as subprocesses. CLI `rune acp send/inbox/ack` surface not yet wired. | #70 |
 | `devices` | — | **Not started** | `list`, `remove`, `clear`, `approve`, `reject`, `rotate`, `revoke` | — |
 | `pairing` | — | **Not started** | `list`, `approve` | — |
 | `node` | — | **Not started** | `run`, `status`, `install`, `uninstall`, `stop`, `restart` | — |
@@ -172,7 +172,7 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 7. `config` — bridge from shipped local/gateway config surfaces to true interactive configure parity (#40/#61)
 
 ### Medium-term (Tier 1, highest value)
-8. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` inspect/start surfaces, including the missing client-facing transport needed for `steer` / `kill` parity (#70)
+8. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` inspect/start surfaces, including the missing client-facing transport needed for `steer` / `kill` parity (#70). **`acp_dispatch` tool now ships** — dispatches to Claude Code / Codex CLIs as subprocesses. CLI `rune acp send/inbox/ack` surface still needs gateway route wiring.
 9. `skills` / `plugins` / `hooks` — complete extension lifecycle beyond the shipped `skills` family core (#71/#68)
 10. `backup` — backup/restore workflow (#67)
 11. `devices` / `pairing` / `node` / `nodes` — multi-node surface (no issue yet)

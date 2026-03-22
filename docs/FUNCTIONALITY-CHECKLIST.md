@@ -122,7 +122,8 @@ Implementation note (2026-03-19): the operator CLI now exposes the `models` comm
 - [x] message moderation breadth (`ban`/`kick`/`timeout`) explicitly deferred/not started and tracked in `docs/parity/CLI-MATRIX.md`
 - [ ] `agent` command
 - [ ] `agents` command family
-- [ ] `acp` command family
+- [x] `acp` tool dispatch — `acp_dispatch` tool registered; dispatches to Claude Code CLI and Codex CLI as subprocesses
+- [ ] `acp` CLI command family (`rune acp send/inbox/ack`)
 - [ ] `skills` command family
 - [ ] `plugins` command family
 - [ ] `hooks` command family

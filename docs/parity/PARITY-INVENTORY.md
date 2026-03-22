@@ -611,6 +611,8 @@ Required concepts:
 - ACP bridge/runtime distinction
 - thread-bound persistent ACP sessions where supported
 
+Status: `acp_dispatch` tool implemented — dispatches to Claude Code CLI and Codex CLI as subprocesses. CLI `rune acp send/inbox/ack` surface parsed but not yet wired to gateway routes.
+
 ### Browser / TUI / dashboard / QR
 Observed local families include:
 
