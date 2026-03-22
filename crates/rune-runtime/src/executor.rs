@@ -587,13 +587,42 @@ impl TurnExecutor {
                 },
             };
 
-            // Call model
-            let response = match self.model_provider.complete(&request).await {
-                Ok(resp) => resp,
-                Err(e) => {
-                    error!(error = %e, "model call failed");
-                    return Err(RuntimeError::Model(e));
+            // Call model with retry on transient errors
+            let response = {
+                const MAX_RETRIES: u32 = 3;
+                const BACKOFF_SECS: [u64; 3] = [1, 3, 10];
+                let mut last_err = None;
+                let mut resp = None;
+
+                for attempt in 0..=MAX_RETRIES {
+                    match self.model_provider.complete(&request).await {
+                        Ok(r) => {
+                            resp = Some(r);
+                            break;
+                        }
+                        Err(e) => {
+                            if attempt < MAX_RETRIES && e.is_retriable() {
+                                let delay = BACKOFF_SECS[attempt as usize];
+                                warn!(
+                                    error = %e,
+                                    attempt = attempt + 1,
+                                    max_retries = MAX_RETRIES,
+                                    backoff_secs = delay,
+                                    "transient model error, retrying"
+                                );
+                                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                last_err = Some(e);
+                            } else {
+                                error!(error = %e, "model call failed");
+                                return Err(RuntimeError::Model(e));
+                            }
+                        }
+                    }
                 }
+
+                resp.ok_or_else(|| {
+                    RuntimeError::Model(last_err.unwrap())
+                })?
             };
 
             usage.add(&response.usage);
