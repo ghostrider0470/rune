@@ -220,6 +220,11 @@ pub enum Command {
         #[command(subcommand)]
         action: UpdateAction,
     },
+    /// Generate and inspect OS service definitions.
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
     /// Factory-reset all state (requires confirmation).
     Reset {
         /// Confirm the destructive reset operation.
@@ -1977,6 +1982,67 @@ pub enum UpdateAction {
     Apply,
     /// Show current update status.
     Status,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ServiceTarget {
+    Systemd,
+    Launchd,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ServiceAction {
+    /// Print a service definition to stdout.
+    Print {
+        /// Service target format.
+        #[arg(long, value_enum, default_value = "systemd")]
+        target: ServiceTarget,
+        /// Service name/label to embed in the unit/plist.
+        #[arg(long, default_value = "rune-gateway")]
+        name: String,
+        /// Working directory for the service process.
+        #[arg(long, default_value = ".")]
+        workdir: String,
+        /// Config path passed via RUNE_CONFIG.
+        #[arg(long)]
+        config: Option<String>,
+        /// Gateway URL exposed to the service process.
+        #[arg(long)]
+        gateway_url: Option<String>,
+        /// Start the gateway with approval.mode=yolo.
+        #[arg(long)]
+        yolo: bool,
+        /// Disable sandboxing for the service process.
+        #[arg(long)]
+        no_sandbox: bool,
+    },
+    /// Write a service definition to disk.
+    Install {
+        /// Service target format.
+        #[arg(long, value_enum, default_value = "systemd")]
+        target: ServiceTarget,
+        /// Service name/label to embed in the unit/plist.
+        #[arg(long, default_value = "rune-gateway")]
+        name: String,
+        /// Working directory for the service process.
+        #[arg(long, default_value = ".")]
+        workdir: String,
+        /// Config path passed via RUNE_CONFIG.
+        #[arg(long)]
+        config: Option<String>,
+        /// Gateway URL exposed to the service process.
+        #[arg(long)]
+        gateway_url: Option<String>,
+        /// Start the gateway with approval.mode=yolo.
+        #[arg(long)]
+        yolo: bool,
+        /// Disable sandboxing for the service process.
+        #[arg(long)]
+        no_sandbox: bool,
+        /// Output path for the generated file.
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 #[cfg(test)]

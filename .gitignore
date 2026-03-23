@@ -13,3 +13,7 @@ ui/dist
 notes/
 *:Zone.Identifier
 *:mshield
+apps/mobile/node_modules/
+apps/mobile/.expo/
+apps/mobile/dist/
+apps/mobile/.next/

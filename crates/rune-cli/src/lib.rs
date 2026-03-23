@@ -6,6 +6,7 @@ pub mod doctor;
 mod logs;
 pub mod memory;
 pub mod output;
+pub mod service;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -31,12 +32,13 @@ use cli::{
     MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
-    RemindersAction, SandboxAction, SecretsAction, SecurityAction, SessionsAction, SkillsAction,
+    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, ServiceTarget, SessionsAction, SkillsAction,
     SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
 };
+use service::{install_service_definition, print_service_definition, ServiceInstallOptions};
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
     ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
@@ -2563,6 +2565,50 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             UpdateAction::Status => {
                 let result = client.update_status().await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Service { action } => match action {
+            ServiceAction::Print {
+                target,
+                name,
+                workdir,
+                config,
+                gateway_url,
+                yolo,
+                no_sandbox,
+            } => {
+                let result = print_service_definition(
+                    target,
+                    &name,
+                    std::path::Path::new(&workdir),
+                    config.as_deref(),
+                    gateway_url.as_deref(),
+                    yolo,
+                    no_sandbox,
+                )?;
+                println!("{}", render(&result, format));
+            }
+            ServiceAction::Install {
+                target,
+                name,
+                workdir,
+                config,
+                gateway_url,
+                yolo,
+                no_sandbox,
+                output,
+            } => {
+                let result = install_service_definition(ServiceInstallOptions {
+                    target,
+                    name,
+                    workdir: std::path::PathBuf::from(workdir),
+                    config,
+                    gateway_url,
+                    yolo,
+                    no_sandbox,
+                    output: output.map(std::path::PathBuf::from),
+                })?;
                 println!("{}", render(&result, format));
             }
         },
