@@ -50,18 +50,16 @@ cargo build --release --bin rune-gateway --bin rune
 Generate a service definition with the built-in CLI:
 
 ```bash
-./target/release/rune service install   --target systemd   --name rune-gateway   --workdir "$PWD"   --config "$PWD/config.toml"
+./target/release/rune service install   --target systemd   --name rune-gateway   --workdir "$PWD"   --config "$PWD/config.toml"   --enable   --start
 ```
 
-Then load and start it on Linux:
+Check status on Linux:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now rune-gateway
 systemctl --user status rune-gateway
 ```
 
-On macOS, use `--target launchd` instead. The command writes `~/Library/LaunchAgents/rune-gateway.plist`, which you can load with `launchctl load ~/Library/LaunchAgents/rune-gateway.plist`.
+On macOS, use `--target launchd --enable` instead. The command writes `~/Library/LaunchAgents/rune-gateway.plist` and loads it with `launchctl load -w`.
 
 ## Verify startup
 

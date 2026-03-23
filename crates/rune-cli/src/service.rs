@@ -15,6 +15,8 @@ pub struct ServiceInstallOptions {
     pub yolo: bool,
     pub no_sandbox: bool,
     pub output: Option<PathBuf>,
+    pub enable: bool,
+    pub start: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +85,10 @@ pub fn install_service_definition(options: ServiceInstallOptions) -> Result<Serv
     }
     std::fs::write(&output_path, &content)
         .with_context(|| format!("failed to write {}", output_path.display()))?;
+
+    if options.enable || options.start {
+        activate_service(options.target, &output_path, &options.name, options.enable, options.start)?;
+    }
 
     Ok(ServiceDefinitionResponse {
         target: service_target_name(options.target).to_string(),
@@ -187,6 +193,73 @@ fn render_launchd_plist(
     plist
 }
 
+fn activate_service(
+    target: ServiceTarget,
+    output_path: &Path,
+    name: &str,
+    enable: bool,
+    start: bool,
+) -> Result<()> {
+    match target {
+        ServiceTarget::Systemd => activate_systemd_service(output_path, name, enable, start),
+        ServiceTarget::Launchd => activate_launchd_service(output_path, name, enable, start),
+    }
+}
+
+fn activate_systemd_service(output_path: &Path, name: &str, enable: bool, start: bool) -> Result<()> {
+    run_command(
+        std::process::Command::new("systemctl")
+            .arg("--user")
+            .arg("daemon-reload"),
+        "systemctl --user daemon-reload",
+    )?;
+
+    if enable {
+        let mut cmd = std::process::Command::new("systemctl");
+        cmd.arg("--user").arg("enable");
+        if start {
+            cmd.arg("--now");
+        }
+        cmd.arg(name);
+        run_command(&mut cmd, "systemctl --user enable")?;
+    } else if start {
+        run_command(
+            std::process::Command::new("systemctl")
+                .arg("--user")
+                .arg("start")
+                .arg(name),
+            "systemctl --user start",
+        )?;
+    }
+
+    let _ = output_path;
+    Ok(())
+}
+
+fn activate_launchd_service(output_path: &Path, _name: &str, enable: bool, start: bool) -> Result<()> {
+    if enable || start {
+        run_command(
+            std::process::Command::new("launchctl")
+                .arg("load")
+                .arg("-w")
+                .arg(output_path),
+            "launchctl load -w",
+        )?;
+    }
+    Ok(())
+}
+
+fn run_command(cmd: &mut std::process::Command, display: &str) -> Result<()> {
+    let status = cmd
+        .status()
+        .with_context(|| format!("failed to execute {display}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("{display} exited with status {status}");
+    }
+}
+
 fn default_output_path(target: ServiceTarget, name: &str) -> PathBuf {
     match target {
         ServiceTarget::Systemd => {
@@ -263,6 +336,8 @@ mod tests {
             yolo: true,
             no_sandbox: true,
             output: Some(output.clone()),
+            enable: false,
+            start: false,
         })
         .unwrap();
 

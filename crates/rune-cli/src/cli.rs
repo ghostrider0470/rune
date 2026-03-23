@@ -2042,6 +2042,12 @@ pub enum ServiceAction {
         /// Output path for the generated file.
         #[arg(long)]
         output: Option<String>,
+        /// Enable the installed service after writing the definition.
+        #[arg(long)]
+        enable: bool,
+        /// Start the installed service after writing the definition.
+        #[arg(long)]
+        start: bool,
     },
 }
 

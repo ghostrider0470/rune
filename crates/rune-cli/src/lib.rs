@@ -2598,6 +2598,8 @@ pub async fn run(cli: Cli) -> Result<()> {
                 yolo,
                 no_sandbox,
                 output,
+                enable,
+                start,
             } => {
                 let result = install_service_definition(ServiceInstallOptions {
                     target,
@@ -2608,6 +2610,8 @@ pub async fn run(cli: Cli) -> Result<()> {
                     yolo,
                     no_sandbox,
                     output: output.map(std::path::PathBuf::from),
+                    enable,
+                    start,
                 })?;
                 println!("{}", render(&result, format));
             }
