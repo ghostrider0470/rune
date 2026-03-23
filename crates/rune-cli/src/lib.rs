@@ -32,7 +32,7 @@ use cli::{
     MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
-    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, ServiceTarget, SessionsAction, SkillsAction,
+    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, SessionsAction, SkillsAction,
     SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction,
 };
 use client::{

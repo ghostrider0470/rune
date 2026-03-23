@@ -32,13 +32,24 @@ Today, the project already has:
 ## Quick start
 
 ```bash
-cargo build --release --bin rune-gateway
+cargo build --release --bin rune-gateway --bin rune
 cp config.example.toml config.toml
 # fill in your provider + channel settings
 ./target/release/rune-gateway --config config.toml
 ```
 
 Then open `http://127.0.0.1:8787/dashboard`.
+
+To generate a user service for unattended operation:
+
+```bash
+./target/release/rune service install   --target systemd   --name rune-gateway   --workdir "$PWD"   --config "$PWD/config.toml"
+
+systemctl --user daemon-reload
+systemctl --user enable --now rune-gateway
+```
+
+On macOS, swap `--target launchd` to write a LaunchAgent plist instead.
 
 Next docs from there:
 - [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)

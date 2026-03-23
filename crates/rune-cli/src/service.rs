@@ -242,3 +242,64 @@ fn xml_escape(value: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_writes_systemd_unit_to_requested_path() {
+        let temp = std::env::temp_dir().join(format!("rune-service-test-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let output = temp.join("rune-gateway.service");
+
+        let result = install_service_definition(ServiceInstallOptions {
+            target: ServiceTarget::Systemd,
+            name: "rune-gateway".into(),
+            workdir: temp.clone(),
+            config: Some("config.toml".into()),
+            gateway_url: Some("http://127.0.0.1:8787".into()),
+            yolo: true,
+            no_sandbox: true,
+            output: Some(output.clone()),
+        })
+        .unwrap();
+
+        let written = std::fs::read_to_string(&output).unwrap();
+        assert_eq!(result.output_path.as_deref(), Some(output.to_string_lossy().as_ref()));
+        assert!(written.contains("Description=Rune Gateway (rune-gateway)"));
+        assert!(written.contains("Environment=RUNE_CONFIG=config.toml"));
+        assert!(written.contains("Environment=RUNE_GATEWAY_URL=http://127.0.0.1:8787"));
+        assert!(written.contains("--yolo"));
+        assert!(written.contains("--no-sandbox"));
+
+        let _ = std::fs::remove_file(output);
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn print_launchd_plist_embeds_program_arguments() {
+        let temp = std::env::temp_dir().join(format!("rune-service-test-{}", std::process::id()));
+        let result = print_service_definition(
+            ServiceTarget::Launchd,
+            "rune-gateway",
+            &temp,
+            Some("config.toml"),
+            Some("http://127.0.0.1:8787"),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.target, "launchd");
+        assert!(result.output_path.is_none());
+        assert!(result.content.contains("<key>Label</key>
+  <string>rune-gateway</string>"));
+        assert!(result.content.contains("<key>ProgramArguments</key>"));
+        assert!(result.content.contains("<string>gateway</string>"));
+        assert!(result.content.contains("<string>run</string>"));
+        assert!(result.content.contains("<key>RUNE_CONFIG</key>"));
+        assert!(result.content.contains("<string>config.toml</string>"));
+    }
+}
