@@ -995,6 +995,33 @@ async fn delete_session_removes_session_and_transcript() {
 }
 
 #[tokio::test]
+async fn mark_running_allows_resuming_from_waiting_states() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    for status in [
+        "waiting_for_tool",
+        "waiting_for_approval",
+        "waiting_for_subagent",
+    ] {
+        let session = engine
+            .create_session(
+                SessionKind::Direct,
+                Some(h.workspace_root.to_string_lossy().to_string()),
+            )
+            .await
+            .unwrap();
+        h.session_repo
+            .update_status(session.id, status, chrono::Utc::now())
+            .await
+            .unwrap();
+
+        let resumed = engine.mark_running(session.id).await.unwrap();
+        assert_eq!(resumed.status, "running", "failed for status {status}");
+    }
+}
+
+#[tokio::test]
 async fn invalid_session_transition_rejected() {
     let h = TestHarness::new();
     let engine = h.session_engine();

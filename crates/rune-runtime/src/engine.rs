@@ -92,9 +92,11 @@ impl SessionEngine {
     }
 
     /// Transition a session to Running status.
+    ///
+    /// Idempotent when already running, and valid from any waiting state when
+    /// resuming execution after a tool/subagent/approval pause.
     pub async fn mark_running(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.transition_session(session_id, "ready", "running")
-            .await
+        self.checked_transition(session_id, SessionStatus::Running).await
     }
 
     /// Transition a session to Completed status.
