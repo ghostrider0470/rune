@@ -17,6 +17,8 @@ table! {
         channel_ref -> Nullable<Text>,
         requester_session_id -> Nullable<Uuid>,
         latest_turn_id -> Nullable<Uuid>,
+        runtime_profile -> Nullable<Text>,
+        policy_profile -> Nullable<Text>,
         metadata -> Jsonb,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,

@@ -71,6 +71,8 @@ impl SessionEngine {
             channel_ref,
             requester_session_id,
             latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
             metadata: serde_json::json!({}),
             created_at: now,
             updated_at: now,
