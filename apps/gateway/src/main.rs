@@ -1921,7 +1921,7 @@ fn render_session_status_card(
         vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
     if approval_mode == "on-miss" {
         unresolved.push(
-            "approval requests and operator-triggered resume are durable, but restart-safe continuation for mid-resume approval flows is not parity-complete yet".to_string(),
+            "approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable".to_string(),
         );
     }
     if security_mode == "allowlist" {
