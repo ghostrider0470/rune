@@ -31,6 +31,8 @@ Today, the project already has:
 
 ## Quick start
 
+### Local dev / source checkout
+
 ```bash
 cargo build --release --bin rune-gateway --bin rune
 cp config.example.toml config.toml
@@ -43,10 +45,26 @@ Then open `http://127.0.0.1:8787/dashboard`.
 To generate a user service for unattended operation:
 
 ```bash
-./target/release/rune service install   --target systemd   --name rune-gateway   --workdir "$PWD"   --config "$PWD/config.toml"   --enable   --start
+./target/release/rune service install \
+  --target systemd \
+  --name rune-gateway \
+  --workdir "$PWD" \
+  --config "$PWD/config.toml" \
+  --enable \
+  --start
 ```
 
 On macOS, swap `--target launchd` to write a LaunchAgent plist instead.
+
+### Zero-config Docker bring-up
+
+Rune also ships a zero-config Docker Compose path for fast evaluation with persisted local state:
+
+```bash
+docker compose -f docker-compose.zero-config.yml up --build
+```
+
+This variant mounts durable data under the `rune-data` volume and exposes the dashboard on `http://127.0.0.1:8787/dashboard`.
 
 Next docs from there:
 - [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)
