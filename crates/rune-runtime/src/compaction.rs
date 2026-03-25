@@ -263,12 +263,25 @@ impl CompactionStrategy for TokenBudgetCompaction {
 
         let len = messages.len();
         if len <= self.preserve_tail {
-            // Not enough messages to compact — keep all.
             return messages;
         }
 
-        let split_at = len - self.preserve_tail;
-        let (old, recent) = messages.split_at(split_at);
+        // Always preserve the system message at index 0 (contains system prompt,
+        // workspace context, memory, skills). Only compact user/assistant/tool
+        // messages between the system prompt and the preserved tail.
+        let has_system_prefix = messages
+            .first()
+            .is_some_and(|m| m.role == Role::System);
+
+        let compactable_start = if has_system_prefix { 1 } else { 0 };
+        let compactable = &messages[compactable_start..];
+
+        if compactable.len() <= self.preserve_tail {
+            return messages;
+        }
+
+        let split_at = compactable.len() - self.preserve_tail;
+        let (old, recent) = compactable.split_at(split_at);
 
         // Memory flush: persist a structured summary before dropping messages
         if let Some(workspace_root) = &self.workspace_root {
@@ -285,7 +298,10 @@ impl CompactionStrategy for TokenBudgetCompaction {
             tool_calls: None,
         };
 
-        let mut result = Vec::with_capacity(1 + recent.len());
+        let mut result = Vec::with_capacity(2 + recent.len());
+        if has_system_prefix {
+            result.push(messages[0].clone());
+        }
         result.push(summary_msg);
         result.extend_from_slice(recent);
         result
@@ -483,6 +499,27 @@ mod tests {
         let content = std::fs::read_to_string(&daily_path).unwrap();
         assert!(content.starts_with("# Existing notes"));
         assert!(content.contains("[Session context summary]"));
+    }
+
+    #[test]
+    fn compact_preserves_system_message_at_index_zero() {
+        let compaction = TokenBudgetCompaction::new(100, 2);
+        let mut messages = vec![msg(Role::System, "You are a helpful assistant. This is the system prompt.")];
+        for i in 0..30 {
+            messages.push(msg(
+                Role::User,
+                &format!("message {} with padding to inflate token count for compaction", i),
+            ));
+        }
+        let result = compaction.compact(messages);
+        // Should have: original system msg + summary + 2 preserved tail = 4
+        assert!(result.len() >= 3);
+        assert_eq!(result[0].role, Role::System);
+        assert!(
+            result[0].content.as_ref().unwrap().contains("helpful assistant"),
+            "original system message must be preserved, got: {}",
+            result[0].content.as_ref().unwrap()
+        );
     }
 
     #[test]
