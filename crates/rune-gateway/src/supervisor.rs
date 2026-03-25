@@ -150,8 +150,29 @@ pub(crate) async fn execute_job(
     match &job.payload {
         JobPayload::SystemEvent { text } => run_system_event(deps, text).await,
         JobPayload::AgentTurn { message, model, .. } => {
-            run_agent_turn(deps, message, model.as_deref(), job.session_target).await
+            let enriched = enrich_with_last_run(deps, job, message).await;
+            run_agent_turn(deps, &enriched, model.as_deref(), job.session_target).await
         }
+    }
+}
+
+/// Prepend last-run output to a cron message for continuity across ticks.
+async fn enrich_with_last_run(deps: &SupervisorDeps, job: &Job, message: &str) -> String {
+    let runs = deps.scheduler.get_runs(&job.id, Some(1)).await;
+    let last_output = runs.first().and_then(|r| {
+        if r.status == rune_runtime::scheduler::JobRunStatus::Completed {
+            r.output.as_deref()
+        } else {
+            None
+        }
+    });
+
+    match last_output {
+        Some(output) if !output.is_empty() => {
+            let truncated = if output.len() > 2000 { &output[..2000] } else { output };
+            format!("## Last run result:\n{truncated}\n\n## Your task:\n{message}")
+        }
+        _ => message.to_string(),
     }
 }
 
