@@ -845,6 +845,32 @@ async fn init_workspace(
         }
     }
 
+    let memory_readme = path.join("memory/README.md");
+    if !memory_readme.exists() {
+        tokio::fs::write(
+            &memory_readme,
+            include_str!("../templates/workspace/memory/README.md"),
+        )
+        .await?;
+        created += 1;
+        println!("  ✓ Created memory/README.md");
+    } else {
+        println!("  ○ memory/README.md already exists, skipping");
+    }
+
+    let config_example_path = path.join("config.example.toml");
+    if !config_example_path.exists() {
+        tokio::fs::write(
+            &config_example_path,
+            include_str!("../../../config.example.toml"),
+        )
+        .await?;
+        created += 1;
+        println!("  ✓ Created config.example.toml");
+    } else {
+        println!("  ○ config.example.toml already exists, skipping");
+    }
+
     println!(
         "\nWorkspace initialized at {} ({created} files created)",
         path.display()
