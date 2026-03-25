@@ -217,6 +217,20 @@ impl SessionRepo for PgSessionRepo {
             .await
             .map_err(StoreError::from)
     }
+
+    async fn mark_stale_completed(&self, stale_secs: i64) -> Result<u64, StoreError> {
+        use diesel::sql_types::Timestamptz;
+        let cutoff = chrono::Utc::now() - chrono::Duration::seconds(stale_secs);
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let count = diesel::sql_query(
+            "UPDATE sessions SET status = 'completed' WHERE status = 'running' AND last_activity_at < $1"
+        )
+        .bind::<Timestamptz, _>(cutoff)
+        .execute(&mut conn)
+        .await
+        .map_err(StoreError::from)?;
+        Ok(count as u64)
+    }
 }
 
 // ── PgTurnRepo ──────────────────────────────────────────────────────

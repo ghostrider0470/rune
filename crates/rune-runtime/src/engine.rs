@@ -24,6 +24,11 @@ impl SessionEngine {
         }
     }
 
+    /// Expose the underlying session repo for direct operations (e.g. stale cleanup).
+    pub fn session_repo(&self) -> &Arc<dyn SessionRepo> {
+        &self.session_repo
+    }
+
     pub fn with_transcript_repo(mut self, transcript_repo: Arc<dyn TranscriptRepo>) -> Self {
         self.transcript_repo = Some(transcript_repo);
         self

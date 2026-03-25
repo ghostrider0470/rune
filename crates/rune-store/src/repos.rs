@@ -62,6 +62,9 @@ pub trait SessionRepo: Send + Sync {
     /// Used on startup to pre-populate the in-memory session index so that
     /// existing conversations resume after a gateway restart.
     async fn list_active_channel_sessions(&self) -> Result<Vec<SessionRow>, StoreError>;
+
+    /// Mark sessions stuck in 'running' with no activity for over `stale_secs` as completed.
+    async fn mark_stale_completed(&self, stale_secs: i64) -> Result<u64, StoreError>;
 }
 
 // ── Turn repository ───────────────────────────────────────────────────

@@ -456,6 +456,22 @@ impl SessionRepo for SqliteSessionRepo {
             .await
             .map_err(StoreError::from)
     }
+
+    async fn mark_stale_completed(&self, stale_secs: i64) -> Result<u64, StoreError> {
+        self.conn
+            .call(move |conn| {
+                let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(stale_secs))
+                    .format("%Y-%m-%dT%H:%M:%S%.6fZ")
+                    .to_string();
+                let count = conn.execute(
+                    "UPDATE sessions SET status = 'completed' WHERE status = 'running' AND last_activity_at < ?1",
+                    [&cutoff],
+                )?;
+                Ok(count as u64)
+            })
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════

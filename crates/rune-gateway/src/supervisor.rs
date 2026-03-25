@@ -303,6 +303,8 @@ async fn deliver_result_standalone(
 async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<bool>) {
     info!("supervisor loop started");
 
+    let mut tick_count: u64 = 0;
+
     loop {
         tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {}
@@ -405,6 +407,16 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                 }
             }
             deps.reminder_store.release_claim(&reminder.id).await;
+        }
+
+        // --- Stale session cleanup (every ~100s / 10 ticks) ---
+        tick_count += 1;
+        if tick_count % 10 == 0 {
+            match deps.session_engine.session_repo().mark_stale_completed(3600).await {
+                Ok(0) => {}
+                Ok(n) => info!(count = n, "cleaned up stale running sessions"),
+                Err(e) => warn!(error = %e, "stale session cleanup failed"),
+            }
         }
     }
 }
