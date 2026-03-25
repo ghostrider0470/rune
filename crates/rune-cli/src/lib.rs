@@ -14,7 +14,7 @@ use clap::CommandFactory;
 use clap_complete::{Shell, generate};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
+use std::process::{Child, Command as StdCommand};
 use std::time::SystemTime;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
@@ -217,6 +217,122 @@ fn set_array_strings(doc: &mut DocumentMut, section: &str, key: &str, values: &[
     doc[section][key] = Item::Value(Value::Array(arr));
 }
 
+fn discover_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+fn default_workspace_root() -> Result<PathBuf> {
+    discover_home_dir()
+        .map(|home| home.join(".rune"))
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve home directory for default workspace"))
+}
+
+fn open_config_instructions(workspace: &Path, config_path: &Path) {
+    let workspace_hint = workspace.display();
+    let config_hint = config_path.display();
+    eprintln!("next steps:");
+    eprintln!(
+        "  - edit {} to add your provider key or switch models",
+        config_hint
+    );
+    eprintln!(
+        "  - run from {} so Rune reuses this workspace",
+        workspace_hint
+    );
+}
+
+fn start_gateway_process(workspace: &Path, config_path: &Path) -> Result<Child> {
+    let mut candidates: Vec<(String, StdCommand)> = Vec::new();
+
+    let mut direct = StdCommand::new("rune-gateway");
+    direct
+        .arg("--config")
+        .arg(config_path)
+        .current_dir(workspace);
+    candidates.push(("rune-gateway".to_string(), direct));
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let gateway_name = if cfg!(windows) {
+                "rune-gateway.exe"
+            } else {
+                "rune-gateway"
+            };
+            let gateway_path = bin_dir.join(gateway_name);
+            if gateway_path.exists() {
+                let mut sibling = StdCommand::new(&gateway_path);
+                sibling
+                    .arg("--config")
+                    .arg(config_path)
+                    .current_dir(workspace);
+                candidates.push((gateway_path.display().to_string(), sibling));
+            }
+        }
+    }
+
+    let mut cargo = StdCommand::new("cargo");
+    cargo
+        .arg("run")
+        .arg("--release")
+        .arg("--bin")
+        .arg("rune-gateway")
+        .arg("--")
+        .arg("--config")
+        .arg(config_path)
+        .current_dir(workspace);
+    candidates.push(("cargo run --release --bin rune-gateway".to_string(), cargo));
+
+    let mut last_err = None;
+    for (label, mut cmd) in candidates {
+        match cmd.spawn() {
+            Ok(child) => return Ok(child),
+            Err(err) => last_err = Some(format!("{label}: {err}")),
+        }
+    }
+
+    anyhow::bail!(
+        "failed to start gateway automatically ({})",
+        last_err.unwrap_or_else(|| "no launch candidates".to_string())
+    )
+}
+
+fn ollama_default_model() -> &'static str {
+    "llama3.2"
+}
+
+fn detect_ollama() -> Option<String> {
+    let host = std::env::var("OLLAMA_HOST")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+
+    let normalized = if host.contains("/v1") || host.contains("/api") {
+        host.trim_end_matches('/').to_string()
+    } else {
+        format!("{}/api/tags", host.trim_end_matches('/'))
+    };
+
+    let probe_url = if normalized.ends_with("/api/tags") {
+        normalized
+    } else {
+        format!("{}/api/tags", normalized.trim_end_matches('/'))
+    };
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(1200))
+        .build()
+        .ok()?;
+
+    let response = client.get(&probe_url).send().ok()?;
+    if response.status().is_success() {
+        Some(host.trim_end_matches('/').to_string())
+    } else {
+        None
+    }
+}
+
 fn normalize_provider_kind(input: &str) -> String {
     match input.trim().to_ascii_lowercase().as_str() {
         "azure-openai" => "azure".to_string(),
@@ -350,25 +466,44 @@ async fn run_init_wizard(
     open: bool,
     non_interactive: bool,
 ) -> Result<()> {
-    let workspace = PathBuf::from(path);
+    let workspace = if path == "." {
+        default_workspace_root()?
+    } else {
+        PathBuf::from(path)
+    };
     init_workspace(&workspace, None, non_interactive).await?;
 
     let interactive = std::io::stdin().is_terminal() && !non_interactive;
+    let detected_ollama = detect_ollama();
 
     let provider = match provider {
         Some(value) => normalize_provider_kind(&value),
-        None if interactive => normalize_provider_kind(&prompt_text("Provider", Some("openai"))?),
+        None if interactive => {
+            let default_provider = if detected_ollama.is_some() {
+                "ollama"
+            } else {
+                "openai"
+            };
+            normalize_provider_kind(&prompt_text("Provider", Some(default_provider))?)
+        }
+        None if detected_ollama.is_some() => "ollama".to_string(),
         None => "openai".to_string(),
     };
 
+    let model_default = if provider == "ollama" {
+        ollama_default_model()
+    } else {
+        provider_default_model(&provider)
+    };
     let model = match model {
         Some(value) => value,
-        None if interactive => prompt_text("Model", Some(provider_default_model(&provider)))?,
-        None => provider_default_model(&provider).to_string(),
+        None if interactive => prompt_text("Model", Some(model_default))?,
+        None => model_default.to_string(),
     };
 
     let api_key = match api_key {
         Some(value) => value,
+        None if provider == "ollama" => String::new(),
         None => {
             let env_key = std::env::var("OPENAI_API_KEY")
                 .ok()
@@ -390,21 +525,18 @@ async fn run_init_wizard(
 
     let config_path = write_wizard_config(&workspace, &provider, &model, &api_key, webchat)?;
     println!("✓ Wrote {}", config_path.display());
+    if provider == "ollama" {
+        if let Some(host) = detected_ollama {
+            println!("✓ Auto-detected Ollama at {host}");
+        }
+    }
 
     let url = "http://127.0.0.1:8787/chat";
     if start {
-        let mut cmd = StdCommand::new("cargo");
-        cmd.arg("run")
-            .arg("-p")
-            .arg("rune-gateway-app")
-            .arg("--")
-            .arg("--config")
-            .arg(&config_path)
-            .current_dir(&workspace);
-        let child = cmd
-            .spawn()
-            .context("failed to start rune-gateway-app via cargo run")?;
+        let child = start_gateway_process(&workspace, &config_path)?;
         println!("✓ Started gateway (pid {})", child.id());
+    } else {
+        open_config_instructions(&workspace, &config_path);
     }
 
     if webchat && open {

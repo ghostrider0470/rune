@@ -24,13 +24,13 @@ cargo build --release
 If you just want Rune working with an API key and browser chat, use the built-in first-run wizard:
 
 ```bash
-cargo run --release --bin rune -- setup --api-key "$OPENAI_API_KEY"
+cargo run --release --bin rune -- setup --path ~/.rune --api-key "$OPENAI_API_KEY"
 ```
 
 Or choose a different provider/model explicitly:
 
 ```bash
-cargo run --release --bin rune -- setup   --provider anthropic   --model claude-3-7-sonnet-latest   --api-key "$ANTHROPIC_API_KEY"
+cargo run --release --bin rune -- setup   --path ~/.rune   --provider anthropic   --model claude-3-7-sonnet-latest   --api-key "$ANTHROPIC_API_KEY"
 ```
 
 What this does:
@@ -109,3 +109,6 @@ Use these next:
 - use [`../operator/DEPLOYMENT.md`](../operator/DEPLOYMENT.md) and [`../operator/DATABASES.md`](../operator/DATABASES.md) when the next question is deployment/storage shape
 - use [`../contributor/DEVELOPMENT.md`](../contributor/DEVELOPMENT.md) when the next step is active development rather than local trial use
 - use [`../INDEX.md`](../INDEX.md) if you need the wider docs front door
+
+
+If Ollama is already running locally, `rune setup` now auto-detects it and defaults to `--provider ollama` without requiring an API key.
