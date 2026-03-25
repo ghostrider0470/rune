@@ -791,8 +791,14 @@ struct FakeMs365TodoService {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MailMutationCall {
     Send(SendMailRequest),
-    Reply { id: String, request: ReplyMailRequest },
-    Forward { id: String, request: ForwardMailRequest },
+    Reply {
+        id: String,
+        request: ReplyMailRequest,
+    },
+    Forward {
+        id: String,
+        request: ForwardMailRequest,
+    },
 }
 
 #[derive(Debug)]
@@ -980,11 +986,18 @@ impl Ms365TodoService for FakeMs365TodoService {
 #[async_trait]
 impl Ms365MailService for FakeMs365MailService {
     async fn send_mail(&self, request: SendMailRequest) -> Result<(), Ms365MailServiceError> {
-        self.calls.lock().await.push(MailMutationCall::Send(request));
+        self.calls
+            .lock()
+            .await
+            .push(MailMutationCall::Send(request));
         self.send_response.clone()
     }
 
-    async fn reply_to_message(&self, id: &str, request: ReplyMailRequest) -> Result<(), Ms365MailServiceError> {
+    async fn reply_to_message(
+        &self,
+        id: &str,
+        request: ReplyMailRequest,
+    ) -> Result<(), Ms365MailServiceError> {
         self.calls.lock().await.push(MailMutationCall::Reply {
             id: id.to_string(),
             request,
@@ -992,7 +1005,11 @@ impl Ms365MailService for FakeMs365MailService {
         self.reply_response.clone()
     }
 
-    async fn forward_message(&self, id: &str, request: ForwardMailRequest) -> Result<(), Ms365MailServiceError> {
+    async fn forward_message(
+        &self,
+        id: &str,
+        request: ForwardMailRequest,
+    ) -> Result<(), Ms365MailServiceError> {
         self.calls.lock().await.push(MailMutationCall::Forward {
             id: id.to_string(),
             request,
@@ -2189,6 +2206,268 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
 
     assert_eq!(err.code, "bad_request");
     assert!(err.message.contains("invalid UUID for session_id"));
+}
+
+
+#[tokio::test]
+async fn ws_rpc_turns_list_and_get_return_turn_rows() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        tts_engine: None,
+        stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+    };
+
+    let session_id = Uuid::new_v4();
+    let first_turn_id = Uuid::new_v4();
+    let second_turn_id = Uuid::new_v4();
+    let started_at = chrono::Utc::now();
+
+    turn_repo
+        .create(NewTurn {
+            id: first_turn_id,
+            session_id,
+            trigger_kind: "message".to_string(),
+            status: "completed".to_string(),
+            model_ref: Some("gpt-4.1".to_string()),
+            started_at,
+            ended_at: Some(started_at),
+            usage_prompt_tokens: Some(10),
+            usage_completion_tokens: Some(5),
+        })
+        .await
+        .unwrap();
+    turn_repo
+        .create(NewTurn {
+            id: second_turn_id,
+            session_id,
+            trigger_kind: "cron".to_string(),
+            status: "running".to_string(),
+            model_ref: Some("gpt-4.1-mini".to_string()),
+            started_at: started_at + chrono::TimeDelta::seconds(1),
+            ended_at: None,
+            usage_prompt_tokens: None,
+            usage_completion_tokens: None,
+        })
+        .await
+        .unwrap();
+
+    let dispatcher = RpcDispatcher::new(state);
+
+    let turns = dispatcher
+        .dispatch(
+            "turns.list",
+            serde_json::json!({
+                "session_id": session_id,
+                "limit": 1,
+                "offset": 1
+            }),
+        )
+        .await
+        .unwrap();
+    let turns = turns.as_array().unwrap();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0]["id"], second_turn_id.to_string());
+    assert_eq!(turns[0]["trigger_kind"], "cron");
+    assert_eq!(turns[0]["status"], "running");
+    assert_eq!(turns[0]["ended_at"], Value::Null);
+
+    let turn = dispatcher
+        .dispatch("turns.get", serde_json::json!({ "turn_id": first_turn_id }))
+        .await
+        .unwrap();
+    assert_eq!(turn["id"], first_turn_id.to_string());
+    assert_eq!(turn["session_id"], session_id.to_string());
+    assert_eq!(turn["usage_prompt_tokens"], 10);
+    assert_eq!(turn["usage_completion_tokens"], 5);
+    assert_eq!(turn["model_ref"], "gpt-4.1");
+}
+
+#[tokio::test]
+async fn ws_rpc_tools_and_approvals_list_surface_state() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    skill_registry
+        .register(rune_runtime::Skill {
+            name: "memory_search".to_string(),
+            description: "Search memory files".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+            binary_path: None,
+            source_dir: std::env::temp_dir().join("memory_search"),
+            enabled: true,
+        })
+        .await;
+
+    let approval_id = Uuid::new_v4();
+    let created_at = chrono::Utc::now();
+    approval_repo
+        .create(NewApproval {
+            id: approval_id,
+            subject_type: "tool_call".to_string(),
+            subject_id: Uuid::new_v4(),
+            reason: "needs network access".to_string(),
+            presented_payload: serde_json::json!({ "tool": "web_fetch" }),
+            created_at,
+            handle_ref: None,
+            host_ref: None,
+        })
+        .await
+        .unwrap();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(1),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        tts_engine: None,
+        stt_engine: None,
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+
+    let tools = dispatcher.dispatch("tools.list", serde_json::json!({})).await.unwrap();
+    let tools = tools.as_array().unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"], "memory_search");
+    assert_eq!(tools[0]["description"], "Search memory files");
+    assert_eq!(tools[0]["enabled"], true);
+
+    let approvals = dispatcher
+        .dispatch("approvals.list", serde_json::json!({}))
+        .await
+        .unwrap();
+    let approvals = approvals.as_array().unwrap();
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(approvals[0]["id"], approval_id.to_string());
+    assert_eq!(approvals[0]["subject_type"], "tool_call");
+    assert!(approvals[0]["subject_id"].as_str().is_some());
+    assert_eq!(approvals[0]["reason"], "needs network access");
+    assert_eq!(approvals[0]["decision"], Value::Null);
+    assert_eq!(approvals[0]["presented_payload"]["tool"], "web_fetch");
 }
 
 #[tokio::test]
@@ -6682,7 +6961,11 @@ async fn set_get_list_and_clear_approval_policy_routes() {
 
     let response = app
         .clone()
-        .oneshot(Request::get("/approvals/policies/exec").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/approvals/policies/exec")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -6692,17 +6975,29 @@ async fn set_get_list_and_clear_approval_policy_routes() {
 
     let response = app
         .clone()
-        .oneshot(Request::get("/approvals/policies").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/approvals/policies")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     let policies = json.as_array().unwrap();
-    assert!(policies.iter().any(|item| item["tool_name"] == "exec" && item["decision"] == "allow_always"));
+    assert!(
+        policies
+            .iter()
+            .any(|item| item["tool_name"] == "exec" && item["decision"] == "allow_always")
+    );
 
     let response = app
         .clone()
-        .oneshot(Request::delete("/approvals/policies/exec").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::delete("/approvals/policies/exec")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -6710,7 +7005,11 @@ async fn set_get_list_and_clear_approval_policy_routes() {
     assert_eq!(json["success"], true);
 
     let response = app
-        .oneshot(Request::get("/approvals/policies/exec").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/approvals/policies/exec")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -6735,7 +7034,6 @@ async fn set_approval_policy_rejects_invalid_decision() {
     assert_eq!(json["code"], "bad_request");
 }
 
-
 #[tokio::test]
 async fn webchat_route_serves_embedded_chat_ui() {
     let app = build_test_app(None);
@@ -6748,11 +7046,13 @@ async fn webchat_route_serves_embedded_chat_ui() {
     assert_eq!(response.status(), StatusCode::OK);
     let headers = response.headers().clone();
     let body = body_text(response).await;
-    assert!(headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .contains("text/html"));
+    assert!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .contains("text/html")
+    );
     assert!(body.contains("Rune WebChat"));
     assert!(body.contains("new WebSocket"));
     assert!(body.contains("session.create"));
