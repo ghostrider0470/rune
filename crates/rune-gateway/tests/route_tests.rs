@@ -6734,3 +6734,27 @@ async fn set_approval_policy_rejects_invalid_decision() {
     let json = body_json(response).await;
     assert_eq!(json["code"], "bad_request");
 }
+
+
+#[tokio::test]
+async fn webchat_route_serves_embedded_chat_ui() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
+    let body = body_text(response).await;
+    assert!(headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .contains("text/html"));
+    assert!(body.contains("Rune WebChat"));
+    assert!(body.contains("new WebSocket"));
+    assert!(body.contains("session.create"));
+    assert!(body.contains("session.send"));
+}
