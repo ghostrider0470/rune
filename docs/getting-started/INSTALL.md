@@ -19,6 +19,30 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo build --release
 ```
 
+## Fast local first run
+
+If you just want Rune working with an API key and browser chat, use the built-in first-run wizard:
+
+```bash
+cargo run --release --bin rune -- setup --api-key "$OPENAI_API_KEY"
+```
+
+Or choose a different provider/model explicitly:
+
+```bash
+cargo run --release --bin rune -- setup   --provider anthropic   --model claude-3-7-sonnet-latest   --api-key "$ANTHROPIC_API_KEY"
+```
+
+What this does:
+
+- initializes the workspace if needed
+- writes `config.toml`
+- enables browser WebChat
+- starts the gateway locally
+- opens `http://127.0.0.1:8787/chat`
+
+For non-interactive CI/script usage, add `--non-interactive`.
+
 ## Create config
 
 ```bash

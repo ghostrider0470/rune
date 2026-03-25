@@ -235,8 +235,33 @@ pub enum Command {
         #[command(subcommand)]
         action: HooksAction,
     },
-    /// Run first-time setup wizard.
-    Setup,
+    /// Run first-time setup wizard (alias for `wizard` with safe defaults).
+    Setup {
+        /// Target workspace/config directory (defaults to current directory).
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// API key/token for the selected provider.
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Provider kind/name (for example: openai, anthropic, azure, groq, mistral, deepseek, ollama).
+        #[arg(long)]
+        provider: Option<String>,
+        /// Model id to configure as default.
+        #[arg(long)]
+        model: Option<String>,
+        /// Enable the browser WebChat flow after writing config.
+        #[arg(long, default_value_t = true)]
+        webchat: bool,
+        /// Start the gateway after writing config.
+        #[arg(long, default_value_t = true)]
+        start: bool,
+        /// Open the chat URL in the default browser after startup.
+        #[arg(long, default_value_t = true)]
+        open: bool,
+        /// Do not prompt; derive missing values from defaults/environment where possible.
+        #[arg(long)]
+        non_interactive: bool,
+    },
     /// Manage backups of durable state.
     Backup {
         #[command(subcommand)]
@@ -5258,7 +5283,7 @@ mod subagent_cli_tests {
     #[test]
     fn parse_setup() {
         let cli = Cli::try_parse_from(["rune", "setup"]).unwrap();
-        assert!(matches!(cli.command, Command::Setup));
+        assert!(matches!(cli.command, Command::Setup { .. }));
     }
 
     #[test]

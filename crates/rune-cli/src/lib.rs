@@ -2833,9 +2833,27 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
-        Command::Setup => {
-            let result = client.setup().await?;
-            println!("{}", render(&result, format));
+        Command::Setup {
+            path,
+            api_key,
+            provider,
+            model,
+            webchat,
+            start,
+            open,
+            non_interactive,
+        } => {
+            run_init_wizard(
+                &path,
+                api_key,
+                provider,
+                model,
+                webchat,
+                start,
+                open,
+                non_interactive,
+            )
+            .await?;
         }
         Command::Backup { action } => match action {
             BackupAction::Create { label } => {
