@@ -2208,7 +2208,6 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
     assert!(err.message.contains("invalid UUID for session_id"));
 }
 
-
 #[tokio::test]
 async fn ws_rpc_turns_list_and_get_return_turn_rows() {
     use rune_gateway::ws_rpc::RpcDispatcher;
@@ -2449,7 +2448,10 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
 
     let dispatcher = RpcDispatcher::new(state);
 
-    let tools = dispatcher.dispatch("tools.list", serde_json::json!({})).await.unwrap();
+    let tools = dispatcher
+        .dispatch("tools.list", serde_json::json!({}))
+        .await
+        .unwrap();
     let tools = tools.as_array().unwrap();
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0]["name"], "memory_search");
