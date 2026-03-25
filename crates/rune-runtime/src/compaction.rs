@@ -269,9 +269,7 @@ impl CompactionStrategy for TokenBudgetCompaction {
         // Always preserve the system message at index 0 (contains system prompt,
         // workspace context, memory, skills). Only compact user/assistant/tool
         // messages between the system prompt and the preserved tail.
-        let has_system_prefix = messages
-            .first()
-            .is_some_and(|m| m.role == Role::System);
+        let has_system_prefix = messages.first().is_some_and(|m| m.role == Role::System);
 
         let compactable_start = if has_system_prefix { 1 } else { 0 };
         let compactable = &messages[compactable_start..];
@@ -504,11 +502,17 @@ mod tests {
     #[test]
     fn compact_preserves_system_message_at_index_zero() {
         let compaction = TokenBudgetCompaction::new(100, 2);
-        let mut messages = vec![msg(Role::System, "You are a helpful assistant. This is the system prompt.")];
+        let mut messages = vec![msg(
+            Role::System,
+            "You are a helpful assistant. This is the system prompt.",
+        )];
         for i in 0..30 {
             messages.push(msg(
                 Role::User,
-                &format!("message {} with padding to inflate token count for compaction", i),
+                &format!(
+                    "message {} with padding to inflate token count for compaction",
+                    i
+                ),
             ));
         }
         let result = compaction.compact(messages);
@@ -516,7 +520,11 @@ mod tests {
         assert!(result.len() >= 3);
         assert_eq!(result[0].role, Role::System);
         assert!(
-            result[0].content.as_ref().unwrap().contains("helpful assistant"),
+            result[0]
+                .content
+                .as_ref()
+                .unwrap()
+                .contains("helpful assistant"),
             "original system message must be preserved, got: {}",
             result[0].content.as_ref().unwrap()
         );

@@ -630,7 +630,10 @@ impl TurnExecutor {
         // where the embedding API call is wasteful and potentially flaky.
         let mem0_prompt_section = if let Some(ref mem0) = self.mem0 {
             if matches!(session_kind, SessionKind::Scheduled | SessionKind::Subagent) {
-                debug!("skipping mem0 recall for ephemeral session kind={:?}", session_kind);
+                debug!(
+                    "skipping mem0 recall for ephemeral session kind={:?}",
+                    session_kind
+                );
                 None
             } else {
                 let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;

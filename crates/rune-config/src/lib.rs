@@ -538,8 +538,12 @@ pub struct CompactionConfig {
     pub preserve_tail: usize,
 }
 
-fn default_context_window() -> usize { 128_000 }
-fn default_preserve_tail() -> usize { 20 }
+fn default_context_window() -> usize {
+    128_000
+}
+fn default_preserve_tail() -> usize {
+    20
+}
 
 impl Default for CompactionConfig {
     fn default() -> Self {

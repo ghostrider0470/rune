@@ -169,7 +169,11 @@ async fn enrich_with_last_run(deps: &SupervisorDeps, job: &Job, message: &str) -
 
     match last_output {
         Some(output) if !output.is_empty() => {
-            let truncated = if output.len() > 2000 { &output[..2000] } else { output };
+            let truncated = if output.len() > 2000 {
+                &output[..2000]
+            } else {
+                output
+            };
             format!("## Last run result:\n{truncated}\n\n## Your task:\n{message}")
         }
         _ => message.to_string(),
@@ -267,7 +271,11 @@ async fn deliver_result_standalone(
                     rune_runtime::scheduler::JobRunStatus::Failed => "FAILED",
                     _ => "finished",
                 };
-                let truncated = if output.len() > 3000 { &output[..3000] } else { output };
+                let truncated = if output.len() > 3000 {
+                    &output[..3000]
+                } else {
+                    output
+                };
                 let msg = format!(
                     "*[{}]* {} ({})\n\n{}",
                     job.name.as_deref().unwrap_or("cron"),
@@ -433,7 +441,12 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
         // --- Stale session cleanup (every ~100s / 10 ticks) ---
         tick_count += 1;
         if tick_count % 10 == 0 {
-            match deps.session_engine.session_repo().mark_stale_completed(3600).await {
+            match deps
+                .session_engine
+                .session_repo()
+                .mark_stale_completed(3600)
+                .await
+            {
                 Ok(0) => {}
                 Ok(n) => info!(count = n, "cleaned up stale running sessions"),
                 Err(e) => warn!(error = %e, "stale session cleanup failed"),
