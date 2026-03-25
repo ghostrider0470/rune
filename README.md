@@ -31,6 +31,20 @@ Today, the project already has:
 
 ## Quick start
 
+### Install in one command
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ghostrider0470/rune/main/scripts/install.sh | sh
+```
+
+The installer builds `rune` and `rune-gateway`, places them in `~/.local/bin` by default, then you can run:
+
+```bash
+rune setup --path ~/.rune --api-key "$OPENAI_API_KEY"
+```
+
+If Ollama is already running locally, `rune setup --path ~/.rune` auto-detects it and skips the API key requirement.
+
 ### Local dev / source checkout
 
 ```bash
