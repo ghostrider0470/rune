@@ -626,32 +626,39 @@ impl TurnExecutor {
         // Mem0 recall: find semantically similar memories before the first
         // model call. We fetch the user message from the most recent
         // transcript entry so we can embed the current query.
+        // Skip for ephemeral session kinds (scheduled cron jobs, subagents)
+        // where the embedding API call is wasteful and potentially flaky.
         let mem0_prompt_section = if let Some(ref mem0) = self.mem0 {
-            let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;
-            let user_msg = transcript_rows
-                .iter()
-                .rev()
-                .find_map(|row| {
-                    let item: rune_core::TranscriptItem =
-                        serde_json::from_value(row.payload.clone()).ok()?;
-                    if let rune_core::TranscriptItem::UserMessage { message } = item {
-                        Some(message.content)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-
-            if !user_msg.is_empty() {
-                let memories = mem0.recall(&user_msg).await;
-                let section = Mem0Engine::format_for_prompt(&memories);
-                if section.is_empty() {
-                    None
-                } else {
-                    Some(section)
-                }
-            } else {
+            if matches!(session_kind, SessionKind::Scheduled | SessionKind::Subagent) {
+                debug!("skipping mem0 recall for ephemeral session kind={:?}", session_kind);
                 None
+            } else {
+                let transcript_rows = self.transcript_repo.list_by_session(session_id).await?;
+                let user_msg = transcript_rows
+                    .iter()
+                    .rev()
+                    .find_map(|row| {
+                        let item: rune_core::TranscriptItem =
+                            serde_json::from_value(row.payload.clone()).ok()?;
+                        if let rune_core::TranscriptItem::UserMessage { message } = item {
+                            Some(message.content)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+
+                if !user_msg.is_empty() {
+                    let memories = mem0.recall(&user_msg).await;
+                    let section = Mem0Engine::format_for_prompt(&memories);
+                    if section.is_empty() {
+                        None
+                    } else {
+                        Some(section)
+                    }
+                } else {
+                    None
+                }
             }
         } else {
             None
