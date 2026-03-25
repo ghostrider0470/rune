@@ -439,33 +439,41 @@ mod tests {
 
     #[test]
     fn turn_state_changed_flags() {
-        assert!(TurnEvent::Started {
-            session_id: sample_session_id(),
-            turn_id: sample_turn_id(),
-            trigger: "api".to_string(),
-        }
-        .state_changed());
+        assert!(
+            TurnEvent::Started {
+                session_id: sample_session_id(),
+                turn_id: sample_turn_id(),
+                trigger: "api".to_string(),
+            }
+            .state_changed()
+        );
 
-        assert!(!TurnEvent::Progressed {
-            session_id: sample_session_id(),
-            turn_id: sample_turn_id(),
-            status: "model_calling".to_string(),
-        }
-        .state_changed());
+        assert!(
+            !TurnEvent::Progressed {
+                session_id: sample_session_id(),
+                turn_id: sample_turn_id(),
+                status: "model_calling".to_string(),
+            }
+            .state_changed()
+        );
 
-        assert!(TurnEvent::Completed {
-            session_id: sample_session_id(),
-            turn_id: sample_turn_id(),
-            usage: None,
-        }
-        .state_changed());
+        assert!(
+            TurnEvent::Completed {
+                session_id: sample_session_id(),
+                turn_id: sample_turn_id(),
+                usage: None,
+            }
+            .state_changed()
+        );
 
-        assert!(TurnEvent::Failed {
-            session_id: sample_session_id(),
-            turn_id: sample_turn_id(),
-            error: "oops".to_string(),
-        }
-        .state_changed());
+        assert!(
+            TurnEvent::Failed {
+                session_id: sample_session_id(),
+                turn_id: sample_turn_id(),
+                error: "oops".to_string(),
+            }
+            .state_changed()
+        );
     }
 
     // ── ToolEvent ────────────────────────────────────────────────────────
@@ -574,25 +582,31 @@ mod tests {
 
     #[test]
     fn approval_events_always_change_state() {
-        assert!(ApprovalEvent::Created {
-            session_id: sample_session_id(),
-            approval_id: sample_approval_id(),
-            summary: "test".to_string(),
-        }
-        .state_changed());
+        assert!(
+            ApprovalEvent::Created {
+                session_id: sample_session_id(),
+                approval_id: sample_approval_id(),
+                summary: "test".to_string(),
+            }
+            .state_changed()
+        );
 
-        assert!(ApprovalEvent::Resolved {
-            session_id: sample_session_id(),
-            approval_id: sample_approval_id(),
-            decision: "deny".to_string(),
-        }
-        .state_changed());
+        assert!(
+            ApprovalEvent::Resolved {
+                session_id: sample_session_id(),
+                approval_id: sample_approval_id(),
+                decision: "deny".to_string(),
+            }
+            .state_changed()
+        );
 
-        assert!(ApprovalEvent::Expired {
-            session_id: sample_session_id(),
-            approval_id: sample_approval_id(),
-        }
-        .state_changed());
+        assert!(
+            ApprovalEvent::Expired {
+                session_id: sample_session_id(),
+                approval_id: sample_approval_id(),
+            }
+            .state_changed()
+        );
     }
 
     // ── ProcessEvent ─────────────────────────────────────────────────────
@@ -639,13 +653,15 @@ mod tests {
 
     #[test]
     fn process_output_does_not_change_state() {
-        assert!(!ProcessEvent::Output {
-            session_id: sample_session_id(),
-            process_id: "p-1".to_string(),
-            stream: "stderr".to_string(),
-            data: "warning".to_string(),
-        }
-        .state_changed());
+        assert!(
+            !ProcessEvent::Output {
+                session_id: sample_session_id(),
+                process_id: "p-1".to_string(),
+                stream: "stderr".to_string(),
+                data: "warning".to_string(),
+            }
+            .state_changed()
+        );
     }
 
     #[test]

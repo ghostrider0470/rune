@@ -76,11 +76,13 @@ mod tests {
 
     #[test]
     fn retriable_errors() {
-        assert!(ModelError::RateLimited {
-            message: "slow down".into(),
-            retry_after_secs: Some(30),
-        }
-        .is_retriable());
+        assert!(
+            ModelError::RateLimited {
+                message: "slow down".into(),
+                retry_after_secs: Some(30),
+            }
+            .is_retriable()
+        );
         assert!(ModelError::Transient("500".into()).is_retriable());
         assert!(ModelError::QuotaExhausted("done".into()).is_retriable());
     }

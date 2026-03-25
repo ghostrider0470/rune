@@ -198,7 +198,9 @@ async fn azure_body_includes_tools_when_provided() {
 
     let requests = server.received_requests().await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    let tools = body.get("tools").expect("Azure body should include 'tools'");
+    let tools = body
+        .get("tools")
+        .expect("Azure body should include 'tools'");
     assert!(tools.is_array());
     assert_eq!(tools.as_array().unwrap().len(), 1);
     assert_eq!(tools[0]["function"]["name"], "get_weather");
@@ -310,7 +312,12 @@ async fn azure_request_golden_shape_full() {
     assert_eq!(body["max_tokens"], serde_json::json!(1024));
 
     // Only expected keys present
-    let keys: Vec<&str> = body.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+    let keys: Vec<&str> = body
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
     for key in &keys {
         assert!(
             ["messages", "temperature", "max_tokens", "tools"].contains(key),
@@ -357,7 +364,10 @@ async fn azure_vs_openai_body_shape_contrast() {
     assert!(azure_body.get("max_completion_tokens").is_none());
 
     // OpenAI: has model, max_completion_tokens
-    assert!(openai_body.get("model").is_some(), "OpenAI must include model");
+    assert!(
+        openai_body.get("model").is_some(),
+        "OpenAI must include model"
+    );
     assert_eq!(openai_body["max_completion_tokens"], 256);
     assert!(openai_body.get("max_tokens").is_none());
 }
@@ -1232,10 +1242,7 @@ async fn routed_provider_falls_back_on_retriable_error() {
         default_image_model: None,
         fallbacks: vec![ModelFallbackChainConfig {
             name: "default-chat".into(),
-            chain: vec![
-                "primary/gpt-5.4".into(),
-                "secondary/claude-opus-4-6".into(),
-            ],
+            chain: vec!["primary/gpt-5.4".into(), "secondary/claude-opus-4-6".into()],
         }],
         image_fallbacks: vec![],
         auth_orders: vec![],
@@ -1319,10 +1326,7 @@ async fn routed_provider_does_not_fallback_on_non_retriable_error() {
         default_image_model: None,
         fallbacks: vec![ModelFallbackChainConfig {
             name: "default-chat".into(),
-            chain: vec![
-                "primary/gpt-5.4".into(),
-                "secondary/claude-opus-4-6".into(),
-            ],
+            chain: vec!["primary/gpt-5.4".into(), "secondary/claude-opus-4-6".into()],
         }],
         image_fallbacks: vec![],
         auth_orders: vec![],
@@ -1404,10 +1408,7 @@ async fn routed_provider_returns_last_error_when_all_fallbacks_fail() {
         default_image_model: None,
         fallbacks: vec![ModelFallbackChainConfig {
             name: "default-chat".into(),
-            chain: vec![
-                "primary/gpt-5.4".into(),
-                "secondary/claude-opus-4-6".into(),
-            ],
+            chain: vec!["primary/gpt-5.4".into(), "secondary/claude-opus-4-6".into()],
         }],
         image_fallbacks: vec![],
         auth_orders: vec![],
@@ -1551,7 +1552,10 @@ async fn foundry_routes_gpt_to_openai_endpoint() {
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests.len(), 1);
     assert!(
-        requests[0].url.path().contains("/openai/v1/chat/completions"),
+        requests[0]
+            .url
+            .path()
+            .contains("/openai/v1/chat/completions"),
         "GPT model should route to OpenAI path, got: {}",
         requests[0].url
     );
@@ -1602,7 +1606,10 @@ async fn foundry_default_model_routes_to_openai() {
 
     let requests = server.received_requests().await.unwrap();
     assert!(
-        requests[0].url.path().contains("/openai/v1/chat/completions"),
+        requests[0]
+            .url
+            .path()
+            .contains("/openai/v1/chat/completions"),
         "Default (no model) should route to OpenAI path, got: {}",
         requests[0].url
     );
@@ -1992,8 +1999,12 @@ async fn foundry_anthropic_request_golden_shape() {
     assert_eq!(msgs[2]["role"], "user");
 
     // Only expected top-level keys
-    let keys: std::collections::HashSet<&str> =
-        body.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+    let keys: std::collections::HashSet<&str> = body
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
     let expected: std::collections::HashSet<&str> =
         ["model", "max_tokens", "system", "messages"].into();
     assert_eq!(
@@ -2034,10 +2045,8 @@ async fn foundry_openai_vs_azure_openai_body_contrast() {
     let foundry_reqs = foundry_server.received_requests().await.unwrap();
     let azure_reqs = azure_server.received_requests().await.unwrap();
 
-    let foundry_body: serde_json::Value =
-        serde_json::from_slice(&foundry_reqs[0].body).unwrap();
-    let azure_body: serde_json::Value =
-        serde_json::from_slice(&azure_reqs[0].body).unwrap();
+    let foundry_body: serde_json::Value = serde_json::from_slice(&foundry_reqs[0].body).unwrap();
+    let azure_body: serde_json::Value = serde_json::from_slice(&azure_reqs[0].body).unwrap();
 
     // Foundry: has model, max_completion_tokens (OpenAI convention)
     assert!(
@@ -2064,10 +2073,7 @@ async fn foundry_openai_vs_azure_openai_body_contrast() {
         "Foundry uses /openai/v1/ path"
     );
     assert!(
-        azure_reqs[0]
-            .url
-            .path()
-            .contains("/openai/deployments/"),
+        azure_reqs[0].url.path().contains("/openai/deployments/"),
         "Azure OpenAI uses /openai/deployments/ path"
     );
 }
@@ -2112,8 +2118,10 @@ async fn foundry_anthropic_maps_401_authentication_error() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .respond_with(
-            ResponseTemplate::new(401)
-                .set_body_json(anthropic_error_body("authentication_error", "Invalid API key")),
+            ResponseTemplate::new(401).set_body_json(anthropic_error_body(
+                "authentication_error",
+                "Invalid API key",
+            )),
         )
         .mount(&server)
         .await;
@@ -2239,10 +2247,12 @@ async fn foundry_anthropic_maps_500_api_error() {
 async fn foundry_anthropic_maps_400_context_length() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(anthropic_error_body(
-            "invalid_request_error",
-            "prompt has too many tokens: 200000 tokens > 100000 maximum",
-        )))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(anthropic_error_body(
+                "invalid_request_error",
+                "prompt has too many tokens: 200000 tokens > 100000 maximum",
+            )),
+        )
         .mount(&server)
         .await;
 
@@ -2259,10 +2269,12 @@ async fn foundry_anthropic_maps_400_context_length() {
 async fn foundry_anthropic_maps_400_content_filter() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(anthropic_error_body(
-            "invalid_request_error",
-            "content filter triggered: blocked by content_filter policy",
-        )))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(anthropic_error_body(
+                "invalid_request_error",
+                "content filter triggered: blocked by content_filter policy",
+            )),
+        )
         .mount(&server)
         .await;
 
@@ -2279,10 +2291,12 @@ async fn foundry_anthropic_maps_400_content_filter() {
 async fn foundry_anthropic_maps_400_generic_request_error() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(anthropic_error_body(
-            "invalid_request_error",
-            "messages: at least one message is required",
-        )))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(anthropic_error_body(
+                "invalid_request_error",
+                "messages: at least one message is required",
+            )),
+        )
         .mount(&server)
         .await;
 
@@ -2329,8 +2343,10 @@ async fn foundry_error_format_contrast_openai_vs_anthropic() {
     // Anthropic error format
     Mock::given(method("POST"))
         .respond_with(
-            ResponseTemplate::new(401)
-                .set_body_json(anthropic_error_body("authentication_error", "Invalid key (anthropic)")),
+            ResponseTemplate::new(401).set_body_json(anthropic_error_body(
+                "authentication_error",
+                "Invalid key (anthropic)",
+            )),
         )
         .mount(&anthropic_server)
         .await;

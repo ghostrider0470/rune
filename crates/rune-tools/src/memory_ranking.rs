@@ -51,11 +51,7 @@ pub fn apply_temporal_decay(results: &mut [MemoryHit], half_life_days: f64) {
 ///
 /// Returns `None` for evergreen files (MEMORY.md, files without a date in the name).
 /// Returns `Some(factor)` in `(0.0, 1.0]` for dated files.
-fn compute_decay_factor(
-    file_path: &str,
-    today: NaiveDate,
-    half_life_days: f64,
-) -> Option<f64> {
+fn compute_decay_factor(file_path: &str, today: NaiveDate, half_life_days: f64) -> Option<f64> {
     // MEMORY.md is always evergreen
     let filename = file_path
         .rsplit('/')
@@ -166,10 +162,7 @@ pub fn mmr_rerank(results: Vec<MemoryHit>, lambda: f64, top_k: usize) -> Vec<Mem
     );
 
     // Collect selected results in order, preserving their original (decayed) scores
-    selected
-        .into_iter()
-        .map(|i| results[i].clone())
-        .collect()
+    selected.into_iter().map(|i| results[i].clone()).collect()
 }
 
 /// Tokenize text into a set of lowercase words.
@@ -200,15 +193,13 @@ fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
 
 /// Common English stop words to filter from conversational queries.
 const STOP_WORDS: &[&str] = &[
-    "a", "about", "an", "and", "any", "are", "as", "at", "be", "been", "but",
-    "by", "can", "could", "did", "do", "does", "for", "from", "had", "has",
-    "have", "he", "her", "him", "his", "how", "i", "if", "in", "into", "is",
-    "it", "its", "just", "me", "might", "my", "no", "not", "of", "on", "or",
-    "our", "out", "own", "re", "say", "she", "should", "so", "some", "than",
-    "that", "the", "their", "them", "then", "there", "these", "they", "this",
-    "those", "to", "too", "up", "us", "very", "was", "we", "were", "what",
-    "when", "where", "which", "while", "who", "whom", "why", "will", "with",
-    "would", "you", "your",
+    "a", "about", "an", "and", "any", "are", "as", "at", "be", "been", "but", "by", "can", "could",
+    "did", "do", "does", "for", "from", "had", "has", "have", "he", "her", "him", "his", "how",
+    "i", "if", "in", "into", "is", "it", "its", "just", "me", "might", "my", "no", "not", "of",
+    "on", "or", "our", "out", "own", "re", "say", "she", "should", "so", "some", "than", "that",
+    "the", "their", "them", "then", "there", "these", "they", "this", "those", "to", "too", "up",
+    "us", "very", "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom",
+    "why", "will", "with", "would", "you", "your",
 ];
 
 /// Expand a conversational query into search-friendly keywords.

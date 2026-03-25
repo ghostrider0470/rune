@@ -32,13 +32,12 @@ use cli::{
     MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
-    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, SessionsAction, SkillsAction,
-    SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction,
+    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, SessionsAction,
+    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
 };
-use service::{install_service_definition, print_service_definition, ServiceInstallOptions};
 use output::{
     ChannelCapabilitiesResponse, ChannelDetail, ChannelListResponse, ChannelLogFile,
     ChannelLogsResponse, ChannelResolveResponse, ChannelStatusResponse, DashboardChannelsSummary,
@@ -48,6 +47,7 @@ use output::{
     ModelScanResponse, ModelSetImageResponse, ModelSetResponse, ModelStatusResponse, OutputFormat,
     TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
 };
+use service::{ServiceInstallOptions, install_service_definition, print_service_definition};
 
 /// Initialize a workspace directory with default files.
 fn load_config() -> rune_config::AppConfig {

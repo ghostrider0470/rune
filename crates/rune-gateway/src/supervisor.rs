@@ -62,13 +62,21 @@ impl OperatorDelivery for TelegramOperatorDelivery {
             "parse_mode": "Markdown",
         });
 
-        let resp = self.client.post(&url).json(&params).send().await
+        let resp = self
+            .client
+            .post(&url)
+            .json(&params)
+            .send()
+            .await
             .map_err(|e| format!("telegram send failed: {e}"))?;
 
         if !resp.status().is_success() {
             // Retry without Markdown if parsing failed
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
-            let desc = body.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let desc = body
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if desc.contains("parse entities") || desc.contains("can't parse") {
                 let plain = serde_json::json!({
                     "chat_id": self.chat_id,
@@ -283,26 +291,29 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
             let tick_result = deps.heartbeat.tick().await;
             if let Some(prompt) = tick_result.prompt {
                 match run_heartbeat(&deps, &prompt).await {
-                    Ok(response) => {
-                        match deps.heartbeat.record_response(&response).await {
-                            HeartbeatResponseAction::SuppressNoop => {
-                                debug!("heartbeat response suppressed (HEARTBEAT_OK)");
-                            }
-                            HeartbeatResponseAction::SuppressDuplicate => {
-                                debug!("heartbeat response suppressed (duplicate)");
-                            }
-                            HeartbeatResponseAction::Deliver => {
-                                info!(len = response.len(), "heartbeat produced output — delivering to operator");
-                                if let Some(ref delivery) = deps.operator_delivery {
-                                    if let Err(e) = delivery.deliver(&response).await {
-                                        error!(error = %e, "failed to deliver heartbeat to operator");
-                                    }
-                                } else {
-                                    debug!("heartbeat output ready but no operator delivery configured");
+                    Ok(response) => match deps.heartbeat.record_response(&response).await {
+                        HeartbeatResponseAction::SuppressNoop => {
+                            debug!("heartbeat response suppressed (HEARTBEAT_OK)");
+                        }
+                        HeartbeatResponseAction::SuppressDuplicate => {
+                            debug!("heartbeat response suppressed (duplicate)");
+                        }
+                        HeartbeatResponseAction::Deliver => {
+                            info!(
+                                len = response.len(),
+                                "heartbeat produced output — delivering to operator"
+                            );
+                            if let Some(ref delivery) = deps.operator_delivery {
+                                if let Err(e) = delivery.deliver(&response).await {
+                                    error!(error = %e, "failed to deliver heartbeat to operator");
                                 }
+                            } else {
+                                debug!(
+                                    "heartbeat output ready but no operator delivery configured"
+                                );
                             }
                         }
-                    }
+                    },
                     Err(e) => {
                         error!(error = %e, "heartbeat execution failed");
                     }
@@ -618,7 +629,9 @@ mod tests {
         )
         .await;
 
-        let event = rx.try_recv().expect("announce mode should broadcast an event");
+        let event = rx
+            .try_recv()
+            .expect("announce mode should broadcast an event");
         assert_eq!(event.kind, "cron_run_completed");
         assert_eq!(event.payload["delivery_mode"], "announce");
         assert_eq!(event.payload["output"], "hello world");

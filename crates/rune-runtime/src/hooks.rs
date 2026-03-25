@@ -153,21 +153,12 @@ impl HookRegistry {
 
     /// Number of handlers registered for a specific event.
     pub async fn handler_count(&self, event: &HookEvent) -> usize {
-        self.handlers
-            .read()
-            .await
-            .get(event)
-            .map_or(0, |v| v.len())
+        self.handlers.read().await.get(event).map_or(0, |v| v.len())
     }
 
     /// Total number of handlers across all events.
     pub async fn total_handlers(&self) -> usize {
-        self.handlers
-            .read()
-            .await
-            .values()
-            .map(|v| v.len())
-            .sum()
+        self.handlers.read().await.values().map(|v| v.len()).sum()
     }
 
     /// Clear all handlers (used during plugin reload).

@@ -254,7 +254,11 @@ impl MemoryToolExecutor {
         if self.search_config.temporal_decay_enabled {
             memory_ranking::apply_temporal_decay(&mut hits, self.search_config.half_life_days);
             // Re-sort after decay so MMR sees the adjusted scores
-            hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            hits.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         if self.search_config.mmr_enabled {
@@ -323,7 +327,11 @@ impl MemoryToolExecutor {
             }
         }
 
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         // Return more than max_results so ranking pipeline can select diverse results
         results.truncate(max_results * 3);
         results

@@ -65,9 +65,7 @@ fn build_transcriptions_url(base_url: &str, model: &str, api_version: Option<&st
             .trim_end_matches('/')
             .trim_end_matches("/openai/v1")
             .trim_end_matches("/openai");
-        format!(
-            "{root}/openai/deployments/{model}/audio/transcriptions?api-version={version}"
-        )
+        format!("{root}/openai/deployments/{model}/audio/transcriptions?api-version={version}")
     } else {
         format!("{}/audio/transcriptions", base_url.trim_end_matches('/'))
     }
@@ -82,7 +80,8 @@ impl SttProvider for OpenAiStt {
     ) -> Result<TranscriptionResult, SttError> {
         let ext = extension_for_mime(mime_type)?;
         let filename = format!("audio.{ext}");
-        let url = build_transcriptions_url(&self.base_url, &self.model, self.api_version.as_deref());
+        let url =
+            build_transcriptions_url(&self.base_url, &self.model, self.api_version.as_deref());
 
         debug!(
             mime_type,

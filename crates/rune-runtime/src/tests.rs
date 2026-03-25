@@ -1206,10 +1206,12 @@ async fn approval_required_is_attributed_in_transcript() {
     assert_eq!(approvals[0].presented_payload["tool_name"], "exec");
     assert_eq!(approvals[0].presented_payload["resume_status"], "pending");
     assert_eq!(approvals[0].presented_payload["approval_status"], "pending");
-    assert!(approvals[0]
-        .presented_payload
-        .get("approval_status_updated_at")
-        .is_none());
+    assert!(
+        approvals[0]
+            .presented_payload
+            .get("approval_status_updated_at")
+            .is_none()
+    );
     assert_eq!(
         approvals[0].presented_payload["command"],
         "rm -rf /tmp/demo"
@@ -1912,7 +1914,10 @@ async fn allow_always_policy_auto_approves_matching_tool_call() {
         policy_repo,
     );
 
-    let (turn, _) = executor.execute(session.id, "list files", None).await.unwrap();
+    let (turn, _) = executor
+        .execute(session.id, "list files", None)
+        .await
+        .unwrap();
     // Turn should complete (not halt at waiting_for_approval).
     assert_eq!(turn.status, "completed");
 

@@ -30,7 +30,11 @@ pub struct ServiceDefinitionResponse {
 impl fmt::Display for ServiceDefinitionResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(path) = &self.output_path {
-            writeln!(f, "✓ Wrote {} service definition for {} to {}", self.target, self.name, path)?;
+            writeln!(
+                f,
+                "✓ Wrote {} service definition for {} to {}",
+                self.target, self.name, path
+            )?;
         } else {
             writeln!(f, "# {} service definition for {}", self.target, self.name)?;
         }
@@ -47,15 +51,8 @@ pub fn print_service_definition(
     yolo: bool,
     no_sandbox: bool,
 ) -> Result<ServiceDefinitionResponse> {
-    let content = render_service_definition(
-        target,
-        name,
-        workdir,
-        config,
-        gateway_url,
-        yolo,
-        no_sandbox,
-    )?;
+    let content =
+        render_service_definition(target, name, workdir, config, gateway_url, yolo, no_sandbox)?;
 
     Ok(ServiceDefinitionResponse {
         target: service_target_name(target).to_string(),
@@ -65,7 +62,9 @@ pub fn print_service_definition(
     })
 }
 
-pub fn install_service_definition(options: ServiceInstallOptions) -> Result<ServiceDefinitionResponse> {
+pub fn install_service_definition(
+    options: ServiceInstallOptions,
+) -> Result<ServiceDefinitionResponse> {
     let content = render_service_definition(
         options.target,
         &options.name,
@@ -87,7 +86,13 @@ pub fn install_service_definition(options: ServiceInstallOptions) -> Result<Serv
         .with_context(|| format!("failed to write {}", output_path.display()))?;
 
     if options.enable || options.start {
-        activate_service(options.target, &output_path, &options.name, options.enable, options.start)?;
+        activate_service(
+            options.target,
+            &output_path,
+            &options.name,
+            options.enable,
+            options.start,
+        )?;
     }
 
     Ok(ServiceDefinitionResponse {
@@ -117,8 +122,12 @@ fn render_service_definition(
     }
 
     Ok(match target {
-        ServiceTarget::Systemd => render_systemd_unit(name, &exe, workdir, config, gateway_url, &args),
-        ServiceTarget::Launchd => render_launchd_plist(name, &exe, workdir, config, gateway_url, &args),
+        ServiceTarget::Systemd => {
+            render_systemd_unit(name, &exe, workdir, config, gateway_url, &args)
+        }
+        ServiceTarget::Launchd => {
+            render_launchd_plist(name, &exe, workdir, config, gateway_url, &args)
+        }
     })
 }
 
@@ -138,10 +147,16 @@ fn render_systemd_unit(
     );
 
     if let Some(config) = config {
-        unit.push_str(&format!("Environment=RUNE_CONFIG={}\n", systemd_escape_raw(config)));
+        unit.push_str(&format!(
+            "Environment=RUNE_CONFIG={}\n",
+            systemd_escape_raw(config)
+        ));
     }
     if let Some(url) = gateway_url {
-        unit.push_str(&format!("Environment=RUNE_GATEWAY_URL={}\n", systemd_escape_raw(url)));
+        unit.push_str(&format!(
+            "Environment=RUNE_GATEWAY_URL={}\n",
+            systemd_escape_raw(url)
+        ));
     }
 
     unit.push_str("\n[Install]\nWantedBy=default.target\n");
@@ -159,9 +174,15 @@ fn render_launchd_plist(
     let mut plist = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n",
     );
-    plist.push_str(&format!("  <key>Label</key>\n  <string>{}</string>\n", xml_escape(name)));
+    plist.push_str(&format!(
+        "  <key>Label</key>\n  <string>{}</string>\n",
+        xml_escape(name)
+    ));
     plist.push_str("  <key>ProgramArguments</key>\n  <array>\n");
-    plist.push_str(&format!("    <string>{}</string>\n", xml_escape(&exe.display().to_string())));
+    plist.push_str(&format!(
+        "    <string>{}</string>\n",
+        xml_escape(&exe.display().to_string())
+    ));
     for arg in args {
         plist.push_str(&format!("    <string>{}</string>\n", xml_escape(arg)));
     }
@@ -206,7 +227,12 @@ fn activate_service(
     }
 }
 
-fn activate_systemd_service(output_path: &Path, name: &str, enable: bool, start: bool) -> Result<()> {
+fn activate_systemd_service(
+    output_path: &Path,
+    name: &str,
+    enable: bool,
+    start: bool,
+) -> Result<()> {
     run_command(
         std::process::Command::new("systemctl")
             .arg("--user")
@@ -236,7 +262,12 @@ fn activate_systemd_service(output_path: &Path, name: &str, enable: bool, start:
     Ok(())
 }
 
-fn activate_launchd_service(output_path: &Path, _name: &str, enable: bool, start: bool) -> Result<()> {
+fn activate_launchd_service(
+    output_path: &Path,
+    _name: &str,
+    enable: bool,
+    start: bool,
+) -> Result<()> {
     if enable || start {
         run_command(
             std::process::Command::new("launchctl")
@@ -273,7 +304,8 @@ fn default_output_path(target: ServiceTarget, name: &str) -> PathBuf {
             let base = std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("."));
-            base.join("Library/LaunchAgents").join(format!("{name}.plist"))
+            base.join("Library/LaunchAgents")
+                .join(format!("{name}.plist"))
         }
     }
 }
@@ -289,7 +321,10 @@ fn shell_join(parts: impl IntoIterator<Item = String>) -> String {
     parts
         .into_iter()
         .map(|part| {
-            if part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | ':')) {
+            if part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | ':'))
+            {
                 part
             } else {
                 format!("'{}'", part.replace('\'', "'\\''"))
@@ -316,7 +351,6 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,7 +376,10 @@ mod tests {
         .unwrap();
 
         let written = std::fs::read_to_string(&output).unwrap();
-        assert_eq!(result.output_path.as_deref(), Some(output.to_string_lossy().as_ref()));
+        assert_eq!(
+            result.output_path.as_deref(),
+            Some(output.to_string_lossy().as_ref())
+        );
         assert!(written.contains("Description=Rune Gateway (rune-gateway)"));
         assert!(written.contains("Environment=RUNE_CONFIG=config.toml"));
         assert!(written.contains("Environment=RUNE_GATEWAY_URL=http://127.0.0.1:8787"));
@@ -369,8 +406,10 @@ mod tests {
 
         assert_eq!(result.target, "launchd");
         assert!(result.output_path.is_none());
-        assert!(result.content.contains("<key>Label</key>
-  <string>rune-gateway</string>"));
+        assert!(result.content.contains(
+            "<key>Label</key>
+  <string>rune-gateway</string>"
+        ));
         assert!(result.content.contains("<key>ProgramArguments</key>"));
         assert!(result.content.contains("<string>gateway</string>"));
         assert!(result.content.contains("<string>run</string>"));

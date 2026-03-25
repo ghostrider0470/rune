@@ -34,7 +34,6 @@ pub struct GatewayClient {
     pub(crate) http: Client,
 }
 
-
 #[derive(Debug, Clone, Default)]
 pub struct Ms365TodoTaskUpdateInput {
     pub title: Option<String>,

@@ -145,15 +145,31 @@ pub enum DispatchDecision {
 
 /// Words that signal the message is a question / status query.
 const DIRECT_KEYWORDS: &[&str] = &[
-    "what", "how", "why", "when", "where", "who", "which", "status", "list",
-    "show", "describe", "explain", "tell me", "help",
+    "what", "how", "why", "when", "where", "who", "which", "status", "list", "show", "describe",
+    "explain", "tell me", "help",
 ];
 
 /// Words that signal dev work.
 const DEV_KEYWORDS: &[&str] = &[
-    "fix", "implement", "add", "refactor", "work on", "build", "create",
-    "update", "remove", "delete", "migrate", "deploy", "write", "change",
-    "modify", "debug", "patch", "upgrade", "rewrite",
+    "fix",
+    "implement",
+    "add",
+    "refactor",
+    "work on",
+    "build",
+    "create",
+    "update",
+    "remove",
+    "delete",
+    "migrate",
+    "deploy",
+    "write",
+    "change",
+    "modify",
+    "debug",
+    "patch",
+    "upgrade",
+    "rewrite",
 ];
 
 // ---------------------------------------------------------------------------

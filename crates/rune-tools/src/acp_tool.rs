@@ -135,9 +135,7 @@ impl AcpToolExecutor {
             None => {
                 return Ok(ToolResult {
                     tool_call_id: call.tool_call_id.clone(),
-                    output: format!(
-                        "Unknown agent '{agent_name}'. Supported: claude-code, codex"
-                    ),
+                    output: format!("Unknown agent '{agent_name}'. Supported: claude-code, codex"),
                     is_error: true,
                     tool_execution_id: None,
                 });
@@ -161,9 +159,7 @@ impl AcpToolExecutor {
                 let exit_code = output.status.code().unwrap_or(-1);
 
                 let mut result_text = String::new();
-                result_text.push_str(&format!(
-                    "Agent: {label}\nExit code: {exit_code}\n"
-                ));
+                result_text.push_str(&format!("Agent: {label}\nExit code: {exit_code}\n"));
 
                 if !stdout.is_empty() {
                     result_text.push_str("\n--- stdout ---\n");
@@ -198,10 +194,7 @@ impl AcpToolExecutor {
             }
             Err(_) => ToolResult {
                 tool_call_id: call.tool_call_id.clone(),
-                output: format!(
-                    "ACP task timed out after {}s",
-                    timeout_secs.as_secs()
-                ),
+                output: format!("ACP task timed out after {}s", timeout_secs.as_secs()),
                 is_error: true,
                 tool_execution_id: None,
             },
@@ -210,11 +203,7 @@ impl AcpToolExecutor {
         Ok(result)
     }
 
-    fn build_command(
-        config: &AcpAgentConfig,
-        task: &str,
-        workdir: &PathBuf,
-    ) -> Command {
+    fn build_command(config: &AcpAgentConfig, task: &str, workdir: &PathBuf) -> Command {
         let mut cmd = Command::new(&config.binary_path);
 
         match config.agent {
@@ -227,10 +216,7 @@ impl AcpToolExecutor {
                     .arg("--no-session-persistence");
             }
             AcpAgent::Codex => {
-                cmd.arg("exec")
-                    .arg(task)
-                    .arg("--model")
-                    .arg("o3");
+                cmd.arg("exec").arg(task).arg("--model").arg("o3");
             }
         }
 
@@ -302,8 +288,14 @@ mod tests {
     #[test]
     fn agent_from_str_variants() {
         assert_eq!(AcpAgent::from_str("claude"), Some(AcpAgent::ClaudeCode));
-        assert_eq!(AcpAgent::from_str("claude-code"), Some(AcpAgent::ClaudeCode));
-        assert_eq!(AcpAgent::from_str("Claude-Code"), Some(AcpAgent::ClaudeCode));
+        assert_eq!(
+            AcpAgent::from_str("claude-code"),
+            Some(AcpAgent::ClaudeCode)
+        );
+        assert_eq!(
+            AcpAgent::from_str("Claude-Code"),
+            Some(AcpAgent::ClaudeCode)
+        );
         assert_eq!(AcpAgent::from_str("codex"), Some(AcpAgent::Codex));
         assert_eq!(AcpAgent::from_str("openai-codex"), Some(AcpAgent::Codex));
         assert_eq!(AcpAgent::from_str("unknown"), None);

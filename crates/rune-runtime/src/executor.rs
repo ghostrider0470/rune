@@ -11,7 +11,9 @@ use rune_core::{
 };
 use rune_models::{CompletionRequest, ModelProvider, StreamEvent};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
-use rune_store::repos::{ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo};
+use rune_store::repos::{
+    ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
+};
 use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
 use crate::compaction::CompactionStrategy;
@@ -268,7 +270,13 @@ impl TurnExecutor {
         // 4. Run the model/tool loop
         let mut usage = UsageAccumulator::new();
         let result = self
-            .run_turn_loop(session_id, turn_id, effective_model.as_deref(), &mut usage, chunk_tx.as_ref())
+            .run_turn_loop(
+                session_id,
+                turn_id,
+                effective_model.as_deref(),
+                &mut usage,
+                chunk_tx.as_ref(),
+            )
             .await;
 
         // Persist usage totals even on failed turns so operator surfaces remain durable.
@@ -637,7 +645,11 @@ impl TurnExecutor {
             if !user_msg.is_empty() {
                 let memories = mem0.recall(&user_msg).await;
                 let section = Mem0Engine::format_for_prompt(&memories);
-                if section.is_empty() { None } else { Some(section) }
+                if section.is_empty() {
+                    None
+                } else {
+                    Some(section)
+                }
             } else {
                 None
             }
@@ -669,7 +681,8 @@ impl TurnExecutor {
                 Some(registry) => registry.system_prompt_fragment().await,
                 None => None,
             };
-            let mut extra_system_sections: Vec<String> = skill_prompt_fragment.into_iter().collect();
+            let mut extra_system_sections: Vec<String> =
+                skill_prompt_fragment.into_iter().collect();
 
             // Inject recalled mem0 memories into the system prompt
             if let Some(ref section) = mem0_prompt_section {
@@ -731,7 +744,9 @@ impl TurnExecutor {
                         match final_response {
                             Some(resp) => resp,
                             None => {
-                                warn!("stream ended without Done event, falling back to non-streaming");
+                                warn!(
+                                    "stream ended without Done event, falling back to non-streaming"
+                                );
                                 self.complete_with_retries(&request).await?
                             }
                         }
@@ -853,7 +868,9 @@ impl TurnExecutor {
                                 let note = if is_yolo {
                                     format!("auto-approved: yolo mode for {tool}")
                                 } else {
-                                    format!("auto-approved: persisted allow-always policy for {tool}")
+                                    format!(
+                                        "auto-approved: persisted allow-always policy for {tool}"
+                                    )
                                 };
                                 let response = TranscriptItem::ApprovalResponse {
                                     approval_id: auto_approval_id,

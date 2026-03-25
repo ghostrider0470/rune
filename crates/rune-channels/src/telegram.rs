@@ -287,14 +287,14 @@ impl TelegramAdapter {
         // Step 2: download the actual file bytes
         let download_url = self.base_url.replace("/bot", "/file/bot");
         let download_url = format!("{download_url}/{file_path}");
-        let file_resp = self
-            .client
-            .get(&download_url)
-            .send()
-            .await
-            .map_err(|e| ChannelError::Provider {
-                message: format!("file download failed: {e}"),
-            })?;
+        let file_resp =
+            self.client
+                .get(&download_url)
+                .send()
+                .await
+                .map_err(|e| ChannelError::Provider {
+                    message: format!("file download failed: {e}"),
+                })?;
         let bytes = file_resp
             .bytes()
             .await
@@ -304,8 +304,6 @@ impl TelegramAdapter {
 
         Ok((bytes.to_vec(), file_path))
     }
-
-
 
     /// Send synthesized audio back to Telegram as either a voice note bubble or audio file.
     pub async fn send_audio_bytes(
@@ -362,7 +360,9 @@ impl TelegramAdapter {
 
         if !body.ok {
             return Err(ChannelError::Provider {
-                message: body.description.unwrap_or_else(|| "audio send failed".into()),
+                message: body
+                    .description
+                    .unwrap_or_else(|| "audio send failed".into()),
             });
         }
 
@@ -427,7 +427,9 @@ impl TelegramAdapter {
         for (i, chunk) in chunks.iter().enumerate() {
             // Only the first chunk gets the reply_to
             let chunk_reply_to = if i == 0 { reply_to } else { None };
-            let receipt = self.send_single_message(chat_id, chunk, chunk_reply_to).await?;
+            let receipt = self
+                .send_single_message(chat_id, chunk, chunk_reply_to)
+                .await?;
             last_receipt = Some(receipt);
 
             // Small delay between chunks to avoid rate limits
@@ -916,7 +918,13 @@ mod tests {
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].name, "report.pdf");
         assert_eq!(attachments[0].mime_type.as_deref(), Some("application/pdf"));
-        assert!(attachments[0].url.as_ref().unwrap().starts_with("telegram-file:"));
+        assert!(
+            attachments[0]
+                .url
+                .as_ref()
+                .unwrap()
+                .starts_with("telegram-file:")
+        );
     }
 
     #[test]

@@ -799,7 +799,10 @@ impl Ms365MailService for GraphMs365MailService {
 
         let mut message = Map::new();
         message.insert("subject".to_string(), json!(request.subject.trim()));
-        message.insert("body".to_string(), graph_item_body_value(request.body.trim()));
+        message.insert(
+            "body".to_string(),
+            graph_item_body_value(request.body.trim()),
+        );
         message.insert(
             "toRecipients".to_string(),
             graph_mail_recipients_value(&request.to)?,
@@ -1166,7 +1169,10 @@ fn validate_optional_mail_recipients(
     recipients: &[String],
     field_name: &str,
 ) -> Result<(), Ms365MailServiceError> {
-    if recipients.iter().any(|recipient| recipient.trim().is_empty()) {
+    if recipients
+        .iter()
+        .any(|recipient| recipient.trim().is_empty())
+    {
         return Err(Ms365MailServiceError::Validation(format!(
             "{field_name} recipients cannot be empty"
         )));

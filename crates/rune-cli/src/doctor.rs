@@ -114,7 +114,12 @@ async fn check_paths(config: &AppConfig) -> Vec<CheckResult> {
         ("paths.config_dir", &config.paths.config_dir, true),
         ("paths.secrets_dir", &config.paths.secrets_dir, true),
     ] {
-        results.push(check_single_path(name, path, required_persistent, &resolved_mode));
+        results.push(check_single_path(
+            name,
+            path,
+            required_persistent,
+            &resolved_mode,
+        ));
     }
 
     results.push(check_docker_path_layout(config));
@@ -738,7 +743,10 @@ fn check_approval_security(config: &AppConfig) -> Vec<CheckResult> {
         },
         message: format!("Approval mode: {}", approval_mode.as_str()),
         hint: if is_yolo {
-            Some("Yolo mode auto-approves all tool calls — appropriate for trusted local dev only".into())
+            Some(
+                "Yolo mode auto-approves all tool calls — appropriate for trusted local dev only"
+                    .into(),
+            )
         } else {
             None
         },
@@ -1157,9 +1165,11 @@ mod tests {
 
         config.database.backend = rune_config::StorageBackend::Postgres;
         let postgres_fallback = check_database_config(&config).await;
-        assert!(postgres_fallback.iter().any(|r| {
-            r.name == "database.embedded.mode" && r.status == CheckStatus::Pass
-        }));
+        assert!(
+            postgres_fallback
+                .iter()
+                .any(|r| { r.name == "database.embedded.mode" && r.status == CheckStatus::Pass })
+        );
         assert!(postgres_fallback.iter().any(|r| {
             r.name == "database.embedded.install_dir" && r.status == CheckStatus::Skip
         }));
@@ -1313,12 +1323,8 @@ mod tests {
             );
 
             // Server mode — hint should reference mount flags / UID.
-            let server = check_single_path(
-                "paths.db_dir",
-                &ro,
-                true,
-                &rune_config::RuntimeMode::Server,
-            );
+            let server =
+                check_single_path("paths.db_dir", &ro, true, &rune_config::RuntimeMode::Server);
             assert_eq!(server.status, CheckStatus::Fail);
             let hint = server.hint.unwrap();
             assert!(
@@ -1379,9 +1385,7 @@ mod tests {
         config.approval.mode = rune_config::ApprovalMode::Yolo;
         let results = check_approval_security(&config);
         assert!(results.iter().any(|r| {
-            r.name == "approval.mode"
-                && r.status == CheckStatus::Warn
-                && r.message.contains("yolo")
+            r.name == "approval.mode" && r.status == CheckStatus::Warn && r.message.contains("yolo")
         }));
     }
 

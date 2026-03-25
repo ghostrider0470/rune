@@ -75,7 +75,8 @@ impl GitToolExecutor {
                     )
                 } else {
                     // Split a single string on whitespace for convenience
-                    v.as_str().map(|s| s.split_whitespace().map(String::from).collect())
+                    v.as_str()
+                        .map(|s| s.split_whitespace().map(String::from).collect())
                 }
             })
             .unwrap_or_default();
@@ -275,7 +276,11 @@ mod tests {
         let exec = GitToolExecutor::new(dir.path());
         let call = make_call(serde_json::json!({"operation": "status"}));
         let result = exec.execute(call).await.unwrap();
-        assert!(!result.is_error, "git status should succeed: {}", result.output);
+        assert!(
+            !result.is_error,
+            "git status should succeed: {}",
+            result.output
+        );
     }
 
     #[tokio::test]
@@ -318,7 +323,11 @@ mod tests {
         // Test log with args as array
         let call = make_call(serde_json::json!({"operation": "log", "args": ["--oneline", "-1"]}));
         let result = exec.execute(call).await.unwrap();
-        assert!(!result.is_error, "git log should succeed: {}", result.output);
+        assert!(
+            !result.is_error,
+            "git log should succeed: {}",
+            result.output
+        );
         assert!(result.output.contains("initial commit"));
     }
 

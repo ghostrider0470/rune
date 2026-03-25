@@ -545,7 +545,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(persisted.tool_call_id, call.tool_call_id.clone().into_uuid());
+        assert_eq!(
+            persisted.tool_call_id,
+            call.tool_call_id.clone().into_uuid()
+        );
         assert_eq!(
             value["toolExecutionId"],
             serde_json::Value::String(persisted.tool_execution_id.to_string())

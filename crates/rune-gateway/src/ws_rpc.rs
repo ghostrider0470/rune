@@ -806,27 +806,38 @@ impl RpcDispatcher {
     /// List turns for a session. Params: `session_id` (required), `limit`, `offset`.
     async fn turns_list(&self, params: Value) -> Result<Value, RpcError> {
         let session_id = require_uuid(&params, "session_id")?;
-        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(100).min(500) as usize;
+        let limit = params
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .min(500) as usize;
         let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
-        let rows = self.state.turn_repo
+        let rows = self
+            .state
+            .turn_repo
             .list_by_session(session_id)
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
 
-        let items: Vec<Value> = rows.into_iter().skip(offset).take(limit).map(|row| {
-            json!({
-                "id": row.id,
-                "session_id": row.session_id,
-                "trigger_kind": row.trigger_kind,
-                "status": row.status,
-                "model_ref": row.model_ref,
-                "usage_prompt_tokens": row.usage_prompt_tokens,
-                "usage_completion_tokens": row.usage_completion_tokens,
-                "started_at": row.started_at.to_rfc3339(),
-                "ended_at": row.ended_at.map(|t| t.to_rfc3339()),
+        let items: Vec<Value> = rows
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|row| {
+                json!({
+                    "id": row.id,
+                    "session_id": row.session_id,
+                    "trigger_kind": row.trigger_kind,
+                    "status": row.status,
+                    "model_ref": row.model_ref,
+                    "usage_prompt_tokens": row.usage_prompt_tokens,
+                    "usage_completion_tokens": row.usage_completion_tokens,
+                    "started_at": row.started_at.to_rfc3339(),
+                    "ended_at": row.ended_at.map(|t| t.to_rfc3339()),
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(json!(items))
     }
@@ -835,7 +846,9 @@ impl RpcDispatcher {
     async fn turns_get(&self, params: Value) -> Result<Value, RpcError> {
         let turn_id = require_uuid(&params, "turn_id")?;
 
-        let row = self.state.turn_repo
+        let row = self
+            .state
+            .turn_repo
             .find_by_id(turn_id)
             .await
             .map_err(|e| RpcError::not_found(e.to_string()))?;
@@ -858,13 +871,16 @@ impl RpcDispatcher {
     /// List registered tools/skills.
     async fn tools_list(&self) -> Result<Value, RpcError> {
         let skills = self.state.skill_registry.list().await;
-        let items: Vec<Value> = skills.into_iter().map(|s| {
-            json!({
-                "name": s.name,
-                "description": s.description,
-                "enabled": s.enabled,
+        let items: Vec<Value> = skills
+            .into_iter()
+            .map(|s| {
+                json!({
+                    "name": s.name,
+                    "description": s.description,
+                    "enabled": s.enabled,
+                })
             })
-        }).collect();
+            .collect();
         Ok(json!(items))
     }
 
@@ -872,24 +888,29 @@ impl RpcDispatcher {
 
     /// List pending approval requests.
     async fn approvals_list(&self) -> Result<Value, RpcError> {
-        let approvals = self.state.approval_repo
+        let approvals = self
+            .state
+            .approval_repo
             .list(true)
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
 
-        let items: Vec<Value> = approvals.into_iter().map(|a| {
-            json!({
-                "id": a.id,
-                "subject_type": a.subject_type,
-                "subject_id": a.subject_id,
-                "reason": a.reason,
-                "decision": a.decision,
-                "decided_by": a.decided_by,
-                "presented_payload": a.presented_payload,
-                "created_at": a.created_at.to_rfc3339(),
-                "decided_at": a.decided_at.map(|t| t.to_rfc3339()),
+        let items: Vec<Value> = approvals
+            .into_iter()
+            .map(|a| {
+                json!({
+                    "id": a.id,
+                    "subject_type": a.subject_type,
+                    "subject_id": a.subject_id,
+                    "reason": a.reason,
+                    "decision": a.decision,
+                    "decided_by": a.decided_by,
+                    "presented_payload": a.presented_payload,
+                    "created_at": a.created_at.to_rfc3339(),
+                    "decided_at": a.decided_at.map(|t| t.to_rfc3339()),
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(json!(items))
     }
@@ -909,11 +930,14 @@ impl RpcDispatcher {
             )));
         }
 
-        let decided_by = params.get("decided_by")
+        let decided_by = params
+            .get("decided_by")
             .and_then(|v| v.as_str())
             .unwrap_or("operator");
 
-        let decided = self.state.approval_repo
+        let decided = self
+            .state
+            .approval_repo
             .decide(approval_id, &normalised, decided_by, chrono::Utc::now())
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -934,7 +958,9 @@ impl RpcDispatcher {
                 .map_err(|e| RpcError::internal(e.to_string()))?;
         }
 
-        let decided = self.state.approval_repo
+        let decided = self
+            .state
+            .approval_repo
             .find_by_id(approval_id)
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -953,23 +979,30 @@ impl RpcDispatcher {
     /// List background processes.
     async fn processes_list(&self) -> Result<Value, RpcError> {
         let processes = self.state.process_manager.list().await;
-        let items: Vec<Value> = processes.into_iter().map(|p| {
-            json!({
-                "process_id": p.process_id,
-                "running": p.running,
-                "exit_code": p.exit_code,
-                "live": p.live,
-                "durable_status": p.durable_status,
-                "note": p.note,
+        let items: Vec<Value> = processes
+            .into_iter()
+            .map(|p| {
+                json!({
+                    "process_id": p.process_id,
+                    "running": p.running,
+                    "exit_code": p.exit_code,
+                    "live": p.live,
+                    "durable_status": p.durable_status,
+                    "note": p.note,
+                })
             })
-        }).collect();
+            .collect();
         Ok(json!(items))
     }
 
     /// Get a single process. Params: `id` (required).
     async fn processes_get(&self, params: Value) -> Result<Value, RpcError> {
         let id = require_string(&params, "id")?;
-        let p = self.state.process_manager.poll(id).await
+        let p = self
+            .state
+            .process_manager
+            .poll(id)
+            .await
             .map_err(|e| RpcError::not_found(e.to_string()))?;
 
         Ok(json!({
@@ -985,7 +1018,10 @@ impl RpcDispatcher {
     /// Kill a background process. Params: `id` (required).
     async fn processes_kill(&self, params: Value) -> Result<Value, RpcError> {
         let id = require_string(&params, "id")?;
-        self.state.process_manager.kill(id).await
+        self.state
+            .process_manager
+            .kill(id)
+            .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
 
         Ok(json!({
@@ -1005,9 +1041,10 @@ impl RpcDispatcher {
         }
         channels.sort();
 
-        let items: Vec<Value> = channels.into_iter().map(|name| {
-            json!({ "name": name, "kind": name, "enabled": true })
-        }).collect();
+        let items: Vec<Value> = channels
+            .into_iter()
+            .map(|name| json!({ "name": name, "kind": name, "enabled": true }))
+            .collect();
         Ok(json!(items))
     }
 
@@ -1021,7 +1058,9 @@ impl RpcDispatcher {
         channels.sort();
         drop(config);
 
-        let rows = self.state.session_repo
+        let rows = self
+            .state
+            .session_repo
             .list(i64::MAX / 4, 0)
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;

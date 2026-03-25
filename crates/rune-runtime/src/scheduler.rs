@@ -1818,6 +1818,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(updated.next_run_at, before, "name-only update must not change next_run_at");
+        assert_eq!(
+            updated.next_run_at, before,
+            "name-only update must not change next_run_at"
+        );
     }
 }

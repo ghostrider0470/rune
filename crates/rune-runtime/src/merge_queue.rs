@@ -108,9 +108,9 @@ impl MergeQueue {
 
     /// Peek at the next entry eligible for merge (CI passed + approved).
     pub fn next(&self) -> Option<&MergeQueueEntry> {
-        self.entries.iter().find(|e| {
-            e.ci_status == CiStatus::Passed && e.review_status == ReviewStatus::Approved
-        })
+        self.entries
+            .iter()
+            .find(|e| e.ci_status == CiStatus::Passed && e.review_status == ReviewStatus::Approved)
     }
 
     /// Remove the entry for `branch` from the queue.
@@ -135,7 +135,10 @@ impl MergeQueue {
     /// Return entries that have been queued longer than `threshold`.
     pub fn stale_entries(&self, threshold: Duration) -> Vec<&MergeQueueEntry> {
         let cutoff = Utc::now() - chrono::Duration::from_std(threshold).unwrap_or_default();
-        self.entries.iter().filter(|e| e.queued_at < cutoff).collect()
+        self.entries
+            .iter()
+            .filter(|e| e.queued_at < cutoff)
+            .collect()
     }
 
     /// Merge the next eligible entry: rebase onto default branch, squash-merge,

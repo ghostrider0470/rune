@@ -96,19 +96,15 @@ impl TokenBudgetCompaction {
             tokens.max(1)
         }
 
-        let content_tokens = msg
-            .content
-            .as_deref()
-            .map_or(0, count_text_tokens);
-        let tool_calls_tokens = msg
-            .tool_calls
-            .as_ref()
-            .map_or(0, |calls| {
-                calls.iter().map(|tc| {
-                    count_text_tokens(&tc.function.name)
-                        + count_text_tokens(&tc.function.arguments)
-                }).sum()
-            });
+        let content_tokens = msg.content.as_deref().map_or(0, count_text_tokens);
+        let tool_calls_tokens = msg.tool_calls.as_ref().map_or(0, |calls| {
+            calls
+                .iter()
+                .map(|tc| {
+                    count_text_tokens(&tc.function.name) + count_text_tokens(&tc.function.arguments)
+                })
+                .sum()
+        });
         content_tokens + tool_calls_tokens
     }
 
@@ -126,7 +122,9 @@ impl TokenBudgetCompaction {
 
         // Extract user questions/requests and assistant answers/decisions
         for msg in messages {
-            let Some(content) = &msg.content else { continue };
+            let Some(content) = &msg.content else {
+                continue;
+            };
             let trimmed = content.trim();
             if trimmed.is_empty() {
                 continue;
@@ -190,7 +188,10 @@ impl TokenBudgetCompaction {
             // Truncate long individual messages to keep the note concise
             let max_msg_len = 300;
             let excerpt = if trimmed.len() > max_msg_len {
-                format!("{}...", &trimmed[..Self::truncate_utf8_boundary(trimmed, max_msg_len)])
+                format!(
+                    "{}...",
+                    &trimmed[..Self::truncate_utf8_boundary(trimmed, max_msg_len)]
+                )
             } else {
                 trimmed.to_string()
             };
@@ -316,10 +317,7 @@ mod tests {
     #[test]
     fn under_budget_passes_through() {
         let compaction = TokenBudgetCompaction::new(128_000, 20);
-        let messages = vec![
-            msg(Role::User, "hello"),
-            msg(Role::Assistant, "hi there"),
-        ];
+        let messages = vec![msg(Role::User, "hello"), msg(Role::Assistant, "hi there")];
         let result = compaction.compact(messages.clone());
         assert_eq!(result.len(), 2);
     }
@@ -331,13 +329,25 @@ mod tests {
         let mut messages = Vec::new();
         // Create enough messages to exceed 80 tokens (80% of 100)
         for i in 0..30 {
-            messages.push(msg(Role::User, &format!("message number {} with some padding text to inflate token count", i)));
+            messages.push(msg(
+                Role::User,
+                &format!(
+                    "message number {} with some padding text to inflate token count",
+                    i
+                ),
+            ));
         }
         let result = compaction.compact(messages);
         // Should have 1 summary + 2 preserved tail messages = 3
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].role, Role::System);
-        assert!(result[0].content.as_ref().unwrap().starts_with("[Earlier conversation summary]"));
+        assert!(
+            result[0]
+                .content
+                .as_ref()
+                .unwrap()
+                .starts_with("[Earlier conversation summary]")
+        );
         // Structured summary should contain user extractions
         assert!(result[0].content.as_ref().unwrap().contains("User asked:"));
     }
@@ -345,10 +355,7 @@ mod tests {
     #[test]
     fn preserves_tail_when_few_messages() {
         let compaction = TokenBudgetCompaction::new(10, 20);
-        let messages = vec![
-            msg(Role::User, "a"),
-            msg(Role::Assistant, "b"),
-        ];
+        let messages = vec![msg(Role::User, "a"), msg(Role::Assistant, "b")];
         // Even if over threshold, if len <= preserve_tail, keep all
         let result = compaction.compact(messages.clone());
         assert_eq!(result.len(), 2);
@@ -371,7 +378,10 @@ mod tests {
             msg(Role::User, "What database should we use?"),
             msg(Role::Assistant, "I recommend PostgreSQL for this workload."),
             msg(Role::User, "What about SQLite?"),
-            msg(Role::Assistant, "SQLite works for single-node, but PG scales better."),
+            msg(
+                Role::Assistant,
+                "SQLite works for single-node, but PG scales better.",
+            ),
         ];
 
         let note = TokenBudgetCompaction::build_flush_note(&messages);
@@ -408,13 +418,22 @@ mod tests {
     #[test]
     fn compaction_flushes_to_daily_memory() {
         let tmp = TempDir::new().unwrap();
-        let compaction = TokenBudgetCompaction::new(100, 2)
-            .with_memory_flush(tmp.path());
+        let compaction = TokenBudgetCompaction::new(100, 2).with_memory_flush(tmp.path());
 
         let mut messages = Vec::new();
         for i in 0..30 {
-            let role = if i % 2 == 0 { Role::User } else { Role::Assistant };
-            messages.push(msg(role, &format!("message {} with padding to inflate token count for compaction", i)));
+            let role = if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            };
+            messages.push(msg(
+                role,
+                &format!(
+                    "message {} with padding to inflate token count for compaction",
+                    i
+                ),
+            ));
         }
 
         let result = compaction.compact(messages);
@@ -422,8 +441,14 @@ mod tests {
 
         // Check that a daily memory file was created
         let today = Utc::now().date_naive();
-        let daily_path = tmp.path().join("memory").join(format!("{}.md", today.format("%Y-%m-%d")));
-        assert!(daily_path.exists(), "daily memory file should exist after compaction flush");
+        let daily_path = tmp
+            .path()
+            .join("memory")
+            .join(format!("{}.md", today.format("%Y-%m-%d")));
+        assert!(
+            daily_path.exists(),
+            "daily memory file should exist after compaction flush"
+        );
 
         let content = std::fs::read_to_string(&daily_path).unwrap();
         assert!(content.contains("[Session context summary]"));
@@ -440,12 +465,17 @@ mod tests {
         let daily_path = memory_dir.join(format!("{}.md", today.format("%Y-%m-%d")));
         std::fs::write(&daily_path, "# Existing notes\n\n- Did some work\n").unwrap();
 
-        let compaction = TokenBudgetCompaction::new(100, 2)
-            .with_memory_flush(tmp.path());
+        let compaction = TokenBudgetCompaction::new(100, 2).with_memory_flush(tmp.path());
 
         let mut messages = Vec::new();
         for i in 0..30 {
-            messages.push(msg(Role::User, &format!("message {} with padding to inflate token count for compaction", i)));
+            messages.push(msg(
+                Role::User,
+                &format!(
+                    "message {} with padding to inflate token count for compaction",
+                    i
+                ),
+            ));
         }
 
         compaction.compact(messages);
@@ -461,7 +491,10 @@ mod tests {
         let compaction = TokenBudgetCompaction::new(100, 2);
         let mut messages = Vec::new();
         for i in 0..30 {
-            messages.push(msg(Role::User, &format!("message {} with padding to inflate token count", i)));
+            messages.push(msg(
+                Role::User,
+                &format!("message {} with padding to inflate token count", i),
+            ));
         }
 
         let result = compaction.compact(messages);

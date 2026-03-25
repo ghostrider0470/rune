@@ -27,9 +27,7 @@ use rune_config::{
     AppConfig, MemoryLevel, ModelBootstrap, PathsProfile, RuntimeMode, StorageBackend,
 };
 use rune_core::ToolCategory;
-use rune_gateway::ms365::{
-    GraphMs365MailService, GraphMs365PlannerService, GraphMs365TodoService,
-};
+use rune_gateway::ms365::{GraphMs365MailService, GraphMs365PlannerService, GraphMs365TodoService};
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
 use rune_mcp::{McpManager, McpToolExecutor};
@@ -38,8 +36,8 @@ use rune_models::{
     RoutedModelProvider, Usage,
 };
 use rune_runtime::{
-    ContextAssembler, LaneQueue, Mem0Engine, NoOpCompaction, SessionEngine,
-    TelegramFileDownloader, TurnExecutor,
+    ContextAssembler, LaneQueue, Mem0Engine, NoOpCompaction, SessionEngine, TelegramFileDownloader,
+    TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,

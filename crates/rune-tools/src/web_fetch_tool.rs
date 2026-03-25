@@ -133,9 +133,7 @@ impl WebFetchToolExecutor {
                         | "retry-after"
                 )
             })
-            .map(|(name, value)| {
-                format!("{}: {}", name, value.to_str().unwrap_or("<binary>"))
-            })
+            .map(|(name, value)| format!("{}: {}", name, value.to_str().unwrap_or("<binary>")))
             .collect();
 
         // Read body text
@@ -160,7 +158,10 @@ impl WebFetchToolExecutor {
         };
 
         // Format output
-        let mut output = format!("HTTP {status_code} {}\n", status.canonical_reason().unwrap_or(""));
+        let mut output = format!(
+            "HTTP {status_code} {}\n",
+            status.canonical_reason().unwrap_or("")
+        );
         if !response_headers.is_empty() {
             for h in &response_headers {
                 output.push_str(h);

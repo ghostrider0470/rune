@@ -1,5 +1,6 @@
 #![doc = "Tool system primitives and built-in executors for Rune: shared definitions, registry, approval/policy helpers, process/file/session/memory tool implementations, and compatibility test scaffolding."]
 
+pub mod acp_tool;
 pub mod approval;
 pub mod cron_tool;
 mod definition;
@@ -21,7 +22,6 @@ pub mod spawn_tool;
 mod stubs;
 pub mod subagent_tool;
 pub mod web_fetch_tool;
-pub mod acp_tool;
 
 pub use definition::{ToolCall, ToolDefinition, ToolResult};
 pub use error::ToolError;

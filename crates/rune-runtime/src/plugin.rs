@@ -105,8 +105,8 @@ impl PluginInstance {
             .stdin
             .as_mut()
             .ok_or("plugin stdin not available")?;
-        let mut line = serde_json::to_string(&request)
-            .map_err(|e| format!("serialize error: {e}"))?;
+        let mut line =
+            serde_json::to_string(&request).map_err(|e| format!("serialize error: {e}"))?;
         line.push('\n');
 
         stdin
@@ -138,8 +138,7 @@ impl PluginInstance {
             return Err("plugin closed stdout".to_string());
         }
 
-        serde_json::from_str(&response_line)
-            .map_err(|e| format!("invalid JSON from plugin: {e}"))
+        serde_json::from_str(&response_line).map_err(|e| format!("invalid JSON from plugin: {e}"))
     }
 
     /// Check if the plugin process is still running.
@@ -204,10 +203,10 @@ impl PluginRegistry {
             .ok_or_else(|| format!("plugin not found: {name}"))?;
 
         let instance = PluginInstance::spawn(manifest).await?;
-        self.instances
-            .write()
-            .await
-            .insert(name.to_string(), Arc::new(tokio::sync::Mutex::new(instance)));
+        self.instances.write().await.insert(
+            name.to_string(),
+            Arc::new(tokio::sync::Mutex::new(instance)),
+        );
         Ok(())
     }
 
@@ -256,11 +255,8 @@ impl PluginRegistry {
         drop(instances);
 
         let mut inst = instance.lock().await;
-        inst.send_request(
-            &format!("hook/{}", event.as_str()),
-            context.clone(),
-        )
-        .await
+        inst.send_request(&format!("hook/{}", event.as_str()), context.clone())
+            .await
     }
 
     /// Register all plugin hook handlers into a HookRegistry.
@@ -546,9 +542,7 @@ async fn load_plugin_manifest(path: &Path) -> Result<PluginManifest, String> {
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    let name = frontmatter
-        .name
-        .unwrap_or_else(|| dir_name.to_string());
+    let name = frontmatter.name.unwrap_or_else(|| dir_name.to_string());
     let version = frontmatter.version.unwrap_or_else(|| "0.0.0".to_string());
     let description = frontmatter
         .description
@@ -608,10 +602,7 @@ Body content here.
         assert_eq!(fm.version.as_deref(), Some("1.0.0"));
         assert_eq!(fm.description.as_deref(), Some("A test plugin"));
         assert_eq!(fm.binary.as_deref(), Some("./run.sh"));
-        assert_eq!(
-            fm.hooks.as_deref(),
-            Some("pre_tool_call, post_tool_call")
-        );
+        assert_eq!(fm.hooks.as_deref(), Some("pre_tool_call, post_tool_call"));
     }
 
     #[test]

@@ -96,17 +96,20 @@ impl SessionEngine {
     /// Idempotent when already running, and valid from any waiting state when
     /// resuming execution after a tool/subagent/approval pause.
     pub async fn mark_running(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.checked_transition(session_id, SessionStatus::Running).await
+        self.checked_transition(session_id, SessionStatus::Running)
+            .await
     }
 
     /// Transition a session to Completed status.
     pub async fn mark_completed(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.checked_transition(session_id, SessionStatus::Completed).await
+        self.checked_transition(session_id, SessionStatus::Completed)
+            .await
     }
 
     /// Transition a session to Failed status.
     pub async fn mark_failed(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
-        self.checked_transition(session_id, SessionStatus::Failed).await
+        self.checked_transition(session_id, SessionStatus::Failed)
+            .await
     }
 
     /// Get a session by ID.
@@ -169,12 +172,13 @@ impl SessionEngine {
         target: SessionStatus,
     ) -> Result<SessionRow, RuntimeError> {
         let row = self.session_repo.find_by_id(session_id).await?;
-        let current: SessionStatus = row.status.parse().map_err(|_| {
-            RuntimeError::InvalidSessionState {
-                expected: target.as_str().to_string(),
-                actual: row.status.clone(),
-            }
-        })?;
+        let current: SessionStatus =
+            row.status
+                .parse()
+                .map_err(|_| RuntimeError::InvalidSessionState {
+                    expected: target.as_str().to_string(),
+                    actual: row.status.clone(),
+                })?;
         if !current.can_transition_to(&target) {
             return Err(RuntimeError::InvalidSessionState {
                 expected: target.as_str().to_string(),

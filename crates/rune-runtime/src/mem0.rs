@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 use rune_config::Mem0Config;
 use rune_models::ModelProvider;
 use serde::{Deserialize, Serialize};
-use tokio_postgres::types::Type;
 use tokio_postgres::Client;
+use tokio_postgres::types::Type;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -249,9 +249,19 @@ impl Mem0Engine {
             .query_typed(
                 RECALL_SQL,
                 &[
-                    (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                    (&self.config.similarity_threshold as &(dyn tokio_postgres::types::ToSql + Sync), Type::FLOAT8),
-                    (&(self.config.top_k as i64) as &(dyn tokio_postgres::types::ToSql + Sync), Type::INT8),
+                    (
+                        &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &self.config.similarity_threshold
+                            as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::FLOAT8,
+                    ),
+                    (
+                        &(self.config.top_k as i64) as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::INT8,
+                    ),
                 ],
             )
             .await
@@ -415,8 +425,14 @@ impl Mem0Engine {
                        LIMIT $2
                    ) b ON true"#,
                 &[
-                    (&edge_threshold as &(dyn tokio_postgres::types::ToSql + Sync), Type::FLOAT8),
-                    (&neighbors_k as &(dyn tokio_postgres::types::ToSql + Sync), Type::INT8),
+                    (
+                        &edge_threshold as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::FLOAT8,
+                    ),
+                    (
+                        &neighbors_k as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::INT8,
+                    ),
                 ],
             )
             .await
@@ -424,7 +440,10 @@ impl Mem0Engine {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "mem0 graph: edge query failed");
-                return MemoryGraph { nodes, edges: vec![] };
+                return MemoryGraph {
+                    nodes,
+                    edges: vec![],
+                };
             }
         };
 
@@ -483,9 +502,7 @@ impl Mem0Engine {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "embedding API returned {status}: {body}"
-            ));
+            return Err(format!("embedding API returned {status}: {body}"));
         }
 
         let json: serde_json::Value = resp
@@ -522,9 +539,7 @@ impl Mem0Engine {
         user_msg: &str,
         assistant_msg: &str,
     ) -> Result<Vec<ExtractedFact>, String> {
-        let user_content = format!(
-            "Conversation:\nUser: {user_msg}\nAssistant: {assistant_msg}"
-        );
+        let user_content = format!("Conversation:\nUser: {user_msg}\nAssistant: {assistant_msg}");
 
         let request = rune_models::CompletionRequest {
             messages: vec![
@@ -555,11 +570,7 @@ impl Mem0Engine {
             .await
             .map_err(|e| format!("extraction LLM call failed: {e}"))?;
 
-        let content = response
-            .content
-            .as_deref()
-            .unwrap_or("[]")
-            .trim();
+        let content = response.content.as_deref().unwrap_or("[]").trim();
 
         // The LLM might wrap its response in a markdown code block.
         let json_str = content
@@ -593,8 +604,14 @@ impl Mem0Engine {
             .query_typed(
                 DEDUP_CHECK_SQL,
                 &[
-                    (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                    (&self.config.dedup_threshold as &(dyn tokio_postgres::types::ToSql + Sync), Type::FLOAT8),
+                    (
+                        &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &self.config.dedup_threshold as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::FLOAT8,
+                    ),
                 ],
             )
             .await
@@ -609,11 +626,26 @@ impl Mem0Engine {
                 .query_typed(
                     UPDATE_MEMORY_SQL,
                     &[
-                        (&existing_id as &(dyn tokio_postgres::types::ToSql + Sync), Type::UUID),
-                        (&fact.fact as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                        (&fact.category as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                        (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                        (&now as &(dyn tokio_postgres::types::ToSql + Sync), Type::TIMESTAMPTZ),
+                        (
+                            &existing_id as &(dyn tokio_postgres::types::ToSql + Sync),
+                            Type::UUID,
+                        ),
+                        (
+                            &fact.fact as &(dyn tokio_postgres::types::ToSql + Sync),
+                            Type::TEXT,
+                        ),
+                        (
+                            &fact.category as &(dyn tokio_postgres::types::ToSql + Sync),
+                            Type::TEXT,
+                        ),
+                        (
+                            &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                            Type::TEXT,
+                        ),
+                        (
+                            &now as &(dyn tokio_postgres::types::ToSql + Sync),
+                            Type::TIMESTAMPTZ,
+                        ),
                     ],
                 )
                 .await
@@ -632,13 +664,34 @@ impl Mem0Engine {
             .query_typed(
                 INSERT_MEMORY_SQL,
                 &[
-                    (&id as &(dyn tokio_postgres::types::ToSql + Sync), Type::UUID),
-                    (&fact.fact as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                    (&fact.category as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                    (&embedding_str as &(dyn tokio_postgres::types::ToSql + Sync), Type::TEXT),
-                    (&session_opt as &(dyn tokio_postgres::types::ToSql + Sync), Type::UUID),
-                    (&now as &(dyn tokio_postgres::types::ToSql + Sync), Type::TIMESTAMPTZ),
-                    (&now as &(dyn tokio_postgres::types::ToSql + Sync), Type::TIMESTAMPTZ),
+                    (
+                        &id as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::UUID,
+                    ),
+                    (
+                        &fact.fact as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &fact.category as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &session_opt as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::UUID,
+                    ),
+                    (
+                        &now as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TIMESTAMPTZ,
+                    ),
+                    (
+                        &now as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TIMESTAMPTZ,
+                    ),
                 ],
             )
             .await

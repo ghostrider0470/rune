@@ -13,9 +13,9 @@ use uuid::Uuid;
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
 use rune_config::{AgentsConfig, ModelsConfig};
 use rune_core::SessionKind;
-use rune_stt::SttEngine;
 use rune_store::models::SessionRow;
 use rune_store::repos::SessionRepo;
+use rune_stt::SttEngine;
 
 use crate::engine::SessionEngine;
 use crate::error::RuntimeError;
@@ -274,9 +274,8 @@ impl SessionLoop {
                                 full
                             }
                         };
-                        let error_content = format!(
-                            "Sorry, I encountered an error: {brief}. Please try again."
-                        );
+                        let error_content =
+                            format!("Sorry, I encountered an error: {brief}. Please try again.");
                         let ch = self.channel.lock().await;
                         // Edit the placeholder with the error, or send a new reply.
                         if let Some(ref ph_id) = placeholder_id {

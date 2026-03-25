@@ -14,7 +14,9 @@ use serde::Serialize;
 use tracing::debug;
 
 use super::ModelProvider;
-use super::response::{ApiResponse, map_anthropic_error_response, map_error_response, parse_response};
+use super::response::{
+    ApiResponse, map_anthropic_error_response, map_error_response, parse_response,
+};
 use crate::error::ModelError;
 use crate::types::{ChatMessage, CompletionRequest, CompletionResponse, FinishReason, Usage};
 

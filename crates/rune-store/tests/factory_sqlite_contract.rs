@@ -47,7 +47,11 @@ fn new_session() -> NewSession {
 #[tokio::test]
 async fn auto_backend_without_database_url_resolves_to_sqlite_factory_path() {
     let temp = tempfile::tempdir().expect("temp dir should be created");
-    let sqlite_path = temp.path().join("nested").join("state").join("rune-auto.db");
+    let sqlite_path = temp
+        .path()
+        .join("nested")
+        .join("state")
+        .join("rune-auto.db");
 
     let mut config = AppConfig::default();
     config.database.backend = StorageBackend::Auto;
@@ -60,7 +64,10 @@ async fn auto_backend_without_database_url_resolves_to_sqlite_factory_path() {
     assert_eq!(info.backend_name, "sqlite");
     assert_eq!(info.database_url, None);
     assert!(!info.pgvector_available());
-    assert!(sqlite_path.exists(), "sqlite database file should be created");
+    assert!(
+        sqlite_path.exists(),
+        "sqlite database file should be created"
+    );
 
     let session = new_session();
     let created = repos

@@ -930,9 +930,11 @@ mod tests {
     #[test]
     fn fsm_created_to_ready() {
         assert!(SessionStatus::Created.can_transition_to(&SessionStatus::Ready));
-        assert!(SessionStatus::Created
-            .transition(SessionStatus::Ready)
-            .is_ok());
+        assert!(
+            SessionStatus::Created
+                .transition(SessionStatus::Ready)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1012,9 +1014,11 @@ mod tests {
         assert!(!SessionStatus::Created.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Completed.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Ready.can_transition_to(&SessionStatus::WaitingForApproval));
-        assert!(SessionStatus::Created
-            .transition(SessionStatus::Running)
-            .is_err());
+        assert!(
+            SessionStatus::Created
+                .transition(SessionStatus::Running)
+                .is_err()
+        );
     }
 
     // ── TriggerKind ──────────────────────────────────────────────

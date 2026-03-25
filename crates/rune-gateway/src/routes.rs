@@ -2281,7 +2281,9 @@ pub async fn heartbeat_set_interval(
         .and_then(|v| v.as_u64())
         .ok_or_else(|| GatewayError::BadRequest("interval_secs required".into()))?;
     if secs < 60 {
-        return Err(GatewayError::BadRequest("interval_secs must be >= 60".into()));
+        return Err(GatewayError::BadRequest(
+            "interval_secs must be >= 60".into(),
+        ));
     }
     state.heartbeat.set_interval(secs).await;
     Ok(Json(ActionResponse {

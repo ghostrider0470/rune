@@ -77,8 +77,8 @@ impl OrchestratorState {
         if !path.exists() {
             return Ok(None);
         }
-        let data = std::fs::read_to_string(&path)
-            .map_err(|e| OrchestratorError::Io(e.to_string()))?;
+        let data =
+            std::fs::read_to_string(&path).map_err(|e| OrchestratorError::Io(e.to_string()))?;
         let state: Self =
             serde_json::from_str(&data).map_err(|e| OrchestratorError::Parse(e.to_string()))?;
         Ok(Some(state))
@@ -91,8 +91,7 @@ impl OrchestratorState {
     pub fn save(&self, workspace: &Path) -> Result<(), OrchestratorError> {
         let path = Self::state_path(workspace, &self.project);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| OrchestratorError::Io(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| OrchestratorError::Io(e.to_string()))?;
         }
         let tmp = path.with_extension("json.tmp");
         let data = serde_json::to_string_pretty(self)
@@ -305,7 +304,9 @@ impl FileLockManager {
 
         // Insert locks.
         for p in paths {
-            self.state.file_locks.insert(p.clone(), agent_id.to_string());
+            self.state
+                .file_locks
+                .insert(p.clone(), agent_id.to_string());
         }
 
         // Update the agent entry's lock list if present.
@@ -369,7 +370,10 @@ mod tests {
 
     #[test]
     fn disjoint_patterns_do_not_overlap() {
-        assert!(!patterns_overlap("src/module_a/foo.rs", "src/module_b/bar.rs"));
+        assert!(!patterns_overlap(
+            "src/module_a/foo.rs",
+            "src/module_b/bar.rs"
+        ));
     }
 
     #[test]
@@ -493,8 +497,9 @@ mod tests {
 
         state.save(workspace.path()).unwrap();
 
-        let loaded =
-            OrchestratorState::load(workspace.path(), "test-project").unwrap().unwrap();
+        let loaded = OrchestratorState::load(workspace.path(), "test-project")
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.project, "test-project");
         assert_eq!(loaded.file_locks.get("src/*").unwrap(), "agent-1");
     }
@@ -505,7 +510,9 @@ mod tests {
         let state = make_state();
         state.save(workspace.path()).unwrap();
 
-        let expected = workspace.path().join("agents/test-project/.orchestrator-state.json");
+        let expected = workspace
+            .path()
+            .join("agents/test-project/.orchestrator-state.json");
         assert!(expected.exists());
     }
 
