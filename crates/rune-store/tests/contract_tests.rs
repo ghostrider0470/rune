@@ -265,6 +265,13 @@ async fn test_turn_invalid_transition_rejected(
         .await
         .unwrap_err();
     assert!(matches!(err, StoreError::InvalidTransition(_)));
+
+    let updated = turn_repo
+        .update_status(tid, "failed", Some(now()))
+        .await
+        .unwrap();
+    assert_eq!(updated.status, "failed");
+    assert!(updated.ended_at.is_some());
 }
 
 async fn test_transcript_crud(
