@@ -329,10 +329,13 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
         // --- Scheduled jobs (durable claim prevents duplicate execution) ---
         let due_jobs = deps.scheduler.claim_due_jobs(CLAIM_LEASE_SECS).await;
         for job in due_jobs {
-            let job_id = job.id;
-            debug!(job_id = %job_id, name = ?job.name, "executing claimed job");
-            let _ = run_job_lifecycle(&deps, &job, true, SchedulerRunTrigger::Due).await;
-            deps.scheduler.release_claim(&job_id).await;
+            let deps = deps.clone();
+            tokio::spawn(async move {
+                let job_id = job.id;
+                debug!(job_id = %job_id, name = ?job.name, "executing claimed job");
+                let _ = run_job_lifecycle(&deps, &job, true, SchedulerRunTrigger::Due).await;
+                deps.scheduler.release_claim(&job_id).await;
+            });
         }
 
         // --- Reminders (durable claim prevents duplicate delivery) ---
