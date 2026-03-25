@@ -522,7 +522,7 @@ impl SessionStatus {
             | (Self::WaitingForTool, Self::Running)
             | (Self::WaitingForApproval, Self::Running)
             | (Self::WaitingForSubagent, Self::Running)
-            // Waiting → terminal (session cancelled/failed while waiting)
+            // Waiting → terminal (session can be cancelled, fail, or complete while waiting)
             | (Self::WaitingForTool, Self::Completed)
             | (Self::WaitingForTool, Self::Failed)
             | (Self::WaitingForTool, Self::Cancelled)
@@ -532,6 +532,10 @@ impl SessionStatus {
             | (Self::WaitingForSubagent, Self::Completed)
             | (Self::WaitingForSubagent, Self::Failed)
             | (Self::WaitingForSubagent, Self::Cancelled)
+            // Ready sessions may also be terminated explicitly without entering running.
+            | (Self::Ready, Self::Completed)
+            | (Self::Ready, Self::Failed)
+            | (Self::Ready, Self::Cancelled)
             // Suspended ↔ any non-terminal
             | (Self::Suspended, Self::Ready)
             | (_, Self::Suspended)
@@ -1007,7 +1011,7 @@ mod tests {
     fn fsm_rejects_invalid_transitions() {
         assert!(!SessionStatus::Created.can_transition_to(&SessionStatus::Running));
         assert!(!SessionStatus::Completed.can_transition_to(&SessionStatus::Running));
-        assert!(!SessionStatus::Ready.can_transition_to(&SessionStatus::Completed));
+        assert!(!SessionStatus::Ready.can_transition_to(&SessionStatus::WaitingForApproval));
         assert!(SessionStatus::Created
             .transition(SessionStatus::Running)
             .is_err());

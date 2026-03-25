@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use rune_core::{SessionKind, ToolCategory};
+use rune_core::{SessionKind, SessionStatus, ToolCategory};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, FunctionCall, ModelError, ModelProvider,
     ToolCallRequest, Usage,
@@ -1022,6 +1022,40 @@ async fn mark_running_allows_resuming_from_waiting_states() {
 }
 
 #[tokio::test]
+async fn ready_session_can_transition_to_terminal_states() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    for (target, expected) in [
+        (SessionStatus::Completed, "completed"),
+        (SessionStatus::Failed, "failed"),
+        (SessionStatus::Cancelled, "cancelled"),
+    ] {
+        let session = engine
+            .create_session(
+                SessionKind::Direct,
+                Some(h.workspace_root.to_string_lossy().to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(session.status, "ready");
+
+        let updated = match target {
+            SessionStatus::Completed => engine.mark_completed(session.id).await.unwrap(),
+            SessionStatus::Failed => engine.mark_failed(session.id).await.unwrap(),
+            SessionStatus::Cancelled => h
+                .session_repo
+                .update_status(session.id, "cancelled", chrono::Utc::now())
+                .await
+                .unwrap(),
+            _ => unreachable!(),
+        };
+
+        assert_eq!(updated.status, expected);
+    }
+}
+
+#[tokio::test]
 async fn invalid_session_transition_rejected() {
     let h = TestHarness::new();
     let engine = h.session_engine();
@@ -1033,14 +1067,16 @@ async fn invalid_session_transition_rejected() {
         )
         .await
         .unwrap();
-    // Session auto-transitions to ready. Trying to complete from ready is invalid.
     assert_eq!(session.status, "ready");
 
-    let err = engine.mark_completed(session.id).await.unwrap_err();
-    assert!(
-        err.to_string().contains("expected"),
-        "got: {err}"
-    );
+    let err = engine.mark_running(session.id).await.unwrap();
+    assert_eq!(err.status, "running");
+
+    let completed = engine.mark_completed(session.id).await.unwrap();
+    assert_eq!(completed.status, "completed");
+
+    let err = engine.mark_running(session.id).await.unwrap_err();
+    assert!(err.to_string().contains("running"), "got: {err}");
 }
 
 #[tokio::test]
