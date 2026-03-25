@@ -527,11 +527,36 @@ impl Default for DatabaseConfig {
     }
 }
 
+/// Compaction controls for context window management.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    /// Model context window size in tokens. Default: 128000.
+    #[serde(default = "default_context_window")]
+    pub context_window: usize,
+    /// Number of recent messages to always preserve verbatim. Default: 20.
+    #[serde(default = "default_preserve_tail")]
+    pub preserve_tail: usize,
+}
+
+fn default_context_window() -> usize { 128_000 }
+fn default_preserve_tail() -> usize { 20 }
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            context_window: default_context_window(),
+            preserve_tail: default_preserve_tail(),
+        }
+    }
+}
+
 /// Runtime execution controls.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeConfig {
     #[serde(default)]
     pub lanes: LaneQueueConfig,
+    #[serde(default)]
+    pub compaction: CompactionConfig,
 }
 
 /// MCP server configuration entry.
