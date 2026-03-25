@@ -51,8 +51,16 @@ pub fn print_service_definition(
     yolo: bool,
     no_sandbox: bool,
 ) -> Result<ServiceDefinitionResponse> {
-    let content =
-        render_service_definition(target, name, workdir, config, gateway_url, yolo, no_sandbox)?;
+    let content = render_service_definition(
+        target,
+        name,
+        workdir,
+        config,
+        gateway_url,
+        yolo,
+        no_sandbox,
+        None,
+    )?;
 
     Ok(ServiceDefinitionResponse {
         target: service_target_name(target).to_string(),
@@ -65,6 +73,10 @@ pub fn print_service_definition(
 pub fn install_service_definition(
     options: ServiceInstallOptions,
 ) -> Result<ServiceDefinitionResponse> {
+    let output_path = options
+        .output
+        .clone()
+        .unwrap_or_else(|| default_output_path(options.target, &options.name));
     let content = render_service_definition(
         options.target,
         &options.name,
@@ -73,11 +85,9 @@ pub fn install_service_definition(
         options.gateway_url.as_deref(),
         options.yolo,
         options.no_sandbox,
+        Some(&output_path),
     )?;
 
-    let output_path = options
-        .output
-        .unwrap_or_else(|| default_output_path(options.target, &options.name));
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -111,6 +121,7 @@ fn render_service_definition(
     gateway_url: Option<&str>,
     yolo: bool,
     no_sandbox: bool,
+    output_path: Option<&Path>,
 ) -> Result<String> {
     let exe = std::env::current_exe().context("failed to resolve current rune binary path")?;
     let mut args = vec!["gateway".to_string(), "run".to_string()];
@@ -123,10 +134,10 @@ fn render_service_definition(
 
     Ok(match target {
         ServiceTarget::Systemd => {
-            render_systemd_unit(name, &exe, workdir, config, gateway_url, &args)
+            render_systemd_unit(name, &exe, workdir, config, gateway_url, &args, output_path)
         }
         ServiceTarget::Launchd => {
-            render_launchd_plist(name, &exe, workdir, config, gateway_url, &args)
+            render_launchd_plist(name, &exe, workdir, config, gateway_url, &args, output_path)
         }
     })
 }
@@ -138,6 +149,7 @@ fn render_systemd_unit(
     config: Option<&str>,
     gateway_url: Option<&str>,
     args: &[String],
+    output_path: Option<&Path>,
 ) -> String {
     let exec = shell_join(std::iter::once(exe.display().to_string()).chain(args.iter().cloned()));
     let mut unit = format!(
@@ -159,6 +171,14 @@ fn render_systemd_unit(
         ));
     }
 
+    if let Some(path) = output_path {
+        unit.push_str("ExecStartPre=/bin/mkdir -p %h/.config/systemd/user\n");
+        unit.push_str(&format!(
+            "ExecStartPre=/bin/sh -lc 'test -f {}'\n",
+            shell_single_quote(&path.display().to_string())
+        ));
+    }
+
     unit.push_str("\n[Install]\nWantedBy=default.target\n");
     unit
 }
@@ -170,6 +190,7 @@ fn render_launchd_plist(
     config: Option<&str>,
     gateway_url: Option<&str>,
     args: &[String],
+    output_path: Option<&Path>,
 ) -> String {
     let mut plist = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n",
@@ -208,6 +229,17 @@ fn render_launchd_plist(
             ));
         }
         plist.push_str("  </dict>\n");
+    }
+
+    if let Some(path) = output_path {
+        plist.push_str(&format!(
+            "  <key>StandardOutPath</key>\n  <string>{}</string>\n",
+            xml_escape(&path.with_extension("log").display().to_string())
+        ));
+        plist.push_str(&format!(
+            "  <key>StandardErrorPath</key>\n  <string>{}</string>\n",
+            xml_escape(&path.with_extension("err.log").display().to_string())
+        ));
     }
 
     plist.push_str("</dict>\n</plist>\n");
@@ -334,6 +366,10 @@ fn shell_join(parts: impl IntoIterator<Item = String>) -> String {
         .join(" ")
 }
 
+fn shell_single_quote(value: &str) -> String {
+    value.replace('\'', "'\\''")
+}
+
 fn systemd_escape(path: &Path) -> String {
     systemd_escape_raw(&path.display().to_string())
 }
@@ -385,6 +421,7 @@ mod tests {
         assert!(written.contains("Environment=RUNE_GATEWAY_URL=http://127.0.0.1:8787"));
         assert!(written.contains("--yolo"));
         assert!(written.contains("--no-sandbox"));
+        assert!(written.contains("ExecStartPre=/bin/sh -lc 'test -f "));
 
         let _ = std::fs::remove_file(output);
         let _ = std::fs::remove_dir_all(temp);
@@ -406,14 +443,45 @@ mod tests {
 
         assert_eq!(result.target, "launchd");
         assert!(result.output_path.is_none());
-        assert!(result.content.contains(
-            "<key>Label</key>
-  <string>rune-gateway</string>"
-        ));
+        assert!(
+            result
+                .content
+                .contains("<key>Label</key>\n  <string>rune-gateway</string>")
+        );
         assert!(result.content.contains("<key>ProgramArguments</key>"));
         assert!(result.content.contains("<string>gateway</string>"));
         assert!(result.content.contains("<string>run</string>"));
         assert!(result.content.contains("<key>RUNE_CONFIG</key>"));
         assert!(result.content.contains("<string>config.toml</string>"));
+    }
+
+    #[test]
+    fn install_launchd_writes_log_paths_next_to_plist() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("rune-gateway.plist");
+
+        let result = install_service_definition(ServiceInstallOptions {
+            target: ServiceTarget::Launchd,
+            name: "rune-gateway".into(),
+            workdir: temp.path().to_path_buf(),
+            config: None,
+            gateway_url: None,
+            yolo: false,
+            no_sandbox: false,
+            output: Some(output.clone()),
+            enable: false,
+            start: false,
+        })
+        .unwrap();
+
+        let written = std::fs::read_to_string(&output).unwrap();
+        assert_eq!(
+            result.output_path.as_deref(),
+            Some(output.to_string_lossy().as_ref())
+        );
+        assert!(written.contains("<key>StandardOutPath</key>"));
+        assert!(written.contains(&output.with_extension("log").display().to_string()));
+        assert!(written.contains("<key>StandardErrorPath</key>"));
+        assert!(written.contains(&output.with_extension("err.log").display().to_string()));
     }
 }

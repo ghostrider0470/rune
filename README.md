@@ -56,7 +56,7 @@ cp config.example.toml config.toml
 
 Then open `http://127.0.0.1:8787/dashboard`.
 
-To generate a user service for unattended operation:
+To generate and install a user service for unattended operation:
 
 ```bash
 ./target/release/rune service install \
@@ -68,7 +68,7 @@ To generate a user service for unattended operation:
   --start
 ```
 
-On macOS, swap `--target launchd` to write a LaunchAgent plist instead.
+On macOS, swap `--target launchd` to write a LaunchAgent plist instead. The install command now also wires stdout/stderr logs next to the plist for easier first-run debugging.
 
 ### Zero-config Docker bring-up
 
