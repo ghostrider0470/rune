@@ -691,3 +691,53 @@ async fn duplicate_session_returns_conflict() {
     let result = repo.create(session).await;
     assert!(matches!(result, Err(StoreError::Conflict(_))));
 }
+
+#[tokio::test]
+async fn turn_repo_rejects_invalid_status_transition() {
+    let Some((pool, _pgvector)) = setup().await else {
+        return;
+    };
+    let session_repo = PgSessionRepo::new(pool.clone());
+    let turn_repo = PgTurnRepo::new(pool);
+
+    let now = Utc::now();
+    let session_id = Uuid::now_v7();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "direct".to_string(),
+            status: "ready".to_string(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let turn_id = Uuid::now_v7();
+    turn_repo
+        .create(NewTurn {
+            id: turn_id,
+            session_id,
+            trigger_kind: "user_message".to_string(),
+            status: "started".to_string(),
+            model_ref: Some("gpt-4".to_string()),
+            started_at: now,
+            ended_at: None,
+            usage_prompt_tokens: None,
+            usage_completion_tokens: None,
+        })
+        .await
+        .unwrap();
+
+    let err = turn_repo
+        .update_status(turn_id, "completed", Some(Utc::now()))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::InvalidTransition(_)));
+}

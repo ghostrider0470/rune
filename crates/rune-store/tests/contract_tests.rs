@@ -21,7 +21,7 @@ fn new_session() -> NewSession {
     NewSession {
         id: Uuid::now_v7(),
         kind: "interactive".into(),
-        status: "active".into(),
+        status: "ready".into(),
         workspace_root: Some("/tmp/test".into()),
         channel_ref: None,
         requester_session_id: None,
@@ -38,7 +38,7 @@ fn new_turn(session_id: Uuid) -> NewTurn {
         id: Uuid::now_v7(),
         session_id,
         trigger_kind: "user_message".into(),
-        status: "running".into(),
+        status: "started".into(),
         model_ref: Some("test/model".into()),
         started_at: now(),
         ended_at: None,
@@ -227,6 +227,13 @@ async fn test_turn_crud(session_repo: &dyn SessionRepo, turn_repo: &dyn TurnRepo
     assert_eq!(list.len(), 1);
 
     let updated = turn_repo
+        .update_status(tid, "model_calling", None)
+        .await
+        .unwrap();
+    assert_eq!(updated.status, "model_calling");
+    assert!(updated.ended_at.is_none());
+
+    let updated = turn_repo
         .update_status(tid, "completed", Some(now()))
         .await
         .unwrap();
@@ -236,6 +243,28 @@ async fn test_turn_crud(session_repo: &dyn SessionRepo, turn_repo: &dyn TurnRepo
     let updated = turn_repo.update_usage(tid, 100, 50).await.unwrap();
     assert_eq!(updated.usage_prompt_tokens, Some(100));
     assert_eq!(updated.usage_completion_tokens, Some(50));
+}
+
+async fn test_turn_invalid_transition_rejected(
+    session_repo: &dyn SessionRepo,
+    turn_repo: &dyn TurnRepo,
+) {
+    let mut s = new_session();
+    s.kind = "direct".into();
+    s.status = "ready".into();
+    let sid = s.id;
+    session_repo.create(s).await.unwrap();
+
+    let mut t = new_turn(sid);
+    t.status = "started".into();
+    let tid = t.id;
+    turn_repo.create(t).await.unwrap();
+
+    let err = turn_repo
+        .update_status(tid, "completed", Some(now()))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, StoreError::InvalidTransition(_)));
 }
 
 async fn test_transcript_crud(
@@ -606,7 +635,9 @@ async fn test_claim_stale_reclaim(repo: &dyn JobRepo) {
     job.schedule = Some(r#"{"kind":"every","every_ms":60000}"#.into());
     let jid = job.id;
     repo.create(job).await.unwrap();
-    repo.record_run(jid, far_past, Some(far_past)).await.unwrap();
+    repo.record_run(jid, far_past, Some(far_past))
+        .await
+        .unwrap();
 
     let old_claim_time = now() - chrono::Duration::seconds(600);
     let fresh_stale_before = now() - chrono::Duration::seconds(300);
@@ -852,6 +883,12 @@ mod sqlite_contract {
     async fn turn_crud() {
         let (s, t, ..) = repos().await;
         test_turn_crud(&s, &t).await;
+    }
+
+    #[tokio::test]
+    async fn turn_invalid_transition_rejected() {
+        let (s, t, ..) = repos().await;
+        test_turn_invalid_transition_rejected(&s, &t).await;
     }
 
     #[tokio::test]

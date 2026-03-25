@@ -274,6 +274,14 @@ impl TurnRepo for PgTurnRepo {
         ended_at: Option<DateTime<Utc>>,
     ) -> Result<TurnRow, StoreError> {
         let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let current_str: String = turns::table
+            .find(id)
+            .select(turns::status)
+            .first(&mut conn)
+            .await
+            .map_err(|e| not_found_or(e, "turn", id))?;
+        crate::turn_status::validate_turn_transition(&current_str, status)?;
+
         if let Some(ended) = ended_at {
             diesel::update(turns::table.find(id))
                 .set((turns::status.eq(status), turns::ended_at.eq(Some(ended))))

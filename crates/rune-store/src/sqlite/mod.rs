@@ -265,8 +265,7 @@ const JOB_RUN_COLS: &str =
     "id, job_id, started_at, finished_at, trigger_kind, status, output, created_at";
 const APPROVAL_COLS: &str = "id, subject_type, subject_id, reason, decision, decided_by, decided_at, presented_payload, created_at, handle_ref, host_ref";
 const TOOL_EXEC_COLS: &str = "id, tool_call_id, session_id, turn_id, tool_name, arguments, status, result_summary, error_summary, started_at, ended_at, approval_id, execution_mode";
-const PROCESS_HANDLE_COLS: &str =
-    "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at, execution_mode, tool_execution_id";
+const PROCESS_HANDLE_COLS: &str = "process_id, tool_call_id, session_id, command, cwd, status, exit_code, started_at, ended_at, execution_mode, tool_execution_id";
 const PAIRED_DEVICE_COLS: &str = "id, name, public_key, role, scopes, token_hash, token_expires_at, paired_at, last_seen_at, created_at";
 const PAIRING_REQUEST_COLS: &str = "id, device_name, public_key, challenge, created_at, expires_at";
 
@@ -535,6 +534,12 @@ impl TurnRepo for SqliteTurnRepo {
         let status = status.to_string();
         self.conn
             .call(move |conn| {
+                let current_str: String = conn
+                    .prepare("SELECT status FROM turns WHERE id = ?1")?
+                    .query_row([&id_s], |row| row.get(0))?;
+                crate::turn_status::validate_turn_transition(&current_str, &status)
+                    .map_err(|err| rusqlite::Error::InvalidParameterName(err.to_string()))?;
+
                 require_affected(conn.execute(
                     "UPDATE turns SET status = ?1, ended_at = ?2 WHERE id = ?3",
                     rusqlite::params![status, ended_at.as_ref().map(to_rfc3339), &id_s],
@@ -543,7 +548,12 @@ impl TurnRepo for SqliteTurnRepo {
                     .query_row([&id_s], row_to_turn)
             })
             .await
-            .map_err(|e| map_err(e, "turn", &id.to_string()))
+            .map_err(|e| match &e {
+                tokio_rusqlite::Error::Error(rusqlite::Error::InvalidParameterName(msg)) => {
+                    StoreError::InvalidTransition(msg.clone())
+                }
+                _ => map_err(e, "turn", &id.to_string()),
+            })
     }
 
     async fn update_usage(
@@ -801,10 +811,7 @@ impl JobRepo for SqliteJobRepo {
                         LIMIT ?4\
                     )"
                 );
-                conn.execute(
-                    &update_sql,
-                    rusqlite::params![&now_s, &jt, &stale_s, limit],
-                )?;
+                conn.execute(&update_sql, rusqlite::params![&now_s, &jt, &stale_s, limit])?;
 
                 // Fetch the rows we just claimed.
                 let select_sql = format!(
@@ -824,10 +831,7 @@ impl JobRepo for SqliteJobRepo {
         let id_s = id.to_string();
         self.conn
             .call(move |conn| {
-                conn.execute(
-                    "UPDATE jobs SET claimed_at = NULL WHERE id = ?1",
-                    [&id_s],
-                )?;
+                conn.execute("UPDATE jobs SET claimed_at = NULL WHERE id = ?1", [&id_s])?;
                 Ok(())
             })
             .await
