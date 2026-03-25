@@ -3290,6 +3290,10 @@ mod tests {
                 .cloned()
                 .collect())
         }
+
+        async fn mark_stale_completed(&self, _stale_secs: i64) -> Result<u64, StoreError> {
+            Ok(0)
+        }
     }
 
     struct MemTranscriptRepo {
