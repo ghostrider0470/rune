@@ -233,8 +233,9 @@
     try {
       const res = await rpc('session.send', { session_id: sessionId, content: text });
       // If the response contains inline assistant text, show it.
-      if (res && res.assistant_text) {
-        appendMsg('assistant', res.assistant_text);
+      const inlineReply = res && (res.assistant_reply || res.assistant_text || res.response || res.text);
+      if (inlineReply) {
+        appendMsg('assistant', inlineReply);
       }
     } catch(e) {
       appendMsg('system', 'Error: ' + (e.message || JSON.stringify(e)));

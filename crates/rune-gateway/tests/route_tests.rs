@@ -6757,4 +6757,5 @@ async fn webchat_route_serves_embedded_chat_ui() {
     assert!(body.contains("new WebSocket"));
     assert!(body.contains("session.create"));
     assert!(body.contains("session.send"));
+    assert!(body.contains("assistant_reply"));
 }
