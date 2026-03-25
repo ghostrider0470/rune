@@ -6660,3 +6660,77 @@ async fn configure_with_providers_reports_configured() {
     let tts = items.iter().find(|i| i["name"] == "tts").unwrap();
     assert_eq!(tts["status"], "skipped");
 }
+
+#[tokio::test]
+async fn set_get_list_and_clear_approval_policy_routes() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::put("/approvals/policies/exec")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"decision":"allow-always"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["tool_name"], "exec");
+    assert_eq!(json["decision"], "allow_always");
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/approvals/policies/exec").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["tool_name"], "exec");
+    assert_eq!(json["decision"], "allow_always");
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/approvals/policies").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let policies = json.as_array().unwrap();
+    assert!(policies.iter().any(|item| item["tool_name"] == "exec" && item["decision"] == "allow_always"));
+
+    let response = app
+        .clone()
+        .oneshot(Request::delete("/approvals/policies/exec").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["success"], true);
+
+    let response = app
+        .oneshot(Request::get("/approvals/policies/exec").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn set_approval_policy_rejects_invalid_decision() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::put("/approvals/policies/exec")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"decision":"allow-once"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "bad_request");
+}
