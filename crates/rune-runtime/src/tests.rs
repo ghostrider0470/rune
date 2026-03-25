@@ -236,6 +236,8 @@ impl SessionRepo for MemSessionRepo {
             workspace_root: s.workspace_root,
             channel_ref: s.channel_ref,
             requester_session_id: s.requester_session_id,
+            runtime_profile: s.runtime_profile,
+            policy_profile: s.policy_profile,
             latest_turn_id: s.latest_turn_id,
             metadata: s.metadata,
             created_at: s.created_at,
