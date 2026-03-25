@@ -27,7 +27,7 @@ if [ ! -f "$BINARY" ]; then
 fi
 
 # Quick smoke test — just check it can print version/help
-if ! "$BINARY" --help >/dev/null 2>&1; then
+if ! "$REPO_DIR/target/release/rune" health >/dev/null 2>&1; then
     echo "[self-update] Binary smoke test failed — aborting"
     exit 1
 fi
