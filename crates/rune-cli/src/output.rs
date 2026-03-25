@@ -902,7 +902,7 @@ pub struct ApprovalListResponse {
 impl fmt::Display for ApprovalListResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.approvals.is_empty() {
-            return write!(f, "No pending approvals.");
+            return write!(f, "No approvals found.");
         }
         for approval in &self.approvals {
             writeln!(

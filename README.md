@@ -77,6 +77,7 @@ Next docs from there:
 Rune sits between messaging channels and model providers. It manages:
 - sessions and turn execution
 - tool calls and approvals
+- durable approval queue inspection and decisioning via `rune approvals ...`
 - cron jobs, reminders, and automation
 - memory and retrieval workflows
 - provider routing and model invocation
