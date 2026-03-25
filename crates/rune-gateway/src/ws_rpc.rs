@@ -918,11 +918,33 @@ impl RpcDispatcher {
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
 
+        if normalised == "allow_always" && decided.subject_type == "tool_call" {
+            self.state
+                .tool_approval_repo
+                .set_policy(&decided.reason, "allow_always")
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+        }
+
+        if decided.subject_type == "tool_call" {
+            self.state
+                .turn_executor
+                .resume_approval(decided.id)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+        }
+
+        let decided = self.state.approval_repo
+            .find_by_id(approval_id)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
         Ok(json!({
             "id": decided.id,
             "decision": decided.decision,
             "decided_by": decided.decided_by,
             "decided_at": decided.decided_at.map(|t| t.to_rfc3339()),
+            "presented_payload": decided.presented_payload,
         }))
     }
 

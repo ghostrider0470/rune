@@ -1168,6 +1168,12 @@ async fn approval_required_is_attributed_in_transcript() {
     assert_eq!(approvals[0].reason, "exec");
     assert!(approvals[0].decision.is_none());
     assert_eq!(approvals[0].presented_payload["tool_name"], "exec");
+    assert_eq!(approvals[0].presented_payload["resume_status"], "pending");
+    assert_eq!(approvals[0].presented_payload["approval_status"], "pending");
+    assert!(approvals[0]
+        .presented_payload
+        .get("approval_status_updated_at")
+        .is_none());
     assert_eq!(
         approvals[0].presented_payload["command"],
         "rm -rf /tmp/demo"
