@@ -36,8 +36,8 @@ use rune_models::{
     RoutedModelProvider, Usage,
 };
 use rune_runtime::{
-    ContextAssembler, LaneQueue, Mem0Engine, NoOpCompaction, SessionEngine, TelegramFileDownloader,
-    TurnExecutor,
+    ContextAssembler, LaneQueue, Mem0Engine, SessionEngine, TelegramFileDownloader,
+    TokenBudgetCompaction, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
@@ -589,7 +589,16 @@ async fn build_services(
         tool_executor,
         tool_registry,
         ContextAssembler::new(&system_prompt),
-        Arc::new(NoOpCompaction),
+        {
+            let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
+                TokenBudgetCompaction::new(
+                    config.runtime.compaction.context_window,
+                    config.runtime.compaction.preserve_tail,
+                )
+                .with_memory_flush(&workspace_root),
+            );
+            compaction
+        },
     );
 
     let default_model = select_default_model(&config, auto_default_model);
