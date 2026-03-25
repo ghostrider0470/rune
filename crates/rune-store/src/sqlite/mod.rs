@@ -651,8 +651,8 @@ impl JobRepo for SqliteJobRepo {
                         j.schedule,
                         j.due_at.as_ref().map(to_rfc3339),
                         j.enabled as i32,
-                        Option::<String>::None,
-                        Option::<String>::None,
+                        Option::<String>::None, // last_run_at
+                        j.next_run_at.as_ref().map(to_rfc3339),
                         j.payload_kind,
                         j.delivery_mode,
                         serde_json::to_string(&j.payload).unwrap_or_default(),

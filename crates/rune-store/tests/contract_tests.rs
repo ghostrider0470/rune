@@ -66,6 +66,7 @@ fn new_job() -> NewJob {
         schedule: Some("0 * * * *".into()),
         due_at: None,
         enabled: true,
+        next_run_at: None,
         payload_kind: "reminder".into(),
         delivery_mode: "announce".into(),
         payload: json!({"msg": "test"}),

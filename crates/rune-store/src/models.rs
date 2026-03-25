@@ -154,6 +154,7 @@ pub struct NewJob {
     pub schedule: Option<String>,
     pub due_at: Option<DateTime<Utc>>,
     pub enabled: bool,
+    pub next_run_at: Option<DateTime<Utc>>,
     pub payload_kind: String,
     pub delivery_mode: String,
     pub payload: serde_json::Value,
