@@ -12,8 +12,11 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::CommandFactory;
 use clap_complete::{Shell, generate};
+use std::io::{IsTerminal, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::time::SystemTime;
+use toml_edit::{DocumentMut, Item, Table, Value};
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
@@ -160,6 +163,255 @@ fn print_completion(shell: CompletionShell) -> Result<()> {
         "rune",
         &mut std::io::stdout(),
     );
+    Ok(())
+}
+
+fn prompt_text(label: &str, default: Option<&str>) -> Result<String> {
+    let mut stderr = std::io::stderr();
+    match default {
+        Some(default) if !default.is_empty() => write!(stderr, "{label} [{default}]: ")?,
+        _ => write!(stderr, "{label}: ")?,
+    }
+    stderr.flush().ok();
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Ok(default.unwrap_or_default().to_string())
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    Ok(())
+}
+
+fn set_string(doc: &mut DocumentMut, section: &str, key: &str, value: &str) {
+    if !doc[section].is_table() {
+        doc[section] = Item::Table(Table::new());
+    }
+    doc[section][key] = Item::Value(Value::from(value));
+}
+
+fn set_bool(doc: &mut DocumentMut, section: &str, key: &str, value: bool) {
+    if !doc[section].is_table() {
+        doc[section] = Item::Table(Table::new());
+    }
+    doc[section][key] = Item::Value(Value::from(value));
+}
+
+fn set_array_strings(doc: &mut DocumentMut, section: &str, key: &str, values: &[&str]) {
+    if !doc[section].is_table() {
+        doc[section] = Item::Table(Table::new());
+    }
+    let mut arr = toml_edit::Array::default();
+    for value in values {
+        arr.push(*value);
+    }
+    doc[section][key] = Item::Value(Value::Array(arr));
+}
+
+fn normalize_provider_kind(input: &str) -> String {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "azure-openai" => "azure".to_string(),
+        value => value.to_string(),
+    }
+}
+
+fn provider_default_base_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("https://api.openai.com/v1"),
+        "anthropic" => Some("https://api.anthropic.com/v1"),
+        "groq" => Some("https://api.groq.com/openai/v1"),
+        "mistral" => Some("https://api.mistral.ai/v1"),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
+        "google" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+        "ollama" => Some("http://localhost:11434/v1"),
+        _ => None,
+    }
+}
+
+fn provider_default_model(provider: &str) -> &'static str {
+    match provider {
+        "anthropic" => "claude-3-7-sonnet-latest",
+        "groq" => "llama-3.3-70b-versatile",
+        "mistral" => "mistral-large-latest",
+        "deepseek" => "deepseek-chat",
+        "google" => "gemini-2.0-flash",
+        "ollama" => "llama3.2",
+        "azure" => "gpt-4o",
+        _ => "gpt-4o-mini",
+    }
+}
+
+fn write_wizard_config(
+    workspace: &Path,
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    webchat: bool,
+) -> Result<PathBuf> {
+    let config_path = workspace.join("config.toml");
+    ensure_parent_dir(&config_path)?;
+
+    let existing = if config_path.exists() {
+        std::fs::read_to_string(&config_path)
+            .with_context(|| format!("failed to read {}", config_path.display()))?
+    } else {
+        String::new()
+    };
+
+    let mut doc = if existing.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        existing
+            .parse::<DocumentMut>()
+            .with_context(|| format!("failed to parse {}", config_path.display()))?
+    };
+
+    set_string(&mut doc, "mode", "", "standalone");
+    if doc["mode"].is_table() {
+        doc["mode"] = Item::Value(Value::from("standalone"));
+    }
+    set_string(&mut doc, "gateway", "host", "127.0.0.1");
+    doc["gateway"]["port"] = Item::Value(Value::from(8787));
+
+    set_bool(&mut doc, "browser", "enabled", webchat);
+    set_array_strings(
+        &mut doc,
+        "channels",
+        "enabled",
+        if webchat { &["webchat"] } else { &[] },
+    );
+
+    if !doc["models"].is_table() {
+        doc["models"] = Item::Table(Table::new());
+    }
+    doc["models"]["default_model"] = Item::Value(Value::from(format!("local/{model}")));
+
+    if !doc["models"]["providers"].is_array_of_tables() {
+        doc["models"]["providers"] = Item::ArrayOfTables(Default::default());
+    }
+    let arr = doc["models"]["providers"]
+        .as_array_of_tables_mut()
+        .ok_or_else(|| anyhow::anyhow!("models.providers must be an array of tables"))?;
+    arr.clear();
+    let mut table = toml_edit::Table::new();
+    table["name"] = Item::Value(Value::from("local"));
+    table["kind"] = Item::Value(Value::from(provider));
+    table["api_key"] = Item::Value(Value::from(api_key));
+    if let Some(base_url) = provider_default_base_url(provider) {
+        table["base_url"] = Item::Value(Value::from(base_url));
+    }
+    let mut models = toml_edit::Array::default();
+    models.push(model);
+    table["models"] = Item::Value(Value::Array(models));
+    arr.push(table);
+
+    std::fs::write(&config_path, doc.to_string())
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    Ok(config_path)
+}
+
+fn open_url_in_browser(url: &str) -> Result<()> {
+    let candidates: &[(&str, &[&str])] = if cfg!(target_os = "macos") {
+        &[("open", &[])]
+    } else if cfg!(target_os = "windows") {
+        &[("cmd", &["/C", "start", ""])]
+    } else {
+        &[("xdg-open", &[]), ("gio", &["open"])]
+    };
+
+    for (program, args) in candidates {
+        let status = StdCommand::new(program).args(*args).arg(url).status();
+        if let Ok(status) = status {
+            if status.success() {
+                return Ok(());
+            }
+        }
+    }
+
+    anyhow::bail!("failed to open browser for {url}")
+}
+
+async fn run_init_wizard(
+    path: &str,
+    api_key: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+    webchat: bool,
+    start: bool,
+    open: bool,
+    non_interactive: bool,
+) -> Result<()> {
+    let workspace = PathBuf::from(path);
+    init_workspace(&workspace, None, non_interactive).await?;
+
+    let interactive = std::io::stdin().is_terminal() && !non_interactive;
+
+    let provider = match provider {
+        Some(value) => normalize_provider_kind(&value),
+        None if interactive => normalize_provider_kind(&prompt_text("Provider", Some("openai"))?),
+        None => "openai".to_string(),
+    };
+
+    let model = match model {
+        Some(value) => value,
+        None if interactive => prompt_text("Model", Some(provider_default_model(&provider)))?,
+        None => provider_default_model(&provider).to_string(),
+    };
+
+    let api_key = match api_key {
+        Some(value) => value,
+        None => {
+            let env_key = std::env::var("OPENAI_API_KEY")
+                .ok()
+                .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
+                .or_else(|| std::env::var("GROQ_API_KEY").ok())
+                .or_else(|| std::env::var("MISTRAL_API_KEY").ok())
+                .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
+                .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+                .or_else(|| std::env::var("AZURE_OPENAI_API_KEY").ok());
+            match (env_key, interactive) {
+                (Some(value), _) => value,
+                (None, true) => prompt_text("API key", None)?,
+                (None, false) => anyhow::bail!(
+                    "missing API key; pass --api-key or set a provider API key env var"
+                ),
+            }
+        }
+    };
+
+    let config_path = write_wizard_config(&workspace, &provider, &model, &api_key, webchat)?;
+    println!("✓ Wrote {}", config_path.display());
+
+    let url = "http://127.0.0.1:8787/chat";
+    if start {
+        let mut cmd = StdCommand::new("cargo");
+        cmd.arg("run")
+            .arg("-p")
+            .arg("rune-gateway-app")
+            .arg("--")
+            .arg("--config")
+            .arg(&config_path)
+            .current_dir(&workspace);
+        let child = cmd
+            .spawn()
+            .context("failed to start rune-gateway-app via cargo run")?;
+        println!("✓ Started gateway (pid {})", child.id());
+    }
+
+    if webchat && open {
+        open_url_in_browser(url)?;
+        println!("✓ Opened {url}");
+    }
+
     Ok(())
 }
 
@@ -2460,6 +2712,28 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Configure => {
             let result = client.configure().await?;
             println!("{}", render(&result, format));
+        }
+        Command::Wizard {
+            path,
+            api_key,
+            provider,
+            model,
+            webchat,
+            start,
+            open,
+            non_interactive,
+        } => {
+            run_init_wizard(
+                &path,
+                api_key,
+                provider,
+                model,
+                webchat,
+                start,
+                open,
+                non_interactive,
+            )
+            .await?;
         }
         Command::Agent { action } => match action {
             AgentAction::Run {

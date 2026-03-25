@@ -188,6 +188,33 @@ pub enum Command {
     },
     /// Run the interactive setup wizard.
     Configure,
+    /// Run the local first-run init wizard and optionally open WebChat.
+    Wizard {
+        /// Target workspace/config directory (defaults to current directory).
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// API key/token for the selected provider.
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Provider kind/name (for example: openai, anthropic, azure, groq, mistral, deepseek, ollama).
+        #[arg(long)]
+        provider: Option<String>,
+        /// Model id to configure as default.
+        #[arg(long)]
+        model: Option<String>,
+        /// Enable the browser WebChat flow after writing config.
+        #[arg(long, default_value_t = true)]
+        webchat: bool,
+        /// Start the gateway after writing config.
+        #[arg(long, default_value_t = true)]
+        start: bool,
+        /// Open the chat URL in the default browser after startup.
+        #[arg(long, default_value_t = true)]
+        open: bool,
+        /// Do not prompt; derive missing values from defaults/environment where possible.
+        #[arg(long)]
+        non_interactive: bool,
+    },
     /// Direct agent-turn invocation — send a single instruction to a session.
     Agent {
         #[command(subcommand)]
