@@ -199,12 +199,21 @@ async fn deliver_result(
     output: &str,
     trigger: SchedulerRunTrigger,
 ) {
-    deliver_result_standalone(&deps.event_tx, job, status, output, trigger).await;
+    deliver_result_standalone(
+        &deps.event_tx,
+        deps.operator_delivery.as_deref(),
+        job,
+        status,
+        output,
+        trigger,
+    )
+    .await;
 }
 
 /// Core delivery logic, callable without full `SupervisorDeps` (for testing).
 async fn deliver_result_standalone(
     event_tx: &broadcast::Sender<SessionEvent>,
+    operator_delivery: Option<&dyn OperatorDelivery>,
     job: &Job,
     status: &rune_runtime::scheduler::JobRunStatus,
     output: &str,
@@ -229,6 +238,26 @@ async fn deliver_result_standalone(
                 state_changed: true,
             });
             debug!(job_id = %job.id, "announce delivery sent");
+
+            // Also deliver to operator's Telegram (proactive updates)
+            if let Some(delivery) = operator_delivery {
+                let status_str = match status {
+                    rune_runtime::scheduler::JobRunStatus::Completed => "completed",
+                    rune_runtime::scheduler::JobRunStatus::Failed => "FAILED",
+                    _ => "finished",
+                };
+                let truncated = if output.len() > 3000 { &output[..3000] } else { output };
+                let msg = format!(
+                    "*[{}]* {} ({})\n\n{}",
+                    job.name.as_deref().unwrap_or("cron"),
+                    status_str,
+                    trigger.as_str(),
+                    truncated,
+                );
+                if let Err(e) = delivery.deliver(&msg).await {
+                    warn!(job_id = %job.id, error = %e, "operator delivery for cron result failed");
+                }
+            }
         }
         SchedulerDeliveryMode::Webhook => {
             let Some(url) = job.webhook_url.as_deref() else {
@@ -625,6 +654,7 @@ mod tests {
         // Call deliver_result_standalone which tests the announce path directly.
         deliver_result_standalone(
             &event_tx,
+            None,
             &job,
             &JobRunStatus::Completed,
             "hello world",
@@ -648,6 +678,7 @@ mod tests {
 
         deliver_result_standalone(
             &event_tx,
+            None,
             &job,
             &JobRunStatus::Completed,
             "silent output",
@@ -669,6 +700,7 @@ mod tests {
         // Should not panic or broadcast — just warn and return.
         deliver_result_standalone(
             &event_tx,
+            None,
             &job,
             &JobRunStatus::Completed,
             "output",
