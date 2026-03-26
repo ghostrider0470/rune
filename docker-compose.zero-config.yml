@@ -5,6 +5,16 @@ services:
     build: .
     ports:
       - "8787:8787"
+    environment:
+      RUNE__DATABASE__DATABASE_URL: sqlite:///data/db/rune.db
+      RUNE__GATEWAY__HOST: 0.0.0.0
+      RUNE__GATEWAY__PORT: 8787
+      RUNE__BROWSER__ENABLED: "true"
+      RUNE__UI__ENABLED: "true"
+      RUNE__CHANNELS__ENABLED: webchat
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
     volumes:
       - rune-data:/data
       - ./config:/config:ro
