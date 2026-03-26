@@ -130,10 +130,12 @@ impl SessionRepo for CosmosStore {
         Ok(SessionRow::from(doc))
     }
 
-    async fn list(&self, limit: i64, offset: i64) -> Result<Vec<SessionRow>, StoreError> {
+    async fn list(&self, limit: i64, _offset: i64) -> Result<Vec<SessionRow>, StoreError> {
+        // Cosmos TOP max is ~2 billion; cap to avoid overflow errors from callers passing i64::MAX.
+        let capped = limit.min(100_000);
         let query = format!(
             "SELECT TOP {} * FROM c WHERE c.type = 'session' ORDER BY c.created_at DESC",
-            limit
+            capped
         );
         let stream = self
             .container()
