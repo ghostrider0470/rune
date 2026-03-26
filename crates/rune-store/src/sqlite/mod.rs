@@ -113,10 +113,12 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         channel_ref: row.get(4)?,
         requester_session_id: parse_uuid_opt(row.get(5)?),
         latest_turn_id: parse_uuid_opt(row.get(6)?),
-        metadata: parse_json(&row.get::<_, String>(7)?),
-        created_at: parse_dt(&row.get::<_, String>(8)?),
-        updated_at: parse_dt(&row.get::<_, String>(9)?),
-        last_activity_at: parse_dt(&row.get::<_, String>(10)?),
+        runtime_profile: row.get(7)?,
+        policy_profile: row.get(8)?,
+        metadata: parse_json(&row.get::<_, String>(9)?),
+        created_at: parse_dt(&row.get::<_, String>(10)?),
+        updated_at: parse_dt(&row.get::<_, String>(11)?),
+        last_activity_at: parse_dt(&row.get::<_, String>(12)?),
     })
 }
 
@@ -257,7 +259,7 @@ fn row_to_pairing_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PairingRe
 // Column lists
 // ══════════════════════════════════════════════════════════════════════
 
-const SESSION_COLS: &str = "id, kind, status, workspace_root, channel_ref, requester_session_id, latest_turn_id, metadata, created_at, updated_at, last_activity_at";
+const SESSION_COLS: &str = "id, kind, status, workspace_root, channel_ref, requester_session_id, latest_turn_id, runtime_profile, policy_profile, metadata, created_at, updated_at, last_activity_at";
 const TURN_COLS: &str = "id, session_id, trigger_kind, status, model_ref, started_at, ended_at, usage_prompt_tokens, usage_completion_tokens";
 const TRANSCRIPT_COLS: &str = "id, session_id, turn_id, seq, kind, payload, created_at";
 const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload_kind, delivery_mode, payload, created_at, updated_at, claimed_at";
@@ -298,11 +300,12 @@ impl SessionRepo for SqliteSessionRepo {
     async fn create(&self, s: NewSession) -> Result<SessionRow, StoreError> {
         self.conn.call(move |conn| {
             conn.execute(
-                &format!("INSERT INTO sessions ({SESSION_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+                &format!("INSERT INTO sessions ({SESSION_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"),
                 rusqlite::params![
                     s.id.to_string(), s.kind, s.status, s.workspace_root, s.channel_ref,
                     s.requester_session_id.map(|u| u.to_string()),
                     s.latest_turn_id.map(|u| u.to_string()),
+                    s.runtime_profile, s.policy_profile,
                     serde_json::to_string(&s.metadata).unwrap_or_default(),
                     to_rfc3339(&s.created_at), to_rfc3339(&s.updated_at), to_rfc3339(&s.last_activity_at),
                 ],

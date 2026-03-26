@@ -275,6 +275,15 @@ ALTER TABLE process_handles ADD COLUMN execution_mode TEXT;
 ALTER TABLE process_handles ADD COLUMN tool_execution_id TEXT;
 "#,
     },
+    Migration {
+        version: 7,
+        name: "session_profile_fields",
+        sql: r#"
+-- Add runtime_profile and policy_profile to sessions per PROTOCOLS.md 4.1.
+ALTER TABLE sessions ADD COLUMN runtime_profile TEXT;
+ALTER TABLE sessions ADD COLUMN policy_profile TEXT;
+"#,
+    },
 ];
 
 /// Run all pending migrations on the given connection.

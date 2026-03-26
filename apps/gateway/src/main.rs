@@ -3168,6 +3168,8 @@ mod tests {
                 workspace_root: session.workspace_root,
                 channel_ref: session.channel_ref,
                 requester_session_id: session.requester_session_id,
+                runtime_profile: session.runtime_profile,
+                policy_profile: session.policy_profile,
                 latest_turn_id: session.latest_turn_id,
                 metadata: session.metadata,
                 created_at: session.created_at,
