@@ -35,10 +35,11 @@ use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
 use rune_gateway::ms365::{
-    CreatePlannerTaskRequest, CreateTodoTaskRequest, ForwardMailRequest, Ms365MailService,
+    CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest,
+    ForwardMailRequest, Ms365CalendarService, Ms365CalendarServiceError, Ms365MailService,
     Ms365MailServiceError, Ms365PlannerService, Ms365PlannerServiceError, Ms365TodoService,
-    Ms365TodoServiceError, PlannerTask, ReplyMailRequest, SendMailRequest, TodoTask,
-    UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
+    Ms365TodoServiceError, PlannerTask, ReplyMailRequest, RespondCalendarEventRequest,
+    SendMailRequest, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
 };
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
 
@@ -778,6 +779,26 @@ enum TodoMutationCall {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CalendarMutationCall {
+    Create(CreateCalendarEventRequest),
+    Delete {
+        id: String,
+    },
+    Respond {
+        id: String,
+        request: RespondCalendarEventRequest,
+    },
+}
+
+#[derive(Debug)]
+struct FakeMs365CalendarService {
+    create_response: Result<(), Ms365CalendarServiceError>,
+    delete_response: Result<(), Ms365CalendarServiceError>,
+    respond_response: Result<(), Ms365CalendarServiceError>,
+    calls: Mutex<Vec<CalendarMutationCall>>,
+}
+
 #[derive(Debug)]
 struct FakeMs365PlannerService {
     create_response: Result<PlannerTask, Ms365PlannerServiceError>,
@@ -813,6 +834,23 @@ struct FakeMs365MailService {
     reply_response: Result<(), Ms365MailServiceError>,
     forward_response: Result<(), Ms365MailServiceError>,
     calls: Mutex<Vec<MailMutationCall>>,
+}
+
+impl Default for FakeMs365CalendarService {
+    fn default() -> Self {
+        Self {
+            create_response: Err(Ms365CalendarServiceError::NotConfigured(
+                "test calendar service not configured".to_string(),
+            )),
+            delete_response: Err(Ms365CalendarServiceError::NotConfigured(
+                "test calendar service not configured".to_string(),
+            )),
+            respond_response: Err(Ms365CalendarServiceError::NotConfigured(
+                "test calendar service not configured".to_string(),
+            )),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
 }
 
 impl Default for FakeMs365PlannerService {
@@ -857,6 +895,33 @@ impl Default for FakeMs365MailService {
             forward_response: Ok(()),
             calls: Mutex::new(Vec::new()),
         }
+    }
+}
+
+impl FakeMs365CalendarService {
+    fn with_create_response(response: Result<(), Ms365CalendarServiceError>) -> Self {
+        Self {
+            create_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_delete_response(response: Result<(), Ms365CalendarServiceError>) -> Self {
+        Self {
+            delete_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_respond_response(response: Result<(), Ms365CalendarServiceError>) -> Self {
+        Self {
+            respond_response: response,
+            ..Self::default()
+        }
+    }
+
+    async fn calls(&self) -> Vec<CalendarMutationCall> {
+        self.calls.lock().await.clone()
     }
 }
 
@@ -911,6 +976,40 @@ impl FakeMs365TodoService {
 
     async fn calls(&self) -> Vec<TodoMutationCall> {
         self.calls.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl Ms365CalendarService for FakeMs365CalendarService {
+    async fn create_event(
+        &self,
+        request: CreateCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError> {
+        self.calls
+            .lock()
+            .await
+            .push(CalendarMutationCall::Create(request));
+        self.create_response.clone()
+    }
+
+    async fn delete_event(&self, id: &str) -> Result<(), Ms365CalendarServiceError> {
+        self.calls
+            .lock()
+            .await
+            .push(CalendarMutationCall::Delete { id: id.to_string() });
+        self.delete_response.clone()
+    }
+
+    async fn respond_to_event(
+        &self,
+        id: &str,
+        request: RespondCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError> {
+        self.calls.lock().await.push(CalendarMutationCall::Respond {
+            id: id.to_string(),
+            request,
+        });
+        self.respond_response.clone()
     }
 }
 
@@ -1036,6 +1135,10 @@ fn build_test_app_with_config(config: AppConfig, auth_token: Option<String>) -> 
     build_test_app_parts(config, auth_token).0
 }
 
+fn test_ms365_calendar_service() -> Arc<dyn Ms365CalendarService> {
+    Arc::new(FakeMs365CalendarService::default())
+}
+
 fn test_ms365_planner_service() -> Arc<dyn Ms365PlannerService> {
     Arc::new(FakeMs365PlannerService::default())
 }
@@ -1055,6 +1158,21 @@ fn build_test_app_parts(
     build_test_app_parts_with_ms365_services(
         config,
         auth_token,
+        test_ms365_calendar_service(),
+        test_ms365_planner_service(),
+        test_ms365_todo_service(),
+    )
+}
+
+fn build_test_app_parts_with_calendar_service(
+    config: AppConfig,
+    auth_token: Option<String>,
+    ms365_calendar_service: Arc<dyn Ms365CalendarService>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services(
+        config,
+        auth_token,
+        ms365_calendar_service,
         test_ms365_planner_service(),
         test_ms365_todo_service(),
     )
@@ -1068,6 +1186,7 @@ fn build_test_app_parts_with_planner_service(
     build_test_app_parts_with_ms365_services(
         config,
         auth_token,
+        test_ms365_calendar_service(),
         ms365_planner_service,
         test_ms365_todo_service(),
     )
@@ -1081,6 +1200,7 @@ fn build_test_app_parts_with_todo_service(
     build_test_app_parts_with_ms365_services(
         config,
         auth_token,
+        test_ms365_calendar_service(),
         test_ms365_planner_service(),
         ms365_todo_service,
     )
@@ -1089,6 +1209,7 @@ fn build_test_app_parts_with_todo_service(
 fn build_test_app_parts_with_ms365_services(
     mut config: AppConfig,
     auth_token: Option<String>,
+    ms365_calendar_service: Arc<dyn Ms365CalendarService>,
     ms365_planner_service: Arc<dyn Ms365PlannerService>,
     ms365_todo_service: Arc<dyn Ms365TodoService>,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
@@ -1165,6 +1286,7 @@ fn build_test_app_parts_with_ms365_services(
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service,
         ms365_planner_service,
         ms365_todo_service,
         ms365_mail_service: test_ms365_mail_service(),
@@ -1195,6 +1317,20 @@ fn sample_planner_task(id: &str) -> PlannerTask {
         created_at: Some("2026-03-22T10:15:00Z".to_string()),
         priority: Some(5),
         description: Some("Collect user-facing changes.".to_string()),
+    }
+}
+
+fn sample_calendar_create_request() -> CreateCalendarEventRequest {
+    CreateCalendarEventRequest {
+        subject: "Sprint review".to_string(),
+        start: "2026-03-30T09:00:00Z".to_string(),
+        end: "2026-03-30T10:00:00Z".to_string(),
+        attendees: vec![
+            "alice@example.com".to_string(),
+            "bob@example.com".to_string(),
+        ],
+        location: Some("Conference Room A".to_string()),
+        body: Some("Walk through the shipped backend slice.".to_string()),
     }
 }
 
@@ -1286,6 +1422,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -1391,6 +1528,7 @@ enabled: true
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -1508,6 +1646,7 @@ async fn status_reports_configured_lane_capacities() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -1602,6 +1741,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -1734,6 +1874,7 @@ async fn ws_rpc_health_reports_session_count() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -1841,6 +1982,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -1969,6 +2111,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2114,6 +2257,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2204,6 +2348,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2290,6 +2435,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2455,6 +2601,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2555,6 +2702,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2702,6 +2850,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2845,6 +2994,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -2953,6 +3103,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -3413,6 +3564,152 @@ async fn ms365_auth_status_requires_auth_when_gateway_token_enabled() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ms365_calendar_create_event_forwards_request_and_returns_created_response() {
+    let calendar_service = Arc::new(FakeMs365CalendarService::with_create_response(Ok(())));
+    let (app, _device_repo) = build_test_app_parts_with_calendar_service(
+        AppConfig::default(),
+        None,
+        calendar_service.clone(),
+    );
+
+    let request = sample_calendar_create_request();
+    let response = app
+        .oneshot(
+            Request::post("/ms365/calendar/events")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_string(&request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let json = body_json(response).await;
+    assert_eq!(json["success"], true);
+    assert_eq!(json["message"], "Calendar event created");
+
+    let calls = calendar_service.calls().await;
+    assert_eq!(calls, vec![CalendarMutationCall::Create(request)]);
+}
+
+#[tokio::test]
+async fn ms365_calendar_delete_routes_forward_id_and_preserve_compat_alias() {
+    let calendar_service = Arc::new(FakeMs365CalendarService::with_delete_response(Ok(())));
+    let (app, _device_repo) = build_test_app_parts_with_calendar_service(
+        AppConfig::default(),
+        None,
+        calendar_service.clone(),
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::delete("/ms365/calendar/events/event-123")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["success"], true);
+    assert_eq!(json["message"], "Calendar event deleted");
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/calendar/events/event-456/delete")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let calls = calendar_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![
+            CalendarMutationCall::Delete {
+                id: "event-123".to_string(),
+            },
+            CalendarMutationCall::Delete {
+                id: "event-456".to_string(),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn ms365_calendar_respond_event_forwards_request_and_returns_success() {
+    let calendar_service = Arc::new(FakeMs365CalendarService::with_respond_response(Ok(())));
+    let (app, _device_repo) = build_test_app_parts_with_calendar_service(
+        AppConfig::default(),
+        None,
+        calendar_service.clone(),
+    );
+
+    let request = RespondCalendarEventRequest {
+        response: "tentative".to_string(),
+        comment: Some("Need to confirm timing with the team.".to_string()),
+    };
+    let response = app
+        .oneshot(
+            Request::post("/ms365/calendar/events/event-789/respond")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_string(&request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["success"], true);
+    assert_eq!(json["message"], "Calendar response sent");
+
+    let calls = calendar_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![CalendarMutationCall::Respond {
+            id: "event-789".to_string(),
+            request,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_calendar_mutation_routes_require_auth_when_gateway_token_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/ms365/calendar/events")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&sample_calendar_create_request()).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::delete("/ms365/calendar/events/event-123")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
@@ -4803,6 +5100,7 @@ async fn send_message_and_transcript_with_shared_state() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -5032,6 +5330,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -6038,6 +6337,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -6289,6 +6589,7 @@ async fn reminders_list_includes_outcome_fields() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -6391,6 +6692,7 @@ async fn reminders_cancel_returns_success() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -6510,6 +6812,7 @@ async fn agent_steer_success() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -6662,6 +6965,7 @@ async fn agent_kill_success() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
@@ -6812,6 +7116,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         event_tx,
         tts_engine: None,
         stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),

@@ -19,7 +19,7 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tts::TtsEngine;
 use tokio::sync::{RwLock, broadcast};
 
-use crate::ms365::{Ms365MailService, Ms365PlannerService, Ms365TodoService};
+use crate::ms365::{Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService};
 use crate::pairing::DeviceRegistry;
 
 /// Events emitted for WebSocket subscribers.
@@ -88,6 +88,8 @@ pub struct AppState {
     pub tts_engine: Option<Arc<RwLock<TtsEngine>>>,
     /// Speech-to-text engine (constructed when STT API key is configured).
     pub stt_engine: Option<Arc<RwLock<SttEngine>>>,
+    /// Microsoft 365 Calendar mutation backend.
+    pub ms365_calendar_service: Arc<dyn Ms365CalendarService>,
     /// Microsoft 365 Planner mutation backend.
     pub ms365_planner_service: Arc<dyn Ms365PlannerService>,
     /// Microsoft 365 To-Do mutation backend.

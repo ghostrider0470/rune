@@ -32,7 +32,7 @@ use tokio::sync::RwLock;
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
-use crate::ms365::{Ms365MailService, Ms365PlannerService, Ms365TodoService};
+use crate::ms365::{Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService};
 use crate::pairing::DeviceRegistry;
 use crate::routes;
 use crate::state::{AppState, SessionEvent};
@@ -81,6 +81,7 @@ pub struct Services {
     pub process_manager: ProcessManager,
     pub capabilities: Capabilities,
     pub device_repo: Arc<dyn DeviceRepo>,
+    pub ms365_calendar_service: Arc<dyn Ms365CalendarService>,
     pub ms365_planner_service: Arc<dyn Ms365PlannerService>,
     pub ms365_todo_service: Arc<dyn Ms365TodoService>,
     pub ms365_mail_service: Arc<dyn Ms365MailService>,
@@ -202,6 +203,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         event_tx,
         tts_engine,
         stt_engine,
+        ms365_calendar_service: services.ms365_calendar_service,
         ms365_planner_service: services.ms365_planner_service,
         ms365_todo_service: services.ms365_todo_service,
         ms365_mail_service: services.ms365_mail_service,
@@ -422,6 +424,22 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/stt/disable", post(routes::stt_disable))
         // Microsoft 365 routes
         .route("/ms365/auth/status", get(routes::ms365_auth_status))
+        .route(
+            "/ms365/calendar/events",
+            post(routes::ms365_calendar_create_event),
+        )
+        .route(
+            "/ms365/calendar/events/{id}",
+            delete(routes::ms365_calendar_delete_event),
+        )
+        .route(
+            "/ms365/calendar/events/{id}/delete",
+            post(routes::ms365_calendar_delete_event_compat),
+        )
+        .route(
+            "/ms365/calendar/events/{id}/respond",
+            post(routes::ms365_calendar_respond_event),
+        )
         .route("/ms365/mail/send", post(routes::ms365_mail_send))
         .route(
             "/ms365/mail/messages/{id}/reply",
