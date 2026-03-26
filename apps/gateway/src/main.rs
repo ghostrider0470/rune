@@ -847,7 +847,7 @@ async fn build_mcp_tool_executor(
             args: Some(srv.args.clone()),
             env: srv.env.clone(),
             cwd: None,
-            url: None,
+            url: srv.url.clone(),
             enabled: true,
         });
     }

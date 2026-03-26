@@ -93,6 +93,7 @@ pub struct ClaudeMcpServer {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    pub url: Option<String>,
 }
 
 /// The fully-parsed representation of a Claude Code plugin directory.
@@ -154,13 +155,17 @@ struct McpJsonFile {
 
 #[derive(Debug, Deserialize)]
 struct McpServerEntry {
-    #[serde(default = "default_transport")]
+    /// Transport type: "stdio" or "http". Claude Code uses "type" as the key.
+    #[serde(alias = "type", default = "default_transport")]
     transport: String,
+    #[serde(default)]
     command: Option<String>,
     #[serde(default)]
     args: Vec<String>,
     #[serde(default)]
     env: HashMap<String, String>,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 fn default_transport() -> String {
@@ -415,6 +420,7 @@ async fn parse_mcp_file(path: &Path) -> Vec<ClaudeMcpServer> {
                 command: entry.command,
                 args: entry.args,
                 env: entry.env,
+                url: entry.url,
             })
             .collect();
     }
@@ -429,6 +435,7 @@ async fn parse_mcp_file(path: &Path) -> Vec<ClaudeMcpServer> {
                 command: entry.command,
                 args: entry.args,
                 env: entry.env,
+                url: entry.url,
             })
             .collect();
     }
