@@ -51,6 +51,7 @@ pub struct MemoryEdge {
 /// `TurnExecutor` and share it across concurrent turns.
 pub struct Mem0Engine {
     client: tokio::sync::Mutex<Client>,
+    pg_url: String,
     http: reqwest::Client,
     config: Mem0Config,
     extraction_provider: Arc<dyn ModelProvider>,
@@ -220,10 +221,41 @@ impl Mem0Engine {
 
         Some(Arc::new(Self {
             client: tokio::sync::Mutex::new(client),
+            pg_url: pg_url.to_string(),
             http,
             config: config.clone(),
             extraction_provider,
         }))
+    }
+
+    // ── Connection management ─────────────────────────────────────────
+
+    /// Ensure the PG client is alive. If the connection has dropped, attempt
+    /// to reconnect transparently. This is called before every query.
+    async fn ensure_connected(&self) -> Result<(), String> {
+        let client = self.client.lock().await;
+        // Simple health check — execute a trivial query
+        match client.simple_query("SELECT 1").await {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                warn!(error = %e, "mem0 PG connection dead, attempting reconnect");
+            }
+        }
+        drop(client);
+
+        // Reconnect
+        match connect_postgres(&self.pg_url).await {
+            Ok(new_client) => {
+                let mut client = self.client.lock().await;
+                *client = new_client;
+                info!("mem0 PG connection restored");
+                Ok(())
+            }
+            Err(e) => {
+                error!(error = %e, "mem0 PG reconnect failed");
+                Err(format!("reconnect failed: {e}"))
+            }
+        }
     }
 
     // ── Public API ───────────────────────────────────────────────────
@@ -232,6 +264,10 @@ impl Mem0Engine {
     ///
     /// Returns an empty vec on any error (never blocks the turn).
     pub async fn recall(&self, query: &str) -> Vec<Memory> {
+        if let Err(e) = self.ensure_connected().await {
+            warn!(error = %e, "mem0 recall: connection check failed");
+            return Vec::new();
+        }
         let embedding = match self.embed(query).await {
             Ok(e) => e,
             Err(e) => {
@@ -310,6 +346,10 @@ impl Mem0Engine {
         assistant_msg: &str,
         session_id: Uuid,
     ) -> Vec<Memory> {
+        if let Err(e) = self.ensure_connected().await {
+            warn!(error = %e, "mem0 capture: connection check failed");
+            return Vec::new();
+        }
         let facts = match self.extract_facts(user_msg, assistant_msg).await {
             Ok(f) => f,
             Err(e) => {
@@ -346,6 +386,7 @@ impl Mem0Engine {
 
     /// Delete a memory by its ID.
     pub async fn delete_memory(&self, id: &str) -> Result<(), String> {
+        self.ensure_connected().await?;
         let client = self.client.lock().await;
         client
             .execute("DELETE FROM rune_memories WHERE id = $1::uuid", &[&id])
@@ -389,6 +430,10 @@ impl Mem0Engine {
     /// Uses a single LATERAL JOIN query to find the K nearest neighbors per node,
     /// with `a.id < b.id` to deduplicate edges at the SQL level.
     pub async fn graph(&self, edge_threshold: f64, neighbors_k: i64) -> MemoryGraph {
+        if let Err(e) = self.ensure_connected().await {
+            warn!(error = %e, "mem0 graph: connection check failed");
+            return MemoryGraph { nodes: Vec::new(), edges: Vec::new() };
+        }
         let client = self.client.lock().await;
 
         // Get all memories
