@@ -8072,6 +8072,29 @@ async fn chat_route_redirects_to_webchat() {
 }
 
 #[tokio::test]
+async fn chat_route_redirect_preserves_webchat_auth_query() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::get("/chat?api_key=test-key&session_token=browser-token&session_id=session-123")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .unwrap(),
+        "/webchat?api_key=test-key&session_token=browser-token&session_id=session-123"
+    );
+}
+
+#[tokio::test]
 async fn webchat_route_serves_embedded_chat_ui() {
     let app = build_test_app(None);
 
