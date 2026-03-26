@@ -38,8 +38,9 @@ use rune_gateway::ms365::{
     CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest,
     ForwardMailRequest, Ms365CalendarService, Ms365CalendarServiceError, Ms365MailService,
     Ms365MailServiceError, Ms365PlannerService, Ms365PlannerServiceError, Ms365TodoService,
-    Ms365TodoServiceError, PlannerTask, ReplyMailRequest, RespondCalendarEventRequest,
-    SendMailRequest, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
+    Ms365TodoServiceError, Ms365UsersService, Ms365UsersServiceError, PlannerTask,
+    ReplyMailRequest, RespondCalendarEventRequest, SendMailRequest, TodoTask,
+    UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile, UserSummary, UsersList,
 };
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
 
@@ -828,12 +829,27 @@ enum MailMutationCall {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UsersReadCall {
+    Me,
+    List { limit: u32 },
+    Read { id: String },
+}
+
 #[derive(Debug)]
 struct FakeMs365MailService {
     send_response: Result<(), Ms365MailServiceError>,
     reply_response: Result<(), Ms365MailServiceError>,
     forward_response: Result<(), Ms365MailServiceError>,
     calls: Mutex<Vec<MailMutationCall>>,
+}
+
+#[derive(Debug)]
+struct FakeMs365UsersService {
+    me_response: Result<UserProfile, Ms365UsersServiceError>,
+    list_response: Result<UsersList, Ms365UsersServiceError>,
+    read_response: Result<UserProfile, Ms365UsersServiceError>,
+    calls: Mutex<Vec<UsersReadCall>>,
 }
 
 impl Default for FakeMs365CalendarService {
@@ -893,6 +909,23 @@ impl Default for FakeMs365MailService {
             send_response: Ok(()),
             reply_response: Ok(()),
             forward_response: Ok(()),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for FakeMs365UsersService {
+    fn default() -> Self {
+        Self {
+            me_response: Err(Ms365UsersServiceError::NotConfigured(
+                "test users service not configured".to_string(),
+            )),
+            list_response: Err(Ms365UsersServiceError::NotConfigured(
+                "test users service not configured".to_string(),
+            )),
+            read_response: Err(Ms365UsersServiceError::NotConfigured(
+                "test users service not configured".to_string(),
+            )),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -975,6 +1008,33 @@ impl FakeMs365TodoService {
     }
 
     async fn calls(&self) -> Vec<TodoMutationCall> {
+        self.calls.lock().await.clone()
+    }
+}
+
+impl FakeMs365UsersService {
+    fn with_me_response(response: Result<UserProfile, Ms365UsersServiceError>) -> Self {
+        Self {
+            me_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_list_response(response: Result<UsersList, Ms365UsersServiceError>) -> Self {
+        Self {
+            list_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_read_response(response: Result<UserProfile, Ms365UsersServiceError>) -> Self {
+        Self {
+            read_response: response,
+            ..Self::default()
+        }
+    }
+
+    async fn calls(&self) -> Vec<UsersReadCall> {
         self.calls.lock().await.clone()
     }
 }
@@ -1123,6 +1183,27 @@ impl Ms365MailService for FakeMs365MailService {
     }
 }
 
+#[async_trait]
+impl Ms365UsersService for FakeMs365UsersService {
+    async fn me(&self) -> Result<UserProfile, Ms365UsersServiceError> {
+        self.calls.lock().await.push(UsersReadCall::Me);
+        self.me_response.clone()
+    }
+
+    async fn list(&self, limit: u32) -> Result<UsersList, Ms365UsersServiceError> {
+        self.calls.lock().await.push(UsersReadCall::List { limit });
+        self.list_response.clone()
+    }
+
+    async fn read(&self, id: &str) -> Result<UserProfile, Ms365UsersServiceError> {
+        self.calls
+            .lock()
+            .await
+            .push(UsersReadCall::Read { id: id.to_string() });
+        self.read_response.clone()
+    }
+}
+
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 const TEST_AUTH_TOKEN: &str = "test-secret-token";
@@ -1151,6 +1232,10 @@ fn test_ms365_mail_service() -> Arc<dyn Ms365MailService> {
     Arc::new(FakeMs365MailService::default())
 }
 
+fn test_ms365_users_service() -> Arc<dyn Ms365UsersService> {
+    Arc::new(FakeMs365UsersService::default())
+}
+
 fn build_test_app_parts(
     config: AppConfig,
     auth_token: Option<String>,
@@ -1161,6 +1246,7 @@ fn build_test_app_parts(
         test_ms365_calendar_service(),
         test_ms365_planner_service(),
         test_ms365_todo_service(),
+        test_ms365_users_service(),
     )
 }
 
@@ -1175,6 +1261,7 @@ fn build_test_app_parts_with_calendar_service(
         ms365_calendar_service,
         test_ms365_planner_service(),
         test_ms365_todo_service(),
+        test_ms365_users_service(),
     )
 }
 
@@ -1189,6 +1276,7 @@ fn build_test_app_parts_with_planner_service(
         test_ms365_calendar_service(),
         ms365_planner_service,
         test_ms365_todo_service(),
+        test_ms365_users_service(),
     )
 }
 
@@ -1203,6 +1291,22 @@ fn build_test_app_parts_with_todo_service(
         test_ms365_calendar_service(),
         test_ms365_planner_service(),
         ms365_todo_service,
+        test_ms365_users_service(),
+    )
+}
+
+fn build_test_app_parts_with_users_service(
+    config: AppConfig,
+    auth_token: Option<String>,
+    ms365_users_service: Arc<dyn Ms365UsersService>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services(
+        config,
+        auth_token,
+        test_ms365_calendar_service(),
+        test_ms365_planner_service(),
+        test_ms365_todo_service(),
+        ms365_users_service,
     )
 }
 
@@ -1212,6 +1316,7 @@ fn build_test_app_parts_with_ms365_services(
     ms365_calendar_service: Arc<dyn Ms365CalendarService>,
     ms365_planner_service: Arc<dyn Ms365PlannerService>,
     ms365_todo_service: Arc<dyn Ms365TodoService>,
+    ms365_users_service: Arc<dyn Ms365UsersService>,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -1290,6 +1395,7 @@ fn build_test_app_parts_with_ms365_services(
         ms365_planner_service,
         ms365_todo_service,
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service,
     };
 
     (build_router(state, auth_token), device_repo)
@@ -1303,6 +1409,19 @@ async fn body_json(response: axum::http::Response<Body>) -> Value {
 async fn body_text(response: axum::http::Response<Body>) -> String {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+fn sample_user_profile(id: &str, mail: &str) -> UserProfile {
+    UserProfile {
+        id: id.to_string(),
+        display_name: "Test User".to_string(),
+        user_principal_name: mail.to_string(),
+        mail: Some(mail.to_string()),
+        job_title: Some("Engineer".to_string()),
+        department: Some("Platform".to_string()),
+        office_location: Some("Sarajevo".to_string()),
+        mobile_phone: Some("+38761111222".to_string()),
+    }
 }
 
 fn sample_planner_task(id: &str) -> PlannerTask {
@@ -1426,6 +1545,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1532,6 +1652,7 @@ enabled: true
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1650,6 +1771,7 @@ async fn status_reports_configured_lane_capacities() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -1745,6 +1867,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1878,6 +2001,7 @@ async fn ws_rpc_health_reports_session_count() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -1986,6 +2110,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2115,6 +2240,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2261,6 +2387,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2352,6 +2479,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2439,6 +2567,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let session_id = Uuid::new_v4();
@@ -2605,6 +2734,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2706,6 +2836,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2854,6 +2985,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2998,6 +3130,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3107,6 +3240,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3564,6 +3698,150 @@ async fn ms365_auth_status_requires_auth_when_gateway_token_enabled() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ms365_users_me_forwards_request_and_returns_profile() {
+    let users_service = Arc::new(FakeMs365UsersService::with_me_response(Ok(
+        sample_user_profile("user-me-1", "me@example.com"),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_users_service(AppConfig::default(), None, users_service.clone());
+
+    let response = app
+        .oneshot(Request::get("/ms365/users/me").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["user"]["id"], "user-me-1");
+    assert_eq!(json["user"]["user_principal_name"], "me@example.com");
+
+    let calls = users_service.calls().await;
+    assert_eq!(calls, vec![UsersReadCall::Me]);
+}
+
+#[tokio::test]
+async fn ms365_users_list_forwards_limit_and_returns_directory_page() {
+    let users_service = Arc::new(FakeMs365UsersService::with_list_response(Ok(UsersList {
+        users: vec![
+            UserSummary {
+                id: "user-1".to_string(),
+                display_name: "Ada Lovelace".to_string(),
+                user_principal_name: "ada@example.com".to_string(),
+                job_title: Some("Engineer".to_string()),
+            },
+            UserSummary {
+                id: "user-2".to_string(),
+                display_name: "Grace Hopper".to_string(),
+                user_principal_name: "grace@example.com".to_string(),
+                job_title: Some("Admiral".to_string()),
+            },
+        ],
+        total: 2,
+    })));
+    let (app, _device_repo) =
+        build_test_app_parts_with_users_service(AppConfig::default(), None, users_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/users?limit=250")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["total"], 2);
+    assert_eq!(json["users"][0]["id"], "user-1");
+    assert_eq!(json["users"][1]["user_principal_name"], "grace@example.com");
+
+    let calls = users_service.calls().await;
+    assert_eq!(calls, vec![UsersReadCall::List { limit: 100 }]);
+}
+
+#[tokio::test]
+async fn ms365_users_read_forwards_id_and_returns_profile() {
+    let users_service = Arc::new(FakeMs365UsersService::with_read_response(Ok(
+        sample_user_profile("user-read-1", "reader@example.com"),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_users_service(AppConfig::default(), None, users_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/users/reader@example.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["user"]["id"], "user-read-1");
+    assert_eq!(json["user"]["mail"], "reader@example.com");
+
+    let calls = users_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![UsersReadCall::Read {
+            id: "reader@example.com".to_string(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_users_routes_require_auth_when_gateway_token_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/ms365/users/me").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/users")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn ms365_users_read_maps_validation_errors_to_bad_request() {
+    let users_service = Arc::new(FakeMs365UsersService::with_read_response(Err(
+        Ms365UsersServiceError::Validation("user id is required".to_string()),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_users_service(AppConfig::default(), None, users_service);
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/users/%20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let json = body_json(response).await;
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("user id is required")
+    );
 }
 
 #[tokio::test]
@@ -5104,6 +5382,7 @@ async fn send_message_and_transcript_with_shared_state() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -5334,6 +5613,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -6341,6 +6621,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -6593,6 +6874,7 @@ async fn reminders_list_includes_outcome_fields() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -6696,6 +6978,7 @@ async fn reminders_cancel_returns_success() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -6816,6 +7099,7 @@ async fn agent_steer_success() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -6969,6 +7253,7 @@ async fn agent_kill_success() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let app = build_router(state, None);
@@ -7120,6 +7405,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_users_service: test_ms365_users_service(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
