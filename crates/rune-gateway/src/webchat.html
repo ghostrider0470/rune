@@ -242,6 +242,7 @@
   let pendingAssistantMsg = null;
   let reconnectAttempt = 0;
   let reconnectTimer = null;
+  let pollTimer = null;
   let sendCooldownUntil = 0;
   const pendingOutbound = [];
   const authToken = query.get('api_key') || '';
@@ -365,6 +366,7 @@
       if (!isCooldownActive()) {
         sendCooldownUntil = 0;
         if (ws && ws.readyState === WebSocket.OPEN) {
+          stopPollingFallback();
           setStatus(true, 'Connected');
         }
         updateSendAvailability();
@@ -525,6 +527,29 @@
     await refreshSessionList();
   }
 
+  function startPollingFallback() {
+    if (pollTimer || !sessionId) return;
+    pollTimer = window.setInterval(async function() {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      if (!sessionId) return;
+      try {
+        const response = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/transcript' + (authToken ? ('?api_key=' + encodeURIComponent(authToken)) : ''));
+        if (!response.ok) return;
+        const existing = await response.json();
+        resetTranscript();
+        if (Array.isArray(existing)) existing.forEach(appendTranscriptEntry);
+      } catch (_) {
+      }
+    }, 3000);
+  }
+
+  function stopPollingFallback() {
+    if (pollTimer) {
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
   function scheduleReconnect() {
     if (reconnectTimer) return;
     reconnectAttempt += 1;
@@ -553,6 +578,7 @@
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      stopPollingFallback();
       setStatus(true, 'Connected');
       updateSendAvailability();
       try {
@@ -583,6 +609,7 @@
     ws.onclose = function() {
       rejectPendingRpc('WebSocket disconnected');
       sendBtn.disabled = true;
+      startPollingFallback();
       scheduleReconnect();
     };
 
@@ -594,12 +621,15 @@
   function handleEvent(frame) {
     const p = frame.payload || {};
     const kind = frame.kind || p.kind || '';
-    if (kind === 'turn_complete' || kind === 'turn_finished' || kind === 'turn_completed') {
+    if (kind === 'turn_complete' || kind === 'turn_finished' || kind === 'turn_completed' || kind === 'turn.completed') {
       const text = p.assistant_text || p.assistant_reply || p.response || p.text || '';
       if (text) {
         appendStreamingAssistant(text);
       }
       clearPendingAssistant();
+    } else if (kind === 'turn.progressed') {
+      const status = p.status || '';
+      if (status) appendStreamingAssistant('[' + status + ']');
     } else if (kind === 'transcript_append') {
       const role = p.role || p.kind || '';
       const content = p.content || p.text || '';

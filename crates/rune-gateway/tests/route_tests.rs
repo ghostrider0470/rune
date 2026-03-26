@@ -8672,6 +8672,24 @@ async fn webchat_route_lists_browser_sessions_for_multi_user_switching() {
 }
 
 #[tokio::test]
+async fn webchat_route_includes_polling_reconnect_fallback() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(html.contains("function startPollingFallback()"));
+    assert!(html.contains("/sessions/' + encodeURIComponent(sessionId) + '/transcript"));
+    assert!(html.contains("startPollingFallback();"));
+    assert!(html.contains("stopPollingFallback();"));
+    assert!(html.contains("kind === 'turn.completed'"));
+}
+
+#[tokio::test]
 async fn webchat_route_rotates_browser_session_token_when_starting_fresh_session() {
     let app = build_test_app(None);
 
