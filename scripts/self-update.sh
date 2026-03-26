@@ -39,8 +39,31 @@ if ! "$REPO_DIR/target/release/rune" completion generate bash >/dev/null 2>&1; t
     echo "[self-update] CLI completion smoke check failed — aborting"
     exit 1
 fi
-if ! grep -aq "rune_gateway::ws" "$BINARY"; then
-    echo "[self-update] Gateway binary fingerprint check failed — aborting"
+if ! "$BINARY" --help >/dev/null 2>&1; then
+    echo "[self-update] Gateway --help smoke check failed — aborting"
+    exit 1
+fi
+
+SMOKE_CONFIG_DIR="$(mktemp -d)"
+trap 'rm -rf "$SMOKE_CONFIG_DIR"' EXIT
+cat > "$SMOKE_CONFIG_DIR/config.toml" <<'CFG'
+[gateway]
+host = "127.0.0.1"
+port = 0
+
+[database]
+backend = "sqlite"
+
+[ui]
+enabled = false
+
+[browser]
+enabled = false
+CFG
+timeout 10s "$BINARY" --config "$SMOKE_CONFIG_DIR/config.toml" >/dev/null 2>&1 || status=$?
+status=${status:-0}
+if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+    echo "[self-update] Gateway standalone smoke boot failed — aborting"
     exit 1
 fi
 
