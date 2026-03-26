@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Canonical persistent mount points (per DOCKER-DEPLOYMENT.md)
 RUN mkdir -p /data/db /data/sessions /data/memory /data/media \
-             /data/skills /data/logs /data/backups /config /secrets
+             /data/skills /data/plugins /data/logs /data/backups /config /secrets
 
 COPY --from=builder /build/target/release/rune /usr/local/bin/rune
 COPY --from=builder /build/target/release/rune-gateway /usr/local/bin/rune-gateway

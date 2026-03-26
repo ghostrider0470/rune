@@ -16,6 +16,7 @@ set -e
 : "${RUNE__PATHS__MEMORY_DIR:=/data/memory}"
 : "${RUNE__PATHS__MEDIA_DIR:=/data/media}"
 : "${RUNE__PATHS__SKILLS_DIR:=/data/skills}"
+: "${RUNE__PATHS__PLUGINS_DIR:=/data/plugins}"
 : "${RUNE__PATHS__LOGS_DIR:=/data/logs}"
 : "${RUNE__PATHS__BACKUPS_DIR:=/data/backups}"
 : "${RUNE__PATHS__CONFIG_DIR:=/config}"
@@ -35,6 +36,7 @@ export RUNE__PATHS__SESSIONS_DIR
 export RUNE__PATHS__MEMORY_DIR
 export RUNE__PATHS__MEDIA_DIR
 export RUNE__PATHS__SKILLS_DIR
+export RUNE__PATHS__PLUGINS_DIR
 export RUNE__PATHS__LOGS_DIR
 export RUNE__PATHS__BACKUPS_DIR
 export RUNE__PATHS__CONFIG_DIR
@@ -112,7 +114,7 @@ fi
 
 # Ensure data directories exist
 mkdir -p /data/db /data/sessions /data/memory /data/media \
-         /data/skills /data/logs /data/backups
+         /data/skills /data/plugins /data/logs /data/backups
 
 echo "[entrypoint] Starting Rune gateway on ${RUNE__GATEWAY__HOST}:${RUNE__GATEWAY__PORT}"
 
