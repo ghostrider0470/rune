@@ -8138,6 +8138,10 @@ async fn webchat_route_documents_multi_user_browser_sessions() {
     assert!(body.contains("window.sessionStorage.setItem(sessionStorageKey, sessionId)"));
     assert!(body.contains("history.replaceState"));
     assert!(body.contains("sessionToken"));
+    assert!(body.contains("const requestedSessionId = query.get('session_id') || ''"));
+    assert!(body.contains("requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.'"));
+    assert!(body.contains("return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat';"));
+    assert!(body.contains("channel_ref: sessionChannelRef()"));
 }
 #[tokio::test]
 async fn webchat_route_preserves_session_and_auth_query_params() {

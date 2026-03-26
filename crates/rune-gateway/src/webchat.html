@@ -163,7 +163,8 @@
 
   let ws = null;
   const sessionStorageKey = 'rune.webchat.session_id';
-  let sessionId = query.get('session_id') || window.sessionStorage.getItem(sessionStorageKey);
+  const requestedSessionId = query.get('session_id') || '';
+  let sessionId = requestedSessionId || window.sessionStorage.getItem(sessionStorageKey);
   let reqCounter = 0;
   const pendingRpc = {};
   const authToken = query.get('api_key') || '';
@@ -208,6 +209,10 @@
       const text = entry.payload.content || entry.payload.text || '';
       if (text) appendMsg('assistant', text);
     }
+  }
+
+  function sessionChannelRef() {
+    return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat';
   }
 
   function persistSessionInUrl() {
@@ -261,7 +266,7 @@
   async function hydrateSession() {
     if (sessionId) {
       ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
-      appendMsg('system', query.get('session_id') ? 'Resumed session.' : 'Resumed this browser session.');
+      appendMsg('system', requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.');
       const existing = await rpc('session.transcript', { session_id: sessionId });
       if (Array.isArray(existing)) {
         existing.forEach(appendTranscriptEntry);
@@ -270,7 +275,7 @@
       return;
     }
 
-    const res = await rpc('session.create', { kind: 'direct', channel_ref: 'webchat' });
+    const res = await rpc('session.create', { kind: 'direct', channel_ref: sessionChannelRef() });
     sessionId = res.id;
     persistSessionInUrl();
     sendBtn.disabled = false;
