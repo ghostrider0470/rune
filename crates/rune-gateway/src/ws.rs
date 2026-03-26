@@ -74,6 +74,8 @@ struct ResFrame {
 struct ResError {
     code: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
 }
 
 /// Outbound event frame.
@@ -245,6 +247,7 @@ where
                 error: Some(ResError {
                     code: "parse_error".to_string(),
                     message: format!("invalid frame: {e}"),
+                    data: None,
                 }),
             };
             return serde_json::to_string(&res).ok();
@@ -417,6 +420,7 @@ fn encode_res(
         error: error.map(|(code, message)| ResError {
             code: code.to_string(),
             message: message.to_string(),
+            data: None,
         }),
     };
     // Serialization of simple structs should not fail; unwrap_or provides a safe fallback.

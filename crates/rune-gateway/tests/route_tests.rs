@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::body::Body;
@@ -44,7 +44,8 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
-use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
+use rune_gateway::{AppState, SessionEvent, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
+use rune_gateway::ws_rpc::RpcDispatcher;
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
@@ -1550,6 +1551,7 @@ fn build_test_app_parts_with_ms365_services(
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service,
@@ -1747,6 +1749,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -1855,6 +1858,7 @@ enabled: true
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -1975,6 +1979,7 @@ async fn status_reports_configured_lane_capacities() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2072,6 +2077,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2207,6 +2213,7 @@ async fn ws_rpc_health_reports_session_count() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2317,6 +2324,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2448,6 +2456,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2596,6 +2605,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2689,6 +2699,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2778,6 +2789,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -2950,6 +2962,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -3053,6 +3066,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -3203,6 +3217,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -3349,6 +3364,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -3460,6 +3476,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -5843,6 +5860,7 @@ async fn send_message_and_transcript_with_shared_state() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -6075,6 +6093,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -7084,6 +7103,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -7338,6 +7358,7 @@ async fn reminders_list_includes_outcome_fields() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -7443,6 +7464,7 @@ async fn reminders_cancel_returns_success() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -7565,6 +7587,7 @@ async fn agent_steer_success() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -7720,6 +7743,7 @@ async fn agent_kill_success() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -7873,6 +7897,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
         tts_engine: None,
         stt_engine: None,
         ms365_calendar_service: test_ms365_calendar_service(),
@@ -8403,4 +8428,123 @@ async fn websocket_rejects_invalid_query_api_key_when_gateway_auth_is_enabled() 
         other => panic!("expected HTTP handshake error, got {other:?}"),
     }
     server.abort();
+}
+
+#[tokio::test]
+async fn ws_rpc_session_send_rate_limits_bursty_webchat_channels() {
+    let now = chrono::Utc::now();
+    let session_id = Uuid::now_v7();
+    let session_repo = Arc::new(MemSessionRepo::new());
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "direct".into(),
+            status: "ready".into(),
+            workspace_root: None,
+            channel_ref: Some("webchat:browser-token".into()),
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            Arc::new(FakeToolExecutor),
+            Arc::new(ToolRegistry::new()),
+            ContextAssembler::new("test"),
+            Arc::new(NoOpCompaction),
+        )
+        .with_default_model("fake-model"),
+    );
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler: Arc::new(Scheduler::new()),
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(60), 1)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+
+    dispatcher
+        .dispatch(
+            "session.send",
+            serde_json::json!({
+                "session_id": session_id.to_string(),
+                "content": "first"
+            }),
+        )
+        .await
+        .unwrap();
+
+    let err = dispatcher
+        .dispatch(
+            "session.send",
+            serde_json::json!({
+                "session_id": session_id.to_string(),
+                "content": "second"
+            }),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, "rate_limited");
+    assert!(err.message.contains("retry in"));
 }

@@ -1,7 +1,8 @@
 //! Shared application state for Axum handlers.
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
@@ -17,7 +18,7 @@ use rune_store::repos::{
 use rune_stt::SttEngine;
 use rune_tools::process_tool::ProcessManager;
 use rune_tts::TtsEngine;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast};
 
 use crate::ms365::{
     Ms365CalendarService, Ms365FilesService, Ms365MailService, Ms365PlannerService,
@@ -38,7 +39,60 @@ pub struct SessionEvent {
     pub state_changed: bool,
 }
 
-/// Shared state accessible from all route handlers.
+#[derive(Clone, Debug)]
+pub struct WebChatRateLimitEntry {
+    pub window_started_at: Instant,
+    pub count: u32,
+    pub retry_after: Duration,
+}
+
+#[derive(Clone, Debug)]
+pub struct WebChatRateLimiter {
+    window: Duration,
+    max_requests: u32,
+    entries: Arc<Mutex<HashMap<String, WebChatRateLimitEntry>>>,
+}
+
+impl WebChatRateLimiter {
+    pub fn new(window: Duration, max_requests: u32) -> Self {
+        Self {
+            window,
+            max_requests: max_requests.max(1),
+            entries: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn check(&self, key: impl Into<String>) -> Result<(), Duration> {
+        let key = key.into();
+        let now = Instant::now();
+        let mut entries = self.entries.lock().await;
+
+        entries.retain(|_, entry| now.duration_since(entry.window_started_at) < self.window);
+
+        let entry = entries.entry(key).or_insert_with(|| WebChatRateLimitEntry {
+            window_started_at: now,
+            count: 0,
+            retry_after: Duration::from_secs(0),
+        });
+
+        if now.duration_since(entry.window_started_at) >= self.window {
+            entry.window_started_at = now;
+            entry.count = 0;
+            entry.retry_after = Duration::from_secs(0);
+        }
+
+        if entry.count >= self.max_requests {
+            let retry_after = self.window.saturating_sub(now.duration_since(entry.window_started_at));
+            entry.retry_after = retry_after;
+            return Err(retry_after);
+        }
+
+        entry.count += 1;
+        entry.retry_after = Duration::from_secs(0);
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     /// Resolved application configuration (behind RwLock for live editing).
@@ -87,6 +141,8 @@ pub struct AppState {
     pub hook_registry: Arc<HookRegistry>,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
+    /// Per-browser WebChat send limiter used to smooth reconnect storms and abuse.
+    pub webchat_rate_limiter: Arc<WebChatRateLimiter>,
     /// Text-to-speech engine (constructed when TTS API key is configured).
     pub tts_engine: Option<Arc<RwLock<TtsEngine>>>,
     /// Speech-to-text engine (constructed when STT API key is configured).

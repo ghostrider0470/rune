@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::middleware;
@@ -236,6 +236,10 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         plugin_loader,
         hook_registry,
         event_tx,
+        webchat_rate_limiter: Arc::new(crate::state::WebChatRateLimiter::new(
+            Duration::from_secs(10),
+            4,
+        )),
         tts_engine,
         stt_engine,
         ms365_calendar_service: services.ms365_calendar_service,

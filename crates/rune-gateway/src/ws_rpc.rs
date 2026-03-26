@@ -5,6 +5,7 @@
 //! params and returns `Result<Value, RpcError>`.
 
 use serde_json::{Value, json};
+use std::time::Duration;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -356,18 +357,25 @@ impl RpcDispatcher {
     /// Send a message to a session. Params: `session_id` (required), `content` (required), `model` (optional).
     async fn session_send(&self, params: Value) -> Result<Value, RpcError> {
         let session_id = require_uuid(&params, "session_id")?;
+        let session = self
+            .state
+            .session_engine
+            .get_session(session_id)
+            .await
+            .map_err(|e| RpcError::not_found(e.to_string()))?;
         let content = params
             .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| RpcError::bad_request("missing required param: content"))?;
         let model = params.get("model").and_then(|v| v.as_str());
 
-        // Verify session exists.
-        self.state
-            .session_engine
-            .get_session(session_id)
-            .await
-            .map_err(|e| RpcError::not_found(e.to_string()))?;
+        let rate_limit_key = session
+            .channel_ref
+            .clone()
+            .unwrap_or_else(|| format!("session:{}", session_id));
+        if let Err(retry_after) = self.state.webchat_rate_limiter.check(rate_limit_key).await {
+            return Err(rate_limited_error(retry_after));
+        }
 
         let started = std::time::Instant::now();
 
@@ -1355,5 +1363,15 @@ fn parse_session_kind(s: &str) -> Result<SessionKind, RpcError> {
         other => Err(RpcError::bad_request(format!(
             "unknown session kind: {other}"
         ))),
+    }
+}
+
+fn rate_limited_error(retry_after: Duration) -> RpcError {
+    RpcError {
+        code: "rate_limited".into(),
+        message: format!(
+            "webchat send limit reached; retry in {}s",
+            retry_after.as_secs().max(1)
+        ),
     }
 }
