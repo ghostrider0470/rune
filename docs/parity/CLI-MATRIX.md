@@ -36,8 +36,8 @@
 | `memory` | `rune memory` | **Shipped** | `status`, `search`, `get` | — |
 | `approvals` | `rune approvals` | **Shipped** | `list`, `decide`, `policies`, `get`, `set`, `clear` | #42 |
 | `sessions` | `rune sessions` | **Shipped** | `list`, `show`, `status` | #38 |
-| `config` | `rune config` + `rune gateway config` | **Partial** | local `show`, `file`, `get`, `set`, `unset`, `validate` shipped; live gateway `config show/apply` shipped. Interactive `configure` still missing. | #40/#30 |
-| `configure` | — | **Not started** | Interactive setup wizard — no Rune surface yet | #61 |
+| `config` | `rune config` + `rune gateway config` | **Shipped** | local `show`, `file`, `get`, `set`, `unset`, `validate` shipped; live gateway `config show/apply` shipped. | #40/#30 |
+| `configure` | `rune configure` | **Shipped** | Interactive first-run setup wizard alias with the same zero-config flow as `setup` | #61 |
 | `secrets` | `rune secrets` | **Shipped** | `reload`, `audit`, `configure`, `apply` | #67 |
 | `security` | `rune security` | **Shipped** | `audit` | #64 |
 | `system` | `rune system` | **Shipped** | `event inject`, `event schedule`, `event list`, `heartbeat presence/last/enable/disable/status` | #43 |
@@ -48,9 +48,9 @@
 
 ### Tier 0 summary
 
-- **Shipped:** 16 / 20 families
-- **Partial:** 3 (`channels` — missing mutation verbs; `config` — interactive configure still missing; `logs` — query surface landed, follow/tail breadth still missing)
-- **Not started:** 1 (`configure`)
+- **Shipped:** 18 / 20 families
+- **Partial:** 2 (`channels` — missing mutation verbs; `logs` — query surface landed, follow/tail breadth still missing)
+- **Not started:** 0
 
 ---
 

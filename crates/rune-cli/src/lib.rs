@@ -3089,8 +3089,24 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         },
         Command::Configure => {
-            let result = client.configure().await?;
-            println!("{}", render(&result, format));
+            run_init_wizard(InitWizardOptions {
+                path: ".",
+                api_key: None,
+                provider: None,
+                model: None,
+                telegram_token: None,
+                webchat: true,
+                start: true,
+                open: true,
+                non_interactive: false,
+                install_service: false,
+                service_target: ServiceTarget::Systemd,
+                service_name: "rune-gateway",
+                service_enable: true,
+                service_start: true,
+                print_next_steps: true,
+            })
+            .await?;
         }
         Command::Wizard {
             path,
