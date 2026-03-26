@@ -35,7 +35,7 @@ As of 2026-03-14 early-morning execution:
 - background `exec` launches now persist restart-visible metadata into durable tool-execution audit rows, with honest degraded `process` inspection after restart
 
 Highest-leverage remaining parity gaps:
-1. restart-safe continuation guarantees for approval-resumed turns and live process handles across gateway restarts
+1. restart-safe continuation guarantees remain explicitly incomplete: current Rune preserves durable approval-decision resume metadata and startup restoration of active session indexing, but it still does not prove broader restart-safe continuation for approval-resumed turns, live process handles, resumed-session notifications, or all in-flight work across gateway restarts.
 2. broader persistence/inspectability for subagent lifecycle beyond scheduled descendants
    - Note: baseline durable parent/requester linkage for direct/channel/scheduled/subagent sessions already exists in runtime tests, and live `sessions_spawn` now also preserves requester linkage when the caller provides `sessionKey`/`requesterSessionId`; remaining gap is richer lifecycle/runtime inspectability rather than the linkage primitive itself.
 3. deeper session-status parity quality (cost fidelity, unresolved-note reduction, broader runtime linkage)
