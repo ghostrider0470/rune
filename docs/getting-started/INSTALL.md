@@ -40,12 +40,12 @@ cargo run --release --bin rune -- setup \
 What this does:
 
 - initializes the workspace if needed
-- writes `config.toml`
+- writes `config.toml` with local SQLite storage and UI/WebChat enabled
 - enables browser WebChat
 - starts the gateway locally
 - opens `http://127.0.0.1:8787/chat`
 
-For non-interactive CI/script usage, add `--non-interactive`.
+For non-interactive CI/script usage, add `--non-interactive`. If you skip automatic startup, the wizard prints the exact `rune-gateway --config ...` and `rune service install --workdir ... --config ... --enable --start` commands to finish setup.
 
 ## Create config
 

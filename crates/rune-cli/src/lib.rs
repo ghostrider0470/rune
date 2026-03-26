@@ -233,13 +233,12 @@ fn open_config_instructions(workspace: &Path, config_path: &Path) {
     let workspace_hint = workspace.display();
     let config_hint = config_path.display();
     eprintln!("next steps:");
+    eprintln!("  - config: {}", config_hint);
+    eprintln!("  - workspace: {}", workspace_hint);
+    eprintln!("  - start manually: rune-gateway --config {}", config_hint);
     eprintln!(
-        "  - edit {} to add your provider key or switch models",
-        config_hint
-    );
-    eprintln!(
-        "  - run from {} so Rune reuses this workspace",
-        workspace_hint
+        "  - install a background service: rune service install --workdir {} --config {} --enable --start",
+        workspace_hint, config_hint
     );
 }
 
@@ -429,6 +428,20 @@ fn write_wizard_config(
     models.push(model);
     table["models"] = Item::Value(Value::Array(models));
     arr.push(table);
+
+    if !doc["storage"].is_table() {
+        doc["storage"] = Item::Table(Table::new());
+    }
+    doc["storage"]["backend"] = Item::Value(Value::from("sqlite"));
+    doc["storage"]["sqlite_path"] = Item::Value(Value::from("state/rune.db"));
+
+    if !doc["ui"].is_table() {
+        doc["ui"] = Item::Table(Table::new());
+    }
+    doc["ui"]["enabled"] = Item::Value(Value::from(true));
+
+    std::fs::create_dir_all(workspace.join("state"))
+        .with_context(|| format!("failed to create {}", workspace.join("state").display()))?;
 
     std::fs::write(&config_path, doc.to_string())
         .with_context(|| format!("failed to write {}", config_path.display()))?;

@@ -43,7 +43,7 @@ The installer builds `rune` and `rune-gateway`, places them in `~/.local/bin` by
 rune setup --path ~/.rune --api-key "$OPENAI_API_KEY"
 ```
 
-If Ollama is already running locally, `rune setup --path ~/.rune` auto-detects it and skips the API key requirement.
+If Ollama is already running locally, `rune setup --path ~/.rune` auto-detects it and skips the API key requirement. The wizard now writes a zero-config local SQLite state path, enables WebChat/UI, and prepares the workspace for immediate browser use.
 
 ### Local dev / source checkout
 
@@ -69,6 +69,8 @@ To generate and install a user service for unattended operation:
 ```
 
 On macOS, swap `--target launchd` to write a LaunchAgent plist instead. The install command also wires stdout/stderr logs next to the plist, bootstraps the agent with `launchctl bootstrap`, and kickstarts it when `--start` is passed.
+
+If you skip `--start`, Rune prints the exact manual `rune-gateway --config ...` command plus a ready-to-run `rune service install --workdir ... --config ... --enable --start` follow-up so the setup path still ends in a durable background service without hunting through docs.
 
 ### Zero-config Docker bring-up
 
