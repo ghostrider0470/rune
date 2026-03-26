@@ -273,6 +273,24 @@ export interface TranscriptEntry {
   created_at: string;
 }
 
+
+export interface AgentListItem {
+  id: string;
+  default: boolean;
+  model: string | null;
+  workspace: string | null;
+  system_prompt: string | null;
+}
+
+export interface SkillItem {
+  name: string;
+  description: string;
+  enabled: boolean;
+  binary_path: string | null;
+  source_dir: string;
+  parameters: unknown;
+}
+
 // Approvals
 export interface ApprovalRequestResponse {
   id: string;

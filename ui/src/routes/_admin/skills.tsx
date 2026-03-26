@@ -5,20 +5,12 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import type { SkillItem } from "@/lib/api-types";
 import { Wrench, FolderOpen } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/skills")({
   component: SkillsPage,
 });
-
-interface SkillItem {
-  name: string;
-  description: string;
-  enabled: boolean;
-  binary_path: string | null;
-  source_dir: string;
-  parameters: unknown;
-}
 
 function SkillsPage() {
   const queryClient = useQueryClient();

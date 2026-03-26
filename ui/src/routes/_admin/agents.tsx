@@ -12,24 +12,17 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import type { AgentListItem } from "@/lib/api-types";
 import { Bot, Star } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/agents")({
   component: AgentsPage,
 });
 
-interface AgentItem {
-  id: string;
-  default: boolean;
-  model: string | null;
-  workspace: string | null;
-  system_prompt: string | null;
-}
-
 function AgentsPage() {
   const { data: agents, isLoading } = useQuery({
     queryKey: ["agents"],
-    queryFn: () => api.get<AgentItem[]>("/agents"),
+    queryFn: () => api.get<AgentListItem[]>("/agents"),
     refetchInterval: 30_000,
   });
 
