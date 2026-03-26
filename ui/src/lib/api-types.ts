@@ -178,7 +178,9 @@ export interface CronWakeRequest {
 // Sessions
 export interface SessionListItem {
   id: string;
+  kind: string;
   status: string;
+  requester_session_id?: string | null;
   channel: string | null;
   created_at: string;
   last_activity_at?: string;
