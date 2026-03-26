@@ -8886,4 +8886,108 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_channels() {
 
     assert_eq!(err.code, "rate_limited");
     assert!(err.message.contains("retry in"));
+    assert_eq!(
+        err.data
+            .as_ref()
+            .and_then(|data| data.get("retry_after_seconds"))
+            .and_then(|value| value.as_u64()),
+        Some(60)
+    );
+}
+
+#[tokio::test]
+async fn ws_rpc_processes_log_surfaces_output() {
+    let process_manager = ProcessManager::new();
+    let mut child = tokio::process::Command::new("bash")
+        .arg("-lc")
+        .arg("printf 'hello from log'")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take();
+    let process_id = "test-process-log".to_string();
+    process_manager
+        .register(process_id.clone(), child, stdin)
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider = Arc::new(FakeModelProvider) as Arc<dyn ModelProvider>;
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let tool_executor = Arc::new(rune_tools::StubExecutor) as Arc<dyn rune_tools::ToolExecutor>;
+    let compaction = Arc::new(NoOpCompaction) as Arc<dyn CompactionStrategy>;
+    let context_assembler = ContextAssembler::new("system");
+    let turn_executor = Arc::new(TurnExecutor::new(
+        session_repo.clone() as Arc<dyn SessionRepo>,
+        turn_repo.clone() as Arc<dyn TurnRepo>,
+        transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+        approval_repo.clone() as Arc<dyn ApprovalRepo>,
+        model_provider.clone(),
+        tool_executor,
+        tool_registry,
+        context_assembler,
+        compaction,
+    ));
+    let session_engine = Arc::new(SessionEngine::new(
+        session_repo.clone() as Arc<dyn SessionRepo>
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler: Arc::new(Scheduler::new()),
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager,
+        capabilities: test_capabilities(0),
+        device_repo: device_repo as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(60), 1)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let payload = dispatcher
+        .dispatch("processes.log", serde_json::json!({ "id": process_id }))
+        .await
+        .unwrap();
+
+    assert_eq!(payload["output"], "hello from log");
 }

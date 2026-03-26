@@ -277,6 +277,7 @@ where
                             Some((
                                 "bad_request",
                                 "missing subscription target: session_id, event, or all",
+                                None,
                             )),
                             current_state_version(state_version.as_ref()),
                         ));
@@ -329,6 +330,7 @@ where
                             Some((
                                 "bad_request",
                                 "missing subscription target: session_id, event, or all",
+                                None,
                             )),
                             current_state_version(state_version.as_ref()),
                         ));
@@ -376,7 +378,7 @@ where
                             &id,
                             false,
                             None,
-                            Some((&rpc_err.code, &rpc_err.message)),
+                            Some((&rpc_err.code, &rpc_err.message, rpc_err.data.as_ref())),
                             current_state_version(state_version.as_ref()),
                         )),
                     }
@@ -408,7 +410,7 @@ fn encode_res(
     id: &str,
     ok: bool,
     payload: Option<Value>,
-    error: Option<(&str, &str)>,
+    error: Option<(&str, &str, Option<&Value>)>,
     state_version: u64,
 ) -> String {
     let frame = ResFrame {
@@ -417,10 +419,10 @@ fn encode_res(
         ok,
         state_version,
         payload,
-        error: error.map(|(code, message)| ResError {
+        error: error.map(|(code, message, data)| ResError {
             code: code.to_string(),
             message: message.to_string(),
-            data: None,
+            data: data.cloned(),
         }),
     };
     // Serialization of simple structs should not fail; unwrap_or provides a safe fallback.
@@ -463,6 +465,7 @@ mod tests {
             result: Err(crate::ws_rpc::RpcError {
                 code: code.to_string(),
                 message: message.to_string(),
+                data: None,
             }),
         }
     }
@@ -683,6 +686,7 @@ mod tests {
         assert_eq!(decoded["ok"], false);
         assert_eq!(decoded["error"]["code"], "method_not_found");
         assert_eq!(decoded["error"]["message"], "unknown method: nope");
+        assert!(decoded["error"]["data"].is_null());
         assert_eq!(decoded["stateVersion"], 9);
         assert_eq!(state_version.load(Ordering::Relaxed), 9);
     }

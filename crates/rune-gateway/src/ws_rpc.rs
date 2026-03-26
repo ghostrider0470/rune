@@ -24,6 +24,7 @@ use crate::ws::active_ws_connections;
 pub struct RpcError {
     pub code: String,
     pub message: String,
+    pub data: Option<Value>,
 }
 
 impl RpcError {
@@ -31,6 +32,7 @@ impl RpcError {
         Self {
             code: "bad_request".into(),
             message: msg.into(),
+            data: None,
         }
     }
 
@@ -38,6 +40,7 @@ impl RpcError {
         Self {
             code: "not_found".into(),
             message: msg.into(),
+            data: None,
         }
     }
 
@@ -45,6 +48,7 @@ impl RpcError {
         Self {
             code: "internal".into(),
             message: msg.into(),
+            data: None,
         }
     }
 
@@ -52,6 +56,7 @@ impl RpcError {
         Self {
             code: "method_not_found".into(),
             message: format!("unknown method: {method}"),
+            data: None,
         }
     }
 }
@@ -112,6 +117,7 @@ impl RpcDispatcher {
             "approvals.decide" => self.approvals_decide(params).await,
             "processes.list" => self.processes_list().await,
             "processes.get" => self.processes_get(params).await,
+            "processes.log" => self.processes_log(params).await,
             "processes.kill" => self.processes_kill(params).await,
             "channels.list" => self.channels_list().await,
             "channels.status" => self.channels_status().await,
@@ -1081,6 +1087,35 @@ impl RpcDispatcher {
 
     // ── Processes ────────────────────────────────────────────────────────
 
+    /// Fetch process log output with optional offset/limit. Params: `id`, optional `offset`, `limit`.
+    async fn processes_log(&self, params: Value) -> Result<Value, RpcError> {
+        let id = require_string(&params, "id")?;
+        let offset = params
+            .get("offset")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize);
+        let limit = params
+            .get("limit")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize);
+
+        let output = self
+            .state
+            .process_manager
+            .log(id, offset, limit)
+            .await
+            .map_err(|error| match error {
+                rune_tools::ToolError::ExecutionFailed(message)
+                    if message.contains("process not found") =>
+                {
+                    RpcError::bad_request(message)
+                }
+                other => RpcError::internal(other.to_string()),
+            })?;
+
+        Ok(json!({ "output": output }))
+    }
+
     /// List background processes.
     async fn processes_list(&self) -> Result<Value, RpcError> {
         let processes = self.state.process_manager.list().await;
@@ -1373,5 +1408,8 @@ fn rate_limited_error(retry_after: Duration) -> RpcError {
             "webchat send limit reached; retry in {}s",
             retry_after.as_secs().max(1)
         ),
+        data: Some(json!({
+            "retry_after_seconds": retry_after.as_secs().max(1)
+        })),
     }
 }
