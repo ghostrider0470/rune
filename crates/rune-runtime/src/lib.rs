@@ -1,5 +1,8 @@
 #![doc = "Session engine, turn loop, context assembly, and tool orchestration for Rune."]
 
+pub mod comms;
+pub use comms::CommsClient;
+
 pub mod agent_registry;
 pub mod claude_plugin;
 pub mod command_registry;
