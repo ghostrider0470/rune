@@ -74,10 +74,10 @@ _Generated 2026-03-20 from code audit of both codebases._
 | Mattermost | Yes | No |
 | Twitch | Yes | No |
 | Nostr | Yes | No |
-| WebChat (in-browser) | Yes | No |
+| WebChat (in-browser) | Yes | Yes |
 | 5+ others | Yes | No |
 
-**Critical gap:** WebChat (in-browser) for operator UI. Teams/Google Chat for enterprise.
+**Remaining gap:** Teams/Google Chat for enterprise plus the broader long-tail channel adapters.
 
 ### 3. Tool System
 
