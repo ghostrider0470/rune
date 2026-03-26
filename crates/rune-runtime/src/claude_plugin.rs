@@ -388,7 +388,9 @@ async fn parse_commands_dir(dir: &Path, plugin_name: &str) -> Vec<ClaudeCommand>
     commands
 }
 
-/// Read `.mcp.json` with a top-level `mcpServers` object.
+/// Read `.mcp.json` — supports both formats:
+/// - `{ "mcpServers": { "name": { ... } } }` (plugin.json style)
+/// - `{ "name": { "command": ..., "args": [...] } }` (Claude Code .mcp.json style)
 async fn parse_mcp_file(path: &Path) -> Vec<ClaudeMcpServer> {
     if !path.exists() {
         return Vec::new();
@@ -402,25 +404,37 @@ async fn parse_mcp_file(path: &Path) -> Vec<ClaudeMcpServer> {
         }
     };
 
-    let parsed: McpJsonFile = match serde_json::from_str(&content) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!(path = %path.display(), error = %e, "failed to parse .mcp.json");
-            return Vec::new();
-        }
-    };
+    // Try the { "mcpServers": { ... } } format first
+    if let Ok(parsed) = serde_json::from_str::<McpJsonFile>(&content) {
+        return parsed
+            .mcp_servers
+            .into_iter()
+            .map(|(name, entry)| ClaudeMcpServer {
+                name,
+                transport: entry.transport,
+                command: entry.command,
+                args: entry.args,
+                env: entry.env,
+            })
+            .collect();
+    }
 
-    parsed
-        .mcp_servers
-        .into_iter()
-        .map(|(name, entry)| ClaudeMcpServer {
-            name,
-            transport: entry.transport,
-            command: entry.command,
-            args: entry.args,
-            env: entry.env,
-        })
-        .collect()
+    // Fall back to flat format: { "server_name": { "command": ..., "args": [...] } }
+    if let Ok(flat) = serde_json::from_str::<HashMap<String, McpServerEntry>>(&content) {
+        return flat
+            .into_iter()
+            .map(|(name, entry)| ClaudeMcpServer {
+                name,
+                transport: entry.transport,
+                command: entry.command,
+                args: entry.args,
+                env: entry.env,
+            })
+            .collect();
+    }
+
+    warn!(path = %path.display(), "failed to parse .mcp.json in any known format");
+    Vec::new()
 }
 
 // ---------------------------------------------------------------------------
