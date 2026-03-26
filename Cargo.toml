@@ -56,3 +56,6 @@ postgresql_embedded = "0.20"
 wiremock = "0.6"
 tempfile = "3"
 toml_edit = "0.22"
+azure_data_cosmos = { version = "0.31", features = ["key_auth"] }
+azure_core = "0.32"
+futures = "0.3"
