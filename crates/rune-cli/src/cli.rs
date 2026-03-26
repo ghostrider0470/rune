@@ -154,17 +154,53 @@ pub enum Command {
         #[command(subcommand)]
         action: CompletionAction,
     },
-    /// Initialize a new workspace with default files.
+    /// Run first-time setup wizard (legacy name kept as an alias for quick start).
     Init {
-        /// Directory to initialize (defaults to current directory).
-        #[arg(default_value = ".")]
+        /// Target workspace/config directory (defaults to current directory).
+        #[arg(long, default_value = ".")]
         path: String,
-        /// Template slug to bootstrap from (e.g. "coding-agent").
+        /// API key/token for the selected provider.
         #[arg(long)]
-        template: Option<String>,
-        /// Skip interactive prompts and use defaults.
+        api_key: Option<String>,
+        /// Provider kind/name (for example: openai, anthropic, azure, groq, mistral, deepseek, ollama).
+        #[arg(long)]
+        provider: Option<String>,
+        /// Model id to configure as default.
+        #[arg(long)]
+        model: Option<String>,
+        /// Telegram bot token to enable Telegram during setup.
+        #[arg(long)]
+        telegram_token: Option<String>,
+        /// Enable the browser WebChat flow after writing config.
+        #[arg(long, default_value_t = true)]
+        webchat: bool,
+        /// Start the gateway after writing config.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        start: bool,
+        /// Open the chat URL in the default browser after startup.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        open: bool,
+        /// Skip opening the browser after startup.
+        #[arg(long = "no-open", default_value_t = false)]
+        no_open: bool,
+        /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
+        /// Install a service definition after writing config.
+        #[arg(long)]
+        install_service: bool,
+        /// Service manager target for --install-service.
+        #[arg(long, value_enum, default_value = "systemd")]
+        service_target: ServiceTarget,
+        /// Service label/name to use for --install-service.
+        #[arg(long, default_value = "rune-gateway")]
+        service_name: String,
+        /// Enable the service immediately after install.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        service_enable: bool,
+        /// Start the service immediately after install.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        service_start: bool,
     },
     /// Manage configuration.
     Config {
@@ -5380,6 +5416,12 @@ mod subagent_cli_tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_init() {
+        let cli = Cli::try_parse_from(["rune", "init"]).unwrap();
+        assert!(matches!(cli.command, Command::Init { .. }));
     }
 
     #[test]

@@ -1743,11 +1743,39 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Init {
             path,
-            template,
+            api_key,
+            provider,
+            model,
+            telegram_token,
+            webchat,
+            start,
+            open,
+            no_open,
             non_interactive,
+            install_service,
+            service_target,
+            service_name,
+            service_enable,
+            service_start,
         } => {
-            let target = std::path::Path::new(&path);
-            init_workspace(target, template.as_deref(), non_interactive).await?;
+            run_init_wizard(InitWizardOptions {
+                path: &path,
+                api_key,
+                provider,
+                model,
+                telegram_token,
+                webchat,
+                start,
+                open: open && !no_open,
+                non_interactive,
+                install_service,
+                service_target,
+                service_name: &service_name,
+                service_enable,
+                service_start,
+                print_next_steps: true,
+            })
+            .await?;
         }
         Command::Skills { action } => match action {
             SkillsAction::List => {
