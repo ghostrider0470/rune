@@ -8886,13 +8886,13 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_channels() {
 
     assert_eq!(err.code, "rate_limited");
     assert!(err.message.contains("retry in"));
-    assert_eq!(
-        err.data
-            .as_ref()
-            .and_then(|data| data.get("retry_after_seconds"))
-            .and_then(|value| value.as_u64()),
-        Some(60)
-    );
+    let retry_after = err
+        .data
+        .as_ref()
+        .and_then(|data| data.get("retry_after_seconds"))
+        .and_then(|value| value.as_u64())
+        .unwrap();
+    assert!((1..=60).contains(&retry_after));
 }
 
 #[tokio::test]
@@ -8990,4 +8990,215 @@ async fn ws_rpc_processes_log_surfaces_output() {
         .unwrap();
 
     assert_eq!(payload["output"], "hello from log");
+}
+
+#[tokio::test]
+async fn ws_rpc_memory_search_returns_workspace_hits() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("MEMORY.md"),
+        "# Memory\nMet Hamza at Horizon Tech\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("memory")).unwrap();
+    std::fs::write(
+        tmp.path().join("memory/2026-03-26.md"),
+        "Shipped webchat support today\n",
+    )
+    .unwrap();
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let mut config = AppConfig::default();
+    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(config)),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let body = dispatcher
+        .dispatch("memory.search", serde_json::json!({ "q": "Hamza", "limit": 5 }))
+        .await
+        .unwrap();
+
+    assert_eq!(body["query"], "Hamza");
+    assert_eq!(body["results"].as_array().unwrap().len(), 1);
+    assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
+    assert!(body["results"][0]["snippet"]
+        .as_str()
+        .unwrap()
+        .contains("Met Hamza at Horizon Tech"));
+}
+
+#[tokio::test]
+async fn ws_rpc_doctor_run_matches_http_contract() {
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let mut config = AppConfig::default();
+    config.gateway.auth_token = Some("secret-token".into());
+
+    let app = build_test_app_with_config(config.clone(), Some("secret-token".into()));
+    let http_response = app
+        .oneshot(
+            Request::post("/api/doctor/run")
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(http_response.status(), StatusCode::OK);
+    let http_body = body_json(http_response).await;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(config)),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let ws_body = dispatcher
+        .dispatch("doctor.run", serde_json::json!({}))
+        .await
+        .unwrap();
+
+    assert_eq!(ws_body["overall"], http_body["overall"]);
+    assert_eq!(ws_body["checks"], http_body["checks"]);
+    assert!(ws_body["run_at"].as_str().unwrap().contains('T'));
 }

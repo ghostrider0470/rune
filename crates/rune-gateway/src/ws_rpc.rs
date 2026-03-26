@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use rune_core::SessionKind;
 use rune_runtime::SkillScanSummary;
+use rune_tools::{ToolCall, ToolExecutor};
 
 use crate::a2ui::{A2uiActionParams, A2uiEvent, A2uiFormSubmitParams, broadcast_a2ui_event};
 use crate::events::{RuntimeEvent, TurnEvent, UsageSummary, broadcast_runtime_event};
@@ -1224,26 +1225,64 @@ impl RpcDispatcher {
         }))
     }
 
-    /// Search memory (stub).
+    /// Search memory via the same executor used by the HTTP gateway routes.
     async fn memory_search(&self, params: Value) -> Result<Value, RpcError> {
         let q = params.get("q").and_then(|v| v.as_str()).unwrap_or("");
         if q.is_empty() {
             return Err(RpcError::bad_request("missing required param: q"));
         }
 
+        let limit = params
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .clamp(1, 50) as usize;
+
+        let workspace_root = {
+            let config = self.state.config.read().await;
+            config
+                .agents
+                .defaults
+                .workspace
+                .clone()
+                .unwrap_or_else(|| ".".to_string())
+        };
+
+        let call = ToolCall {
+            tool_call_id: rune_core::ToolCallId::new(),
+            tool_name: "memory_search".to_string(),
+            arguments: json!({
+                "query": q,
+                "maxResults": limit,
+            }),
+        };
+
+        let tool = rune_tools::memory_tool::MemoryToolExecutor::new(workspace_root);
+        let result = tool
+            .execute(call)
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        let results = crate::routes::parse_memory_search_output(&result.output);
+        let message = if results.is_empty() {
+            format!("No results found for query: {q}")
+        } else {
+            format!("Found {} memory result(s)", results.len())
+        };
+
         Ok(json!({
             "query": q,
-            "results": [],
-            "message": "memory search not yet wired to gateway-level index",
+            "results": results,
+            "message": message,
         }))
     }
 
     // ── Logs ────────────────────────────────────────────────────────────
 
-    /// Query structured logs (stub).
+    /// Query structured logs with the same parity payload as the HTTP route.
     async fn logs_query(&self, _params: Value) -> Result<Value, RpcError> {
         let config = self.state.config.read().await;
         let logs_dir = config.paths.logs_dir.display().to_string();
+        drop(config);
 
         Ok(json!({
             "entries": [],
@@ -1253,46 +1292,12 @@ impl RpcDispatcher {
 
     // ── Doctor ──────────────────────────────────────────────────────────
 
-    /// Run doctor checks.
+    /// Run doctor checks with the same result contract as the HTTP route.
     async fn doctor_run(&self) -> Result<Value, RpcError> {
-        let config = self.state.config.read().await;
-        let provider_ok = !config.models.providers.is_empty();
-        let auth_ok = config.gateway.auth_token.is_some();
-        drop(config);
-
-        let session_ok = self.state.session_repo.list(1, 0).await.is_ok();
-
-        let checks = vec![
-            json!({
-                "name": "model_providers",
-                "status": if provider_ok { "pass" } else { "warn" },
-                "message": if provider_ok { "provider(s) configured" } else { "no model providers configured" },
-            }),
-            json!({
-                "name": "auth",
-                "status": if auth_ok { "pass" } else { "warn" },
-                "message": if auth_ok { "bearer auth enabled" } else { "no auth token configured" },
-            }),
-            json!({
-                "name": "session_store",
-                "status": if session_ok { "pass" } else { "fail" },
-                "message": if session_ok { "session store reachable" } else { "session store error" },
-            }),
-        ];
-
-        let overall = if checks.iter().any(|c| c["status"] == "fail") {
-            "fail"
-        } else if checks.iter().any(|c| c["status"] == "warn") {
-            "warn"
-        } else {
-            "pass"
-        };
-
-        Ok(json!({
-            "overall": overall,
-            "checks": checks,
-            "run_at": chrono::Utc::now().to_rfc3339(),
-        }))
+        let report = crate::routes::doctor_run(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        Ok(serde_json::to_value(report.0).map_err(|error| RpcError::internal(error.to_string()))?)
     }
 
     /// Full daemon status.

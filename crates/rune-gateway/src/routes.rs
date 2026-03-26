@@ -4233,7 +4233,7 @@ pub struct MemorySearchResponse {
     pub message: String,
 }
 
-fn parse_memory_search_output(output: &str) -> Vec<Value> {
+pub(crate) fn parse_memory_search_output(output: &str) -> Vec<Value> {
     output
         .split("\n---\n")
         .filter_map(|chunk| {
