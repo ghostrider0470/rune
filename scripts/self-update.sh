@@ -15,20 +15,28 @@ BACKUP="$REPO_DIR/target/release/rune-gateway.bak"
 cd "$REPO_DIR"
 
 echo "[self-update] Building gateway..."
-if ! cargo build --release --bin rune-gateway 2>&1; then
+if ! cargo build --release --bin rune --bin rune-gateway 2>&1; then
     echo "[self-update] BUILD FAILED — aborting, keeping current binary"
     exit 1
 fi
 
-echo "[self-update] Build succeeded. Checking binary..."
+echo "[self-update] Build succeeded. Checking binaries..."
 if [ ! -f "$BINARY" ]; then
     echo "[self-update] Binary not found at $BINARY — aborting"
     exit 1
 fi
+if [ ! -f "$REPO_DIR/target/release/rune" ]; then
+    echo "[self-update] CLI binary not found at $REPO_DIR/target/release/rune — building both binaries is required"
+    exit 1
+fi
 
-# Quick smoke test — just check it can print version/help
-if ! "$REPO_DIR/target/release/rune" health >/dev/null 2>&1; then
-    echo "[self-update] Binary smoke test failed — aborting"
+# Quick smoke tests — avoid commands that require a running gateway
+if ! "$REPO_DIR/target/release/rune-gateway" --version >/dev/null 2>&1; then
+    echo "[self-update] Gateway binary version check failed — aborting"
+    exit 1
+fi
+if ! "$REPO_DIR/target/release/rune" --version >/dev/null 2>&1; then
+    echo "[self-update] CLI binary version check failed — aborting"
     exit 1
 fi
 
