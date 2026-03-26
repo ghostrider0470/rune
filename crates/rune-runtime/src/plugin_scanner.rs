@@ -181,27 +181,44 @@ impl PluginScanner {
                 }
             };
 
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
+            let mut dirs_to_scan = vec![expanded];
+            // Recurse up to 3 levels to handle Claude cache structure:
+            // cache/claude-plugins-official/<name>/<version>/
+            for _depth in 0..3 {
+                let mut next_dirs = Vec::new();
+                for scan_dir in &dirs_to_scan {
+                    let mut entries = match tokio::fs::read_dir(scan_dir).await {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let path = entry.path();
+                        if !path.is_dir() {
+                            continue;
+                        }
 
-                if claude_plugin::is_claude_plugin_dir(&path) {
-                    self.handle_claude_plugin(&path, &mut seen_names, &mut summary)
-                        .await;
-                } else if path.join("PLUGIN.md").exists() {
-                    // Native plugin — let the existing PluginLoader handle it.
-                    // We just tally it so the summary is informative.
-                    let dir_name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if seen_names.insert(dir_name) {
-                        summary.native_plugins += 1;
+                        if claude_plugin::is_claude_plugin_dir(&path) {
+                            self.handle_claude_plugin(&path, &mut seen_names, &mut summary)
+                                .await;
+                        } else if path.join("PLUGIN.md").exists() {
+                            let dir_name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if seen_names.insert(dir_name) {
+                                summary.native_plugins += 1;
+                            }
+                        } else {
+                            // Not a plugin dir — recurse deeper (marketplace/version dirs)
+                            next_dirs.push(path);
+                        }
                     }
                 }
+                if next_dirs.is_empty() {
+                    break;
+                }
+                dirs_to_scan = next_dirs;
             }
         }
 
