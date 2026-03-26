@@ -273,6 +273,7 @@
   let browserSessionToken = sessionToken || query.get('browser_session') || window.sessionStorage.getItem(browserSessionKey) || '';
 
   let knownSessions = [];
+  let currentSessionUrl = '';
   const sessionTokenKey = 'rune.webchat.session_auth_tokens';
   let sessionAuthTokens = loadSessionAuthTokens();
 
@@ -335,7 +336,7 @@
       return;
     }
     if (browserSessionToken) {
-      sessionHintEl.textContent = 'This browser is pinned to session_token ' + browserSessionToken.slice(0, 8) + '… — bookmark this URL to reopen the same session list.';
+      sessionHintEl.textContent = 'This browser is pinned to session_token ' + browserSessionToken.slice(0, 8) + '… — bookmark this URL to reopen the same session list and thread URLs.';
       return;
     }
     sessionHintEl.textContent = 'Anonymous browser mode — starting a new session rotates a fresh browser token for isolation.';
@@ -372,10 +373,15 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'session-item' + (item.id === sessionId ? ' active' : '');
-      button.innerHTML = '<div class="session-item-title">' + (item.id === sessionId ? 'Current session' : 'Session') + '</div>' +
+      const resumeTitle = item.id === sessionId ? 'Current session' : 'Session';
+      const resumeUrl = new URL(location.pathname, location.origin);
+      resumeUrl.searchParams.set('session_id', item.id);
+      if (authToken) resumeUrl.searchParams.set('api_key', authToken);
+      if (browserSessionToken) resumeUrl.searchParams.set('session_token', browserSessionToken);
+      button.innerHTML = '<div class="session-item-title">' + resumeTitle + '</div>' +
         '<div class="session-item-meta">' +
         (item.channel || 'webchat') + ' • ' + (item.status || 'unknown') + ' • ' + (((item.metadata || {}).browser_auth_mode) || authLabelFor(item.id)) + ' • ' + formatRelative(item.created_at) +
-        '</div>';
+        '</div><div class="session-item-meta">resume: ' + resumeUrl.toString() + '</div>';
       button.addEventListener('click', function() {
         if (item.id === sessionId) return;
         openSession(item.id, false).catch((e) => appendMsg('system', 'Failed to switch session: ' + (e.message || e)));
@@ -405,6 +411,7 @@
     }
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
     updateAuthBadge();
+    syncCurrentSessionLink();
     appendMsg('system', fromLink ? 'Opened session from browser history.' : 'Switched session.');
     const existing = await rpc('session.transcript', { session_id: sessionId });
     if (Array.isArray(existing)) existing.forEach(function(entry) {
@@ -532,6 +539,24 @@
     return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat:anonymous';
   }
 
+  function updateCurrentSessionUrl() {
+    if (!sessionId) {
+      currentSessionUrl = '';
+      return;
+    }
+    const next = new URLSearchParams();
+    next.set('session_id', sessionId);
+    if (authToken) next.set('api_key', authToken);
+    if (browserSessionToken) next.set('session_token', browserSessionToken);
+    currentSessionUrl = location.origin + location.pathname + '?' + next.toString();
+  }
+
+  function syncCurrentSessionLink() {
+    updateCurrentSessionUrl();
+    if (!sessionHintEl || !currentSessionUrl) return;
+    sessionHintEl.textContent = 'Current session URL ready — copy from the address bar to reopen this exact thread later.';
+  }
+
   function persistSessionInUrl() {
     const next = new URLSearchParams(location.search);
     if (!sessionId) {
@@ -540,6 +565,7 @@
       if (authToken) next.set('api_key', authToken);
       if (browserSessionToken) next.set('session_token', browserSessionToken);
       history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next.toString() : ''));
+      updateCurrentSessionUrl();
       renderSessionList();
       return;
     }
@@ -551,6 +577,7 @@
     if (authToken) next.set('api_key', authToken);
     if (browserSessionToken) next.set('session_token', browserSessionToken);
     history.replaceState(null, '', location.pathname + '?' + next.toString());
+    updateCurrentSessionUrl();
   }
 
   function persistBrowserSessionToken() {
@@ -580,6 +607,7 @@
     if (authToken) next.set('api_key', authToken);
     if (browserSessionToken) next.set('session_token', browserSessionToken);
     history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next.toString() : ''));
+    updateCurrentSessionUrl();
     resetTranscript();
     appendMsg('system', 'Starting a new session...');
     renderSessionList();
@@ -625,6 +653,7 @@
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
     updateAuthBadge();
     sessionPollCursor = '';
+    syncCurrentSessionLink();
     appendMsg('system', 'Session started.');
     await refreshSessionList();
   }

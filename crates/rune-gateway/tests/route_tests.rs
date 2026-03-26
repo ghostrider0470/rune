@@ -8929,6 +8929,22 @@ async fn webchat_route_rejects_non_object_session_token_storage_payloads() {
     assert!(body.contains("!Array.isArray(parsed) ? parsed : {}"));
 }
 #[tokio::test]
+async fn webchat_route_lists_resume_urls_for_browser_sessions() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("resume: "));
+    assert!(body.contains("resumeUrl.toString()"));
+    assert!(body.contains("Current session URL ready"));
+}
+
+#[tokio::test]
 async fn webchat_route_mentions_session_isolation_hinting() {
     let app = build_test_app(None);
 
