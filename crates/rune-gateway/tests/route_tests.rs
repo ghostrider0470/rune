@@ -8696,6 +8696,9 @@ async fn doctor_routes_return_checks_and_latest_results() {
     let run_body = body_json(run_response).await;
     assert!(run_body["overall"].is_string());
     assert!(run_body["run_at"].is_string());
+    assert_eq!(run_body["paths"]["profile"], "docker-default");
+    assert_eq!(run_body["paths"]["mode"], "standalone");
+    assert_eq!(run_body["paths"]["auto_create_missing"], true);
     let checks = run_body["checks"].as_array().unwrap();
     assert!(
         checks
@@ -10367,4 +10370,51 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
     assert_eq!(json["tool_name"], "exec");
     assert_eq!(json["status"], "completed");
     assert_eq!(json["result_summary"], "ok");
+}
+
+#[tokio::test]
+async fn doctor_route_reports_custom_path_profile_and_server_mode() {
+    let mut config = AppConfig::default();
+    config.mode = RuntimeMode::Server;
+    let root = std::env::temp_dir().join(format!("rune-doctor-custom-{}", Uuid::now_v7()));
+    config.paths.db_dir = root.join("db");
+    config.paths.sessions_dir = root.join("sessions");
+    config.paths.memory_dir = root.join("memory");
+    config.paths.media_dir = root.join("media");
+    config.paths.skills_dir = root.join("skills");
+    config.paths.plugins_dir = root.join("plugins");
+    config.paths.logs_dir = root.join("logs");
+    config.paths.backups_dir = root.join("backups");
+    config.paths.config_dir = root.join("config");
+    config.paths.secrets_dir = root.join("secrets");
+    for dir in [
+        &config.paths.db_dir,
+        &config.paths.sessions_dir,
+        &config.paths.memory_dir,
+        &config.paths.media_dir,
+        &config.paths.skills_dir,
+        &config.paths.plugins_dir,
+        &config.paths.logs_dir,
+        &config.paths.backups_dir,
+        &config.paths.config_dir,
+        &config.paths.secrets_dir,
+    ] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::post("/api/doctor/run")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["paths"]["profile"], "custom");
+    assert_eq!(body["paths"]["mode"], "server");
+    assert_eq!(body["paths"]["auto_create_missing"], false);
 }

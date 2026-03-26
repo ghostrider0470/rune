@@ -4469,10 +4469,18 @@ pub struct DoctorCheck {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DoctorPathSummary {
+    pub profile: &'static str,
+    pub mode: &'static str,
+    pub auto_create_missing: bool,
+}
+
 #[derive(Serialize)]
 pub struct DoctorReport {
     pub overall: &'static str,
     pub checks: Vec<DoctorCheck>,
+    pub paths: DoctorPathSummary,
     pub run_at: String,
 }
 
@@ -4572,6 +4580,12 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     let mut checks = Vec::new();
 
     let config = state.config.read().await;
+    let resolved_mode = config.mode.resolve(&config);
+    let paths_summary = DoctorPathSummary {
+        profile: config.paths.profile().as_str(),
+        mode: resolved_mode.as_str(),
+        auto_create_missing: resolved_mode == rune_config::RuntimeMode::Standalone,
+    };
     let provider_ok = !config.models.providers.is_empty();
     checks.push(DoctorCheck {
         name: "model_providers".to_string(),
@@ -4667,6 +4681,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     Ok(Json(DoctorReport {
         overall,
         checks,
+        paths: paths_summary,
         run_at: Utc::now().to_rfc3339(),
     }))
 }
