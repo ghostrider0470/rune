@@ -14,6 +14,7 @@ services:
       RUNE__PATHS__MEMORY_DIR: /data/memory
       RUNE__PATHS__MEDIA_DIR: /data/media
       RUNE__PATHS__SKILLS_DIR: /data/skills
+      RUNE__PATHS__PLUGINS_DIR: /data/plugins
       RUNE__PATHS__LOGS_DIR: /data/logs
       RUNE__PATHS__BACKUPS_DIR: /data/backups
       RUNE__GATEWAY__HOST: 0.0.0.0
