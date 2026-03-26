@@ -426,8 +426,8 @@ impl ApprovalRepo for MemApprovalRepo {
             decided_at: None,
             presented_payload: approval.presented_payload,
             created_at: approval.created_at,
-            handle_ref: None,
-            host_ref: None,
+            handle_ref: approval.handle_ref,
+            host_ref: approval.host_ref,
         };
         self.approvals.lock().await.push(row.clone());
         Ok(row)
@@ -2998,7 +2998,131 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
     assert!(approvals[0]["subject_id"].as_str().is_some());
     assert_eq!(approvals[0]["reason"], "needs network access");
     assert_eq!(approvals[0]["decision"], Value::Null);
+    assert_eq!(approvals[0]["handle_ref"], Value::Null);
+    assert_eq!(approvals[0]["host_ref"], Value::Null);
     assert_eq!(approvals[0]["presented_payload"]["tool"], "web_fetch");
+}
+
+#[tokio::test]
+async fn approvals_list_route_includes_durable_resume_refs() {
+    let config = AppConfig::default();
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+
+    let workspace_root = std::env::temp_dir().join(format!("rune-gw-test-{}", Uuid::now_v7()));
+    std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
+    std::fs::write(workspace_root.join("AGENTS.md"), "# Test workspace").unwrap();
+
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+
+    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let skills_dir = config.paths.skills_dir.clone();
+    let config = Arc::new(RwLock::new(config));
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(skills_dir, skill_registry.clone()));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config,
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo.clone() as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let approval_id = Uuid::now_v7();
+    let session_id = Uuid::now_v7();
+    let turn_id = Uuid::now_v7();
+    let created_at = chrono::Utc::now();
+
+    approval_repo
+        .create(NewApproval {
+            id: approval_id,
+            subject_type: "tool_call".to_string(),
+            subject_id: Uuid::now_v7(),
+            reason: "exec".to_string(),
+            presented_payload: serde_json::json!({
+                "session_id": session_id.to_string(),
+                "turn_id": turn_id.to_string(),
+                "tool_name": "exec",
+            }),
+            created_at,
+            handle_ref: Some(session_id.to_string()),
+            host_ref: Some(turn_id.to_string()),
+        })
+        .await
+        .unwrap();
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(Request::get("/approvals").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let approvals = body_json(response).await;
+    let approvals = approvals.as_array().unwrap();
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(approvals[0]["id"], approval_id.to_string());
+    assert_eq!(approvals[0]["handle_ref"], session_id.to_string());
+    assert_eq!(approvals[0]["host_ref"], turn_id.to_string());
+    assert_eq!(approvals[0]["presented_payload"]["tool_name"], "exec");
 }
 
 #[tokio::test]
@@ -8428,7 +8552,13 @@ async fn channels_routes_report_configured_adapters_and_active_channel_sessions(
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(body["active_sessions"], 1);
-    assert!(body["configured"].as_array().unwrap().iter().any(|item| item["name"] == "telegram"));
+    assert!(
+        body["configured"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["name"] == "telegram")
+    );
 }
 
 #[tokio::test]
@@ -8442,7 +8572,12 @@ async fn logs_route_returns_logs_dir_hint() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(body["entries"], serde_json::json!([]));
-    assert!(body["message"].as_str().unwrap().contains("structured log query not yet aggregated; logs directory:"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("structured log query not yet aggregated; logs directory:")
+    );
 }
 
 #[tokio::test]
@@ -8463,10 +8598,18 @@ async fn doctor_routes_return_checks_and_latest_results() {
     assert!(run_body["overall"].is_string());
     assert!(run_body["run_at"].is_string());
     let checks = run_body["checks"].as_array().unwrap();
-    assert!(checks.iter().any(|check| check["name"] == "model_providers"));
+    assert!(
+        checks
+            .iter()
+            .any(|check| check["name"] == "model_providers")
+    );
     assert!(checks.iter().any(|check| check["name"] == "auth"));
     assert!(checks.iter().any(|check| check["name"] == "approval_mode"));
-    assert!(checks.iter().any(|check| check["name"] == "security_posture"));
+    assert!(
+        checks
+            .iter()
+            .any(|check| check["name"] == "security_posture")
+    );
 
     let results_response = app
         .oneshot(

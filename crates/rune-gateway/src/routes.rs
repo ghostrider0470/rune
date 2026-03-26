@@ -23,8 +23,8 @@ use rune_runtime::scheduler::{
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
-use rune_tools::{ToolCall, ToolExecutor};
 use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
+use rune_tools::{ToolCall, ToolExecutor};
 use serde_json::Value;
 
 use crate::error::GatewayError;
@@ -1898,6 +1898,8 @@ pub struct ApprovalRequestResponse {
     pub completed_at: Option<String>,
     pub resume_result_summary: Option<String>,
     pub command: Option<String>,
+    pub handle_ref: Option<String>,
+    pub host_ref: Option<String>,
     pub presented_payload: Value,
     pub created_at: String,
 }
@@ -2052,6 +2054,8 @@ fn approval_to_response(approval: rune_store::models::ApprovalRow) -> ApprovalRe
         completed_at,
         resume_result_summary,
         command,
+        handle_ref: approval.handle_ref,
+        host_ref: approval.host_ref,
         presented_payload: approval.presented_payload,
         created_at: approval.created_at.to_rfc3339(),
     }
