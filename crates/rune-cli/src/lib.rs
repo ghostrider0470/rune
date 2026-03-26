@@ -577,8 +577,6 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
         None => model_default.to_string(),
     };
 
-
-
     let telegram_token = match options.telegram_token {
         Some(value) if !value.trim().is_empty() => Some(value),
         _ if interactive => {
@@ -612,9 +610,9 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
                 (None, false, Some(env_name)) => anyhow::bail!(
                     "missing API key for provider `{provider}`; pass --api-key or set {env_name}"
                 ),
-                (None, false, None) => anyhow::bail!(
-                    "missing API key for provider `{provider}`; pass --api-key"
-                ),
+                (None, false, None) => {
+                    anyhow::bail!("missing API key for provider `{provider}`; pass --api-key")
+                }
             }
         }
     };
@@ -3170,6 +3168,22 @@ pub async fn run(cli: Cli) -> Result<()> {
             service_name,
             service_enable,
             service_start,
+        }
+        | Command::Onboard {
+            path,
+            api_key,
+            provider,
+            model,
+            telegram_token,
+            webchat,
+            start,
+            open,
+            non_interactive,
+            install_service,
+            service_target,
+            service_name,
+            service_enable,
+            service_start,
         } => {
             run_init_wizard(InitWizardOptions {
                 path: &path,
@@ -3341,7 +3355,8 @@ mod tests {
     fn write_wizard_config_keeps_inline_api_key_when_provided() {
         let tmp = TempDir::new().unwrap();
         let config_path =
-            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "test-key", None, true).unwrap();
+            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "test-key", None, true)
+                .unwrap();
 
         let written = std::fs::read_to_string(config_path).unwrap();
         assert!(written.contains("api_key = \"test-key\""));

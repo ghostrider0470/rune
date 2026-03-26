@@ -41,6 +41,7 @@ The installer builds `rune` and `rune-gateway`, places them in `~/.local/bin` by
 
 ```bash
 rune setup --path ~/.rune --api-key "$OPENAI_API_KEY"
+# or: rune onboard --path ~/.rune --api-key "$OPENAI_API_KEY"
 ```
 
 If Ollama is already running locally, `rune setup --path ~/.rune` auto-detects it and skips the API key requirement. `rune setup` is a safe alias for the first-run wizard: it writes a zero-config local SQLite state path, enables WebChat/UI, starts the gateway, and opens browser chat by default.

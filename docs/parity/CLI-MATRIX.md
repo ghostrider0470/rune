@@ -73,14 +73,14 @@
 | `backup` | `rune backup` | **Shipped** | `create`, `restore`, `list` | #67 |
 | `update` | `rune update` | **Partial** | `check`, `apply`, `status` shipped; `wizard` still missing | — |
 | `setup` | — | **Not started** | Interactive setup wizard | #61 |
-| `onboard` | — | **Not started** | First-run onboarding | #61 |
+| `onboard` | `rune onboard` | **Shipped** | First-run onboarding alias to the local setup wizard with the same zero-config flags as `setup` | #61 |
 | `uninstall` | — | **Not started** | Clean removal | — |
 
 ### Tier 1 summary
 
 - **Shipped:** 4
 - **Partial:** 4 (`message` — breadth verbs remain; `agents` — inspect/start/spawn/steer/kill surface exists but transport/runtime parity still needs validation; `skills` — plugins/hooks lifecycle still missing; `update` — wizard still missing)
-- **Not started:** 9
+- **Not started:** 8
 
 ---
 

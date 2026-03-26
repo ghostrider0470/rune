@@ -12,6 +12,7 @@ Then run the built-in first-run wizard:
 
 ```bash
 rune setup --path ~/.rune --api-key "$OPENAI_API_KEY"
+# or: rune onboard --path ~/.rune --api-key "$OPENAI_API_KEY"
 ```
 
 Or install + configure + background the gateway in one flow:

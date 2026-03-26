@@ -162,7 +162,7 @@ _Generated 2026-03-20 from code audit of both codebases._
 | Config management | JSON | TOML + env overrides |
 | Health checks | Yes | Yes |
 | Doctor diagnostics | Yes (comprehensive) | Yes |
-| Interactive setup wizard | Yes (onboard) | Partial (rune setup) |
+| Interactive setup wizard | Yes (onboard) | Partial (rune setup + rune onboard) |
 | Auto-update | Yes | No (rune update check only) |
 | TLS/HTTPS | Yes | No |
 

@@ -298,6 +298,51 @@ pub enum Command {
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_start: bool,
     },
+    /// First-run onboarding alias for the local setup wizard.
+    Onboard {
+        /// Target workspace/config directory (defaults to current directory).
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// API key/token for the selected provider.
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Provider kind/name (for example: openai, anthropic, azure, groq, mistral, deepseek, ollama).
+        #[arg(long)]
+        provider: Option<String>,
+        /// Model id to configure as default.
+        #[arg(long)]
+        model: Option<String>,
+        /// Telegram bot token to enable Telegram during setup.
+        #[arg(long)]
+        telegram_token: Option<String>,
+        /// Enable the browser WebChat flow after writing config.
+        #[arg(long, default_value_t = true)]
+        webchat: bool,
+        /// Start the gateway after writing config.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        start: bool,
+        /// Open the chat URL in the default browser after startup.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        open: bool,
+        /// Do not prompt; derive missing values from defaults/environment where possible.
+        #[arg(long)]
+        non_interactive: bool,
+        /// Install a service definition after writing config.
+        #[arg(long)]
+        install_service: bool,
+        /// Service manager target for --install-service.
+        #[arg(long, value_enum, default_value = "systemd")]
+        service_target: ServiceTarget,
+        /// Service label/name to use for --install-service.
+        #[arg(long, default_value = "rune-gateway")]
+        service_name: String,
+        /// Enable the service immediately after install.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        service_enable: bool,
+        /// Start the service immediately after install.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        service_start: bool,
+    },
     /// Manage backups of durable state.
     Backup {
         #[command(subcommand)]
@@ -5378,6 +5423,15 @@ mod subagent_cli_tests {
                 assert_eq!(id, "bk-001");
                 assert!(confirm);
             }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_onboard() {
+        let cli = Cli::try_parse_from(["rune", "onboard", "--path", "~/.rune"]).unwrap();
+        match cli.command {
+            Command::Onboard { path, .. } => assert_eq!(path, "~/.rune"),
             other => panic!("unexpected: {other:?}"),
         }
     }
