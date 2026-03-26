@@ -83,6 +83,24 @@
     font-size: 12px;
     font-style: italic;
   }
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #new-session-btn {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #new-session-btn:hover {
+    border-color: var(--accent);
+    color: #fff;
+  }
   #input-area {
     padding: 12px 20px;
     border-top: 1px solid var(--border);
@@ -123,7 +141,10 @@
 <body>
 <header>
   <h1>Rune WebChat</h1>
-  <div id="status"><span class="dot"></span><span id="status-text">Connecting...</span></div>
+  <div id="toolbar">
+    <button id="new-session-btn" type="button">New session</button>
+    <div id="status"><span class="dot"></span><span id="status-text">Connecting...</span></div>
+  </div>
 </header>
 <div id="transcript"></div>
 <div id="input-area">
@@ -137,6 +158,7 @@
   const sendBtn    = document.getElementById('send-btn');
   const statusEl   = document.getElementById('status');
   const statusText = document.getElementById('status-text');
+  const newSessionBtn = document.getElementById('new-session-btn');
   const query = new URLSearchParams(location.search);
 
   let ws = null;
@@ -295,6 +317,7 @@
     msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
   }
 
+  newSessionBtn.addEventListener('click', startFreshSession);
   sendBtn.addEventListener('click', send);
   msgInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
