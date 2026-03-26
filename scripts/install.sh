@@ -170,7 +170,9 @@ Optional background service install after setup:
   rune service install --target systemd --name rune-gateway --workdir ~/.rune --config ~/.rune/config.toml --enable --start
   # macOS: rune service install --target launchd --name rune-gateway --workdir ~/.rune --config ~/.rune/config.toml --enable --start
 
-Optional zero-config Docker evaluation:
+Optional zero-config Docker evaluation (from a repo checkout):
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$HOME/Development/rune"
+  cd "$HOME/Development/rune"
   docker compose -f docker-compose.zero-config.yml up --build -d
 EOF
 }

@@ -101,9 +101,11 @@ On macOS, use `--target launchd --enable` instead. The command writes `~/Library
 
 ## Zero-config Docker Compose
 
-For a fast local evaluation with persisted state and no manual config, use the bundled Compose file:
+For a fast local evaluation with persisted state and no manual config, use the bundled Compose file from a repo checkout:
 
 ```bash
+git clone --depth 1 --branch main https://github.com/ghostrider0470/rune ~/Development/rune
+cd ~/Development/rune
 docker compose -f docker-compose.zero-config.yml up --build -d
 ```
 

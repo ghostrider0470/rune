@@ -78,6 +78,8 @@ If you skip `--start`, Rune prints the exact manual `rune-gateway --config ...` 
 Rune also ships a zero-config Docker Compose path for fast evaluation with persisted local state:
 
 ```bash
+git clone --depth 1 --branch main https://github.com/ghostrider0470/rune ~/Development/rune
+cd ~/Development/rune
 docker compose -f docker-compose.zero-config.yml up --build
 ```
 
