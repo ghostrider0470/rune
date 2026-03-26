@@ -8063,7 +8063,10 @@ async fn chat_route_redirects_to_webchat() {
 
     assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
     assert_eq!(
-        response.headers().get(axum::http::header::LOCATION).unwrap(),
+        response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .unwrap(),
         "/webchat"
     );
 }
@@ -8094,17 +8097,12 @@ async fn webchat_route_serves_embedded_chat_ui() {
     assert!(body.contains("assistant_reply"));
 }
 
-
 #[tokio::test]
 async fn webchat_route_documents_multi_user_browser_sessions() {
     let app = build_test_app(None);
 
     let response = app
-        .oneshot(
-            Request::get("/webchat")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
         .await
         .unwrap();
 

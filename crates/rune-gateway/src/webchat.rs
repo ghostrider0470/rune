@@ -8,7 +8,6 @@ use axum::response::{Html, IntoResponse, Redirect};
 /// The embedded chat HTML page.
 const CHAT_HTML: &str = include_str!("webchat.html");
 
-
 /// Redirect legacy `/chat` traffic into the embedded WebChat entrypoint.
 pub async fn legacy_chat_redirect() -> impl IntoResponse {
     Redirect::temporary("/webchat")
