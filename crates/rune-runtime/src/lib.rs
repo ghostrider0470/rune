@@ -1,5 +1,7 @@
 #![doc = "Session engine, turn loop, context assembly, and tool orchestration for Rune."]
 
+pub mod agent_registry;
+pub mod command_registry;
 mod compaction;
 mod context;
 pub mod dispatcher;
@@ -23,6 +25,8 @@ pub mod skill_loader;
 mod usage;
 pub mod workspace;
 
+pub use agent_registry::AgentRegistry;
+pub use command_registry::CommandRegistry;
 pub use compaction::{CompactionStrategy, NoOpCompaction, TokenBudgetCompaction};
 pub use context::ContextAssembler;
 pub use dispatcher::{DispatchDecision, MessageDispatcher, OrchestratorRegistry};
