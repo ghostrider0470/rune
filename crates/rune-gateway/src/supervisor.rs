@@ -600,6 +600,13 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                 Ok(n) => info!(count = n, "cleaned up stale running sessions"),
                 Err(e) => warn!(error = %e, "stale session cleanup failed"),
             }
+
+            // Also clean up dangling turns (interrupted by crash/restart)
+            match deps.turn_executor.turn_repo().mark_stale_failed(3600).await {
+                Ok(0) => {}
+                Ok(n) => info!(count = n, "cleaned up stale dangling turns"),
+                Err(e) => warn!(error = %e, "stale turn cleanup failed"),
+            }
         }
 
         // --- Plugin re-scan ---

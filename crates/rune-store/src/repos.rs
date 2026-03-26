@@ -96,6 +96,10 @@ pub trait TurnRepo: Send + Sync {
         prompt_tokens: i32,
         completion_tokens: i32,
     ) -> Result<TurnRow, StoreError>;
+
+    /// Mark turns stuck in non-terminal status (started, model_calling, tool_executing)
+    /// for longer than `stale_secs` as failed. Returns the count of affected rows.
+    async fn mark_stale_failed(&self, stale_secs: i64) -> Result<u64, StoreError>;
 }
 
 // ── Transcript repository ─────────────────────────────────────────────

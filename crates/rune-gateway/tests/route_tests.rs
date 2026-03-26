@@ -323,6 +323,10 @@ impl TurnRepo for MemTurnRepo {
         turn.usage_completion_tokens = Some(completion_tokens);
         Ok(turn.clone())
     }
+
+    async fn mark_stale_failed(&self, _stale_secs: i64) -> Result<u64, StoreError> {
+        Ok(0)
+    }
 }
 
 struct MemTranscriptRepo {

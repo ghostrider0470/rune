@@ -330,6 +330,20 @@ impl TurnRepo for PgTurnRepo {
             .await
             .map_err(|e| not_found_or(e, "turn", id))
     }
+
+    async fn mark_stale_failed(&self, stale_secs: i64) -> Result<u64, StoreError> {
+        let mut conn = self.pool.get().await.map_err(pool_err)?;
+        let cutoff = chrono::Utc::now() - chrono::Duration::seconds(stale_secs);
+        let count = diesel::sql_query(
+            "UPDATE turns SET status = 'failed', ended_at = NOW() \
+             WHERE status IN ('started', 'model_calling', 'tool_executing') \
+             AND started_at < $1"
+        )
+        .bind::<diesel::sql_types::Timestamptz, _>(cutoff)
+        .execute(&mut conn)
+        .await?;
+        Ok(count as u64)
+    }
 }
 
 // ── PgTranscriptRepo ────────────────────────────────────────────────

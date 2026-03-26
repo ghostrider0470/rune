@@ -159,6 +159,11 @@ impl TurnExecutor {
         self.lane_queue.as_ref().map(|queue| queue.stats())
     }
 
+    /// Expose the turn repository for stale turn cleanup.
+    pub fn turn_repo(&self) -> &Arc<dyn TurnRepo> {
+        &self.turn_repo
+    }
+
     /// Attach a dynamic skill registry whose enabled skills are injected into the system prompt.
     pub fn with_skill_registry(mut self, registry: Arc<SkillRegistry>) -> Self {
         self.skill_registry = Some(registry);

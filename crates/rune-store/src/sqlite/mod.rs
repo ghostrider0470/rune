@@ -591,6 +591,26 @@ impl TurnRepo for SqliteTurnRepo {
                 .query_row([&id_s], row_to_turn)
         }).await.map_err(|e| map_err(e, "turn", &id.to_string()))
     }
+
+    async fn mark_stale_failed(&self, stale_secs: i64) -> Result<u64, StoreError> {
+        self.conn
+            .call(move |conn| {
+                let now = chrono::Utc::now();
+                let cutoff = (now - chrono::Duration::seconds(stale_secs))
+                    .format("%Y-%m-%dT%H:%M:%S%.6fZ")
+                    .to_string();
+                let now_s = now.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
+                let count = conn.execute(
+                    "UPDATE turns SET status = 'failed', ended_at = ?1 \
+                     WHERE status IN ('started', 'model_calling', 'tool_executing') \
+                     AND started_at < ?2",
+                    rusqlite::params![&now_s, &cutoff],
+                )?;
+                Ok(count as u64)
+            })
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════
