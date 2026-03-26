@@ -2943,13 +2943,25 @@ models = ["gpt-5.4", "gpt-image-1"]
 
     #[test]
     fn adjust_paths_preserves_custom_but_fixes_docker_defaults() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("HOME", "/home/testuser");
+        }
+
         let mut config = AppConfig::default();
         config.paths.db_dir = PathBuf::from("/custom/db");
         config.adjust_paths_for_mode(&RuntimeMode::Standalone);
         // Custom path is preserved.
         assert_eq!(config.paths.db_dir, PathBuf::from("/custom/db"));
         // Docker-default paths are replaced with standalone equivalents.
-        assert_ne!(config.paths.plugins_dir, PathBuf::from("/data/plugins"));
+        assert_eq!(
+            config.paths.plugins_dir,
+            PathBuf::from("/home/testuser/.rune/plugins")
+        );
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
     }
 
     #[test]
