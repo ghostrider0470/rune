@@ -774,8 +774,12 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     }
 
     if options.open {
-        open_url_in_browser(&url)?;
-        println!("✓ Opened {url}");
+        if options.start || should_start_service {
+            open_url_in_browser(&url)?;
+            println!("✓ Opened {url}");
+        } else {
+            println!("→ Chat URL: {url}");
+        }
     }
 
     Ok(())
@@ -996,7 +1000,9 @@ fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
     let base = gateway_url.trim_end_matches('/');
     let probe_targets = [
         format!("{base}/ready"),
+        format!("{base}/api/ready"),
         format!("{base}/health"),
+        format!("{base}/api/health"),
         format!("{base}/gateway/ready"),
         format!("{base}/gateway/health"),
         base.to_string(),
@@ -3977,6 +3983,47 @@ mod tests {
                 None => std::env::remove_var("WAYLAND_DISPLAY"),
             }
         }
+    }
+
+    #[test]
+    fn wait_for_gateway_ready_accepts_api_ready_probe() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 1024];
+                let _ = std::io::Read::read(&mut stream, &mut buf);
+                let response = concat!(
+                    "HTTP/1.1 404 Not Found
+",
+                    "Content-Length: 0
+",
+                    "Connection: close
+
+"
+                );
+                let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+            }
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 1024];
+                let _ = std::io::Read::read(&mut stream, &mut buf);
+                let body = r#"{"status":"ok","service":"rune-gateway","checks":[]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+{}",
+                    body.len(),
+                    body
+                );
+                let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+            }
+        });
+
+        wait_for_gateway_ready(&format!("http://{addr}")).unwrap();
+        handle.join().unwrap();
     }
 
     #[test]

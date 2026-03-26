@@ -337,7 +337,7 @@ impl TurnRepo for PgTurnRepo {
         let count = diesel::sql_query(
             "UPDATE turns SET status = 'failed', ended_at = NOW() \
              WHERE status IN ('started', 'model_calling', 'tool_executing') \
-             AND started_at < $1"
+             AND started_at < $1",
         )
         .bind::<diesel::sql_types::Timestamptz, _>(cutoff)
         .execute(&mut conn)
