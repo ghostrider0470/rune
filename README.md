@@ -43,7 +43,7 @@ The installer builds `rune` and `rune-gateway`, places them in `~/.local/bin` by
 rune setup --path ~/.rune --api-key "$OPENAI_API_KEY"
 ```
 
-If Ollama is already running locally, `rune setup --path ~/.rune` auto-detects it and skips the API key requirement. The wizard now writes a zero-config local SQLite state path, enables WebChat/UI, and prepares the workspace for immediate browser use.
+If Ollama is already running locally, `rune setup --path ~/.rune` auto-detects it and skips the API key requirement. `rune setup` is a safe alias for the first-run wizard: it writes a zero-config local SQLite state path, enables WebChat/UI, starts the gateway, and opens browser chat by default.
 
 ### Local dev / source checkout
 
@@ -80,7 +80,7 @@ Rune also ships a zero-config Docker Compose path for fast evaluation with persi
 docker compose -f docker-compose.zero-config.yml up --build
 ```
 
-This variant mounts durable data under the `rune-data` volume, explicitly enables the browser UI + WebChat, and exposes chat on `http://127.0.0.1:8787/webchat` (`/dashboard` is also available).
+This variant mounts durable data under the `rune-data` volume, explicitly enables the browser UI + WebChat, and exposes chat on `http://127.0.0.1:8787/chat` (`/dashboard` is also available).
 
 Next docs from there:
 - [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)

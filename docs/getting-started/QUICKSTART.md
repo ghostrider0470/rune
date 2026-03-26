@@ -20,7 +20,7 @@ If Ollama is already running locally, this also works without an API key:
 rune setup --path ~/.rune
 ```
 
-That flow writes a local SQLite-backed config, enables the embedded UI + WebChat, starts the gateway, and opens browser chat at `http://127.0.0.1:8787/webchat`.
+That flow uses the safe `setup` alias for the first-run wizard: it writes a local SQLite-backed config, enables the embedded UI + WebChat, starts the gateway, and opens browser chat at `http://127.0.0.1:8787/webchat`.
 
 ## Option B — source checkout
 
