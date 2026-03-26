@@ -668,6 +668,11 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     println!("Then re-run first-run setup if needed:");
     println!(r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>""#);
     println!("  # or just: rune setup --path ~/.rune   # when Ollama is already running locally");
+    println!();
+    println!("Verify the install:");
+    println!("  rune update wizard");
+    println!("  rune --gateway-url http://127.0.0.1:8787 health");
+    println!("  rune --gateway-url http://127.0.0.1:8787 doctor run");
     Ok(())
 }
 
