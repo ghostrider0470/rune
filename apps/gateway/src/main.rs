@@ -551,6 +551,7 @@ async fn build_services(
         registry.register_many(executor.tool_definitions());
     }
     let tool_count = registry.len();
+    let shared_command_registry = Arc::new(CommandRegistry::new());
     let tool_registry = Arc::new(registry);
     let approval = Arc::new(PolicyBasedApproval::new(std::collections::HashSet::new()));
     let live_session_query = LiveSessionQuery::new(
@@ -678,6 +679,9 @@ async fn build_services(
         }
     };
 
+    // Shared command registry — populated by PluginScanner in server.rs,
+    // used by both the session loop (Telegram commands) and the REST API.
+
     // Build session loop if Telegram channel is configured.
     let session_loop = if let Some(ref tg) = config.channels.telegram_token {
         if !tg.is_empty() {
@@ -688,7 +692,6 @@ async fn build_services(
                     adapter: adapter.clone(),
                 });
 
-            let command_registry = Arc::new(CommandRegistry::new());
             let mut loop_builder = SessionLoop::new(
                 session_engine.clone(),
                 turn_executor.clone(),
@@ -698,7 +701,7 @@ async fn build_services(
                 config.models.clone(),
             )
             .with_file_downloader(downloader)
-            .with_command_registry(command_registry);
+            .with_command_registry(shared_command_registry.clone());
 
             if let Some(ref stt) = stt_engine {
                 loop_builder = loop_builder.with_stt(stt.clone());
@@ -758,6 +761,7 @@ async fn build_services(
         ms365_mail_service: Arc::new(GraphMs365MailService::new()),
         ms365_files_service: Arc::new(GraphMs365FilesService::new()),
         ms365_users_service: Arc::new(GraphMs365UsersService::new()),
+        command_registry: Some(shared_command_registry.clone()),
     };
 
     Ok((services, embedded_pg, session_loop))

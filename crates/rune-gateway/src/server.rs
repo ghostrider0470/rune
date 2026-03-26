@@ -90,6 +90,7 @@ pub struct Services {
     pub ms365_mail_service: Arc<dyn Ms365MailService>,
     pub ms365_files_service: Arc<dyn Ms365FilesService>,
     pub ms365_users_service: Arc<dyn Ms365UsersService>,
+    pub command_registry: Option<Arc<CommandRegistry>>,
 }
 
 /// Start the gateway HTTP server.
@@ -185,7 +186,10 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     plugin_registry.register_hooks(&hook_registry).await;
 
     let agent_registry = Arc::new(AgentRegistry::new());
-    let command_registry = Arc::new(CommandRegistry::new());
+    let command_registry = services
+        .command_registry
+        .clone()
+        .unwrap_or_else(|| Arc::new(CommandRegistry::new()));
 
     let plugin_scanner = Arc::new(PluginScanner::new(
         plugin_scan_dirs,
