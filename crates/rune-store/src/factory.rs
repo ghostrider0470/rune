@@ -64,6 +64,11 @@ pub async fn build_repos(
             Ok((repos, info, None))
         }
         ResolvedBackend::Postgres => build_pg_repos(config).await,
+        #[cfg(feature = "cosmos")]
+        ResolvedBackend::Cosmos => {
+            let (repos, info) = build_cosmos_repos(config).await?;
+            Ok((repos, info, None))
+        }
     }
 }
 
@@ -75,6 +80,8 @@ pub async fn build_repos(config: &AppConfig) -> Result<(RepoSet, StorageInfo), S
     match resolved {
         #[cfg(feature = "sqlite")]
         ResolvedBackend::Sqlite => build_sqlite_repos(config).await,
+        #[cfg(feature = "cosmos")]
+        ResolvedBackend::Cosmos => build_cosmos_repos(config).await,
     }
 }
 
@@ -85,6 +92,8 @@ enum ResolvedBackend {
     Sqlite,
     #[cfg(feature = "postgres")]
     Postgres,
+    #[cfg(feature = "cosmos")]
+    Cosmos,
 }
 
 fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
@@ -104,9 +113,10 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
             panic!("storage backend set to 'sqlite' but the 'sqlite' feature is not compiled in");
         }
         StorageBackend::Cosmos => {
-            panic!(
-                "storage backend set to 'cosmos' but the Cosmos repo implementations are not yet wired up"
-            );
+            #[cfg(feature = "cosmos")]
+            return ResolvedBackend::Cosmos;
+            #[cfg(not(feature = "cosmos"))]
+            panic!("storage backend set to 'cosmos' but the 'cosmos' feature is not compiled in");
         }
         StorageBackend::Auto => {
             if db.database_url.is_some() {
@@ -114,6 +124,12 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
                 return ResolvedBackend::Postgres;
                 #[cfg(not(feature = "postgres"))]
                 panic!("DATABASE_URL is set but the 'postgres' feature is not compiled in");
+            }
+            if db.cosmos_endpoint.is_some() {
+                #[cfg(feature = "cosmos")]
+                return ResolvedBackend::Cosmos;
+                #[cfg(not(feature = "cosmos"))]
+                panic!("cosmos_endpoint is set but the 'cosmos' feature is not compiled in");
             }
             #[cfg(feature = "sqlite")]
             return ResolvedBackend::Sqlite;
@@ -239,4 +255,49 @@ async fn build_pg_repos(
     };
 
     Ok((repos, info, embedded_pg))
+}
+
+// ── Cosmos builder ──────────────────────────────────────────────────
+
+#[cfg(feature = "cosmos")]
+async fn build_cosmos_repos(config: &AppConfig) -> Result<(RepoSet, StorageInfo), StoreError> {
+    use crate::cosmos::CosmosStore;
+
+    let endpoint = config
+        .database
+        .cosmos_endpoint
+        .as_ref()
+        .ok_or_else(|| StoreError::Database("cosmos_endpoint is required".into()))?;
+    let key = config
+        .database
+        .cosmos_key
+        .as_ref()
+        .ok_or_else(|| StoreError::Database("cosmos_key is required".into()))?;
+
+    info!(endpoint = %endpoint, "connecting to Cosmos DB NoSQL");
+
+    let store = CosmosStore::new(endpoint, key, config.database.run_migrations).await?;
+
+    let repos = RepoSet {
+        session_repo: Arc::new(store.clone()),
+        turn_repo: Arc::new(store.clone()),
+        transcript_repo: Arc::new(store.clone()),
+        job_repo: Arc::new(store.clone()),
+        job_run_repo: Arc::new(store.clone()),
+        approval_repo: Arc::new(store.clone()),
+        tool_approval_repo: Arc::new(store.clone()),
+        memory_embedding_repo: Arc::new(store.clone()),
+        tool_execution_repo: Arc::new(store.clone()),
+        device_repo: Arc::new(store.clone()),
+        process_handle_repo: Arc::new(store),
+    };
+
+    let info = StorageInfo {
+        backend_name: "cosmos (nosql)",
+        #[cfg(feature = "postgres")]
+        pgvector_status: None,
+        database_url: None,
+    };
+
+    Ok((repos, info))
 }
