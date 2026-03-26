@@ -262,6 +262,7 @@
   let reconnectAttempt = 0;
   let reconnectTimer = null;
   let pollTimer = null;
+  let reconnectToastVisible = false;
   let sendCooldownUntil = 0;
   const pendingOutbound = [];
   const authToken = query.get('api_key') || '';
@@ -467,11 +468,15 @@
 
   function queueOutbound(text) {
     pendingOutbound.push(text);
-    appendMsg('system', 'Queued message until WebChat reconnects.');
+    if (!reconnectToastVisible) {
+      reconnectToastVisible = true;
+      appendMsg('system', 'Queued message until WebChat reconnects.');
+    }
   }
 
   async function flushOutboundQueue() {
     if (!pendingOutbound.length || !ws || ws.readyState !== WebSocket.OPEN || !sessionId || isCooldownActive()) return;
+    reconnectToastVisible = false;
     const queued = pendingOutbound.splice(0, pendingOutbound.length);
     for (const text of queued) {
       msgInput.value = text;
@@ -673,6 +678,7 @@
         reconnectTimer = null;
       }
       stopPollingFallback();
+      reconnectToastVisible = false;
       setStatus(true, 'Connected');
       updateSendAvailability();
       try {

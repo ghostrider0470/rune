@@ -10084,3 +10084,20 @@ async fn api_approvals_post_and_policy_routes_are_exposed() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn webchat_route_only_shows_one_reconnect_queue_notice_until_reconnected() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(html.contains("let reconnectToastVisible = false;"));
+    assert!(html.contains("if (!reconnectToastVisible) {"));
+    assert!(html.contains("reconnectToastVisible = true;"));
+    assert!(html.contains("reconnectToastVisible = false;"));
+}
