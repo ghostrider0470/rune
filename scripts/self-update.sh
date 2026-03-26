@@ -30,13 +30,13 @@ if [ ! -f "$REPO_DIR/target/release/rune" ]; then
     exit 1
 fi
 
-# Quick smoke tests — avoid commands that require binding the real gateway port
-if ! "$REPO_DIR/target/release/rune-gateway" --help >/dev/null 2>&1; then
-    echo "[self-update] Gateway binary help check failed — aborting"
-    exit 1
-fi
+# Quick smoke tests — keep them side-effect free and avoid binding the real gateway port
 if ! "$REPO_DIR/target/release/rune" --version >/dev/null 2>&1; then
     echo "[self-update] CLI binary version check failed — aborting"
+    exit 1
+fi
+if ! "$REPO_DIR/target/release/rune-gateway" --help >/dev/null 2>&1; then
+    echo "[self-update] Gateway binary help check failed — aborting"
     exit 1
 fi
 
