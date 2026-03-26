@@ -236,6 +236,7 @@
   const sessionStorageKey = 'rune.webchat.session_id';
   const requestedSessionId = query.get('session_id') || '';
   let sessionId = requestedSessionId || window.sessionStorage.getItem(sessionStorageKey);
+  let explicitSessionRequested = Boolean(requestedSessionId);
   let reqCounter = 0;
   let pendingRpc = {};
   let pendingAssistantMsg = null;
@@ -284,7 +285,7 @@
         '</div>';
       button.addEventListener('click', function() {
         if (item.id === sessionId) return;
-        openSession(item.id, true).catch((e) => appendMsg('system', 'Failed to switch session: ' + (e.message || e)));
+        openSession(item.id, false).catch((e) => appendMsg('system', 'Failed to switch session: ' + (e.message || e)));
       });
       sessionListEl.appendChild(button);
     });
@@ -301,6 +302,7 @@
   }
 
   async function openSession(nextSessionId, fromLink) {
+    explicitSessionRequested = Boolean(fromLink);
     const previousSessionId = sessionId;
     sessionId = nextSessionId;
     resetTranscript();
@@ -379,6 +381,7 @@
   function persistSessionInUrl() {
     const next = new URLSearchParams(location.search);
     if (!sessionId) {
+      explicitSessionRequested = false;
       next.delete('session_id');
       if (authToken) next.set('api_key', authToken);
       if (browserSessionToken) next.set('session_token', browserSessionToken);
@@ -390,6 +393,7 @@
     renderSessionList();
     const next = new URLSearchParams(location.search);
     next.set('session_id', sessionId);
+    explicitSessionRequested = true;
     if (authToken) next.set('api_key', authToken);
     if (browserSessionToken) next.set('session_token', browserSessionToken);
     history.replaceState(null, '', location.pathname + '?' + next.toString());
@@ -438,7 +442,7 @@
   async function hydrateSession() {
     if (sessionId) {
       const resumedLabel = requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.';
-      await openSession(sessionId, requestedSessionId ? true : false);
+      await openSession(sessionId, explicitSessionRequested);
       appendMsg('system', resumedLabel);
       await refreshSessionList();
       return;
