@@ -54,6 +54,7 @@ pub struct SessionLoop {
     models: ModelsConfig,
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
     file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
+    command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
 }
 
 /// MIME types considered audio for transcription purposes.
@@ -81,6 +82,7 @@ impl SessionLoop {
             models,
             stt_engine: None,
             file_downloader: None,
+            command_registry: None,
         }
     }
 
@@ -93,6 +95,12 @@ impl SessionLoop {
     /// Attach a file downloader for resolving `telegram-file:` URLs.
     pub fn with_file_downloader(mut self, downloader: Arc<dyn TelegramFileDownloader>) -> Self {
         self.file_downloader = Some(downloader);
+        self
+    }
+
+    /// Attach a command registry for plugin slash commands.
+    pub fn with_command_registry(mut self, registry: Arc<crate::command_registry::CommandRegistry>) -> Self {
+        self.command_registry = Some(registry);
         self
     }
 
@@ -156,7 +164,27 @@ impl SessionLoop {
                 // Enrich content by downloading/transcribing media attachments.
                 let enriched_content = self.enrich_media_content(&msg).await;
 
-                info!(session_id = %session.id, len = enriched_content.len(), "executing turn");
+                // Expand plugin slash commands into their full prompt body.
+                let final_text = if enriched_content.starts_with('/') {
+                    if let Some(ref registry) = self.command_registry {
+                        let (cmd, args) = match enriched_content.split_once(' ') {
+                            Some((c, a)) => (c.trim_start_matches('/'), a.trim()),
+                            None => (enriched_content.trim_start_matches('/'), ""),
+                        };
+                        if let Some(command) = registry.get(cmd).await {
+                            info!(command = cmd, plugin = %command.plugin_name, "expanding plugin command");
+                            command.expand(args)
+                        } else {
+                            enriched_content.clone()
+                        }
+                    } else {
+                        enriched_content.clone()
+                    }
+                } else {
+                    enriched_content.clone()
+                };
+
+                info!(session_id = %session.id, len = final_text.len(), "executing turn");
 
                 // Send a "Thinking…" placeholder reply so the user gets immediate feedback.
                 let placeholder_id = {
@@ -208,7 +236,7 @@ impl SessionLoop {
 
                 let result = self
                     .turn_executor
-                    .execute_streaming(session.id, &enriched_content, None, chunk_tx)
+                    .execute_streaming(session.id, &final_text, None, chunk_tx)
                     .await;
 
                 // Wait for the progressive edit task to finish (it exits when
@@ -346,6 +374,21 @@ impl SessionLoop {
             }
             "/reset" => {
                 self.handle_reset_command(msg).await?;
+                Ok(true)
+            }
+            "/commands" => {
+                let mut text = String::from("Available commands:\n\n");
+                text.push_str("/start - show welcome\n/help - show help\n/status - runtime status\n/model - switch model\n/reset - clear history\n/commands - this list\n");
+                if let Some(ref registry) = self.command_registry {
+                    let commands = registry.list().await;
+                    if !commands.is_empty() {
+                        text.push_str("\nPlugin commands:\n");
+                        for cmd in &commands {
+                            text.push_str(&format!("/{} - {}\n", cmd.short_name(), cmd.description));
+                        }
+                    }
+                }
+                self.send_command_reply(msg, &text).await;
                 Ok(true)
             }
             _ => Ok(false),
