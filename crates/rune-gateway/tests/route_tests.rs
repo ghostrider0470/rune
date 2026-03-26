@@ -34,6 +34,7 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
+use rune_gateway::logging::LogStore;
 use rune_gateway::ms365::{
     CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest, FileContent,
     FileItem, FileMetadata, FileSearchItem, FilesList, FilesSearch, ForwardMailRequest,
@@ -44,7 +45,6 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
-use rune_gateway::logging::LogStore;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
@@ -1699,7 +1699,7 @@ fn sample_todo_task(list_id: &str, id: &str) -> TodoTask {
 #[tokio::test]
 async fn ws_rpc_status_matches_http_status_basics() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
     use rune_runtime::{Lane, LaneQueue};
 
@@ -1806,7 +1806,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_skills_reload_and_toggle_round_trip() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2043,7 +2043,7 @@ async fn status_reports_configured_lane_capacities() {
 #[tokio::test]
 async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
     use rune_runtime::{Lane, LaneQueue};
 
@@ -2150,7 +2150,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_health_reports_session_count() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2283,7 +2283,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2408,7 +2408,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2563,7 +2563,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_session_get_includes_last_turn_timestamps() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2698,7 +2698,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_session_status_rejects_invalid_uuid() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2794,7 +2794,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_turns_list_and_get_return_turn_rows() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2942,7 +2942,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_tools_and_approvals_list_surface_state() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -3210,7 +3210,7 @@ async fn approvals_list_route_includes_durable_resume_refs() {
 #[tokio::test]
 async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::{ConnState, handle_text_message};
     use rune_gateway::ws_rpc::RpcDispatcher;
 
@@ -3367,7 +3367,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::{ConnState, handle_text_message};
     use rune_gateway::ws_rpc::RpcDispatcher;
 
@@ -3519,7 +3519,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::ConnState;
     use rune_gateway::ws::handle_text_message;
     use rune_gateway::ws_rpc::RpcDispatcher;
@@ -3638,7 +3638,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_handle_text_message_dispatches_rpc_errors() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::{ConnState, handle_text_message};
     use rune_gateway::ws_rpc::RpcDispatcher;
 
@@ -8072,7 +8072,7 @@ async fn agent_kill_not_found() {
 #[tokio::test]
 async fn ws_rpc_agent_steer_and_kill() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -8714,7 +8714,6 @@ async fn logs_route_returns_buffered_entries() {
     assert_eq!(body["entries"], serde_json::json!([]));
     assert_eq!(body["message"], "0 log entries");
 }
-
 
 #[tokio::test]
 async fn doctor_routes_return_checks_and_latest_results() {
@@ -9621,7 +9620,7 @@ async fn ws_rpc_processes_log_surfaces_output() {
 #[tokio::test]
 async fn ws_rpc_memory_search_returns_workspace_hits() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -9739,7 +9738,7 @@ use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 #[tokio::test]
 async fn ws_rpc_doctor_run_matches_http_contract() {
     use rune_gateway::logging::LogStore;
-use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let mut config = AppConfig::default();
@@ -10803,4 +10802,36 @@ async fn api_ready_returns_200_for_standalone_defaults_even_without_explicit_mod
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn protected_webchat_route_accepts_session_token_query_auth() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("shared-secret".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::get("/webchat?session_token=browser-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn protected_http_routes_reject_session_token_query_auth_for_non_webchat_routes() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("shared-secret".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::get("/sessions?session_token=browser-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }

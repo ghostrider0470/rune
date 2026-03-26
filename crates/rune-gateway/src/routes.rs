@@ -1684,6 +1684,7 @@ pub struct TranscriptEntry {
 #[derive(Deserialize, Default)]
 pub struct TranscriptQuery {
     pub after: Option<Uuid>,
+    pub session_token: Option<String>,
 }
 
 /// `GET /sessions/{id}/transcript` — full session transcript.
@@ -1692,11 +1693,18 @@ pub async fn get_transcript(
     Path(session_id): Path<Uuid>,
     Query(query): Query<TranscriptQuery>,
 ) -> Result<Json<Vec<TranscriptEntry>>, GatewayError> {
-    state
+    let session = state
         .session_engine
         .get_session(session_id)
         .await
         .map_err(|e| GatewayError::SessionNotFound(e.to_string()))?;
+
+    if let Some(session_token) = query.session_token.as_deref() {
+        let expected_channel = format!("webchat:{session_token}");
+        if session.channel_ref.as_deref() != Some(expected_channel.as_str()) {
+            return Err(GatewayError::Unauthorized);
+        }
+    };
 
     let items = state
         .transcript_repo
@@ -3634,7 +3642,10 @@ pub async fn list_agents(
                 .or_else(|| config.agents.effective_model(agent).map(str::to_string))
                 .or_else(|| config.models.default_model.clone()),
             workspace: config.agents.effective_workspace(agent).map(str::to_string),
-            system_prompt: config.agents.effective_system_prompt(agent).map(str::to_string),
+            system_prompt: config
+                .agents
+                .effective_system_prompt(agent)
+                .map(str::to_string),
         }
     }));
 

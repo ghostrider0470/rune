@@ -54,7 +54,7 @@ fn extract_query_bearer_token(query: &str) -> Option<&str> {
         .split('&')
         .filter_map(|pair| pair.split_once('='))
         .find_map(|(key, value)| match key {
-            "api_key" | "auth" => Some(value),
+            "api_key" | "auth" | "session_token" => Some(value),
             _ => None,
         })
 }
@@ -68,6 +68,15 @@ fn extract_websocket_protocol_bearer_token(value: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn extracts_session_token_query_alias() {
+        assert_eq!(
+            super::extract_query_bearer_token("session_token=browser-secret"),
+            Some("browser-secret")
+        );
+    }
+
     #[test]
     fn extracts_websocket_protocol_bearer_token() {
         assert_eq!(
