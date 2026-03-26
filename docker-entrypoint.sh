@@ -17,6 +17,9 @@ set -e
 : "${RUNE__PATHS__LOGS_DIR:=/data/logs}"
 : "${RUNE__PATHS__BACKUPS_DIR:=/data/backups}"
 : "${RUNE__LOGGING__LOG_LEVEL:=info}"
+: "${RUNE__UI__ENABLED:=true}"
+: "${RUNE__BROWSER__ENABLED:=true}"
+: "${RUNE__CHANNELS__ENABLED:=webchat}"
 
 export RUNE__DATABASE__DATABASE_URL
 export RUNE__GATEWAY__PORT
@@ -29,6 +32,9 @@ export RUNE__PATHS__SKILLS_DIR
 export RUNE__PATHS__LOGS_DIR
 export RUNE__PATHS__BACKUPS_DIR
 export RUNE__LOGGING__LOG_LEVEL
+export RUNE__UI__ENABLED
+export RUNE__BROWSER__ENABLED
+export RUNE__CHANNELS__ENABLED
 
 # Auto-detect Ollama — probe common Docker network addresses
 if [ -z "${RUNE__MODELS__PROVIDERS}" ]; then
@@ -47,6 +53,33 @@ if [ -z "${RUNE__MODELS__PROVIDERS}" ]; then
             fi
         done
     fi
+fi
+
+
+# Seed /config/config.toml on first boot so the mounted config volume is self-describing
+# and survives container/image churn with a real config artifact.
+if [ ! -f /config/config.toml ]; then
+    cat >/config/config.toml <<EOF
+mode = "standalone"
+
+[gateway]
+host = "0.0.0.0"
+port = ${RUNE__GATEWAY__PORT}
+
+[storage]
+backend = "sqlite"
+sqlite_path = "/data/db/rune.db"
+
+[ui]
+enabled = ${RUNE__UI__ENABLED}
+
+[browser]
+enabled = ${RUNE__BROWSER__ENABLED}
+
+[channels]
+enabled = ["webchat"]
+EOF
+    echo "[entrypoint] Seeded /config/config.toml with zero-config defaults"
 fi
 
 # Load config from /config if present
