@@ -248,7 +248,7 @@
   const authHeaderToken = query.get('auth') || authToken;
   const sessionToken = query.get('session_token') || '';
   const browserSessionKey = 'rune.webchat.browser_session_token';
-  const browserSessionToken = sessionToken || query.get('browser_session') || window.sessionStorage.getItem(browserSessionKey) || '';
+  let browserSessionToken = sessionToken || query.get('browser_session') || window.sessionStorage.getItem(browserSessionKey) || '';
 
   let knownSessions = [];
 
@@ -455,9 +455,15 @@
     history.replaceState(null, '', location.pathname + '?' + next.toString());
   }
 
-  if (browserSessionToken) {
-    window.sessionStorage.setItem(browserSessionKey, browserSessionToken);
+  function persistBrowserSessionToken() {
+    if (browserSessionToken) {
+      window.sessionStorage.setItem(browserSessionKey, browserSessionToken);
+    } else {
+      window.sessionStorage.removeItem(browserSessionKey);
+    }
   }
+
+  persistBrowserSessionToken();
 
   function resetTranscript() {
     transcript.innerHTML = '';
@@ -466,6 +472,8 @@
 
   async function startFreshSession() {
     sessionId = null;
+    browserSessionToken = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+    persistBrowserSessionToken();
     window.sessionStorage.removeItem(sessionStorageKey);
     const next = new URLSearchParams(location.search);
     next.delete('session_id');

@@ -8354,6 +8354,23 @@ async fn webchat_route_lists_browser_sessions_for_multi_user_switching() {
 }
 
 #[tokio::test]
+async fn webchat_route_rotates_browser_session_token_when_starting_fresh_session() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("function persistBrowserSessionToken()"));
+    assert!(body.contains("window.sessionStorage.removeItem(browserSessionKey)"));
+    assert!(body.contains("browserSessionToken = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2);"));
+    assert!(body.contains("persistBrowserSessionToken();"));
+}
+
+#[tokio::test]
 async fn webchat_route_mentions_authorization_header_auth() {
     let app = build_test_app(None);
 
