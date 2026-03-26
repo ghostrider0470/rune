@@ -28,7 +28,6 @@ pub struct PluginStatus {
 #[derive(Clone)]
 pub struct PluginManager {
     scanner: Arc<PluginScanner>,
-    plugin_registry: Arc<PluginRegistry>,
     skill_registry: Arc<SkillRegistry>,
     agent_registry: Arc<AgentRegistry>,
     command_registry: Arc<CommandRegistry>,
@@ -51,7 +50,6 @@ struct PluginMeta {
 impl PluginManager {
     pub fn new(
         scanner: Arc<PluginScanner>,
-        plugin_registry: Arc<PluginRegistry>,
         skill_registry: Arc<SkillRegistry>,
         agent_registry: Arc<AgentRegistry>,
         command_registry: Arc<CommandRegistry>,
@@ -59,7 +57,6 @@ impl PluginManager {
     ) -> Self {
         Self {
             scanner,
-            plugin_registry,
             skill_registry,
             agent_registry,
             command_registry,
@@ -69,6 +66,10 @@ impl PluginManager {
     }
 
     pub async fn reload(&self) -> UnifiedScanSummary {
+        self.skill_registry.clear().await;
+        self.agent_registry.clear().await;
+        self.command_registry.clear().await;
+        self.hook_registry.clear().await;
         let summary = self.scanner.scan().await;
         self.rebuild_meta().await;
         summary
@@ -115,6 +116,20 @@ impl PluginManager {
                     self.skill_registry.remove(&skill.name).await;
                 }
             }
+            let agents = self.agent_registry.list().await;
+            for agent in agents {
+                if agent.name.starts_with(&prefix) {
+                    self.agent_registry.remove(&agent.name).await;
+                }
+            }
+            let commands = self.command_registry.list().await;
+            for command in commands {
+                if command.plugin_name == name || command.name.starts_with(&prefix) {
+                    self.command_registry.clear().await;
+                    break;
+                }
+            }
+            let _ = self.hook_registry.total_handlers().await;
             info!(plugin = name, "plugin disabled");
             true
         } else {
@@ -215,7 +230,10 @@ mod tests {
     #[tokio::test]
     async fn plugin_status_empty() {
         let scanner = Arc::new(PluginScanner::new(
-            vec![],
+            &rune_config::PluginsConfig {
+                scan_dirs: vec![],
+                ..Default::default()
+            },
             Arc::new(PluginRegistry::new()),
             Arc::new(SkillRegistry::new()),
             Arc::new(AgentRegistry::new()),
@@ -224,7 +242,6 @@ mod tests {
         ));
         let mgr = PluginManager::new(
             scanner,
-            Arc::new(PluginRegistry::new()),
             Arc::new(SkillRegistry::new()),
             Arc::new(AgentRegistry::new()),
             Arc::new(CommandRegistry::new()),
