@@ -2247,6 +2247,9 @@ pub enum ServiceAction {
         /// Start the installed service after writing the definition.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
+        /// Only write the definition; skip systemctl/launchctl activation even when enable/start are true.
+        #[arg(long, default_value_t = false)]
+        no_bootstrap: bool,
     },
 }
 
@@ -6107,5 +6110,25 @@ mod subagent_cli_tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+}
+
+#[test]
+fn parse_service_install_no_bootstrap() {
+    let cli = Cli::try_parse_from([
+        "rune",
+        "service",
+        "install",
+        "--target",
+        "systemd",
+        "--no-bootstrap",
+    ])
+    .unwrap();
+
+    match cli.command {
+        Command::Service {
+            action: ServiceAction::Install { no_bootstrap, .. },
+        } => assert!(no_bootstrap),
+        other => panic!("unexpected command: {other:?}"),
     }
 }

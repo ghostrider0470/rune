@@ -659,6 +659,7 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
             output: None,
             enable: options.service_enable,
             start: options.service_start,
+            auto_bootstrap: true,
         })?;
         if let Some(path) = service.output_path {
             println!("✓ Installed {} service at {}", service.target, path);
@@ -3332,6 +3333,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 output,
                 enable,
                 start,
+                no_bootstrap,
             } => {
                 let result = install_service_definition(ServiceInstallOptions {
                     target,
@@ -3344,6 +3346,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     output: output.map(std::path::PathBuf::from),
                     enable,
                     start,
+                    auto_bootstrap: !no_bootstrap,
                 })?;
                 println!("{}", render(&result, format));
             }

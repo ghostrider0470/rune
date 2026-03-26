@@ -87,7 +87,7 @@ Generate a service definition with the built-in CLI:
   --start
 ```
 
-The command now prints the exact follow-up activation/status commands as part of its output.
+The command now prints the exact follow-up activation/status commands as part of its output. Add `--no-bootstrap` if you only want the generated unit/plist written to disk without immediately running `systemctl` or `launchctl`.
 
 Check status on Linux:
 

@@ -17,6 +17,7 @@ pub struct ServiceInstallOptions {
     pub output: Option<PathBuf>,
     pub enable: bool,
     pub start: bool,
+    pub auto_bootstrap: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,7 +131,7 @@ pub fn install_service_definition(
     std::fs::write(&output_path, &content)
         .with_context(|| format!("failed to write {}", output_path.display()))?;
 
-    if options.enable || options.start {
+    if options.auto_bootstrap && (options.enable || options.start) {
         activate_service(
             options.target,
             &output_path,
@@ -658,6 +659,7 @@ mod tests {
             output: Some(output.clone()),
             enable: false,
             start: false,
+            auto_bootstrap: false,
         })
         .unwrap();
 
@@ -721,6 +723,7 @@ mod tests {
             output: Some(output.clone()),
             enable: false,
             start: false,
+            auto_bootstrap: false,
         })
         .unwrap();
 
@@ -742,5 +745,49 @@ mod tests {
 
         let launchd = default_output_path(ServiceTarget::Launchd, "rune-gateway.plist");
         assert!(launchd.ends_with("Library/LaunchAgents/rune-gateway.plist"));
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::*;
+
+    #[test]
+    fn install_without_bootstrap_still_reports_activation_commands() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("rune-gateway.service");
+
+        let result = install_service_definition(ServiceInstallOptions {
+            target: ServiceTarget::Systemd,
+            name: "rune-gateway".into(),
+            workdir: temp.path().to_path_buf(),
+            config: Some("config.toml".into()),
+            gateway_url: Some("http://127.0.0.1:8787".into()),
+            yolo: false,
+            no_sandbox: false,
+            output: Some(output.clone()),
+            enable: true,
+            start: true,
+            auto_bootstrap: false,
+        })
+        .unwrap();
+
+        assert_eq!(
+            result.output_path.as_deref(),
+            Some(output.to_string_lossy().as_ref())
+        );
+        assert!(output.exists());
+        assert!(
+            result
+                .activation_commands
+                .iter()
+                .any(|cmd| cmd == "systemctl --user enable rune-gateway.service")
+        );
+        assert!(
+            result
+                .activation_commands
+                .iter()
+                .any(|cmd| cmd == "systemctl --user start rune-gateway.service")
+        );
     }
 }
