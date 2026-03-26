@@ -35,8 +35,8 @@ if ! "$REPO_DIR/target/release/rune" --version >/dev/null 2>&1; then
     echo "[self-update] CLI binary version check failed — aborting"
     exit 1
 fi
-if ! "$REPO_DIR/target/release/rune-gateway" --help >/dev/null 2>&1; then
-    echo "[self-update] Gateway binary help check failed — aborting"
+if ! "$REPO_DIR/target/release/rune" --gateway-url http://127.0.0.1:8787 health >/dev/null 2>&1; then
+    echo "[self-update] Gateway smoke check via CLI health probe failed — aborting"
     exit 1
 fi
 
