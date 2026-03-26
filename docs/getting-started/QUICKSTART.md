@@ -8,10 +8,22 @@ This is the fastest path to a local Rune browser chat.
 curl -fsSL https://raw.githubusercontent.com/ghostrider0470/rune/main/scripts/install.sh | sh
 ```
 
-Then run:
+Then run the built-in first-run wizard:
 
 ```bash
 rune setup --path ~/.rune --api-key "$OPENAI_API_KEY"
+```
+
+Or install + configure + background the gateway in one flow:
+
+```bash
+rune setup --path ~/.rune --api-key "$OPENAI_API_KEY" --install-service --service-target systemd
+```
+
+On macOS, swap the service target:
+
+```bash
+rune setup --path ~/.rune --api-key "$OPENAI_API_KEY" --install-service --service-target launchd
 ```
 
 If Ollama is already running locally, this also works without an API key:
@@ -20,7 +32,7 @@ If Ollama is already running locally, this also works without an API key:
 rune setup --path ~/.rune
 ```
 
-That flow uses the safe `setup` alias for the first-run wizard: it writes a local SQLite-backed config, enables the embedded UI + WebChat, starts the gateway, and opens browser chat at `http://127.0.0.1:8787/webchat`.
+That flow uses the safe `setup` alias for the first-run wizard: it writes a local SQLite-backed config, enables the embedded UI + WebChat, starts the gateway or installs it as a background service, and opens browser chat at `http://127.0.0.1:8787/webchat`.
 
 ## Option B — source checkout
 
