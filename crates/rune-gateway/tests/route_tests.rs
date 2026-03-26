@@ -10256,9 +10256,131 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
 
     assert_eq!(body["id"], existing_id.to_string());
     assert_eq!(body["resumed"], true);
+    assert_eq!(body["metadata"]["browser_auth_mode"], "api key");
 
     let updated = session_repo.find_by_id(existing_id).await.unwrap();
     assert_eq!(updated.metadata["browser_auth_mode"], "api key");
+}
+
+#[tokio::test]
+async fn ws_rpc_session_resolve_merges_metadata_for_existing_channel_session() {
+    let now = chrono::Utc::now();
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let existing_id = Uuid::now_v7();
+    session_repo
+        .create(NewSession {
+            id: existing_id,
+            kind: "direct".into(),
+            status: "ready".into(),
+            workspace_root: None,
+            channel_ref: Some("webchat:browser-a".to_string()),
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "browser_auth_mode": "session auth",
+                "selected_model": "gpt-4.1"
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            Arc::new(FakeToolExecutor),
+            Arc::new(ToolRegistry::new()),
+            ContextAssembler::new("test"),
+            Arc::new(NoOpCompaction),
+        )
+        .with_default_model("fake-model"),
+    );
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+    let event_tx = test_event_sender().clone();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler: Arc::new(Scheduler::new()),
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let body = dispatcher
+        .dispatch(
+            "session.resolve",
+            serde_json::json!({
+                "kind": "direct",
+                "channel_ref": "webchat:browser-a",
+                "metadata": { "browser_auth_mode": "api key" }
+            }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(body["id"], existing_id.to_string());
+    assert_eq!(body["resumed"], true);
+    assert_eq!(body["metadata"]["browser_auth_mode"], "api key");
+    assert_eq!(body["metadata"]["selected_model"], "gpt-4.1");
+
+    let updated = session_repo.find_by_id(existing_id).await.unwrap();
+    assert_eq!(updated.metadata["browser_auth_mode"], "api key");
+    assert_eq!(updated.metadata["selected_model"], "gpt-4.1");
 }
 
 #[tokio::test]

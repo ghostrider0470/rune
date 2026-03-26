@@ -279,7 +279,9 @@ impl RpcDispatcher {
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
         {
-            if let Some(metadata) = params.get("metadata") {
+            let mut metadata = existing.metadata.clone();
+            if let Some(patch) = params.get("metadata") {
+                merge_json_object(&mut metadata, patch.clone())?;
                 self.state
                     .session_engine
                     .patch_metadata(existing.id, metadata.clone())
@@ -293,6 +295,7 @@ impl RpcDispatcher {
                 "status": existing.status,
                 "created_at": existing.created_at.to_rfc3339(),
                 "resumed": true,
+                "metadata": metadata,
             }));
         }
 
@@ -1518,6 +1521,19 @@ fn skill_reload_json(summary: SkillScanSummary) -> Value {
         "loaded": summary.loaded,
         "removed": summary.removed,
     })
+}
+
+fn merge_json_object(target: &mut Value, patch: Value) -> Result<(), RpcError> {
+    let target_obj = target
+        .as_object_mut()
+        .ok_or_else(|| RpcError::bad_request("session metadata must be a JSON object"))?;
+    let patch_obj = patch
+        .as_object()
+        .ok_or_else(|| RpcError::bad_request("session metadata must be a JSON object"))?;
+    for (key, value) in patch_obj {
+        target_obj.insert(key.clone(), value.clone());
+    }
+    Ok(())
 }
 
 /// Extract a string value from a JSON metadata object.
