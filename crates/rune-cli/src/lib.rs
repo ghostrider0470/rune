@@ -4058,6 +4058,7 @@ connection: close
         handle.join().unwrap();
     }
 
+    #[test]
     fn wait_for_gateway_ready_falls_back_to_gateway_health_when_health_is_missing() {
         use std::io::{Read, Write};
         use std::net::TcpListener;

@@ -622,8 +622,12 @@ pub struct CommsConfig {
     pub peer_id: String,
 }
 
-fn default_comms_agent_id() -> String { "rune".to_string() }
-fn default_comms_peer_id() -> String { "horizon-ai".to_string() }
+fn default_comms_agent_id() -> String {
+    "rune".to_string()
+}
+fn default_comms_peer_id() -> String {
+    "horizon-ai".to_string()
+}
 
 impl Default for CommsConfig {
     fn default() -> Self {

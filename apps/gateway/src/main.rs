@@ -39,6 +39,7 @@ use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider,
     RoutedModelProvider, Usage,
 };
+use rune_runtime::CommsClient;
 use rune_runtime::{
     CommandRegistry, ContextAssembler, LaneQueue, Mem0Engine, SessionEngine,
     TelegramFileDownloader, TokenBudgetCompaction, TurnExecutor,
@@ -54,6 +55,7 @@ use rune_store::repos::{
 use rune_store::{EmbeddedPg, JobRepo, build_repos};
 use rune_tools::ApprovalCheck;
 use rune_tools::approval::{ApprovalRequest, PolicyBasedApproval};
+use rune_tools::comms_tool::{CommsOps, CommsToolExecutor};
 use rune_tools::exec_tool::ExecToolExecutor;
 use rune_tools::file_tools::FileToolExecutor;
 use rune_tools::memory_index::{MemoryIndex, MemoryIndexConfig};
@@ -578,6 +580,21 @@ async fn build_services(
     .await
     .context("failed to initialize memory tool executor")?;
     let hybrid_search_enabled = memory.hybrid_search_backend().is_some();
+
+    // Build comms tool executor if comms is enabled in config.
+    let comms_tool_executor = if config.comms.enabled {
+        config.comms.comms_dir.as_deref().map(|dir| {
+            let client = Arc::new(CommsClient::new(
+                dir,
+                config.comms.agent_id.clone(),
+                config.comms.peer_id.clone(),
+            ));
+            Arc::new(CommsToolExecutor::new(Arc::new(CommsClientOps { client })))
+        })
+    } else {
+        None
+    };
+
     let tool_executor = Arc::new(AppToolExecutor {
         file: FileToolExecutor::new(workspace_root.clone()),
         exec: ExecToolExecutor::new(workspace_root.clone(), Duration::from_secs(30))
@@ -594,6 +611,7 @@ async fn build_services(
         tool_approval_repo: tool_approval_repo.clone(),
         global_approval_mode: config.approval.mode.as_str().to_string(),
         workspace_root: workspace_root.clone(),
+        comms: comms_tool_executor,
     });
 
     // Resolve system prompt: agent config → hardcoded default
@@ -1261,6 +1279,25 @@ async fn shutdown_signal() {
     }
 }
 
+/// Adapter that bridges `CommsClient` (rune-runtime) to `CommsOps` (rune-tools).
+struct CommsClientOps {
+    client: Arc<CommsClient>,
+}
+
+#[async_trait]
+impl CommsOps for CommsClientOps {
+    async fn send_message(
+        &self,
+        _to: &str,
+        msg_type: &str,
+        subject: &str,
+        body: &str,
+        priority: &str,
+    ) -> Result<String, String> {
+        self.client.send(msg_type, subject, body, priority).await
+    }
+}
+
 struct AppToolExecutor {
     file: FileToolExecutor,
     exec: ExecToolExecutor,
@@ -1277,6 +1314,8 @@ struct AppToolExecutor {
     global_approval_mode: String,
     /// Workspace root for tools that need it (git, etc.)
     workspace_root: std::path::PathBuf,
+    /// Optional inter-agent comms executor.
+    comms: Option<Arc<CommsToolExecutor<CommsClientOps>>>,
 }
 
 #[derive(Clone)]
@@ -1573,6 +1612,12 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
+            "comms_send" => match &self.comms {
+                Some(comms) => comms.execute(call).await,
+                None => Err(ToolError::UnknownTool {
+                    name: "comms_send".to_string(),
+                }),
+            },
             other if other.contains("__") => match &self.mcp {
                 Some(mcp) => mcp.execute(call).await,
                 None => Err(ToolError::UnknownTool {
@@ -1869,6 +1914,23 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
                     }
                 },
                 "required": ["task"]
+            }),
+            category: ToolCategory::External,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "comms_send".into(),
+            description: "Send a message to Horizon AI (or another peer agent) via the .comms/ inter-agent mailbox. Use this to report status, ask questions, or dispatch tasks to the peer.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "to": { "type": "string", "default": "horizon-ai" },
+                    "type": { "type": "string", "enum": ["task", "question", "status", "result"] },
+                    "subject": { "type": "string" },
+                    "body": { "type": "string" },
+                    "priority": { "type": "string", "enum": ["p0", "p1", "p2"], "default": "p1" }
+                },
+                "required": ["subject", "body"]
             }),
             category: ToolCategory::External,
             requires_approval: false,
