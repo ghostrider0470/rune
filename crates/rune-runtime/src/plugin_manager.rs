@@ -157,6 +157,7 @@ impl PluginManager {
         let skills = self.skill_registry.list().await;
         let agents = self.agent_registry.list().await;
         let commands = self.command_registry.list().await;
+        let mcp_servers = self.scanner.discovered_mcp_servers().await;
 
         let mut counts: HashMap<String, PluginMeta> = HashMap::new();
 
@@ -216,6 +217,22 @@ impl PluginManager {
                     mcp_servers: 0,
                 });
             entry.commands += 1;
+        }
+
+        for server in &mcp_servers {
+            let entry = counts
+                .entry(server.plugin_name.clone())
+                .or_insert_with(|| PluginMeta {
+                    name: server.plugin_name.clone(),
+                    source_dir: String::new(),
+                    enabled: true,
+                    skills: 0,
+                    agents: 0,
+                    hooks: 0,
+                    commands: 0,
+                    mcp_servers: 0,
+                });
+            entry.mcp_servers += 1;
         }
 
         *meta = counts;

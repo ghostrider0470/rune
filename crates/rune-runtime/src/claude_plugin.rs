@@ -85,6 +85,9 @@ pub struct ClaudeCommand {
 /// An MCP server entry from `.mcp.json`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClaudeMcpServer {
+    /// Plugin that declared this MCP server.
+    #[serde(default)]
+    pub plugin_name: String,
     /// The key from the `mcpServers` map.
     pub name: String,
     pub transport: String,
@@ -212,7 +215,7 @@ pub async fn parse_claude_plugin(dir: &Path) -> Result<ParsedClaudePlugin, Strin
     let agents = parse_agents_dir(&dir.join("agents"), &plugin_name).await;
     let hooks = parse_hooks_file(&dir.join("hooks").join("hooks.json")).await;
     let commands = parse_commands_dir(&dir.join("commands"), &plugin_name).await;
-    let mcp_servers = parse_mcp_file(&dir.join(".mcp.json")).await;
+    let mcp_servers = parse_mcp_file(&dir.join(".mcp.json"), &plugin_name).await;
 
     Ok(ParsedClaudePlugin {
         name: manifest.name,
@@ -396,7 +399,7 @@ async fn parse_commands_dir(dir: &Path, plugin_name: &str) -> Vec<ClaudeCommand>
 /// Read `.mcp.json` — supports both formats:
 /// - `{ "mcpServers": { "name": { ... } } }` (plugin.json style)
 /// - `{ "name": { "command": ..., "args": [...] } }` (Claude Code .mcp.json style)
-async fn parse_mcp_file(path: &Path) -> Vec<ClaudeMcpServer> {
+async fn parse_mcp_file(path: &Path, plugin_name: &str) -> Vec<ClaudeMcpServer> {
     if !path.exists() {
         return Vec::new();
     }
@@ -415,6 +418,7 @@ async fn parse_mcp_file(path: &Path) -> Vec<ClaudeMcpServer> {
             .mcp_servers
             .into_iter()
             .map(|(name, entry)| ClaudeMcpServer {
+                plugin_name: plugin_name.to_string(),
                 name,
                 transport: entry.transport,
                 command: entry.command,
@@ -430,6 +434,7 @@ async fn parse_mcp_file(path: &Path) -> Vec<ClaudeMcpServer> {
         return flat
             .into_iter()
             .map(|(name, entry)| ClaudeMcpServer {
+                plugin_name: plugin_name.to_string(),
                 name,
                 transport: entry.transport,
                 command: entry.command,
@@ -745,7 +750,11 @@ pub async fn discover_plugin_mcp_servers(scan_dirs: &[PathBuf]) -> Vec<ClaudeMcp
                     }
                     let mcp_path = path.join(".mcp.json");
                     if mcp_path.is_file() {
-                        let mcp = parse_mcp_file(&mcp_path).await;
+                        let plugin_name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default();
+                        let mcp = parse_mcp_file(&mcp_path, plugin_name).await;
                         if !mcp.is_empty() {
                             debug!(
                                 dir = %path.display(),
@@ -975,7 +984,7 @@ mod tests {
         .await
         .unwrap();
 
-        let servers = parse_mcp_file(&mcp_path).await;
+        let servers = parse_mcp_file(&mcp_path, "test-plugin").await;
         assert_eq!(servers.len(), 1);
         let s = &servers[0];
         assert_eq!(s.name, "context7");
