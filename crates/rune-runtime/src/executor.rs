@@ -190,23 +190,31 @@ impl TurnExecutor {
 
     /// Attach an agent registry so agent descriptions appear in the system prompt
     /// and templates can be looked up by name via [`resolve_agent_template`].
-    pub fn with_agent_registry(mut self, registry: Arc<crate::agent_registry::AgentRegistry>) -> Self {
+    pub fn with_agent_registry(
+        mut self,
+        registry: Arc<crate::agent_registry::AgentRegistry>,
+    ) -> Self {
         self.agent_registry = Some(registry);
         self
     }
 
     /// Resolve an agent template by type name, falling back to a short-name match
     /// (i.e. the portion after the first `:`) if an exact match is not found.
-    pub async fn resolve_agent_template(&self, subagent_type: &str) -> Option<crate::agent_registry::AgentTemplate> {
+    pub async fn resolve_agent_template(
+        &self,
+        subagent_type: &str,
+    ) -> Option<crate::agent_registry::AgentTemplate> {
         let registry = self.agent_registry.as_ref()?;
         if let Some(template) = registry.get(subagent_type).await {
             return Some(template);
         }
-        let short = subagent_type.split_once(':').map(|(_, s)| s).unwrap_or(subagent_type);
+        let short = subagent_type
+            .split_once(':')
+            .map(|(_, s)| s)
+            .unwrap_or(subagent_type);
         let all = registry.list().await;
-        all.into_iter().find(|t| {
-            t.name.split_once(':').map(|(_, s)| s).unwrap_or(&t.name) == short
-        })
+        all.into_iter()
+            .find(|t| t.name.split_once(':').map(|(_, s)| s).unwrap_or(&t.name) == short)
     }
 
     /// Execute a turn for the given session, triggered by a user message.

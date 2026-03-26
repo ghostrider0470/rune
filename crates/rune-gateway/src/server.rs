@@ -20,7 +20,8 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
-    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo, TranscriptRepo, TurnRepo,
+    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
+    TranscriptRepo, TurnRepo,
 };
 use rune_stt::SttEngine;
 use rune_stt::openai::OpenAiStt;
@@ -574,7 +575,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             "/api/approvals",
             get(routes::list_pending_approvals).post(routes::submit_approval_decision),
         )
-        .route("/api/approvals/policies", get(routes::list_approval_policies))
+        .route(
+            "/api/approvals/policies",
+            get(routes::list_approval_policies),
+        )
         .route(
             "/api/approvals/policies/{tool}",
             get(routes::get_approval_policy)

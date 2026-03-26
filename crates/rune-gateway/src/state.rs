@@ -13,7 +13,8 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
-    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo, TranscriptRepo, TurnRepo,
+    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
+    TranscriptRepo, TurnRepo,
 };
 use rune_stt::SttEngine;
 use rune_tools::process_tool::ProcessManager;

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::agent_registry::AgentRegistry;
 use crate::command_registry::CommandRegistry;
@@ -58,8 +58,12 @@ impl PluginManager {
         hook_registry: Arc<HookRegistry>,
     ) -> Self {
         Self {
-            scanner, plugin_registry, skill_registry, agent_registry,
-            command_registry, hook_registry,
+            scanner,
+            plugin_registry,
+            skill_registry,
+            agent_registry,
+            command_registry,
+            hook_registry,
             plugin_meta: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
@@ -72,19 +76,31 @@ impl PluginManager {
 
     pub async fn status(&self) -> Vec<PluginStatus> {
         let meta = self.plugin_meta.read().await;
-        meta.values().map(|m| PluginStatus {
-            name: m.name.clone(), enabled: m.enabled, source: m.source_dir.clone(),
-            skills: m.skills, agents: m.agents, hooks: m.hooks,
-            commands: m.commands, mcp_servers: m.mcp_servers,
-        }).collect()
+        meta.values()
+            .map(|m| PluginStatus {
+                name: m.name.clone(),
+                enabled: m.enabled,
+                source: m.source_dir.clone(),
+                skills: m.skills,
+                agents: m.agents,
+                hooks: m.hooks,
+                commands: m.commands,
+                mcp_servers: m.mcp_servers,
+            })
+            .collect()
     }
 
     pub async fn get_plugin(&self, name: &str) -> Option<PluginStatus> {
         let meta = self.plugin_meta.read().await;
         meta.get(name).map(|m| PluginStatus {
-            name: m.name.clone(), enabled: m.enabled, source: m.source_dir.clone(),
-            skills: m.skills, agents: m.agents, hooks: m.hooks,
-            commands: m.commands, mcp_servers: m.mcp_servers,
+            name: m.name.clone(),
+            enabled: m.enabled,
+            source: m.source_dir.clone(),
+            skills: m.skills,
+            agents: m.agents,
+            hooks: m.hooks,
+            commands: m.commands,
+            mcp_servers: m.mcp_servers,
         })
     }
 
@@ -131,28 +147,60 @@ impl PluginManager {
         let mut counts: HashMap<String, PluginMeta> = HashMap::new();
 
         for skill in &skills {
-            let plugin_name = skill.name.split_once(':').map(|(p, _)| p).unwrap_or(&skill.name);
-            let entry = counts.entry(plugin_name.to_string()).or_insert_with(|| PluginMeta {
-                name: plugin_name.to_string(), source_dir: skill.source_dir.display().to_string(),
-                enabled: true, skills: 0, agents: 0, hooks: 0, commands: 0, mcp_servers: 0,
-            });
+            let plugin_name = skill
+                .name
+                .split_once(':')
+                .map(|(p, _)| p)
+                .unwrap_or(&skill.name);
+            let entry = counts
+                .entry(plugin_name.to_string())
+                .or_insert_with(|| PluginMeta {
+                    name: plugin_name.to_string(),
+                    source_dir: skill.source_dir.display().to_string(),
+                    enabled: true,
+                    skills: 0,
+                    agents: 0,
+                    hooks: 0,
+                    commands: 0,
+                    mcp_servers: 0,
+                });
             entry.skills += 1;
         }
 
         for agent in &agents {
-            let plugin_name = agent.name.split_once(':').map(|(p, _)| p).unwrap_or(&agent.name);
-            let entry = counts.entry(plugin_name.to_string()).or_insert_with(|| PluginMeta {
-                name: plugin_name.to_string(), source_dir: String::new(),
-                enabled: true, skills: 0, agents: 0, hooks: 0, commands: 0, mcp_servers: 0,
-            });
+            let plugin_name = agent
+                .name
+                .split_once(':')
+                .map(|(p, _)| p)
+                .unwrap_or(&agent.name);
+            let entry = counts
+                .entry(plugin_name.to_string())
+                .or_insert_with(|| PluginMeta {
+                    name: plugin_name.to_string(),
+                    source_dir: String::new(),
+                    enabled: true,
+                    skills: 0,
+                    agents: 0,
+                    hooks: 0,
+                    commands: 0,
+                    mcp_servers: 0,
+                });
             entry.agents += 1;
         }
 
         for cmd in &commands {
-            let entry = counts.entry(cmd.plugin_name.clone()).or_insert_with(|| PluginMeta {
-                name: cmd.plugin_name.clone(), source_dir: String::new(),
-                enabled: true, skills: 0, agents: 0, hooks: 0, commands: 0, mcp_servers: 0,
-            });
+            let entry = counts
+                .entry(cmd.plugin_name.clone())
+                .or_insert_with(|| PluginMeta {
+                    name: cmd.plugin_name.clone(),
+                    source_dir: String::new(),
+                    enabled: true,
+                    skills: 0,
+                    agents: 0,
+                    hooks: 0,
+                    commands: 0,
+                    mcp_servers: 0,
+                });
             entry.commands += 1;
         }
 
@@ -167,12 +215,20 @@ mod tests {
     #[tokio::test]
     async fn plugin_status_empty() {
         let scanner = Arc::new(PluginScanner::new(
-            vec![], Arc::new(PluginRegistry::new()), Arc::new(SkillRegistry::new()),
-            Arc::new(AgentRegistry::new()), Arc::new(CommandRegistry::new()), Arc::new(HookRegistry::new()),
+            vec![],
+            Arc::new(PluginRegistry::new()),
+            Arc::new(SkillRegistry::new()),
+            Arc::new(AgentRegistry::new()),
+            Arc::new(CommandRegistry::new()),
+            Arc::new(HookRegistry::new()),
         ));
         let mgr = PluginManager::new(
-            scanner, Arc::new(PluginRegistry::new()), Arc::new(SkillRegistry::new()),
-            Arc::new(AgentRegistry::new()), Arc::new(CommandRegistry::new()), Arc::new(HookRegistry::new()),
+            scanner,
+            Arc::new(PluginRegistry::new()),
+            Arc::new(SkillRegistry::new()),
+            Arc::new(AgentRegistry::new()),
+            Arc::new(CommandRegistry::new()),
+            Arc::new(HookRegistry::new()),
         );
         let status = mgr.status().await;
         assert!(status.is_empty());

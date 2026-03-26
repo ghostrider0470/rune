@@ -99,7 +99,10 @@ impl SessionLoop {
     }
 
     /// Attach a command registry for plugin slash commands.
-    pub fn with_command_registry(mut self, registry: Arc<crate::command_registry::CommandRegistry>) -> Self {
+    pub fn with_command_registry(
+        mut self,
+        registry: Arc<crate::command_registry::CommandRegistry>,
+    ) -> Self {
         self.command_registry = Some(registry);
         self
     }
@@ -384,7 +387,11 @@ impl SessionLoop {
                     if !commands.is_empty() {
                         text.push_str("\nPlugin commands:\n");
                         for cmd in &commands {
-                            text.push_str(&format!("/{} - {}\n", cmd.short_name(), cmd.description));
+                            text.push_str(&format!(
+                                "/{} - {}\n",
+                                cmd.short_name(),
+                                cmd.description
+                            ));
                         }
                     }
                 }

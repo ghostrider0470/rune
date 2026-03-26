@@ -3616,21 +3616,21 @@ content-length: 0
 connection: close
 
 "
-                        .as_slice()
+                    .as_slice()
                 } else if request.starts_with("GET /gateway/health ") {
                     b"HTTP/1.1 200 OK
 content-length: 2
 connection: close
 
 ok"
-                        .as_slice()
+                    .as_slice()
                 } else {
                     b"HTTP/1.1 500 Internal Server Error
 content-length: 0
 connection: close
 
 "
-                        .as_slice()
+                    .as_slice()
                 };
                 stream.write_all(response).unwrap();
             }
@@ -3639,7 +3639,6 @@ connection: close
         wait_for_gateway_ready(&format!("http://{}", addr)).unwrap();
         handle.join().unwrap();
     }
-
 
     #[test]
     fn write_wizard_config_uses_env_var_for_openai_api_key() {

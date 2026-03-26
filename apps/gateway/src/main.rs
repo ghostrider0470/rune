@@ -852,7 +852,10 @@ async fn build_mcp_tool_executor(
         });
     }
     if !plugin_mcp.is_empty() {
-        info!(count = plugin_mcp.len(), "discovered MCP servers from plugins");
+        info!(
+            count = plugin_mcp.len(),
+            "discovered MCP servers from plugins"
+        );
     }
 
     if server_configs.iter().all(|s| !s.enabled) {

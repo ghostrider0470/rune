@@ -6,12 +6,12 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use once_cell::sync::Lazy;
 
-use axum::extract::{Query, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Query, State};
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
@@ -108,7 +108,12 @@ pub async fn ws_handler(
         .filter(|value| !value.trim().is_empty());
     let subscribe_all = params
         .get("all")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on"))
+        .map(|value| {
+            matches!(
+                value.as_str(),
+                "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on"
+            )
+        })
         .unwrap_or(false);
     ws.on_upgrade(move |socket| {
         handle_socket(

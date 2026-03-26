@@ -1321,7 +1321,10 @@ impl RpcDispatcher {
     async fn memory_graph(&self, params: Value) -> Result<Value, RpcError> {
         let query = crate::routes::MemoryGraphQuery {
             threshold: params.get("threshold").and_then(|value| value.as_f64()),
-            neighbors: params.get("neighbors").and_then(|value| value.as_u64()).map(|value| value as usize),
+            neighbors: params
+                .get("neighbors")
+                .and_then(|value| value.as_u64())
+                .map(|value| value as usize),
         };
 
         let response = crate::routes::memory_graph(
@@ -1398,9 +1401,10 @@ impl RpcDispatcher {
 
     /// Dashboard diagnostics parity payload.
     async fn dashboard_diagnostics(&self) -> Result<Value, RpcError> {
-        let response = crate::routes::dashboard_diagnostics(axum::extract::State(self.state.clone()))
-            .await
-            .map_err(|error| RpcError::internal(error.to_string()))?;
+        let response =
+            crate::routes::dashboard_diagnostics(axum::extract::State(self.state.clone()))
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?;
         serde_json::to_value(response.0).map_err(|error| RpcError::internal(error.to_string()))
     }
 
