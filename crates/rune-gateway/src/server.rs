@@ -33,8 +33,8 @@ use tokio::sync::RwLock;
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
 use crate::ms365::{
-    Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService,
-    Ms365UsersService,
+    Ms365CalendarService, Ms365FilesService, Ms365MailService, Ms365PlannerService,
+    Ms365TodoService, Ms365UsersService,
 };
 use crate::pairing::DeviceRegistry;
 use crate::routes;
@@ -88,6 +88,7 @@ pub struct Services {
     pub ms365_planner_service: Arc<dyn Ms365PlannerService>,
     pub ms365_todo_service: Arc<dyn Ms365TodoService>,
     pub ms365_mail_service: Arc<dyn Ms365MailService>,
+    pub ms365_files_service: Arc<dyn Ms365FilesService>,
     pub ms365_users_service: Arc<dyn Ms365UsersService>,
 }
 
@@ -211,6 +212,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         ms365_planner_service: services.ms365_planner_service,
         ms365_todo_service: services.ms365_todo_service,
         ms365_mail_service: services.ms365_mail_service,
+        ms365_files_service: services.ms365_files_service,
         ms365_users_service: services.ms365_users_service,
     };
 
@@ -429,6 +431,13 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/stt/disable", post(routes::stt_disable))
         // Microsoft 365 routes
         .route("/ms365/auth/status", get(routes::ms365_auth_status))
+        .route("/ms365/files/search", get(routes::ms365_files_search))
+        .route(
+            "/ms365/files/{id}/content",
+            get(routes::ms365_files_content),
+        )
+        .route("/ms365/files", get(routes::ms365_files_list))
+        .route("/ms365/files/{id}", get(routes::ms365_files_read))
         .route("/ms365/users/me", get(routes::ms365_users_me))
         .route("/ms365/users", get(routes::ms365_users_list))
         .route("/ms365/users/{id}", get(routes::ms365_users_read))

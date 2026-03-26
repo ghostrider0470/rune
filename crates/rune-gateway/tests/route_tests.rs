@@ -35,11 +35,12 @@ use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
 use rune_gateway::ms365::{
-    CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest,
-    ForwardMailRequest, Ms365CalendarService, Ms365CalendarServiceError, Ms365MailService,
-    Ms365MailServiceError, Ms365PlannerService, Ms365PlannerServiceError, Ms365TodoService,
-    Ms365TodoServiceError, Ms365UsersService, Ms365UsersServiceError, PlannerTask,
-    ReplyMailRequest, RespondCalendarEventRequest, SendMailRequest, TodoTask,
+    CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest, FileContent,
+    FileItem, FileMetadata, FileSearchItem, FilesList, FilesSearch, ForwardMailRequest,
+    Ms365CalendarService, Ms365CalendarServiceError, Ms365FilesService, Ms365FilesServiceError,
+    Ms365MailService, Ms365MailServiceError, Ms365PlannerService, Ms365PlannerServiceError,
+    Ms365TodoService, Ms365TodoServiceError, Ms365UsersService, Ms365UsersServiceError,
+    PlannerTask, ReplyMailRequest, RespondCalendarEventRequest, SendMailRequest, TodoTask,
     UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile, UserSummary, UsersList,
 };
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
@@ -836,12 +837,29 @@ enum UsersReadCall {
     Read { id: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FilesReadCall {
+    List { path: String, limit: u32 },
+    Read { id: String },
+    Search { query: String, limit: u32 },
+    Content { id: String },
+}
+
 #[derive(Debug)]
 struct FakeMs365MailService {
     send_response: Result<(), Ms365MailServiceError>,
     reply_response: Result<(), Ms365MailServiceError>,
     forward_response: Result<(), Ms365MailServiceError>,
     calls: Mutex<Vec<MailMutationCall>>,
+}
+
+#[derive(Debug)]
+struct FakeMs365FilesService {
+    list_response: Result<FilesList, Ms365FilesServiceError>,
+    read_response: Result<FileMetadata, Ms365FilesServiceError>,
+    search_response: Result<FilesSearch, Ms365FilesServiceError>,
+    content_response: Result<FileContent, Ms365FilesServiceError>,
+    calls: Mutex<Vec<FilesReadCall>>,
 }
 
 #[derive(Debug)]
@@ -909,6 +927,26 @@ impl Default for FakeMs365MailService {
             send_response: Ok(()),
             reply_response: Ok(()),
             forward_response: Ok(()),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for FakeMs365FilesService {
+    fn default() -> Self {
+        Self {
+            list_response: Err(Ms365FilesServiceError::NotConfigured(
+                "test files service not configured".to_string(),
+            )),
+            read_response: Err(Ms365FilesServiceError::NotConfigured(
+                "test files service not configured".to_string(),
+            )),
+            search_response: Err(Ms365FilesServiceError::NotConfigured(
+                "test files service not configured".to_string(),
+            )),
+            content_response: Err(Ms365FilesServiceError::NotConfigured(
+                "test files service not configured".to_string(),
+            )),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -1008,6 +1046,40 @@ impl FakeMs365TodoService {
     }
 
     async fn calls(&self) -> Vec<TodoMutationCall> {
+        self.calls.lock().await.clone()
+    }
+}
+
+impl FakeMs365FilesService {
+    fn with_list_response(response: Result<FilesList, Ms365FilesServiceError>) -> Self {
+        Self {
+            list_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_read_response(response: Result<FileMetadata, Ms365FilesServiceError>) -> Self {
+        Self {
+            read_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_search_response(response: Result<FilesSearch, Ms365FilesServiceError>) -> Self {
+        Self {
+            search_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_content_response(response: Result<FileContent, Ms365FilesServiceError>) -> Self {
+        Self {
+            content_response: response,
+            ..Self::default()
+        }
+    }
+
+    async fn calls(&self) -> Vec<FilesReadCall> {
         self.calls.lock().await.clone()
     }
 }
@@ -1184,6 +1256,41 @@ impl Ms365MailService for FakeMs365MailService {
 }
 
 #[async_trait]
+impl Ms365FilesService for FakeMs365FilesService {
+    async fn list(&self, path: &str, limit: u32) -> Result<FilesList, Ms365FilesServiceError> {
+        self.calls.lock().await.push(FilesReadCall::List {
+            path: path.to_string(),
+            limit,
+        });
+        self.list_response.clone()
+    }
+
+    async fn read(&self, id: &str) -> Result<FileMetadata, Ms365FilesServiceError> {
+        self.calls
+            .lock()
+            .await
+            .push(FilesReadCall::Read { id: id.to_string() });
+        self.read_response.clone()
+    }
+
+    async fn search(&self, query: &str, limit: u32) -> Result<FilesSearch, Ms365FilesServiceError> {
+        self.calls.lock().await.push(FilesReadCall::Search {
+            query: query.to_string(),
+            limit,
+        });
+        self.search_response.clone()
+    }
+
+    async fn download_content(&self, id: &str) -> Result<FileContent, Ms365FilesServiceError> {
+        self.calls
+            .lock()
+            .await
+            .push(FilesReadCall::Content { id: id.to_string() });
+        self.content_response.clone()
+    }
+}
+
+#[async_trait]
 impl Ms365UsersService for FakeMs365UsersService {
     async fn me(&self) -> Result<UserProfile, Ms365UsersServiceError> {
         self.calls.lock().await.push(UsersReadCall::Me);
@@ -1232,6 +1339,10 @@ fn test_ms365_mail_service() -> Arc<dyn Ms365MailService> {
     Arc::new(FakeMs365MailService::default())
 }
 
+fn test_ms365_files_service() -> Arc<dyn Ms365FilesService> {
+    Arc::new(FakeMs365FilesService::default())
+}
+
 fn test_ms365_users_service() -> Arc<dyn Ms365UsersService> {
     Arc::new(FakeMs365UsersService::default())
 }
@@ -1246,6 +1357,7 @@ fn build_test_app_parts(
         test_ms365_calendar_service(),
         test_ms365_planner_service(),
         test_ms365_todo_service(),
+        test_ms365_files_service(),
         test_ms365_users_service(),
     )
 }
@@ -1261,6 +1373,7 @@ fn build_test_app_parts_with_calendar_service(
         ms365_calendar_service,
         test_ms365_planner_service(),
         test_ms365_todo_service(),
+        test_ms365_files_service(),
         test_ms365_users_service(),
     )
 }
@@ -1276,6 +1389,7 @@ fn build_test_app_parts_with_planner_service(
         test_ms365_calendar_service(),
         ms365_planner_service,
         test_ms365_todo_service(),
+        test_ms365_files_service(),
         test_ms365_users_service(),
     )
 }
@@ -1291,6 +1405,23 @@ fn build_test_app_parts_with_todo_service(
         test_ms365_calendar_service(),
         test_ms365_planner_service(),
         ms365_todo_service,
+        test_ms365_files_service(),
+        test_ms365_users_service(),
+    )
+}
+
+fn build_test_app_parts_with_files_service(
+    config: AppConfig,
+    auth_token: Option<String>,
+    ms365_files_service: Arc<dyn Ms365FilesService>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services(
+        config,
+        auth_token,
+        test_ms365_calendar_service(),
+        test_ms365_planner_service(),
+        test_ms365_todo_service(),
+        ms365_files_service,
         test_ms365_users_service(),
     )
 }
@@ -1306,6 +1437,7 @@ fn build_test_app_parts_with_users_service(
         test_ms365_calendar_service(),
         test_ms365_planner_service(),
         test_ms365_todo_service(),
+        test_ms365_files_service(),
         ms365_users_service,
     )
 }
@@ -1316,6 +1448,7 @@ fn build_test_app_parts_with_ms365_services(
     ms365_calendar_service: Arc<dyn Ms365CalendarService>,
     ms365_planner_service: Arc<dyn Ms365PlannerService>,
     ms365_todo_service: Arc<dyn Ms365TodoService>,
+    ms365_files_service: Arc<dyn Ms365FilesService>,
     ms365_users_service: Arc<dyn Ms365UsersService>,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -1395,6 +1528,7 @@ fn build_test_app_parts_with_ms365_services(
         ms365_planner_service,
         ms365_todo_service,
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service,
         ms365_users_service,
     };
 
@@ -1421,6 +1555,52 @@ fn sample_user_profile(id: &str, mail: &str) -> UserProfile {
         department: Some("Platform".to_string()),
         office_location: Some("Sarajevo".to_string()),
         mobile_phone: Some("+38761111222".to_string()),
+    }
+}
+
+fn sample_file_item(id: &str, name: &str, is_folder: bool) -> FileItem {
+    FileItem {
+        id: id.to_string(),
+        name: name.to_string(),
+        size: if is_folder { 0 } else { 4096 },
+        is_folder,
+        last_modified: "2026-03-25T16:30:00Z".to_string(),
+        web_url: Some(format!("https://example.com/files/{id}")),
+    }
+}
+
+fn sample_file_metadata(id: &str, name: &str) -> FileMetadata {
+    FileMetadata {
+        id: id.to_string(),
+        name: name.to_string(),
+        size: 4096,
+        is_folder: false,
+        mime_type: Some("application/pdf".to_string()),
+        last_modified: "2026-03-25T16:30:00Z".to_string(),
+        created_at: "2026-03-24T09:15:00Z".to_string(),
+        web_url: Some(format!("https://example.com/files/{id}")),
+        parent_path: Some("/Shared Documents".to_string()),
+        download_url: Some(format!("https://download.example.com/{id}")),
+    }
+}
+
+fn sample_file_search_item(id: &str, name: &str) -> FileSearchItem {
+    FileSearchItem {
+        id: id.to_string(),
+        name: name.to_string(),
+        size: 2048,
+        is_folder: false,
+        last_modified: "2026-03-25T16:30:00Z".to_string(),
+        web_url: Some(format!("https://example.com/files/{id}")),
+        parent_path: Some("/Shared Documents/Search".to_string()),
+    }
+}
+
+fn sample_file_content(id: &str, filename: &str) -> FileContent {
+    FileContent {
+        filename: filename.to_string(),
+        content_type: "application/pdf".to_string(),
+        bytes: format!("file-bytes-{id}").into_bytes(),
     }
 }
 
@@ -1545,6 +1725,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -1652,6 +1833,7 @@ enabled: true
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -1771,6 +1953,7 @@ async fn status_reports_configured_lane_capacities() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -1867,6 +2050,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2001,6 +2185,7 @@ async fn ws_rpc_health_reports_session_count() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2110,6 +2295,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2240,6 +2426,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2387,6 +2574,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2479,6 +2667,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2567,6 +2756,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2734,6 +2924,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2836,6 +3027,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -2985,6 +3177,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -3130,6 +3323,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -3240,6 +3434,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -3698,6 +3893,202 @@ async fn ms365_auth_status_requires_auth_when_gateway_token_enabled() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ms365_files_list_forwards_path_and_clamped_limit() {
+    let files_service = Arc::new(FakeMs365FilesService::with_list_response(Ok(FilesList {
+        items: vec![
+            sample_file_item("file-1", "Quarterly Report.pdf", false),
+            sample_file_item("folder-1", "Shared", true),
+        ],
+        path: "/Documents".to_string(),
+        total: 2,
+    })));
+    let (app, _device_repo) =
+        build_test_app_parts_with_files_service(AppConfig::default(), None, files_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/files?path=/Documents&limit=250")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["path"], "/Documents");
+    assert_eq!(json["total"], 2);
+    assert_eq!(json["items"][0]["name"], "Quarterly Report.pdf");
+    assert_eq!(json["items"][1]["is_folder"], true);
+
+    let calls = files_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![FilesReadCall::List {
+            path: "/Documents".to_string(),
+            limit: 100,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_files_read_forwards_id_and_returns_metadata() {
+    let files_service = Arc::new(FakeMs365FilesService::with_read_response(Ok(
+        sample_file_metadata("file-42", "Specs.pdf"),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_files_service(AppConfig::default(), None, files_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/files/file-42")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["id"], "file-42");
+    assert_eq!(json["name"], "Specs.pdf");
+    assert_eq!(json["mime_type"], "application/pdf");
+    assert_eq!(json["parent_path"], "/Shared Documents");
+
+    let calls = files_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![FilesReadCall::Read {
+            id: "file-42".to_string(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_files_search_forwards_query_and_returns_results() {
+    let files_service = Arc::new(FakeMs365FilesService::with_search_response(Ok(
+        FilesSearch {
+            items: vec![sample_file_search_item("search-1", "roadmap-notes.md")],
+            query: "roadmap".to_string(),
+            total: 1,
+        },
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_files_service(AppConfig::default(), None, files_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/files/search?query=roadmap&limit=0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["query"], "roadmap");
+    assert_eq!(json["total"], 1);
+    assert_eq!(json["items"][0]["id"], "search-1");
+
+    let calls = files_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![FilesReadCall::Search {
+            query: "roadmap".to_string(),
+            limit: 1,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_files_content_returns_bytes_with_headers() {
+    let files_service = Arc::new(FakeMs365FilesService::with_content_response(Ok(
+        sample_file_content("file-77", "handoff.pdf"),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_files_service(AppConfig::default(), None, files_service.clone());
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/files/file-77/content")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/pdf"
+    );
+    assert_eq!(
+        response.headers().get(header::CONTENT_DISPOSITION).unwrap(),
+        "attachment; filename=\"handoff.pdf\""
+    );
+    let body = body_text(response).await;
+    assert_eq!(body, "file-bytes-file-77");
+
+    let calls = files_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![FilesReadCall::Content {
+            id: "file-77".to_string(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn ms365_files_routes_require_auth_when_gateway_token_enabled() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/ms365/files").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/files/search?query=doc")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn ms365_files_read_maps_validation_errors_to_bad_request() {
+    let files_service = Arc::new(FakeMs365FilesService::with_read_response(Err(
+        Ms365FilesServiceError::Validation("file item id is required".to_string()),
+    )));
+    let (app, _device_repo) =
+        build_test_app_parts_with_files_service(AppConfig::default(), None, files_service);
+
+    let response = app
+        .oneshot(
+            Request::get("/ms365/files/%20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let json = body_json(response).await;
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("file item id is required")
+    );
 }
 
 #[tokio::test]
@@ -5382,6 +5773,7 @@ async fn send_message_and_transcript_with_shared_state() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -5613,6 +6005,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -6621,6 +7014,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -6874,6 +7268,7 @@ async fn reminders_list_includes_outcome_fields() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -6978,6 +7373,7 @@ async fn reminders_cancel_returns_success() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -7099,6 +7495,7 @@ async fn agent_steer_success() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -7253,6 +7650,7 @@ async fn agent_kill_success() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 
@@ -7405,6 +7803,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         ms365_planner_service: test_ms365_planner_service(),
         ms365_todo_service: test_ms365_todo_service(),
         ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
     };
 

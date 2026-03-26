@@ -27,11 +27,12 @@ use serde_json::Value;
 
 use crate::error::GatewayError;
 use crate::ms365::{
-    CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest,
-    ForwardMailRequest, Ms365CalendarServiceError, Ms365MailServiceError, Ms365PlannerServiceError,
-    Ms365TodoServiceError, Ms365UsersServiceError, PlannerTask, ReplyMailRequest,
-    RespondCalendarEventRequest, SendMailRequest, TodoTask, UpdatePlannerTaskRequest,
-    UpdateTodoTaskRequest, UserProfile, UserSummary,
+    CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest, FileItem,
+    FileMetadata, FileSearchItem, ForwardMailRequest, Ms365CalendarServiceError,
+    Ms365FilesServiceError, Ms365MailServiceError, Ms365PlannerServiceError, Ms365TodoServiceError,
+    Ms365UsersServiceError, PlannerTask, ReplyMailRequest, RespondCalendarEventRequest,
+    SendMailRequest, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
+    UserSummary,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
 use crate::state::{AppState, SessionEvent};
@@ -3596,6 +3597,34 @@ pub async fn ms365_auth_status(
 }
 
 #[derive(Serialize)]
+pub struct Ms365FilesListResponse {
+    pub items: Vec<FileItem>,
+    pub path: String,
+    pub total: u32,
+}
+
+#[derive(Serialize)]
+pub struct Ms365FilesReadResponse {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub is_folder: bool,
+    pub mime_type: Option<String>,
+    pub last_modified: String,
+    pub created_at: String,
+    pub web_url: Option<String>,
+    pub parent_path: Option<String>,
+    pub download_url: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Ms365FilesSearchResponse {
+    pub items: Vec<FileSearchItem>,
+    pub query: String,
+    pub total: u32,
+}
+
+#[derive(Serialize)]
 pub struct Ms365UsersReadResponse {
     pub user: UserProfile,
 }
@@ -3604,6 +3633,97 @@ pub struct Ms365UsersReadResponse {
 pub struct Ms365UsersListResponse {
     pub users: Vec<UserSummary>,
     pub total: u32,
+}
+
+/// `GET /ms365/files` — list files in a OneDrive folder path.
+pub async fn ms365_files_list(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Ms365FilesListResponse>, GatewayError> {
+    let path = params.get("path").map(String::as_str).unwrap_or("/");
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(25)
+        .clamp(1, 100);
+
+    let list = state
+        .ms365_files_service
+        .list(path, limit)
+        .await
+        .map_err(map_ms365_files_service_error)?;
+
+    Ok(Json(Ms365FilesListResponse {
+        items: list.items,
+        path: list.path,
+        total: list.total,
+    }))
+}
+
+/// `GET /ms365/files/{id}` — read OneDrive file metadata by item ID.
+pub async fn ms365_files_read(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Ms365FilesReadResponse>, GatewayError> {
+    let file = state
+        .ms365_files_service
+        .read(&id)
+        .await
+        .map_err(map_ms365_files_service_error)?;
+
+    Ok(Json(ms365_file_read_response(file)))
+}
+
+/// `GET /ms365/files/search` — search OneDrive files by name/content.
+pub async fn ms365_files_search(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Ms365FilesSearchResponse>, GatewayError> {
+    let query = params.get("query").map(String::as_str).unwrap_or("");
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(25)
+        .clamp(1, 100);
+
+    let results = state
+        .ms365_files_service
+        .search(query, limit)
+        .await
+        .map_err(map_ms365_files_service_error)?;
+
+    Ok(Json(Ms365FilesSearchResponse {
+        items: results.items,
+        query: results.query,
+        total: results.total,
+    }))
+}
+
+/// `GET /ms365/files/{id}/content` — stream OneDrive file bytes by item ID.
+pub async fn ms365_files_content(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, GatewayError> {
+    let content = state
+        .ms365_files_service
+        .download_content(&id)
+        .await
+        .map_err(map_ms365_files_service_error)?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, content.content_type),
+            (
+                header::CONTENT_DISPOSITION,
+                format!(
+                    "attachment; filename=\"{}\"",
+                    content.filename.replace('"', "")
+                ),
+            ),
+        ],
+        content.bytes,
+    )
+        .into_response())
 }
 
 /// `GET /ms365/users/me` — return the authenticated user's profile.
@@ -3885,6 +4005,33 @@ pub async fn ms365_todo_complete_task(
         .map_err(map_ms365_todo_service_error)?;
 
     Ok(Json(Ms365TodoTaskMutationResponse { task }))
+}
+
+fn ms365_file_read_response(file: FileMetadata) -> Ms365FilesReadResponse {
+    Ms365FilesReadResponse {
+        id: file.id,
+        name: file.name,
+        size: file.size,
+        is_folder: file.is_folder,
+        mime_type: file.mime_type,
+        last_modified: file.last_modified,
+        created_at: file.created_at,
+        web_url: file.web_url,
+        parent_path: file.parent_path,
+        download_url: file.download_url,
+    }
+}
+
+fn map_ms365_files_service_error(error: Ms365FilesServiceError) -> GatewayError {
+    match error {
+        Ms365FilesServiceError::Validation(message) | Ms365FilesServiceError::NotFound(message) => {
+            GatewayError::BadRequest(message)
+        }
+        Ms365FilesServiceError::NotConfigured(message)
+        | Ms365FilesServiceError::Upstream(message) => GatewayError::Internal(message),
+        Ms365FilesServiceError::Unauthorized => GatewayError::Unauthorized,
+        Ms365FilesServiceError::Forbidden(message) => GatewayError::Forbidden(message),
+    }
 }
 
 fn map_ms365_calendar_service_error(error: Ms365CalendarServiceError) -> GatewayError {

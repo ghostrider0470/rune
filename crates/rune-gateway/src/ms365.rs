@@ -357,6 +357,77 @@ pub type Ms365TodoServiceError = Ms365ServiceError;
 pub type Ms365MailServiceError = Ms365ServiceError;
 pub type Ms365CalendarServiceError = Ms365ServiceError;
 pub type Ms365UsersServiceError = Ms365ServiceError;
+pub type Ms365FilesServiceError = Ms365ServiceError;
+
+/// Summary file entry for OneDrive list responses.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileItem {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub is_folder: bool,
+    pub last_modified: String,
+    pub web_url: Option<String>,
+}
+
+/// Detailed file metadata used by read/download flows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileMetadata {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub is_folder: bool,
+    pub mime_type: Option<String>,
+    pub last_modified: String,
+    pub created_at: String,
+    pub web_url: Option<String>,
+    pub parent_path: Option<String>,
+    pub download_url: Option<String>,
+}
+
+/// Summary search result entry for OneDrive file search.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileSearchItem {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub is_folder: bool,
+    pub last_modified: String,
+    pub web_url: Option<String>,
+    pub parent_path: Option<String>,
+}
+
+/// Response from list files.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FilesList {
+    pub items: Vec<FileItem>,
+    pub path: String,
+    pub total: u32,
+}
+
+/// Response from search files.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FilesSearch {
+    pub items: Vec<FileSearchItem>,
+    pub query: String,
+    pub total: u32,
+}
+
+/// Downloadable file content plus metadata for HTTP headers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileContent {
+    pub filename: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+#[async_trait]
+pub trait Ms365FilesService: Send + Sync {
+    async fn list(&self, path: &str, limit: u32) -> Result<FilesList, Ms365FilesServiceError>;
+    async fn read(&self, id: &str) -> Result<FileMetadata, Ms365FilesServiceError>;
+    async fn search(&self, query: &str, limit: u32) -> Result<FilesSearch, Ms365FilesServiceError>;
+    async fn download_content(&self, id: &str) -> Result<FileContent, Ms365FilesServiceError>;
+}
 
 #[async_trait]
 pub trait Ms365PlannerService: Send + Sync {
@@ -1249,6 +1320,234 @@ impl TodoTask {
     }
 }
 
+/// Microsoft 365 Files read backend.
+pub struct GraphMs365FilesService {
+    client: Client,
+}
+
+impl Default for GraphMs365FilesService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphMs365FilesService {
+    pub fn new() -> Self {
+        Self {
+            client: Client::new(),
+        }
+    }
+
+    async fn list_children(
+        &self,
+        path: &str,
+        limit: u32,
+    ) -> Result<GraphDriveChildrenResponse, Ms365FilesServiceError> {
+        let normalized_path = normalize_drive_path(path);
+        let clamped_limit = limit.clamp(1, 100);
+        let graph_path = if normalized_path == "/" {
+            format!("/me/drive/root/children?$top={clamped_limit}")
+        } else {
+            let encoded_path = normalized_path
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .map(urlencoding::encode)
+                .collect::<Vec<_>>()
+                .join("/");
+            format!("/me/drive/root:/{encoded_path}:/children?$top={clamped_limit}")
+        };
+
+        send_graph_json(
+            graph_request(&self.client, reqwest::Method::GET, &graph_path)?,
+            "files",
+        )
+        .await
+    }
+
+    async fn fetch_item(&self, id: &str) -> Result<GraphDriveItem, Ms365FilesServiceError> {
+        let id = validate_drive_item_id(id)?;
+        send_graph_json(
+            graph_request(
+                &self.client,
+                reqwest::Method::GET,
+                &format!("/me/drive/items/{id}"),
+            )?,
+            "files",
+        )
+        .await
+    }
+
+    async fn search_items(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<GraphDriveChildrenResponse, Ms365FilesServiceError> {
+        let query = validate_drive_search_query(query)?;
+        let clamped_limit = limit.clamp(1, 100);
+        let escaped_query = query.replace('\'', "''");
+        let encoded_query = urlencoding::encode(&escaped_query);
+        send_graph_json(
+            graph_request(
+                &self.client,
+                reqwest::Method::GET,
+                &format!("/me/drive/root/search(q='{encoded_query}')?$top={clamped_limit}"),
+            )?,
+            "files",
+        )
+        .await
+    }
+}
+
+#[async_trait]
+impl Ms365FilesService for GraphMs365FilesService {
+    async fn list(&self, path: &str, limit: u32) -> Result<FilesList, Ms365FilesServiceError> {
+        let normalized_path = normalize_drive_path(path);
+        let list = self.list_children(&normalized_path, limit).await?;
+        let total = list.value.len() as u32;
+        Ok(FilesList {
+            items: list.value.into_iter().map(FileItem::from_graph).collect(),
+            path: normalized_path,
+            total,
+        })
+    }
+
+    async fn read(&self, id: &str) -> Result<FileMetadata, Ms365FilesServiceError> {
+        let item = self.fetch_item(id).await?;
+        Ok(FileMetadata::from_graph(item))
+    }
+
+    async fn search(&self, query: &str, limit: u32) -> Result<FilesSearch, Ms365FilesServiceError> {
+        let normalized_query = validate_drive_search_query(query)?.to_string();
+        let results = self.search_items(&normalized_query, limit).await?;
+        let total = results.value.len() as u32;
+        Ok(FilesSearch {
+            items: results
+                .value
+                .into_iter()
+                .map(FileSearchItem::from_graph)
+                .collect(),
+            query: normalized_query,
+            total,
+        })
+    }
+
+    async fn download_content(&self, id: &str) -> Result<FileContent, Ms365FilesServiceError> {
+        let validated_id = validate_drive_item_id(id)?;
+        let metadata = self.read(validated_id).await?;
+        if metadata.is_folder {
+            return Err(Ms365FilesServiceError::Validation(
+                "cannot download content for a folder".to_string(),
+            ));
+        }
+
+        let bytes = send_graph_bytes(
+            graph_request(
+                &self.client,
+                reqwest::Method::GET,
+                &format!("/me/drive/items/{validated_id}/content"),
+            )?,
+            "files",
+        )
+        .await?;
+
+        Ok(FileContent {
+            filename: metadata.name,
+            content_type: metadata
+                .mime_type
+                .unwrap_or_else(|| "application/octet-stream".to_string()),
+            bytes,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphDriveChildrenResponse {
+    value: Vec<GraphDriveItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphDriveItem {
+    id: String,
+    name: String,
+    #[serde(default)]
+    size: u64,
+    #[serde(rename = "lastModifiedDateTime")]
+    last_modified: Option<String>,
+    #[serde(rename = "createdDateTime")]
+    created_at: Option<String>,
+    #[serde(rename = "webUrl")]
+    web_url: Option<String>,
+    #[serde(rename = "@microsoft.graph.downloadUrl")]
+    download_url: Option<String>,
+    #[serde(default)]
+    folder: Option<Value>,
+    #[serde(default)]
+    file: Option<GraphDriveFileFacet>,
+    #[serde(rename = "parentReference")]
+    parent_reference: Option<GraphDriveParentReference>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphDriveFileFacet {
+    #[serde(rename = "mimeType")]
+    mime_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphDriveParentReference {
+    path: Option<String>,
+}
+
+impl FileItem {
+    fn from_graph(item: GraphDriveItem) -> Self {
+        Self {
+            id: item.id,
+            name: item.name,
+            size: item.size,
+            is_folder: item.folder.is_some(),
+            last_modified: item.last_modified.unwrap_or_default(),
+            web_url: item.web_url,
+        }
+    }
+}
+
+impl FileMetadata {
+    fn from_graph(item: GraphDriveItem) -> Self {
+        Self {
+            id: item.id,
+            name: item.name,
+            size: item.size,
+            is_folder: item.folder.is_some(),
+            mime_type: item.file.and_then(|file| file.mime_type),
+            last_modified: item.last_modified.unwrap_or_default(),
+            created_at: item.created_at.unwrap_or_default(),
+            web_url: item.web_url,
+            parent_path: item
+                .parent_reference
+                .and_then(|parent| parent.path)
+                .map(graph_drive_parent_path),
+            download_url: item.download_url,
+        }
+    }
+}
+
+impl FileSearchItem {
+    fn from_graph(item: GraphDriveItem) -> Self {
+        Self {
+            id: item.id,
+            name: item.name,
+            size: item.size,
+            is_folder: item.folder.is_some(),
+            last_modified: item.last_modified.unwrap_or_default(),
+            web_url: item.web_url,
+            parent_path: item
+                .parent_reference
+                .and_then(|parent| parent.path)
+                .map(graph_drive_parent_path),
+        }
+    }
+}
+
 /// Microsoft 365 Users read backend.
 pub struct GraphMs365UsersService {
     client: Client,
@@ -1447,6 +1746,26 @@ async fn send_graph_json<T: serde::de::DeserializeOwned>(
     }
 }
 
+async fn send_graph_bytes(
+    builder: reqwest::RequestBuilder,
+    service_name: &str,
+) -> Result<Vec<u8>, Ms365ServiceError> {
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| Ms365ServiceError::Upstream(error.to_string()))?;
+
+    if response.status().is_success() {
+        response
+            .bytes()
+            .await
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| Ms365ServiceError::Upstream(error.to_string()))
+    } else {
+        Err(map_graph_error(response, service_name).await)
+    }
+}
+
 async fn send_graph_empty(
     builder: reqwest::RequestBuilder,
     service_name: &str,
@@ -1520,6 +1839,50 @@ fn graph_datetime_string(value: &GraphDateTimeTimeZone) -> String {
     }
 
     value.date_time.clone()
+}
+
+fn normalize_drive_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        "/".to_string()
+    } else if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    }
+}
+
+fn graph_drive_parent_path(path: String) -> String {
+    path.strip_prefix("/drive/root:")
+        .map(|value| {
+            let trimmed = value.trim_end_matches(':');
+            if trimmed.is_empty() {
+                "/".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .unwrap_or(path)
+}
+
+fn validate_drive_item_id(id: &str) -> Result<&str, Ms365FilesServiceError> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return Err(Ms365FilesServiceError::Validation(
+            "file item id is required".to_string(),
+        ));
+    }
+    Ok(trimmed)
+}
+
+fn validate_drive_search_query(query: &str) -> Result<&str, Ms365FilesServiceError> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Err(Ms365FilesServiceError::Validation(
+            "file search query is required".to_string(),
+        ));
+    }
+    Ok(trimmed)
 }
 
 fn validate_mail_message_id(id: &str) -> Result<(), Ms365MailServiceError> {
