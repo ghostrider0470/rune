@@ -747,7 +747,8 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
 }
 
 fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
-    let health_url = format!("{}/health", gateway_url.trim_end_matches('/'));
+    let base = gateway_url.trim_end_matches('/');
+    let health_url = format!("{base}/health");
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(1200))
         .build()
@@ -759,6 +760,20 @@ fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
     while std::time::Instant::now() < deadline {
         match client.get(&health_url).send() {
             Ok(response) if response.status().is_success() => return Ok(()),
+            Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
+                match client.get(base).send() {
+                    Ok(root_response) if root_response.status().is_success() => return Ok(()),
+                    Ok(root_response) => {
+                        last_err = Some(format!(
+                            "health returned 404 and root returned {}",
+                            root_response.status()
+                        ));
+                    }
+                    Err(err) => {
+                        last_err = Some(format!("health returned 404 and root probe failed: {err}"));
+                    }
+                }
+            }
             Ok(response) => {
                 last_err = Some(format!("health returned {}", response.status()));
             }
@@ -3588,6 +3603,43 @@ ok",
         assert!(message.contains("gateway did not become ready"));
         assert!(message.contains("/health"));
     }
+
+    #[test]
+    fn wait_for_gateway_ready_falls_back_to_root_when_health_is_missing() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 1024];
+                let read = stream.read(&mut buf).unwrap();
+                let request = String::from_utf8_lossy(&buf[..read]);
+                let response = if request.starts_with("GET /health ") {
+                    b"HTTP/1.1 404 Not Found
+content-length: 0
+connection: close
+
+"
+                        .as_slice()
+                } else {
+                    b"HTTP/1.1 200 OK
+content-length: 2
+connection: close
+
+ok"
+                        .as_slice()
+                };
+                stream.write_all(response).unwrap();
+            }
+        });
+
+        wait_for_gateway_ready(&format!("http://{}", addr)).unwrap();
+        handle.join().unwrap();
+    }
+
 
     #[test]
     fn write_wizard_config_uses_env_var_for_openai_api_key() {
