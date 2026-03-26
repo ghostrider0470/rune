@@ -122,10 +122,17 @@ impl RpcDispatcher {
             "processes.kill" => self.processes_kill(params).await,
             "channels.list" => self.channels_list().await,
             "channels.status" => self.channels_status().await,
+            "auth.info" => self.auth_info().await,
             "memory.status" => self.memory_status().await,
             "memory.search" => self.memory_search(params).await,
+            "memory.graph" => self.memory_graph(params).await,
             "logs.query" => self.logs_query(params).await,
             "doctor.run" => self.doctor_run().await,
+            "doctor.results" => self.doctor_results().await,
+            "dashboard.summary" => self.dashboard_summary().await,
+            "dashboard.models" => self.dashboard_models().await,
+            "dashboard.sessions" => self.dashboard_sessions().await,
+            "dashboard.diagnostics" => self.dashboard_diagnostics().await,
             other => {
                 warn!(method = %other, "unknown WS RPC method");
                 Err(RpcError::method_not_found(other))
@@ -1241,6 +1248,14 @@ impl RpcDispatcher {
 
     // ── Memory ──────────────────────────────────────────────────────────
 
+    /// Auth token / gateway auth status.
+    async fn auth_info(&self) -> Result<Value, RpcError> {
+        let response = crate::routes::auth_token_info(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        serde_json::to_value(response.0).map_err(|error| RpcError::internal(error.to_string()))
+    }
+
     /// Memory subsystem status.
     async fn memory_status(&self) -> Result<Value, RpcError> {
         let config = self.state.config.read().await;
@@ -1302,6 +1317,26 @@ impl RpcDispatcher {
         }))
     }
 
+    /// Memory knowledge graph parity payload.
+    async fn memory_graph(&self, params: Value) -> Result<Value, RpcError> {
+        let query = crate::routes::MemoryGraphQuery {
+            threshold: params.get("threshold").and_then(|value| value.as_f64()),
+            neighbors: params.get("neighbors").and_then(|value| value.as_u64()).map(|value| value as usize),
+        };
+
+        let response = crate::routes::memory_graph(
+            axum::extract::State(self.state.clone()),
+            axum::extract::Query(query),
+        )
+        .await
+        .map_err(|error| match error {
+            crate::error::GatewayError::BadRequest(message) => RpcError::bad_request(message),
+            other => RpcError::internal(other.to_string()),
+        })?;
+
+        serde_json::to_value(response.0).map_err(|error| RpcError::internal(error.to_string()))
+    }
+
     // ── Logs ────────────────────────────────────────────────────────────
 
     /// Query structured logs with the same parity payload as the HTTP route.
@@ -1327,6 +1362,46 @@ impl RpcDispatcher {
             serde_json::to_value(report.0)
                 .map_err(|error| RpcError::internal(error.to_string()))?,
         )
+    }
+
+    /// Latest doctor results parity payload.
+    async fn doctor_results(&self) -> Result<Value, RpcError> {
+        let report = crate::routes::doctor_results(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        serde_json::to_value(report.0).map_err(|error| RpcError::internal(error.to_string()))
+    }
+
+    /// Dashboard summary parity payload.
+    async fn dashboard_summary(&self) -> Result<Value, RpcError> {
+        let response = crate::routes::dashboard_summary(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        serde_json::to_value(response.0).map_err(|error| RpcError::internal(error.to_string()))
+    }
+
+    /// Dashboard models parity payload.
+    async fn dashboard_models(&self) -> Result<Value, RpcError> {
+        let response = crate::routes::dashboard_models(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        serde_json::to_value(response.0).map_err(|error| RpcError::internal(error.to_string()))
+    }
+
+    /// Dashboard sessions parity payload.
+    async fn dashboard_sessions(&self) -> Result<Value, RpcError> {
+        let response = crate::routes::dashboard_sessions(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        serde_json::to_value(response.0).map_err(|error| RpcError::internal(error.to_string()))
+    }
+
+    /// Dashboard diagnostics parity payload.
+    async fn dashboard_diagnostics(&self) -> Result<Value, RpcError> {
+        let response = crate::routes::dashboard_diagnostics(axum::extract::State(self.state.clone()))
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+        serde_json::to_value(response.0).map_err(|error| RpcError::internal(error.to_string()))
     }
 
     /// Full daemon status.
