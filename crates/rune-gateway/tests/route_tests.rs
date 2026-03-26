@@ -8906,7 +8906,6 @@ async fn webchat_route_rejects_non_object_session_token_storage_payloads() {
     let body = body_text(response).await;
     assert!(body.contains("!Array.isArray(parsed) ? parsed : {}"));
 }
-
 #[tokio::test]
 async fn webchat_route_mentions_session_isolation_hinting() {
     let app = build_test_app(None);
@@ -8962,7 +8961,6 @@ async fn websocket_accepts_query_api_key_when_gateway_auth_is_enabled() {
     drop(ws);
     server.abort();
 }
-
 
 #[tokio::test]
 async fn websocket_query_session_id_subscribes_connection_to_target_session() {
