@@ -8141,3 +8141,34 @@ async fn webchat_route_preserves_session_and_auth_query_params() {
     assert!(body.contains("next.set('api_key', authToken)"));
     assert!(body.contains("next.set('session_token', sessionToken)"));
 }
+
+#[tokio::test]
+async fn webchat_route_mentions_authorization_header_auth() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("authHeaderToken"));
+    assert!(body.contains("Bearer"));
+}
+
+#[tokio::test]
+async fn webchat_allows_query_api_key_when_gateway_auth_is_enabled() {
+    let app = build_test_app(Some("test-token".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::get("/webchat?api_key=test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}

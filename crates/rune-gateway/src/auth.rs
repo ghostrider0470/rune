@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use axum::extract::Request;
+use axum::http::header;
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -26,10 +27,13 @@ pub async fn bearer_auth(
 
     let auth_header = request
         .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok());
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
 
-    let Some(token) = auth_header.and_then(|value| value.strip_prefix("Bearer ")) else {
+    let query_token = request.uri().query().and_then(extract_query_bearer_token);
+
+    let Some(token) = auth_header.or(query_token) else {
         return Err(GatewayError::Unauthorized);
     };
 
@@ -38,4 +42,14 @@ pub async fn bearer_auth(
     } else {
         Err(GatewayError::Unauthorized)
     }
+}
+
+fn extract_query_bearer_token(query: &str) -> Option<&str> {
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find_map(|(key, value)| match key {
+            "api_key" | "session_token" => Some(value),
+            _ => None,
+        })
 }

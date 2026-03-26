@@ -167,6 +167,7 @@
   let reqCounter = 0;
   const pendingRpc = {};
   const authToken = query.get('api_key') || '';
+  const authHeaderToken = query.get('auth') || authToken;
   const sessionToken = query.get('session_token') || '';
 
   function buildWsUrl() {
@@ -176,6 +177,10 @@
     if (sessionToken) wsQuery.set('session_token', sessionToken);
     const suffix = wsQuery.toString();
     return proto + '//' + location.host + '/ws' + (suffix ? '?' + suffix : '');
+  }
+
+  function wsProtocols() {
+    return authHeaderToken ? ['rune-ws', 'Bearer ' + authHeaderToken] : ['rune-ws'];
   }
 
   function setStatus(connected, text) {
@@ -268,7 +273,7 @@
   }
 
   function connect() {
-    ws = new WebSocket(buildWsUrl());
+    ws = new WebSocket(buildWsUrl(), wsProtocols());
 
     ws.onopen = async function() {
       setStatus(true, 'Connected');
