@@ -4,7 +4,7 @@ mod a2ui;
 mod auth;
 mod error;
 pub mod events;
-mod logging;
+pub mod logging;
 pub mod ms365;
 pub mod pairing;
 mod routes;

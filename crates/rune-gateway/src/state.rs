@@ -21,6 +21,7 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tts::TtsEngine;
 use tokio::sync::{Mutex, RwLock, broadcast};
 
+use crate::logging::LogStore;
 use crate::ms365::{
     Ms365CalendarService, Ms365FilesService, Ms365MailService, Ms365PlannerService,
     Ms365TodoService, Ms365UsersService,
@@ -148,6 +149,8 @@ pub struct AppState {
     pub plugin_manager: Option<Arc<PluginManager>>,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
+    /// In-memory structured log buffer + fan-out for the admin log viewer.
+    pub log_store: LogStore,
     /// Per-browser WebChat send limiter used to smooth reconnect storms and abuse.
     pub webchat_rate_limiter: Arc<WebChatRateLimiter>,
     /// Text-to-speech engine (constructed when TTS API key is configured).

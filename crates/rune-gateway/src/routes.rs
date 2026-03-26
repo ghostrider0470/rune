@@ -29,6 +29,7 @@ use serde_json::Value;
 
 use crate::error::GatewayError;
 use crate::events::{ApprovalEvent, RuntimeEvent, broadcast_runtime_event};
+use crate::logging::LogEntry;
 use crate::ms365::{
     CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest, FileItem,
     FileMetadata, FileSearchItem, ForwardMailRequest, Ms365CalendarServiceError,
@@ -3504,6 +3505,143 @@ pub async fn stt_disable(State(state): State<AppState>) -> Result<Json<Value>, G
     Ok(Json(json!({ "enabled": false })))
 }
 
+#[derive(Serialize)]
+pub struct UsageEntryResponse {
+    pub date: String,
+    pub model: String,
+    pub provider: String,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+    pub request_count: u64,
+    pub estimated_cost: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UsageSummaryResponse {
+    pub entries: Vec<UsageEntryResponse>,
+    pub total_prompt_tokens: u64,
+    pub total_completion_tokens: u64,
+    pub total_tokens: u64,
+    pub total_requests: u64,
+    pub total_estimated_cost: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AgentListItem {
+    pub id: String,
+    pub default: bool,
+    pub model: Option<String>,
+    pub workspace: Option<String>,
+    pub system_prompt: Option<String>,
+}
+
+/// `GET /api/dashboard/usage` — aggregate token usage by day + model.
+pub async fn get_dashboard_usage(
+    State(state): State<AppState>,
+) -> Result<Json<UsageSummaryResponse>, GatewayError> {
+    let sessions = state
+        .session_repo
+        .list(500, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let mut grouped: HashMap<(String, String), UsageEntryResponse> = HashMap::new();
+    let mut total_prompt_tokens = 0_u64;
+    let mut total_completion_tokens = 0_u64;
+    let mut total_requests = 0_u64;
+
+    for session in sessions {
+        let turns = state
+            .turn_repo
+            .list_by_session(session.id)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+        for turn in turns {
+            let date = turn.started_at.date_naive().to_string();
+            let model = turn
+                .model_ref
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "unknown".to_string());
+            let provider = model.split('/').next().unwrap_or("unknown").to_string();
+            let prompt_tokens = turn.usage_prompt_tokens.unwrap_or(0).max(0) as u64;
+            let completion_tokens = turn.usage_completion_tokens.unwrap_or(0).max(0) as u64;
+            let total_tokens = prompt_tokens + completion_tokens;
+
+            total_prompt_tokens += prompt_tokens;
+            total_completion_tokens += completion_tokens;
+            total_requests += 1;
+
+            let entry = grouped
+                .entry((date.clone(), model.clone()))
+                .or_insert_with(|| UsageEntryResponse {
+                    date: date.clone(),
+                    model: model.clone(),
+                    provider,
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    request_count: 0,
+                    estimated_cost: None,
+                });
+
+            entry.prompt_tokens += prompt_tokens;
+            entry.completion_tokens += completion_tokens;
+            entry.total_tokens += total_tokens;
+            entry.request_count += 1;
+        }
+    }
+
+    let mut entries: Vec<_> = grouped.into_values().collect();
+    entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
+
+    Ok(Json(UsageSummaryResponse {
+        entries,
+        total_prompt_tokens,
+        total_completion_tokens,
+        total_tokens: total_prompt_tokens + total_completion_tokens,
+        total_requests,
+        total_estimated_cost: None,
+    }))
+}
+
+/// `GET /agents` — list configured agent profiles.
+pub async fn list_agents(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AgentListItem>>, GatewayError> {
+    let config = state.config.read().await;
+    let default_model = config.models.default_model.clone();
+    let default_workspace = config.agents.defaults.workspace.clone();
+
+    let mut items = vec![AgentListItem {
+        id: "main".to_string(),
+        default: true,
+        model: default_model,
+        workspace: default_workspace,
+        system_prompt: config.agents.defaults.system_prompt.clone(),
+    }];
+
+    items.extend(config.agents.list.iter().map(|agent| {
+        AgentListItem {
+            id: agent.id.clone(),
+            default: agent.default.unwrap_or(false),
+            model: agent
+                .model
+                .as_ref()
+                .map(|m| m.primary().to_string())
+                .or_else(|| config.agents.effective_model(agent).map(str::to_string))
+                .or_else(|| config.models.default_model.clone()),
+            workspace: config.agents.effective_workspace(agent).map(str::to_string),
+            system_prompt: config.agents.effective_system_prompt(agent).map(str::to_string),
+        }
+    }));
+
+    items.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(Json(items))
+}
+
 // ── Config Editor ───────────────────────────────────────────────────────────
 
 /// `GET /config` — return the current configuration with secrets redacted.
@@ -4469,33 +4607,63 @@ pub async fn memory_delete(
 #[derive(Deserialize)]
 pub struct LogsQuery {
     #[serde(rename = "level")]
-    pub _level: Option<String>,
+    pub level: Option<String>,
     #[serde(rename = "source")]
-    pub _source: Option<String>,
+    pub source: Option<String>,
     #[serde(rename = "limit")]
-    pub _limit: Option<usize>,
+    pub limit: Option<usize>,
     #[serde(rename = "since")]
-    pub _since: Option<String>,
+    pub since: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct LogsQueryResponse {
-    pub entries: Vec<Value>,
+    pub entries: Vec<LogEntry>,
     pub message: String,
 }
 
-/// `GET /api/logs` — query structured logs (stub; log aggregation pending).
+/// `GET /api/logs` — query structured logs from the in-memory ring buffer.
 pub async fn query_logs(
     State(state): State<AppState>,
-    Query(_query): Query<LogsQuery>,
+    Query(query): Query<LogsQuery>,
 ) -> Result<Json<LogsQueryResponse>, GatewayError> {
-    let config = state.config.read().await;
-    let logs_dir = config.paths.logs_dir.display().to_string();
-    drop(config);
+    let mut entries = state.log_store.snapshot().await;
+
+    if let Some(level) = query.level.as_deref().map(str::to_ascii_uppercase) {
+        if level != "ALL" {
+            entries.retain(|entry| entry.level.eq_ignore_ascii_case(&level));
+        }
+    }
+
+    if let Some(source) = query
+        .source
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let source = source.to_ascii_lowercase();
+        entries.retain(|entry| entry.target.to_ascii_lowercase().contains(&source));
+    }
+
+    if let Some(since) = query.since.as_deref() {
+        if let Ok(since_ts) = DateTime::parse_from_rfc3339(since) {
+            let since_utc = since_ts.with_timezone(&Utc);
+            entries.retain(|entry| {
+                DateTime::parse_from_rfc3339(&entry.timestamp)
+                    .map(|ts| ts.with_timezone(&Utc) >= since_utc)
+                    .unwrap_or(false)
+            });
+        }
+    }
+
+    if let Some(limit) = query.limit {
+        if entries.len() > limit {
+            entries = entries.split_off(entries.len() - limit);
+        }
+    }
 
     Ok(Json(LogsQueryResponse {
-        entries: vec![],
-        message: format!("structured log query not yet aggregated; logs directory: {logs_dir}"),
+        message: format!("{} log entries", entries.len()),
+        entries,
     }))
 }
 

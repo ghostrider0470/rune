@@ -44,6 +44,7 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
+use rune_gateway::logging::LogStore;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
@@ -1545,6 +1546,7 @@ fn build_test_app_parts_with_ms365_services(
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -1696,7 +1698,8 @@ fn sample_todo_task(list_id: &str, id: &str) -> TodoTask {
 
 #[tokio::test]
 async fn ws_rpc_status_matches_http_status_basics() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
     use rune_runtime::{Lane, LaneQueue};
 
@@ -1757,6 +1760,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(3),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -1801,7 +1805,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
 
 #[tokio::test]
 async fn ws_rpc_skills_reload_and_toggle_round_trip() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -1870,6 +1875,7 @@ enabled: true
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -1994,6 +2000,7 @@ async fn status_reports_configured_lane_capacities() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2035,7 +2042,8 @@ async fn status_reports_configured_lane_capacities() {
 
 #[tokio::test]
 async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
     use rune_runtime::{Lane, LaneQueue};
 
@@ -2096,6 +2104,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2140,7 +2149,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
 
 #[tokio::test]
 async fn ws_rpc_health_reports_session_count() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2236,6 +2246,7 @@ async fn ws_rpc_health_reports_session_count() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2271,7 +2282,8 @@ async fn ws_rpc_health_reports_session_count() {
 
 #[tokio::test]
 async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2351,6 +2363,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2394,7 +2407,8 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
 
 #[tokio::test]
 async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2487,6 +2501,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2547,7 +2562,8 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
 
 #[tokio::test]
 async fn ws_rpc_session_get_includes_last_turn_timestamps() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2640,6 +2656,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2680,7 +2697,8 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
 
 #[tokio::test]
 async fn ws_rpc_session_status_rejects_invalid_uuid() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2738,6 +2756,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2774,7 +2793,8 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
 
 #[tokio::test]
 async fn ws_rpc_turns_list_and_get_return_turn_rows() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2832,6 +2852,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -2920,7 +2941,8 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
 
 #[tokio::test]
 async fn ws_rpc_tools_and_approvals_list_surface_state() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -3009,6 +3031,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(1),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -3123,6 +3146,7 @@ async fn approvals_list_route_includes_durable_resume_refs() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -3185,7 +3209,8 @@ async fn approvals_list_route_includes_durable_resume_refs() {
 
 #[tokio::test]
 async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::{ConnState, handle_text_message};
     use rune_gateway::ws_rpc::RpcDispatcher;
 
@@ -3244,6 +3269,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -3340,7 +3366,8 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
 
 #[tokio::test]
 async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::{ConnState, handle_text_message};
     use rune_gateway::ws_rpc::RpcDispatcher;
 
@@ -3399,6 +3426,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -3490,7 +3518,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
 
 #[tokio::test]
 async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::ConnState;
     use rune_gateway::ws::handle_text_message;
     use rune_gateway::ws_rpc::RpcDispatcher;
@@ -3550,6 +3579,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -3607,7 +3637,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
 
 #[tokio::test]
 async fn ws_handle_text_message_dispatches_rpc_errors() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws::{ConnState, handle_text_message};
     use rune_gateway::ws_rpc::RpcDispatcher;
 
@@ -3666,6 +3697,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -6053,6 +6085,7 @@ async fn send_message_and_transcript_with_shared_state() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -6289,6 +6322,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -7302,6 +7336,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -7560,6 +7595,7 @@ async fn reminders_list_includes_outcome_fields() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -7669,6 +7705,7 @@ async fn reminders_cancel_returns_success() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -7795,6 +7832,7 @@ async fn agent_steer_success() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -7954,6 +7992,7 @@ async fn agent_kill_success() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -8032,7 +8071,8 @@ async fn agent_kill_not_found() {
 
 #[tokio::test]
 async fn ws_rpc_agent_steer_and_kill() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -8112,6 +8152,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -8661,7 +8702,7 @@ async fn channels_routes_report_configured_adapters_and_active_channel_sessions(
 }
 
 #[tokio::test]
-async fn logs_route_returns_logs_dir_hint() {
+async fn logs_route_returns_buffered_entries() {
     let app = build_test_app(None);
     let response = app
         .oneshot(Request::get("/api/logs").body(Body::empty()).unwrap())
@@ -8671,13 +8712,9 @@ async fn logs_route_returns_logs_dir_hint() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(body["entries"], serde_json::json!([]));
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap()
-            .contains("structured log query not yet aggregated; logs directory:")
-    );
+    assert_eq!(body["message"], "0 log entries");
 }
+
 
 #[tokio::test]
 async fn doctor_routes_return_checks_and_latest_results() {
@@ -8845,6 +8882,7 @@ async fn transcript_route_filters_entries_after_cursor() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         tool_execution_repo: tool_execution_repo as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -9296,6 +9334,7 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_browser_tokens_across_se
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -9429,6 +9468,7 @@ async fn ws_rpc_session_send_rate_limits_shared_webchat_browser_token_across_ses
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -9547,6 +9587,7 @@ async fn ws_rpc_processes_log_surfaces_output() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn rune_store::repos::ToolExecutionRepo>,
         process_manager,
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -9579,7 +9620,8 @@ async fn ws_rpc_processes_log_surfaces_output() {
 
 #[tokio::test]
 async fn ws_rpc_memory_search_returns_workspace_hits() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -9652,6 +9694,7 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -9695,7 +9738,8 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
 
 #[tokio::test]
 async fn ws_rpc_doctor_run_matches_http_contract() {
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::logging::LogStore;
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
     use rune_gateway::ws_rpc::RpcDispatcher;
 
     let mut config = AppConfig::default();
@@ -9769,6 +9813,7 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -10012,6 +10057,7 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -10173,6 +10219,7 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
         device_registry,
@@ -10277,6 +10324,7 @@ async fn api_tool_execution_route_returns_persisted_execution() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         tool_execution_repo: tool_execution_repo.clone() as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -10468,6 +10516,7 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
             as Arc<dyn ToolApprovalPolicyRepo>,
         tool_execution_repo: tool_execution_repo.clone() as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,

@@ -250,6 +250,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         hook_registry,
         plugin_manager: Some(plugin_manager),
         event_tx,
+        log_store: crate::logging::LogStore::new(1000),
         webchat_rate_limiter: Arc::new(crate::state::WebChatRateLimiter::new(
             Duration::from_secs(webchat_send_window_seconds),
             webchat_send_max_requests,
@@ -442,6 +443,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
                 .delete(routes::clear_approval_policy),
         )
         // Agent (subagent) control routes
+        .route("/agents", get(routes::list_agents))
         .route("/agents/{id}/steer", post(routes::agent_steer))
         .route("/agents/{id}/kill", post(routes::agent_kill))
         // Device pairing routes
@@ -591,6 +593,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/health", get(routes::health))
         .route("/api/ready", get(routes::ready))
         .route("/api/status", get(routes::status))
+        .route("/api/dashboard/usage", get(routes::get_dashboard_usage))
         .route("/ws", get(ws::ws_handler))
         // Channel routes
         .route("/api/channels", get(routes::list_channels))
