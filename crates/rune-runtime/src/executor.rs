@@ -57,6 +57,7 @@ pub struct TurnExecutor {
     mem0: Option<Arc<Mem0Engine>>,
     /// Global approval mode — "yolo" auto-approves all tool calls.
     approval_mode: String,
+    agent_registry: Option<Arc<crate::agent_registry::AgentRegistry>>,
 }
 
 impl TurnExecutor {
@@ -116,6 +117,7 @@ impl TurnExecutor {
             hook_registry: None,
             mem0: None,
             approval_mode: "on-miss".to_string(),
+            agent_registry: None,
         }
     }
 
@@ -184,6 +186,27 @@ impl TurnExecutor {
     /// Access the Mem0 engine (if connected).
     pub fn mem0(&self) -> Option<&Arc<Mem0Engine>> {
         self.mem0.as_ref()
+    }
+
+    /// Attach an agent registry so agent descriptions appear in the system prompt
+    /// and templates can be looked up by name via [`resolve_agent_template`].
+    pub fn with_agent_registry(mut self, registry: Arc<crate::agent_registry::AgentRegistry>) -> Self {
+        self.agent_registry = Some(registry);
+        self
+    }
+
+    /// Resolve an agent template by type name, falling back to a short-name match
+    /// (i.e. the portion after the first `:`) if an exact match is not found.
+    pub async fn resolve_agent_template(&self, subagent_type: &str) -> Option<crate::agent_registry::AgentTemplate> {
+        let registry = self.agent_registry.as_ref()?;
+        if let Some(template) = registry.get(subagent_type).await {
+            return Some(template);
+        }
+        let short = subagent_type.split_once(':').map(|(_, s)| s).unwrap_or(subagent_type);
+        let all = registry.list().await;
+        all.into_iter().find(|t| {
+            t.name.split_once(':').map(|(_, s)| s).unwrap_or(&t.name) == short
+        })
     }
 
     /// Execute a turn for the given session, triggered by a user message.
@@ -768,6 +791,22 @@ impl TurnExecutor {
             // Inject recalled mem0 memories into the system prompt
             if let Some(ref section) = mem0_prompt_section {
                 extra_system_sections.push(section.clone());
+            }
+
+            if let Some(ref agent_reg) = self.agent_registry {
+                let agents = agent_reg.list().await;
+                if !agents.is_empty() {
+                    let mut fragment = String::from("\n\n## Available Agents\n\n");
+                    for agent in &agents {
+                        fragment.push_str(&format!("### {}\n", agent.name));
+                        fragment.push_str(&format!("{}\n", agent.description));
+                        if !agent.when_to_use.is_empty() {
+                            fragment.push_str(&format!("When to use: {}\n", agent.when_to_use));
+                        }
+                        fragment.push('\n');
+                    }
+                    extra_system_sections.push(fragment);
+                }
             }
 
             let messages = self.context_assembler.assemble(
