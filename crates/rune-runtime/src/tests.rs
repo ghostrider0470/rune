@@ -1571,6 +1571,74 @@ async fn approval_resume_marks_failed_when_post_tool_continuation_fails() {
     assert_eq!(failed_turn.status, "failed");
 }
 
+
+#[tokio::test]
+async fn resume_approval_rejects_redeciding_completed_approval() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"echo hi"}"#),
+        FakeModelProvider::text_response("done"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({"command": "echo hi"}),
+                    command: Some("echo hi".to_string()),
+                })
+                .unwrap(),
+            },
+            FakeToolStep::Output("approved output".to_string()),
+        ])),
+        registry,
+    );
+
+    let (blocked_turn, _) = executor.execute(session.id, "run it", None).await.unwrap();
+    assert_eq!(blocked_turn.status, "tool_executing");
+
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    let approval_id = approvals[0].id;
+    h.approval_repo
+        .decide(approval_id, "allow_once", "operator", chrono::Utc::now())
+        .await
+        .unwrap();
+
+    let (resumed_turn, _) = executor.resume_approval(approval_id).await.unwrap();
+    assert_eq!(resumed_turn.status, "completed");
+
+    let err = executor.resume_approval(approval_id).await.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("approval already resumed with status completed")
+    );
+}
+
 #[tokio::test]
 async fn session_not_found_returns_error() {
     let h = TestHarness::new();
