@@ -1503,6 +1503,30 @@ impl MemoryEmbeddingRepo for SqliteMemoryEmbeddingRepo {
             .await
             .map_err(StoreError::from)
     }
+
+    async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
+        let fp = file_path.to_string();
+        self.conn
+            .call(move |conn| {
+                let changed = conn.execute(
+                    "DELETE FROM memory_embeddings WHERE file_path = ?1 AND chunk_index = ?2",
+                    rusqlite::params![fp, chunk_index],
+                )?;
+                Ok(changed > 0)
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn delete_all(&self) -> Result<usize, StoreError> {
+        self.conn
+            .call(move |conn| {
+                let changed = conn.execute("DELETE FROM memory_embeddings", [])?;
+                Ok(changed)
+            })
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════

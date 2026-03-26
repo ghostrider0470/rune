@@ -310,6 +310,12 @@ pub trait MemoryEmbeddingRepo: Send + Sync {
 
     /// List distinct indexed files.
     async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError>;
+
+    /// Delete a single chunk by file path and chunk index.
+    async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError>;
+
+    /// Delete all memory embeddings. Returns the count removed.
+    async fn delete_all(&self) -> Result<usize, StoreError>;
 }
 
 // ── Tool execution repository ─────────────────────────────────────────

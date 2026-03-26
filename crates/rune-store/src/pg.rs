@@ -1766,4 +1766,25 @@ impl MemoryEmbeddingRepo for PgMemoryEmbeddingRepo {
             .map_err(StoreError::from)?;
         Ok(rows.iter().map(|r| r.get("file_path")).collect())
     }
+
+    async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let result = client
+            .execute(
+                "DELETE FROM memory_embeddings WHERE file_path = $1 AND chunk_index = $2",
+                &[&file_path, &chunk_index],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(result > 0)
+    }
+
+    async fn delete_all(&self) -> Result<usize, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let result = client
+            .execute("DELETE FROM memory_embeddings", &[])
+            .await
+            .map_err(StoreError::from)?;
+        Ok(result as usize)
+    }
 }
