@@ -8748,6 +8748,34 @@ async fn webchat_route_mentions_session_auth_token_storage() {
 }
 
 #[tokio::test]
+async fn webchat_route_marks_synthetic_current_session_with_auth_mode_metadata() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("metadata: { browser_auth_mode: authLabel() }"));
+}
+
+#[tokio::test]
+async fn webchat_route_rejects_non_object_session_token_storage_payloads() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("!Array.isArray(parsed) ? parsed : {}"));
+}
+
+#[tokio::test]
 async fn webchat_allows_query_api_key_when_gateway_auth_is_enabled() {
     let app = build_test_app(Some("test-token".to_string()));
 

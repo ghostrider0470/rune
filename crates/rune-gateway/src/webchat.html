@@ -272,7 +272,7 @@
       const raw = window.localStorage.getItem(sessionTokenKey);
       if (!raw) return {};
       const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : {};
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch (_) {
       return {};
     }
@@ -331,7 +331,7 @@
     sessionListEl.innerHTML = '';
     const sessions = knownSessions.slice();
     if (sessionId && !sessions.some((item) => item.id === sessionId)) {
-      sessions.unshift({ id: sessionId, status: 'active', kind: 'direct', channel: sessionChannelRef(), created_at: new Date().toISOString() });
+      sessions.unshift({ id: sessionId, status: 'active', kind: 'direct', channel: sessionChannelRef(), created_at: new Date().toISOString(), metadata: { browser_auth_mode: authLabel() } });
     }
     if (!sessions.length) {
       const empty = document.createElement('div');
