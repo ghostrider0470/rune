@@ -307,6 +307,12 @@ impl PluginScanner {
                 model: cs.model.clone(),
                 allowed_tools: cs.allowed_tools.clone(),
                 user_invocable: cs.user_invocable,
+                namespace: None,
+                version: None,
+                kind: Default::default(),
+                requires: vec![],
+                tags: vec![],
+                triggers: vec![],
             };
             self.skill_registry.register(skill).await;
             summary.skills_registered += 1;

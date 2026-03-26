@@ -26,6 +26,8 @@ pub mod project;
 pub mod scheduler;
 pub mod session_loop;
 mod session_metadata;
+pub mod spell;
+pub mod spell_loader;
 pub mod skill;
 pub mod skill_loader;
 mod usage;
@@ -47,6 +49,9 @@ pub use plugin_manager::PluginManager;
 pub use plugin_scanner::{PluginScanner, UnifiedScanSummary};
 pub use project::{ProjectConfig, ProjectRegistry};
 pub use session_loop::TelegramFileDownloader;
+pub use spell::{Spell, SpellKind, SpellRegistry};
+pub use spell_loader::{SpellLoader, SpellScanSummary};
+// Backward-compat re-exports (issue #299)
 pub use skill::{Skill, SkillRegistry};
 pub use skill_loader::{SkillLoader, SkillScanSummary};
 pub use usage::UsageAccumulator;

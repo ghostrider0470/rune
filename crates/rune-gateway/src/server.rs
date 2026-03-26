@@ -111,7 +111,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     .parse()
     .map_err(|e: std::net::AddrParseError| GatewayError::Internal(e.to_string()))?;
 
-    let skills_dir = services.config.paths.skills_dir.clone();
+    let skills_dir = services.config.paths.spells_dir.clone();
     let plugins_dir = services.config.paths.plugins_dir.clone();
     let workspace_root = services.config.agents.defaults.workspace.clone();
     let webchat_send_window_seconds = services.config.browser.webchat_send_window_seconds.max(1);

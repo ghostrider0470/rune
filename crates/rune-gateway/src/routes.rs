@@ -4845,11 +4845,14 @@ fn path_is_root_owned(path: &std::path::Path) -> bool {
 fn standalone_root_owned_startup_path(name: &str) -> bool {
     matches!(
         name,
-        "paths.skills_dir"
+        "paths.spells_dir"
             | "paths.plugins_dir"
             | "paths.backups_dir"
             | "paths.config_dir"
             | "paths.secrets_dir"
+            | "paths.workspace_dir"
+            | "paths.cache_dir"
+            | "paths.data_dir"
     )
 }
 
@@ -4891,11 +4894,14 @@ fn readiness_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     ];
     if resolved_mode == rune_config::RuntimeMode::Server {
         hard_fail_names.extend([
-            "paths.skills_dir",
+            "paths.spells_dir",
             "paths.plugins_dir",
             "paths.backups_dir",
             "paths.config_dir",
             "paths.secrets_dir",
+            "paths.workspace_dir",
+            "paths.cache_dir",
+            "paths.data_dir",
         ]);
     }
 
@@ -4936,12 +4942,15 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
         ("paths.sessions_dir", &config.paths.sessions_dir, true),
         ("paths.memory_dir", &config.paths.memory_dir, true),
         ("paths.media_dir", &config.paths.media_dir, true),
-        ("paths.skills_dir", &config.paths.skills_dir, true),
+        ("paths.spells_dir", &config.paths.spells_dir, true),
         ("paths.plugins_dir", &config.paths.plugins_dir, true),
         ("paths.logs_dir", &config.paths.logs_dir, true),
         ("paths.backups_dir", &config.paths.backups_dir, true),
         ("paths.config_dir", &config.paths.config_dir, true),
         ("paths.secrets_dir", &config.paths.secrets_dir, true),
+        ("paths.workspace_dir", &config.paths.workspace_dir, true),
+        ("paths.cache_dir", &config.paths.cache_dir, true),
+        ("paths.data_dir", &config.paths.data_dir, true),
     ]
     .into_iter()
     .map(|(name, path, required_persistent)| {
@@ -5504,8 +5513,8 @@ mod tests {
         let base = tmp.path().to_path_buf();
         // Create all 9 subdirs
         for sub in &[
-            "db", "sessions", "memory", "media", "skills", "plugins", "logs", "backups", "config",
-            "secrets",
+            "db", "sessions", "memory", "media", "spells", "skills", "plugins", "logs", "backups",
+            "config", "secrets", "workspace", "cache", "data",
         ] {
             std::fs::create_dir(base.join(sub)).unwrap();
         }
@@ -5516,17 +5525,21 @@ mod tests {
                 sessions_dir: base.join("sessions"),
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
+                spells_dir: base.join("spells"),
                 skills_dir: base.join("skills"),
                 plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
                 secrets_dir: base.join("secrets"),
+                workspace_dir: base.join("workspace"),
+                cache_dir: base.join("cache"),
+                data_dir: base.join("data"),
             },
             ..Default::default()
         };
         let checks = storage_path_checks(&config);
-        assert_eq!(checks.len(), 10);
+        assert_eq!(checks.len(), 13);
         for c in &checks {
             assert_eq!(
                 c.status, "pass",
@@ -5547,12 +5560,16 @@ mod tests {
                 sessions_dir: base.join("sessions"),
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
+                spells_dir: base.join("spells"),
                 skills_dir: base.join("skills"),
                 plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
                 secrets_dir: base.join("secrets"),
+                workspace_dir: base.join("workspace"),
+                cache_dir: base.join("cache"),
+                data_dir: base.join("data"),
             },
             ..Default::default()
         };
