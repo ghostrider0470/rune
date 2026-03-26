@@ -173,13 +173,10 @@ impl PluginScanner {
                 continue;
             }
 
-            let mut entries = match tokio::fs::read_dir(&expanded).await {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!(dir = %expanded.display(), error = %e, "failed to read scan directory");
-                    continue;
-                }
-            };
+            if let Err(e) = tokio::fs::read_dir(&expanded).await {
+                warn!(dir = %expanded.display(), error = %e, "failed to read scan directory");
+                continue;
+            }
 
             let mut dirs_to_scan = vec![expanded];
             // Recurse up to 3 levels to handle Claude cache structure:
