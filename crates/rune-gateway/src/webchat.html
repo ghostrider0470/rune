@@ -687,12 +687,17 @@
   function handleEvent(frame) {
     const p = frame.payload || {};
     const kind = frame.kind || p.kind || '';
+    if (kind === 'session_created') {
+      refreshSessionList();
+      return;
+    }
     if (kind === 'turn_complete' || kind === 'turn_finished' || kind === 'turn_completed' || kind === 'turn.completed') {
       const text = p.assistant_text || p.assistant_reply || p.response || p.text || '';
       if (text) {
         appendStreamingAssistant(text);
       }
       clearPendingAssistant();
+      refreshSessionList();
     } else if (kind === 'turn.progressed') {
       const status = p.status || '';
       if (status) appendStreamingAssistant('[' + status + ']');
@@ -704,6 +709,8 @@
       } else if (role === 'user' && content) {
         appendMsg('user', content);
       }
+    } else if (kind === 'session.updated' || kind === 'session_state') {
+      refreshSessionList();
     }
   }
 
