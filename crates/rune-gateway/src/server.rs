@@ -14,8 +14,8 @@ use tracing::info;
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
-    AgentRegistry, CommandRegistry, HookRegistry, PluginLoader, PluginManager, PluginRegistry,
-    PluginScanner, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
+    AgentRegistry, CommandRegistry, CommsClient, HookRegistry, PluginLoader, PluginManager,
+    PluginRegistry, PluginScanner, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -118,6 +118,21 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let webchat_send_max_requests = services.config.browser.webchat_send_max_requests.max(1);
     let plugin_scan_interval_secs = services.config.plugins.scan_interval_secs;
     let plugins_config = services.config.plugins.clone();
+    let comms_client = if services.config.comms.enabled {
+        let comms_dir = services
+            .config
+            .comms
+            .comms_dir
+            .clone()
+            .unwrap_or_else(|| ".comms".to_string());
+        Some(Arc::new(CommsClient::new(
+            comms_dir,
+            services.config.comms.agent_id.clone(),
+            services.config.comms.peer_id.clone(),
+        )))
+    } else {
+        None
+    };
 
     // Build TTS engine if an API key is configured.
     let tts_engine = services
@@ -263,6 +278,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         ms365_mail_service: services.ms365_mail_service,
         ms365_files_service: services.ms365_files_service,
         ms365_users_service: services.ms365_users_service,
+        comms_client,
     };
 
     // Build operator delivery for heartbeat/scheduled output to Telegram.
@@ -309,6 +325,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         operator_delivery,
         plugin_scanner: Some(plugin_scanner.clone()),
         plugin_scan_interval_ticks: plugin_scan_interval_secs / 10,
+        comms: state.comms_client.clone(),
     };
 
     let app = build_router(state, auth_token);
@@ -611,6 +628,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         // Configure / Setup routes
         .route("/configure", post(routes::configure))
         .route("/setup", post(routes::setup))
+        // Native comms routes
+        .route("/api/comms/send", post(routes::comms_send))
+        .route("/api/comms/inbox", get(routes::comms_inbox))
+        .route("/api/comms/ack", post(routes::comms_ack))
         // Update routes
         .route("/update/check", get(routes::update_check))
         .route("/update/apply", post(routes::update_apply))

@@ -37,24 +37,42 @@ impl<C: CommsOps> CommsToolExecutor<C> {
 impl<C: CommsOps> ToolExecutor for CommsToolExecutor<C> {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         let args = &call.arguments;
-        let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("horizon-ai");
-        let msg_type = args.get("type").and_then(|v| v.as_str()).unwrap_or("status");
-        let subject = args.get("subject").and_then(|v| v.as_str()).unwrap_or("message from rune");
+        let to = args
+            .get("to")
+            .and_then(|v| v.as_str())
+            .unwrap_or("horizon-ai");
+        let msg_type = args
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("status");
+        let subject = args
+            .get("subject")
+            .and_then(|v| v.as_str())
+            .unwrap_or("message from rune");
         let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
-        let priority = args.get("priority").and_then(|v| v.as_str()).unwrap_or("p1");
+        let priority = args
+            .get("priority")
+            .and_then(|v| v.as_str())
+            .unwrap_or("p1");
 
         if body.is_empty() {
             return Err(ToolError::InvalidArgument("body is required".into()));
         }
 
-        match self.comms.send_message(to, msg_type, subject, body, priority).await {
+        match self
+            .comms
+            .send_message(to, msg_type, subject, body, priority)
+            .await
+        {
             Ok(id) => Ok(ToolResult {
                 tool_call_id: call.tool_call_id,
                 output: format!("Message sent: {id}"),
                 is_error: false,
                 tool_execution_id: None,
             }),
-            Err(e) => Err(ToolError::ExecutionFailed(format!("comms send failed: {e}"))),
+            Err(e) => Err(ToolError::ExecutionFailed(format!(
+                "comms send failed: {e}"
+            ))),
         }
     }
 }

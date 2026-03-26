@@ -30,7 +30,9 @@ pub struct CommsMessage {
     pub expires_at: Option<String>,
 }
 
-fn default_priority() -> String { "p1".to_string() }
+fn default_priority() -> String {
+    "p1".to_string()
+}
 
 /// The comms client — reads/writes messages to the filesystem mailbox.
 #[derive(Clone)]
@@ -41,7 +43,11 @@ pub struct CommsClient {
 }
 
 impl CommsClient {
-    pub fn new(comms_dir: impl Into<PathBuf>, agent_id: impl Into<String>, peer_id: impl Into<String>) -> Self {
+    pub fn new(
+        comms_dir: impl Into<PathBuf>,
+        agent_id: impl Into<String>,
+        peer_id: impl Into<String>,
+    ) -> Self {
         Self {
             comms_dir: comms_dir.into(),
             agent_id: agent_id.into(),
@@ -73,7 +79,9 @@ impl CommsClient {
             match tokio::fs::read_to_string(&path).await {
                 Ok(content) => match serde_json::from_str::<CommsMessage>(&content) {
                     Ok(msg) => messages.push((path, msg)),
-                    Err(e) => warn!(path = %path.display(), error = %e, "failed to parse comms message"),
+                    Err(e) => {
+                        warn!(path = %path.display(), error = %e, "failed to parse comms message")
+                    }
                 },
                 Err(e) => warn!(path = %path.display(), error = %e, "failed to read comms message"),
             }
@@ -85,7 +93,13 @@ impl CommsClient {
     }
 
     /// Write a message to the peer's inbox.
-    pub async fn send(&self, msg_type: &str, subject: &str, body: &str, priority: &str) -> Result<String, String> {
+    pub async fn send(
+        &self,
+        msg_type: &str,
+        subject: &str,
+        body: &str,
+        priority: &str,
+    ) -> Result<String, String> {
         let id = format!("msg-{}", Uuid::now_v7());
         let now = Utc::now().to_rfc3339();
         let msg = CommsMessage {
@@ -107,7 +121,8 @@ impl CommsClient {
         }
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let slug = subject.chars()
+        let slug = subject
+            .chars()
             .filter(|c| c.is_alphanumeric() || *c == '-' || *c == ' ')
             .collect::<String>()
             .replace(' ', "-")
@@ -119,7 +134,8 @@ impl CommsClient {
         let json = serde_json::to_string_pretty(&msg)
             .map_err(|e| format!("failed to serialize message: {e}"))?;
 
-        tokio::fs::write(&path, json).await
+        tokio::fs::write(&path, json)
+            .await
             .map_err(|e| format!("failed to write message: {e}"))?;
 
         info!(id = %id, to = %self.peer_id, msg_type = msg_type, subject = subject, "comms message sent");
@@ -128,11 +144,9 @@ impl CommsClient {
 
     /// Send an ack for a received message.
     pub async fn send_ack(&self, original: &CommsMessage, summary: &str) -> Result<String, String> {
-        let body = format!(
-            "Acknowledged: {}\n\n{}",
-            original.subject, summary
-        );
-        self.send("ack", &format!("ack: {}", original.subject), &body, "p2").await
+        let body = format!("Acknowledged: {}\n\n{}", original.subject, summary);
+        self.send("ack", &format!("ack: {}", original.subject), &body, "p2")
+            .await
     }
 
     /// Archive a processed message.
@@ -142,23 +156,31 @@ impl CommsClient {
             return Err(format!("failed to create archive dir: {e}"));
         }
 
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown.json");
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let archive_name = format!("{timestamp}_{filename}");
         let archive_path = archive_dir.join(archive_name);
 
-        tokio::fs::rename(path, &archive_path).await
+        tokio::fs::rename(path, &archive_path)
+            .await
             .map_err(|e| format!("failed to archive message: {e}"))?;
 
         debug!(from = %path.display(), to = %archive_path.display(), "comms message archived");
         Ok(())
     }
 
-    pub fn agent_id(&self) -> &str { &self.agent_id }
-    pub fn peer_id(&self) -> &str { &self.peer_id }
-    pub fn comms_dir(&self) -> &Path { &self.comms_dir }
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+    pub fn peer_id(&self) -> &str {
+        &self.peer_id
+    }
+    pub fn comms_dir(&self) -> &Path {
+        &self.comms_dir
+    }
 }
 
 #[cfg(test)]
@@ -177,7 +199,10 @@ mod tests {
         // Sender writes to receiver's inbox (horizon-ai/inbox/)
         // But read_inbox reads from agent's own inbox
         // So: rune sends → horizon-ai/inbox/, horizon-ai reads from horizon-ai/inbox/
-        sender.send("task", "test task", "do something", "p1").await.unwrap();
+        sender
+            .send("task", "test task", "do something", "p1")
+            .await
+            .unwrap();
 
         let messages = receiver.read_inbox().await;
         assert_eq!(messages.len(), 1);
@@ -196,7 +221,12 @@ mod tests {
         let inbox = tmp.path().join("rune").join("inbox");
         tokio::fs::create_dir_all(&inbox).await.unwrap();
         let msg_path = inbox.join("test.json");
-        tokio::fs::write(&msg_path, r#"{"id":"t","from":"x","to":"y","type":"ack","subject":"s","body":"b"}"#).await.unwrap();
+        tokio::fs::write(
+            &msg_path,
+            r#"{"id":"t","from":"x","to":"y","type":"ack","subject":"s","body":"b"}"#,
+        )
+        .await
+        .unwrap();
 
         assert!(msg_path.exists());
         client.archive(&msg_path).await.unwrap();

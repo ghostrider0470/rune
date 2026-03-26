@@ -1566,6 +1566,7 @@ fn build_test_app_parts_with_ms365_services(
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service,
         ms365_users_service,
+        comms_client: None,
     };
 
     (build_router(state, auth_token), device_repo)
@@ -1780,6 +1781,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1895,6 +1897,7 @@ enabled: true
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2020,6 +2023,7 @@ async fn status_reports_configured_lane_capacities() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -2124,6 +2128,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -2266,6 +2271,7 @@ async fn ws_rpc_health_reports_session_count() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2383,6 +2389,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2521,6 +2528,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2676,6 +2684,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2776,6 +2785,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2872,6 +2882,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let session_id = Uuid::new_v4();
@@ -3051,6 +3062,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3166,6 +3178,7 @@ async fn approvals_list_route_includes_durable_resume_refs() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let approval_id = Uuid::now_v7();
@@ -3289,6 +3302,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3446,6 +3460,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3599,6 +3614,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3717,6 +3733,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -6105,6 +6122,7 @@ async fn send_message_and_transcript_with_shared_state() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -6342,6 +6360,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -7356,6 +7375,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -7615,6 +7635,7 @@ async fn reminders_list_includes_outcome_fields() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -7725,6 +7746,7 @@ async fn reminders_cancel_returns_success() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -7852,6 +7874,7 @@ async fn agent_steer_success() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -8012,6 +8035,7 @@ async fn agent_kill_success() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -8172,6 +8196,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -8901,6 +8926,7 @@ async fn transcript_route_filters_entries_after_cursor() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -9353,6 +9379,7 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_browser_tokens_across_se
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9487,6 +9514,7 @@ async fn ws_rpc_session_send_rate_limits_shared_webchat_browser_token_across_ses
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9606,6 +9634,7 @@ async fn ws_rpc_processes_log_surfaces_output() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9713,6 +9742,7 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9832,6 +9862,7 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10076,6 +10107,7 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10238,6 +10270,7 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10357,6 +10390,7 @@ async fn ws_rpc_session_resolve_merges_metadata_for_existing_channel_session() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10465,6 +10499,7 @@ async fn api_tool_execution_route_returns_persisted_execution() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let app = build_router(state, None);
@@ -10657,6 +10692,7 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
         ms365_mail_service: test_ms365_mail_service(),
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
     };
 
     let session_id = Uuid::now_v7();
@@ -10838,7 +10874,8 @@ async fn protected_http_routes_reject_session_token_query_auth_for_non_webchat_r
 
 #[cfg(unix)]
 #[test]
-fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_standalone_first_run() {
+fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_standalone_first_run()
+{
     let root = tempfile::tempdir().unwrap();
     let mut config = rune_config::AppConfig::default();
     config.mode = rune_config::RuntimeMode::Standalone;
@@ -10883,4 +10920,150 @@ fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_sta
     }
 }
 
+#[tokio::test]
+async fn native_comms_send_inbox_and_ack_flow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let comms_dir = tmp.path().join(".comms");
+    let client = Arc::new(rune_runtime::CommsClient::new(
+        &comms_dir,
+        "rune",
+        "horizon-ai",
+    ));
 
+    let app_state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine: Arc::new(SessionEngine::new(Arc::new(MemSessionRepo::new()))),
+        turn_executor: Arc::new(TurnExecutor::new(
+            Arc::new(MemSessionRepo::new()) as Arc<dyn SessionRepo>,
+            Arc::new(MemTurnRepo::new()) as Arc<dyn TurnRepo>,
+            Arc::new(MemTranscriptRepo::new()) as Arc<dyn TranscriptRepo>,
+            Arc::new(MemApprovalRepo::new()) as Arc<dyn ApprovalRepo>,
+            Arc::new(FakeModelProvider),
+            Arc::new(FakeToolExecutor),
+            Arc::new(ToolRegistry::new()),
+            ContextAssembler::new("You are a test assistant."),
+            Arc::new(NoOpCompaction),
+        )),
+        session_repo: Arc::new(MemSessionRepo::new()) as Arc<dyn SessionRepo>,
+        transcript_repo: Arc::new(MemTranscriptRepo::new()) as Arc<dyn TranscriptRepo>,
+        turn_repo: Arc::new(MemTurnRepo::new()) as Arc<dyn TurnRepo>,
+        model_provider: Arc::new(FakeModelProvider),
+        scheduler: Arc::new(Scheduler::new()),
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: Arc::new(MemApprovalRepo::new()) as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: Arc::new(MemDeviceRepo::new()) as Arc<dyn DeviceRepo>,
+        device_registry: Arc::new(DeviceRegistry::new(Arc::new(MemDeviceRepo::new()))),
+        skill_registry: Arc::new(SkillRegistry::new()),
+        skill_loader: Arc::new(SkillLoader::new(
+            std::env::temp_dir(),
+            Arc::new(SkillRegistry::new()),
+        )),
+        plugin_registry: Arc::new(PluginRegistry::new()),
+        plugin_loader: Arc::new(PluginLoader::new(
+            std::env::temp_dir(),
+            Arc::new(PluginRegistry::new()),
+        )),
+        hook_registry: Arc::new(HookRegistry::new()),
+        plugin_manager: None,
+        event_tx: test_event_sender().clone(),
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: Some(client.clone()),
+    };
+    let app = build_router(app_state, None);
+
+    let send_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/comms/send")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "msg_type": "task",
+                        "subject": "test task",
+                        "body": "ship it",
+                        "priority": "p1"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(send_resp.status(), StatusCode::OK);
+
+    let receiver = rune_runtime::CommsClient::new(&comms_dir, "horizon-ai", "rune");
+    let received = receiver.read_inbox().await;
+    assert_eq!(received.len(), 1);
+    assert_eq!(received[0].1.msg_type, "task");
+
+    receiver.send_ack(&received[0].1, "got it").await.unwrap();
+    receiver.archive(&received[0].0).await.unwrap();
+
+    let inbox_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/comms/inbox")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inbox_resp.status(), StatusCode::OK);
+    let inbox_json = body_json(inbox_resp).await;
+    let messages = inbox_json["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["type"].as_str().unwrap(), "ack");
+
+    let ack_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/comms/ack")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "id": messages[0]["id"].as_str().unwrap(),
+                        "summary": "got it"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ack_resp.status(), StatusCode::OK);
+
+    assert!(
+        std::fs::read_dir(comms_dir.join("rune").join("inbox"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    assert!(
+        std::fs::read_dir(comms_dir.join(".archive"))
+            .unwrap()
+            .next()
+            .is_some()
+    );
+}

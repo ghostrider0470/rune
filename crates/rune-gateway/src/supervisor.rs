@@ -108,6 +108,8 @@ pub struct SupervisorDeps {
     pub plugin_scanner: Option<Arc<PluginScanner>>,
     /// How many supervisor ticks (each ~10s) between re-scans. 0 = disabled.
     pub plugin_scan_interval_ticks: u64,
+    /// Optional inter-agent comms client.
+    pub comms: Option<Arc<rune_runtime::CommsClient>>,
 }
 
 impl BackgroundSupervisor {
@@ -237,6 +239,30 @@ async fn deliver_result(
         trigger,
     )
     .await;
+
+    // Write cron result to comms peer inbox (Announce mode only).
+    if matches!(job.delivery_mode, SchedulerDeliveryMode::Announce) {
+        if let Some(ref comms) = deps.comms {
+            let status_str = match status {
+                rune_runtime::scheduler::JobRunStatus::Completed => "completed",
+                rune_runtime::scheduler::JobRunStatus::Failed => "FAILED",
+                _ => "finished",
+            };
+            let truncated = if output.len() > 3000 {
+                &output[..3000]
+            } else {
+                output
+            };
+            let subject = format!(
+                "[cron:{}] {}",
+                job.name.as_deref().unwrap_or("unknown"),
+                status_str
+            );
+            if let Err(e) = comms.send("result", &subject, truncated, "p2").await {
+                warn!(error = %e, "failed to write cron result to comms");
+            }
+        }
+    }
 }
 
 /// Core delivery logic, callable without full `SupervisorDeps` (for testing).
@@ -327,6 +353,125 @@ async fn deliver_result_standalone(
                         job_id = %job.id, url = %url, error = %error,
                         "webhook delivery failed"
                     );
+                }
+            }
+        }
+    }
+}
+
+/// Process messages from the comms inbox.
+async fn check_comms_inbox(deps: &SupervisorDeps) {
+    let Some(ref comms) = deps.comms else {
+        return;
+    };
+
+    let messages = comms.read_inbox().await;
+    if messages.is_empty() {
+        return;
+    }
+
+    info!(count = messages.len(), "processing comms inbox messages");
+
+    for (path, msg) in messages {
+        debug!(
+            id = %msg.id,
+            msg_type = %msg.msg_type,
+            from = %msg.from,
+            subject = %msg.subject,
+            "processing comms message"
+        );
+
+        match msg.msg_type.as_str() {
+            "ack" | "result" => {
+                // Archive silently.
+                if let Err(e) = comms.archive(&path).await {
+                    warn!(error = %e, "failed to archive comms message");
+                }
+            }
+            "status" => {
+                // Respond with gateway status.
+                let sessions_count = match deps
+                    .session_engine
+                    .session_repo()
+                    .list_active_channel_sessions()
+                    .await
+                {
+                    Ok(s) => s.len(),
+                    Err(_) => 0,
+                };
+                let jobs = deps.scheduler.list_jobs(false).await;
+                let body = format!(
+                    "Gateway status:\n- Active sessions: {}\n- Cron jobs: {}\n- Uptime: running",
+                    sessions_count,
+                    jobs.len()
+                );
+                if let Err(e) = comms
+                    .send("result", &format!("re: {}", msg.subject), &body, "p2")
+                    .await
+                {
+                    warn!(error = %e, "failed to send comms status response");
+                }
+                if let Err(e) = comms.archive(&path).await {
+                    warn!(error = %e, "failed to archive comms message");
+                }
+            }
+            "directive" => {
+                // Ack and archive — directive content available via workspace context.
+                info!(subject = %msg.subject, "received comms directive");
+                if let Err(e) = comms.send_ack(&msg, "Directive received and logged.").await {
+                    warn!(error = %e, "failed to send comms directive ack");
+                }
+                if let Err(e) = comms.archive(&path).await {
+                    warn!(error = %e, "failed to archive comms message");
+                }
+            }
+            "task" | "question" => {
+                // Create isolated agent turn and write result back.
+                let prompt = format!(
+                    "[Inter-Agent Comms] This message is from {} via the .comms/ mailbox.\n\
+                    Priority: {}\nSubject: {}\n\n{}\n\n\
+                    Respond with a clear, actionable answer. Your response will be sent back as a result message.",
+                    msg.from, msg.priority, msg.subject, msg.body
+                );
+                match run_agent_turn(deps, &prompt, None, SessionTarget::Isolated).await {
+                    Ok(response) => {
+                        let truncated = if response.len() > 3000 {
+                            &response[..3000]
+                        } else {
+                            &response
+                        };
+                        if let Err(e) = comms
+                            .send(
+                                "result",
+                                &format!("re: {}", msg.subject),
+                                truncated,
+                                &msg.priority,
+                            )
+                            .await
+                        {
+                            warn!(error = %e, "failed to send comms task result");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "comms task agent turn failed");
+                        let _ = comms
+                            .send(
+                                "result",
+                                &format!("re: {} [error]", msg.subject),
+                                &format!("Agent turn failed: {e}"),
+                                "p1",
+                            )
+                            .await;
+                    }
+                }
+                if let Err(e) = comms.archive(&path).await {
+                    warn!(error = %e, "failed to archive comms message");
+                }
+            }
+            other => {
+                warn!(msg_type = other, "unknown comms message type, archiving");
+                if let Err(e) = comms.archive(&path).await {
+                    warn!(error = %e, "failed to archive comms message");
                 }
             }
         }
@@ -472,6 +617,9 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                 }
             }
         }
+
+        // --- Inter-agent comms inbox check ---
+        check_comms_inbox(&deps).await;
     }
 }
 

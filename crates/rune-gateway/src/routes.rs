@@ -15,12 +15,12 @@ use tracing::info;
 use uuid::Uuid;
 
 use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
+use rune_runtime::comms::CommsMessage;
 use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
     SessionTarget, compute_initial_next_run,
 };
-use rune_runtime::comms::CommsMessage;
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
@@ -317,7 +317,9 @@ pub async fn comms_send(
     }))
 }
 
-pub async fn comms_inbox(State(state): State<AppState>) -> Result<Json<CommsInboxResponse>, GatewayError> {
+pub async fn comms_inbox(
+    State(state): State<AppState>,
+) -> Result<Json<CommsInboxResponse>, GatewayError> {
     let client = state
         .comms_client
         .clone()
@@ -352,7 +354,10 @@ pub async fn comms_ack(
         .send_ack(&original, body.summary.as_deref().unwrap_or("received"))
         .await
         .map_err(GatewayError::BadRequest)?;
-    client.archive(&path).await.map_err(GatewayError::BadRequest)?;
+    client
+        .archive(&path)
+        .await
+        .map_err(GatewayError::BadRequest)?;
 
     Ok(Json(CommsAckResponse {
         success: true,
@@ -954,6 +959,7 @@ pub async fn cron_run(
         operator_delivery: None,
         plugin_scanner: None,
         plugin_scan_interval_ticks: 0,
+        comms: state.comms_client.clone(),
     };
 
     let (_status, _output) =

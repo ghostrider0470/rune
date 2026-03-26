@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
+use rune_runtime::CommsClient;
 use rune_runtime::{
     HookRegistry, PluginLoader, PluginManager, PluginRegistry, SessionEngine, SkillLoader,
     SkillRegistry, TurnExecutor,
@@ -169,4 +170,6 @@ pub struct AppState {
     pub ms365_files_service: Arc<dyn Ms365FilesService>,
     /// Microsoft 365 Users read backend.
     pub ms365_users_service: Arc<dyn Ms365UsersService>,
+    /// Optional filesystem mailbox client for native inter-agent comms.
+    pub comms_client: Option<Arc<CommsClient>>,
 }

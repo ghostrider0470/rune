@@ -22,8 +22,8 @@ pub use events::{
     broadcast_runtime_event,
 };
 pub use logging::init_logging;
-pub use server::{GatewayHandle, Services, build_router, start};
 pub use routes::{DoctorCheck, storage_path_checks_for_tests};
+pub use server::{GatewayHandle, Services, build_router, start};
 pub use state::{AppState, SessionEvent, WebChatRateLimiter};
 pub use supervisor::BackgroundSupervisor;
 pub(crate) use supervisor::{SupervisorDeps, run_job_lifecycle};
