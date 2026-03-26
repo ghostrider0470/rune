@@ -551,12 +551,8 @@ impl TurnExecutor {
                     summary: details.clone(),
                     command: extract_approval_command(&details),
                 };
-                self.append_transcript(
-                    session_id,
-                    Some(turn_uuid),
-                    &followup_approval,
-                )
-                .await?;
+                self.append_transcript(session_id, Some(turn_uuid), &followup_approval)
+                    .await?;
 
                 self.approval_repo
                     .create(NewApproval {
@@ -582,7 +578,9 @@ impl TurnExecutor {
                     approval.id,
                     resumed_at,
                     "waiting_for_approval",
-                    Some(format!("tool resume requires another approval gate for {tool}")),
+                    Some(format!(
+                        "tool resume requires another approval gate for {tool}"
+                    )),
                 )
                 .await?;
                 return Ok((turn, usage));

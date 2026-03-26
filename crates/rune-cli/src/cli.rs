@@ -5701,7 +5701,6 @@ mod subagent_cli_tests {
         }
     }
 
-
     #[test]
     fn parse_ms365_calendar_update() {
         let cli = Cli::try_parse_from([
@@ -5723,12 +5722,23 @@ mod subagent_cli_tests {
             "Teams",
             "--body",
             "Agenda",
-        ]).unwrap();
+        ])
+        .unwrap();
         match cli.command {
             Command::Ms365 {
-                action: Ms365Action::Calendar {
-                    action: Ms365CalendarAction::Update { id, subject, start, end, attendees, location, body },
-                },
+                action:
+                    Ms365Action::Calendar {
+                        action:
+                            Ms365CalendarAction::Update {
+                                id,
+                                subject,
+                                start,
+                                end,
+                                attendees,
+                                location,
+                                body,
+                            },
+                    },
             } => {
                 assert_eq!(id, "evt456");
                 assert_eq!(subject.as_deref(), Some("Updated"));

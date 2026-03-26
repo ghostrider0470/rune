@@ -1750,7 +1750,6 @@ async fn resume_approval_rejects_redeciding_completed_approval() {
     );
 }
 
-
 #[tokio::test]
 async fn approval_resume_retains_reapproval_linkage_for_followup_approval() {
     let h = TestHarness::new();
@@ -1816,7 +1815,10 @@ async fn approval_resume_retains_reapproval_linkage_for_followup_approval() {
     let first_approval = approvals[0].clone();
     let session_id = session.id.to_string();
     let turn_id = blocked_turn.id.to_string();
-    assert_eq!(first_approval.handle_ref.as_deref(), Some(session_id.as_str()));
+    assert_eq!(
+        first_approval.handle_ref.as_deref(),
+        Some(session_id.as_str())
+    );
     assert_eq!(first_approval.host_ref.as_deref(), Some(turn_id.as_str()));
 
     h.approval_repo
