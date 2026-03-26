@@ -12,6 +12,8 @@ pub mod pool;
 pub mod repos;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
+#[cfg(feature = "cosmos")]
+pub mod cosmos;
 
 #[cfg(feature = "postgres")]
 pub use embedded::EmbeddedPg;

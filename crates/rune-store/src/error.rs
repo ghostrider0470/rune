@@ -87,3 +87,20 @@ impl From<tokio_rusqlite::Error<rusqlite::Error>> for StoreError {
         }
     }
 }
+
+#[cfg(feature = "cosmos")]
+impl From<azure_core::Error> for StoreError {
+    fn from(err: azure_core::Error) -> Self {
+        let msg = err.to_string();
+        if msg.contains("NotFound") || msg.contains("404") {
+            StoreError::NotFound {
+                entity: "document",
+                id: "unknown".to_string(),
+            }
+        } else if msg.contains("Conflict") || msg.contains("409") {
+            StoreError::Conflict(msg)
+        } else {
+            StoreError::Database(msg)
+        }
+    }
+}
