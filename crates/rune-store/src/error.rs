@@ -41,19 +41,21 @@ impl From<serde_json::Error> for StoreError {
 }
 
 #[cfg(feature = "postgres")]
-impl From<diesel::result::Error> for StoreError {
-    fn from(err: diesel::result::Error) -> Self {
-        match err {
-            diesel::result::Error::NotFound => Self::NotFound {
-                entity: "record",
-                id: "unknown".to_string(),
-            },
-            diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::UniqueViolation,
-                info,
-            ) => Self::Conflict(info.message().to_string()),
-            other => Self::Database(other.to_string()),
+impl From<tokio_postgres::Error> for StoreError {
+    fn from(err: tokio_postgres::Error) -> Self {
+        let msg = err.to_string();
+        if msg.contains("duplicate key") || msg.contains("unique constraint") {
+            StoreError::Conflict(msg)
+        } else {
+            StoreError::Database(msg)
         }
+    }
+}
+
+#[cfg(feature = "postgres")]
+impl From<deadpool_postgres::PoolError> for StoreError {
+    fn from(err: deadpool_postgres::PoolError) -> Self {
+        StoreError::Database(format!("pool error: {err}"))
     }
 }
 

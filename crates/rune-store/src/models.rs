@@ -1,27 +1,16 @@
 //! Row structs for insert and query.
 //!
-//! When the `postgres` feature is active, Diesel derives are included.
-//! Otherwise the structs are plain data types usable by any backend.
+//! These are plain data types usable by any backend. The Diesel derives
+//! have been removed as part of the tokio-postgres migration.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
-use diesel::prelude::*;
-
-#[cfg(feature = "postgres")]
-use crate::schema::*;
-#[cfg(feature = "postgres")]
-use diesel::sql_types::{Float8, Int4, Text, Timestamptz};
-
-// ── Sessions ──────────────────────────────────────────────────────────
+// -- Sessions --
 
 /// A session row as returned by queries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = sessions))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct SessionRow {
     pub id: Uuid,
     pub kind: String,
@@ -40,8 +29,6 @@ pub struct SessionRow {
 
 /// Insert payload for a new session.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = sessions))]
 pub struct NewSession {
     pub id: Uuid,
     pub kind: String,
@@ -58,13 +45,10 @@ pub struct NewSession {
     pub last_activity_at: DateTime<Utc>,
 }
 
-// ── Turns ─────────────────────────────────────────────────────────────
+// -- Turns --
 
 /// A turn row as returned by queries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = turns))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct TurnRow {
     pub id: Uuid,
     pub session_id: Uuid,
@@ -79,8 +63,6 @@ pub struct TurnRow {
 
 /// Insert payload for a new turn.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = turns))]
 pub struct NewTurn {
     pub id: Uuid,
     pub session_id: Uuid,
@@ -93,13 +75,10 @@ pub struct NewTurn {
     pub usage_completion_tokens: Option<i32>,
 }
 
-// ── Transcript items ──────────────────────────────────────────────────
+// -- Transcript items --
 
 /// A transcript item row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = transcript_items))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct TranscriptItemRow {
     pub id: Uuid,
     pub session_id: Uuid,
@@ -112,8 +91,6 @@ pub struct TranscriptItemRow {
 
 /// Insert payload for a new transcript item.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = transcript_items))]
 pub struct NewTranscriptItem {
     pub id: Uuid,
     pub session_id: Uuid,
@@ -124,13 +101,10 @@ pub struct NewTranscriptItem {
     pub created_at: DateTime<Utc>,
 }
 
-// ── Jobs ──────────────────────────────────────────────────────────────
+// -- Jobs --
 
 /// A job row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = jobs))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct JobRow {
     pub id: Uuid,
     pub job_type: String,
@@ -150,8 +124,6 @@ pub struct JobRow {
 
 /// Insert payload for a new job.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = jobs))]
 pub struct NewJob {
     pub id: Uuid,
     pub job_type: String,
@@ -166,13 +138,10 @@ pub struct NewJob {
     pub updated_at: DateTime<Utc>,
 }
 
-// ── Job runs ────────────────────────────────────────────────────────────────
+// -- Job runs --
 
 /// A durable job-run row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = job_runs))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct JobRunRow {
     pub id: Uuid,
     pub job_id: Uuid,
@@ -186,8 +155,6 @@ pub struct JobRunRow {
 
 /// Insert payload for a durable job-run record.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = job_runs))]
 pub struct NewJobRun {
     pub id: Uuid,
     pub job_id: Uuid,
@@ -199,13 +166,10 @@ pub struct NewJobRun {
     pub created_at: DateTime<Utc>,
 }
 
-// ── Approvals ─────────────────────────────────────────────────────────
+// -- Approvals --
 
 /// An approval row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = approvals))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct ApprovalRow {
     pub id: Uuid,
     pub subject_type: String,
@@ -222,8 +186,6 @@ pub struct ApprovalRow {
 
 /// Insert payload for a new approval.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = approvals))]
 pub struct NewApproval {
     pub id: Uuid,
     pub subject_type: String,
@@ -235,13 +197,10 @@ pub struct NewApproval {
     pub host_ref: Option<String>,
 }
 
-// ── Tool executions ───────────────────────────────────────────────────
+// -- Tool executions --
 
 /// A tool execution row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = tool_executions))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct ToolExecutionRow {
     pub id: Uuid,
     pub tool_call_id: Uuid,
@@ -260,8 +219,6 @@ pub struct ToolExecutionRow {
 
 /// Insert payload for a new tool execution.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = tool_executions))]
 pub struct NewToolExecution {
     pub id: Uuid,
     pub tool_call_id: Uuid,
@@ -275,13 +232,10 @@ pub struct NewToolExecution {
     pub execution_mode: Option<String>,
 }
 
-// ── Device pairing ───────────────────────────────────────────────────────────
+// -- Device pairing --
 
 /// A paired device row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = paired_devices))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct PairedDeviceRow {
     pub id: Uuid,
     pub name: String,
@@ -297,8 +251,6 @@ pub struct PairedDeviceRow {
 
 /// Insert payload for a new paired device.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = paired_devices))]
 pub struct NewPairedDevice {
     pub id: Uuid,
     pub name: String,
@@ -313,9 +265,6 @@ pub struct NewPairedDevice {
 
 /// A pairing request row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = pairing_requests))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct PairingRequestRow {
     pub id: Uuid,
     pub device_name: String,
@@ -327,8 +276,6 @@ pub struct PairingRequestRow {
 
 /// Insert payload for a new pairing request.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = pairing_requests))]
 pub struct NewPairingRequest {
     pub id: Uuid,
     pub device_name: String,
@@ -338,13 +285,10 @@ pub struct NewPairingRequest {
     pub expires_at: DateTime<Utc>,
 }
 
-// ── Memory embeddings ─────────────────────────────────────────────────
+// -- Memory embeddings --
 
 /// A persisted memory embedding chunk row (excluding the vector column).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = memory_embeddings))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct MemoryEmbeddingRow {
     pub id: Uuid,
     pub file_path: String,
@@ -355,67 +299,46 @@ pub struct MemoryEmbeddingRow {
 
 /// Result row from keyword search raw SQL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(QueryableByName))]
 pub struct KeywordSearchRow {
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Text))]
     pub file_path: String,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Text))]
     pub chunk_text: String,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Float8))]
     pub score: f64,
 }
 
 /// Result row from vector search raw SQL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(QueryableByName))]
 pub struct VectorSearchRow {
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Text))]
     pub file_path: String,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Text))]
     pub chunk_text: String,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Float8))]
     pub score: f64,
 }
 
 /// Result row for listing distinct indexed files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(QueryableByName))]
 pub struct IndexedFileRow {
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Text))]
     pub file_path: String,
 }
 
 /// Result row for raw COUNT(*) queries over memory embeddings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(QueryableByName))]
 pub struct CountRow {
-    #[cfg_attr(feature = "postgres", diesel(sql_type = diesel::sql_types::BigInt))]
     pub count: i64,
 }
 
 /// Result row for loading a memory embedding row via raw SQL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(QueryableByName))]
 pub struct MemoryEmbeddingByNameRow {
-    #[cfg_attr(feature = "postgres", diesel(sql_type = diesel::sql_types::Uuid))]
     pub id: Uuid,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Text))]
     pub file_path: String,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Int4))]
     pub chunk_index: i32,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Text))]
     pub chunk_text: String,
-    #[cfg_attr(feature = "postgres", diesel(sql_type = Timestamptz))]
     pub created_at: DateTime<Utc>,
 }
 
-// ── Channel deliveries ────────────────────────────────────────────────
+// -- Channel deliveries --
 
 /// A channel delivery row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = channel_deliveries))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct ChannelDeliveryRow {
     pub id: Uuid,
     pub channel: String,
@@ -431,8 +354,6 @@ pub struct ChannelDeliveryRow {
 
 /// Insert payload for a new channel delivery.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = channel_deliveries))]
 pub struct NewChannelDelivery {
     pub id: Uuid,
     pub channel: String,
@@ -443,13 +364,10 @@ pub struct NewChannelDelivery {
     pub created_at: DateTime<Utc>,
 }
 
-// ── Process handles ─────────────────────────────────────────────────────
+// -- Process handles --
 
 /// A durable process handle row as returned by queries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "postgres", derive(Queryable, Selectable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = process_handles))]
-#[cfg_attr(feature = "postgres", diesel(check_for_backend(diesel::pg::Pg)))]
 pub struct ProcessHandleRow {
     pub process_id: Uuid,
     pub tool_call_id: Uuid,
@@ -466,8 +384,6 @@ pub struct ProcessHandleRow {
 
 /// Insert payload for a new process handle.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "postgres", derive(Insertable))]
-#[cfg_attr(feature = "postgres", diesel(table_name = process_handles))]
 pub struct NewProcessHandle {
     pub process_id: Uuid,
     pub tool_call_id: Uuid,

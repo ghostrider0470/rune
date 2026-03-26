@@ -10,8 +10,6 @@ pub mod pg;
 #[cfg(feature = "postgres")]
 pub mod pool;
 pub mod repos;
-#[cfg(feature = "postgres")]
-pub mod schema;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 

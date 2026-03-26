@@ -192,20 +192,20 @@ async fn build_pg_repos(
         (url, Some(epg))
     };
 
+    let pool = pool::create_pool(&database_url, config.database.max_connections as usize)?;
+
     if config.database.run_migrations {
         info!("running pending database migrations");
-        pool::run_migrations(&database_url)?;
+        pool::run_migrations(&pool).await?;
     }
 
-    let pgvector_status = pool::try_upgrade_pgvector(&database_url);
+    let pgvector_status = pool::try_upgrade_pgvector(&pool).await;
     match &pgvector_status {
         pool::PgVectorStatus::Available => info!("pgvector available — vector search enabled"),
         pool::PgVectorStatus::Unavailable(reason) => {
             tracing::warn!(reason, "pgvector unavailable — keyword search only")
         }
     }
-
-    let pool = pool::create_pool(&database_url, config.database.max_connections as usize)?;
 
     let backend_name = if embedded_pg.is_some() {
         "postgres (embedded)"

@@ -1,36 +1,165 @@
-//! Connection pool creation and migration runner.
+//! Connection pool creation and migration runner for tokio-postgres.
 
-use diesel::pg::PgConnection;
-use diesel::prelude::*;
-use diesel_async::AsyncPgConnection;
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod, Runtime};
+use native_tls::TlsConnector;
+use postgres_native_tls::MakeTlsConnector;
+use tokio_postgres::NoTls;
+use tracing::{debug, info, warn};
 
 use crate::error::StoreError;
 
-/// Async connection pool backed by deadpool.
-pub type PgPool = Pool<AsyncPgConnection>;
-
-/// Embedded migrations compiled into the binary.
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
+/// Async connection pool backed by deadpool-postgres.
+pub type PgPool = Pool;
 
 /// Create an async connection pool for the given database URL.
+///
+/// Automatically enables TLS if the URL contains `sslmode=require`.
 pub fn create_pool(database_url: &str, max_size: usize) -> Result<PgPool, StoreError> {
-    let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
-    Pool::builder(config)
-        .max_size(max_size)
-        .build()
-        .map_err(|e| StoreError::Database(format!("failed to build connection pool: {e}")))
+    let mut cfg = Config::new();
+    cfg.url = Some(database_url.to_string());
+    cfg.manager = Some(ManagerConfig {
+        recycling_method: RecyclingMethod::Fast,
+    });
+    cfg.pool = Some(deadpool_postgres::PoolConfig {
+        max_size,
+        ..Default::default()
+    });
+
+    let needs_tls =
+        database_url.contains("sslmode=require") || database_url.contains("sslmode=verify");
+
+    if needs_tls {
+        let tls_connector = TlsConnector::builder()
+            .build()
+            .map_err(|e| StoreError::Database(format!("TLS connector build failed: {e}")))?;
+        let pg_tls = MakeTlsConnector::new(tls_connector);
+        cfg.create_pool(Some(Runtime::Tokio1), pg_tls)
+            .map_err(|e| StoreError::Database(format!("failed to build TLS connection pool: {e}")))
+    } else {
+        cfg.create_pool(Some(Runtime::Tokio1), NoTls)
+            .map_err(|e| StoreError::Database(format!("failed to build connection pool: {e}")))
+    }
 }
 
-/// Run all pending Diesel migrations using a synchronous connection.
-pub fn run_migrations(database_url: &str) -> Result<(), StoreError> {
-    let mut conn = PgConnection::establish(database_url)
-        .map_err(|e| StoreError::Database(format!("failed to connect for migrations: {e}")))?;
-    conn.run_pending_migrations(MIGRATIONS)
-        .map_err(|e| StoreError::Migration(e.to_string()))?;
+/// Run all pending migrations using an active pool connection.
+///
+/// Migrations are embedded as SQL files from the `migrations/` directory.
+/// Tracks applied migrations in a `_rune_pg_migrations` table.
+pub async fn run_migrations(pool: &PgPool) -> Result<(), StoreError> {
+    let client = pool
+        .get()
+        .await
+        .map_err(|e| StoreError::Database(format!("pool error for migrations: {e}")))?;
+
+    // Create tracking table
+    client
+        .batch_execute(
+            "CREATE TABLE IF NOT EXISTS _rune_pg_migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )",
+        )
+        .await
+        .map_err(|e| StoreError::Migration(format!("failed to create migration tracker: {e}")))?;
+
+    // Get already-applied migrations
+    let applied: Vec<String> = client
+        .query(
+            "SELECT name FROM _rune_pg_migrations ORDER BY name",
+            &[],
+        )
+        .await
+        .map_err(|e| StoreError::Migration(format!("failed to read applied migrations: {e}")))?
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+
+    // Embedded migrations -- ordered list of (name, sql)
+    let migrations = embedded_migrations();
+
+    let mut ran = 0;
+    for (name, sql) in &migrations {
+        if applied.contains(name) {
+            continue;
+        }
+        debug!(migration = %name, "running migration");
+        client
+            .batch_execute(sql)
+            .await
+            .map_err(|e| StoreError::Migration(format!("migration {name} failed: {e}")))?;
+        client
+            .execute(
+                "INSERT INTO _rune_pg_migrations (name) VALUES ($1)",
+                &[name],
+            )
+            .await
+            .map_err(|e| {
+                StoreError::Migration(format!("failed to record migration {name}: {e}"))
+            })?;
+        ran += 1;
+    }
+
+    if ran > 0 {
+        info!(count = ran, "applied pending migrations");
+    }
+
     Ok(())
+}
+
+/// Embedded migration SQL files, ordered by directory name.
+fn embedded_migrations() -> Vec<(String, String)> {
+    vec![
+        (
+            "2024-01-01-000000".into(),
+            include_str!("../migrations/2024-01-01-000000_create_tables/up.sql").into(),
+        ),
+        (
+            "2026-03-13-000001".into(),
+            include_str!("../migrations/2026-03-13-000001_add_session_metadata/up.sql").into(),
+        ),
+        (
+            "2026-03-14-000002".into(),
+            include_str!("../migrations/2026-03-14-000002_add_job_runs/up.sql").into(),
+        ),
+        (
+            "2026-03-15-000004".into(),
+            include_str!("../migrations/2026-03-15-000004_add_paired_devices/up.sql").into(),
+        ),
+        (
+            "2026-03-16-000005".into(),
+            include_str!("../migrations/2026-03-16-000005_add_memory_embeddings/up.sql").into(),
+        ),
+        (
+            "2026-03-16-000006".into(),
+            include_str!("../migrations/2026-03-16-000006_unique_token_hash/up.sql").into(),
+        ),
+        (
+            "2026-03-18-000007".into(),
+            include_str!("../migrations/2026-03-18-000007_add_process_handles/up.sql").into(),
+        ),
+        (
+            "2026-03-18-000008".into(),
+            include_str!("../migrations/2026-03-18-000008_add_latest_turn_id_to_sessions/up.sql")
+                .into(),
+        ),
+        (
+            "2026-03-18-000009".into(),
+            include_str!("../migrations/2026-03-18-000009_add_scheduler_semantics/up.sql").into(),
+        ),
+        (
+            "2026-03-19-000010".into(),
+            include_str!("../migrations/2026-03-19-000010_add_durable_claims/up.sql").into(),
+        ),
+        (
+            "2026-03-21-000011".into(),
+            include_str!("../migrations/2026-03-21-000011_process_handle_audit_linkage/up.sql")
+                .into(),
+        ),
+        (
+            "2026-03-23-000012".into(),
+            include_str!("../migrations/2026-03-23-000012_session_profile_fields/up.sql").into(),
+        ),
+    ]
 }
 
 /// Whether pgvector is available in the connected PostgreSQL instance.
@@ -46,35 +175,37 @@ impl PgVectorStatus {
     }
 }
 
-/// Attempt to enable the pgvector extension and add the vector column + index
-/// to `memory_embeddings`. Returns [`PgVectorStatus::Available`] if all steps
-/// succeed, or [`PgVectorStatus::Unavailable`] with a reason string if any
-/// step fails. All SQL is idempotent (`IF NOT EXISTS` / `IF NOT EXISTS`).
-pub fn try_upgrade_pgvector(database_url: &str) -> PgVectorStatus {
-    let mut conn = match PgConnection::establish(database_url) {
+/// Attempt to enable pgvector extension and add vector column + index.
+pub async fn try_upgrade_pgvector(pool: &PgPool) -> PgVectorStatus {
+    let client = match pool.get().await {
         Ok(c) => c,
-        Err(e) => return PgVectorStatus::Unavailable(format!("connection failed: {e}")),
+        Err(e) => return PgVectorStatus::Unavailable(format!("pool error: {e}")),
     };
 
-    if let Err(e) = diesel::sql_query("CREATE EXTENSION IF NOT EXISTS vector").execute(&mut conn) {
+    if let Err(e) = client
+        .batch_execute("CREATE EXTENSION IF NOT EXISTS vector")
+        .await
+    {
         return PgVectorStatus::Unavailable(format!("CREATE EXTENSION vector failed: {e}"));
     }
 
-    if let Err(e) = diesel::sql_query(
-        "ALTER TABLE memory_embeddings ADD COLUMN IF NOT EXISTS embedding vector(1536)",
-    )
-    .execute(&mut conn)
+    if let Err(e) = client
+        .batch_execute(
+            "ALTER TABLE memory_embeddings ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        )
+        .await
     {
         return PgVectorStatus::Unavailable(format!("ADD COLUMN embedding failed: {e}"));
     }
 
-    if let Err(e) = diesel::sql_query(
-        "CREATE INDEX IF NOT EXISTS idx_memory_embedding \
-         ON memory_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)",
-    )
-    .execute(&mut conn)
+    if let Err(e) = client
+        .batch_execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_embedding \
+             ON memory_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)",
+        )
+        .await
     {
-        return PgVectorStatus::Unavailable(format!("CREATE INDEX ivfflat failed: {e}"));
+        warn!(error = %e, "ivfflat index not created -- brute-force cosine search will be used");
     }
 
     PgVectorStatus::Available

@@ -7,16 +7,17 @@ license.workspace = true
 
 [features]
 default = ["postgres", "sqlite"]
-postgres = ["dep:diesel", "dep:diesel-async", "dep:diesel_migrations", "dep:postgresql_embedded"]
+postgres = ["dep:tokio-postgres", "dep:deadpool-postgres", "dep:postgres-native-tls", "dep:native-tls", "dep:postgresql_embedded"]
 sqlite = ["dep:rusqlite", "dep:tokio-rusqlite"]
 
 [dependencies]
 rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
 async-trait.workspace = true
-diesel = { workspace = true, features = ["postgres", "uuid", "chrono", "serde_json"], optional = true }
-diesel-async = { workspace = true, features = ["postgres", "deadpool"], optional = true }
-diesel_migrations = { workspace = true, optional = true }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"], optional = true }
+deadpool-postgres = { version = "0.14", optional = true }
+postgres-native-tls = { version = "0.5", optional = true }
+native-tls = { version = "0.2", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -29,7 +30,6 @@ rusqlite = { workspace = true, optional = true }
 tokio-rusqlite = { workspace = true, optional = true }
 
 [dev-dependencies]
-diesel-async = { workspace = true, features = ["postgres", "deadpool"] }
 serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
