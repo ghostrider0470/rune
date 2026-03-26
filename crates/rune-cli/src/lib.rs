@@ -559,7 +559,10 @@ fn browser_launch_url(
 }
 
 fn open_url_in_browser(url: &str) -> Result<()> {
-    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+    if cfg!(target_os = "linux")
+        && std::env::var_os("DISPLAY").is_none()
+        && std::env::var_os("WAYLAND_DISPLAY").is_none()
+    {
         anyhow::bail!(
             "no graphical browser session detected; rerun with --no-open or open {} manually",
             url
@@ -599,6 +602,7 @@ struct InitWizardOptions<'a> {
     webchat: bool,
     start: bool,
     open: bool,
+    print_url: bool,
     non_interactive: bool,
     install_service: bool,
     service_target: ServiceTarget,
@@ -763,6 +767,10 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
 
     if options.print_next_steps {
         open_config_instructions(&workspace, &config_path);
+    }
+
+    if options.print_next_steps || options.print_url {
+        println!("→ Chat URL: {url}");
     }
 
     if options.open {
@@ -2136,6 +2144,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             no_start,
             open,
             no_open,
+            print_url,
             non_interactive,
             install_service,
             service_target,
@@ -2154,6 +2163,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 webchat,
                 start: start && !no_start,
                 open: open && !no_open,
+                print_url,
                 non_interactive,
                 install_service,
                 service_target,
@@ -3481,6 +3491,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 webchat: true,
                 start: true,
                 open: true,
+                print_url: false,
                 non_interactive: false,
                 install_service: false,
                 service_target: ServiceTarget::Systemd,
@@ -3502,6 +3513,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             no_start,
             open,
             no_open,
+            print_url,
             non_interactive,
             install_service,
             service_target,
@@ -3522,6 +3534,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             no_start,
             open,
             no_open,
+            print_url,
             non_interactive,
             install_service,
             service_target,
@@ -3542,6 +3555,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             no_start,
             open,
             no_open,
+            print_url,
             non_interactive,
             install_service,
             service_target,
@@ -3560,6 +3574,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 webchat,
                 start: start && !no_start,
                 open: open && !no_open,
+                print_url,
                 non_interactive,
                 install_service,
                 service_target,
@@ -3931,6 +3946,37 @@ mod tests {
         assert!(stdout.contains("--install-service --service-target systemd"));
         assert!(stdout.contains("--service-target launchd"));
         assert!(stdout.contains("docker compose up --build -d"));
+    }
+
+    #[test]
+    fn open_url_in_browser_fails_without_display_on_linux() {
+        if !cfg!(target_os = "linux") {
+            return;
+        }
+
+        let display = std::env::var_os("DISPLAY");
+        let wayland = std::env::var_os("WAYLAND_DISPLAY");
+        unsafe {
+            std::env::remove_var("DISPLAY");
+            std::env::remove_var("WAYLAND_DISPLAY");
+        }
+
+        let err = open_url_in_browser("http://127.0.0.1:8787/webchat").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("no graphical browser session detected")
+        );
+
+        unsafe {
+            match display {
+                Some(value) => std::env::set_var("DISPLAY", value),
+                None => std::env::remove_var("DISPLAY"),
+            }
+            match wayland {
+                Some(value) => std::env::set_var("WAYLAND_DISPLAY", value),
+                None => std::env::remove_var("WAYLAND_DISPLAY"),
+            }
+        }
     }
 
     #[test]

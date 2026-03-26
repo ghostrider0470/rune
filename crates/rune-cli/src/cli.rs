@@ -186,6 +186,9 @@ pub enum Command {
         /// Skip opening the browser after startup.
         #[arg(long = "no-open", default_value_t = false)]
         no_open: bool,
+        /// Print the launch URL instead of opening a browser.
+        #[arg(long, default_value_t = false)]
+        print_url: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
@@ -265,6 +268,9 @@ pub enum Command {
         /// Skip opening the browser after startup.
         #[arg(long = "no-open", default_value_t = false)]
         no_open: bool,
+        /// Print the launch URL instead of opening a browser.
+        #[arg(long, default_value_t = false)]
+        print_url: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
@@ -342,6 +348,9 @@ pub enum Command {
         /// Skip opening the browser after startup.
         #[arg(long = "no-open", default_value_t = false)]
         no_open: bool,
+        /// Print the launch URL instead of opening a browser.
+        #[arg(long, default_value_t = false)]
+        print_url: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
@@ -399,6 +408,9 @@ pub enum Command {
         /// Skip opening the browser after startup.
         #[arg(long = "no-open", default_value_t = false)]
         no_open: bool,
+        /// Print the launch URL instead of opening a browser.
+        #[arg(long, default_value_t = false)]
+        print_url: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
@@ -5526,6 +5538,17 @@ mod subagent_cli_tests {
     }
 
     #[test]
+    fn parse_setup_print_url() {
+        let cli = Cli::try_parse_from(["rune", "setup", "--print-url"]).unwrap();
+        match cli.command {
+            Command::Setup { print_url, .. } => {
+                assert!(print_url);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_wizard_no_open() {
         let cli = Cli::try_parse_from(["rune", "wizard", "--no-open"]).unwrap();
         match cli.command {
@@ -5538,12 +5561,34 @@ mod subagent_cli_tests {
     }
 
     #[test]
+    fn parse_wizard_print_url() {
+        let cli = Cli::try_parse_from(["rune", "wizard", "--print-url"]).unwrap();
+        match cli.command {
+            Command::Wizard { print_url, .. } => {
+                assert!(print_url);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_onboard_no_open() {
         let cli = Cli::try_parse_from(["rune", "onboard", "--no-open"]).unwrap();
         match cli.command {
             Command::Onboard { open, no_open, .. } => {
                 assert!(open);
                 assert!(no_open);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_onboard_print_url() {
+        let cli = Cli::try_parse_from(["rune", "onboard", "--print-url"]).unwrap();
+        match cli.command {
+            Command::Onboard { print_url, .. } => {
+                assert!(print_url);
             }
             other => panic!("unexpected: {other:?}"),
         }
