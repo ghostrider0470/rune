@@ -43,7 +43,7 @@ What this does:
 - writes `config.toml` with local SQLite storage and UI/WebChat enabled
 - enables browser WebChat
 - starts the gateway locally
-- opens `http://127.0.0.1:8787/chat`
+- opens `http://127.0.0.1:8787/webchat`
 
 For non-interactive CI/script usage, add `--non-interactive`. If you skip automatic startup, the wizard prints the exact `rune-gateway --config ...` and `rune service install --workdir ... --config ... --enable --start` commands to finish setup.
 
@@ -126,6 +126,7 @@ OPENAI_API_KEY=... docker compose -f docker-compose.zero-config.yml up --build -
 
 After Rune starts, check:
 - dashboard at `http://127.0.0.1:8787/dashboard`
+- browser chat at `http://127.0.0.1:8787/webchat`
 - status/health surfaces through the gateway
 - local logs/console output for startup failures
 

@@ -240,6 +240,8 @@ fn open_config_instructions(workspace: &Path, config_path: &Path) {
         "  - install a background service: rune service install --workdir {} --config {} --enable --start",
         workspace_hint, config_hint
     );
+    eprintln!("  - open chat: http://127.0.0.1:8787/webchat");
+    eprintln!("  - open dashboard: http://127.0.0.1:8787/dashboard");
 }
 
 fn start_gateway_process(workspace: &Path, config_path: &Path) -> Result<Child> {
@@ -544,7 +546,10 @@ async fn run_init_wizard(
         }
     }
 
-    let url = "http://127.0.0.1:8787/chat";
+    let host = "127.0.0.1";
+    let port = 8787u16;
+    let chat_path = if webchat { "/webchat" } else { "/dashboard" };
+    let url = format!("http://{host}:{port}{chat_path}");
     if start {
         let child = start_gateway_process(&workspace, &config_path)?;
         println!("✓ Started gateway (pid {})", child.id());
@@ -552,8 +557,8 @@ async fn run_init_wizard(
         open_config_instructions(&workspace, &config_path);
     }
 
-    if webchat && open {
-        open_url_in_browser(url)?;
+    if open {
+        open_url_in_browser(&url)?;
         println!("✓ Opened {url}");
     }
 
