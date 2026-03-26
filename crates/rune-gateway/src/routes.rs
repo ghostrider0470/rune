@@ -100,6 +100,26 @@ pub struct StatusResponse {
 }
 
 #[derive(Serialize)]
+pub struct UpdateCheckResponse {
+    pub available: bool,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
+pub struct UpdateApplyResponse {
+    pub success: bool,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
+pub struct UpdateStatusResponse {
+    pub current_version: String,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
 pub struct CapabilitiesResponse {
     pub mode: &'static str,
     pub storage_backend: String,
@@ -4785,6 +4805,85 @@ pub async fn setup(
     State(state): State<AppState>,
 ) -> Result<Json<ConfigureGatewayResponse>, GatewayError> {
     configure(State(state)).await
+}
+
+/// `GET /update/check` — report the currently running version and whether a newer Git HEAD exists.
+pub async fn update_check() -> Result<Json<UpdateCheckResponse>, GatewayError> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let detail = if let Some((current, latest)) = git_update_versions() {
+        let available = current != latest;
+        let detail = if available {
+            format!("local checkout is behind Git HEAD ({current} -> {latest})")
+        } else {
+            format!("local checkout matches Git HEAD ({current})")
+        };
+        return Ok(Json(UpdateCheckResponse {
+            available,
+            current_version: current,
+            latest_version: Some(latest),
+            detail,
+        }));
+    } else {
+        "gateway build is not running from a Git checkout; remote update availability unknown"
+            .to_string()
+    };
+
+    Ok(Json(UpdateCheckResponse {
+        available: false,
+        current_version,
+        latest_version: None,
+        detail,
+    }))
+}
+
+/// `POST /update/apply` — guide operators to the supported source/self-update flows.
+pub async fn update_apply() -> Result<Json<UpdateApplyResponse>, GatewayError> {
+    Ok(Json(UpdateApplyResponse {
+        success: false,
+        detail: "automatic in-process update apply is not supported yet; pull the checkout, rebuild `rune` + `rune-gateway`, then restart the service (or run scripts/self-update.sh from the repo)".to_string(),
+    }))
+}
+
+/// `GET /update/status` — report the running build version and checkout/source status.
+pub async fn update_status() -> Result<Json<UpdateStatusResponse>, GatewayError> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let detail = if let Some((current, latest)) = git_update_versions() {
+        if current == latest {
+            format!("running from Git checkout at HEAD {current}")
+        } else {
+            format!("running from Git checkout at {current}; latest HEAD is {latest}")
+        }
+    } else {
+        "running from packaged build or detached source; Git HEAD status unavailable".to_string()
+    };
+
+    Ok(Json(UpdateStatusResponse {
+        current_version,
+        detail,
+    }))
+}
+
+fn git_update_versions() -> Option<(String, String)> {
+    use std::process::Command;
+
+    let current = Command::new("git")
+        .args(["rev-parse", "--short=12", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())?;
+
+    let latest = Command::new("git")
+        .args(["rev-parse", "--short=12", "@{upstream}"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| current.clone());
+
+    Some((current, latest))
 }
 
 #[cfg(test)]

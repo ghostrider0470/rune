@@ -569,6 +569,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         // Configure / Setup routes
         .route("/configure", post(routes::configure))
         .route("/setup", post(routes::setup))
+        // Update routes
+        .route("/update/check", get(routes::update_check))
+        .route("/update/apply", post(routes::update_apply))
+        .route("/update/status", get(routes::update_status))
         .layer(middleware::from_fn(move |req, next| {
             bearer_auth(req, next, auth_token.clone(), device_registry.clone())
         }))
