@@ -35,8 +35,9 @@ use cli::{
     MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
-    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, SessionsAction,
-    SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction,
+    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, ServiceTarget,
+    SessionsAction, SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
+    UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -192,29 +193,45 @@ fn ensure_parent_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn set_string(doc: &mut DocumentMut, section: &str, key: &str, value: &str) {
-    if !doc[section].is_table() {
+fn ensure_table<'a>(doc: &'a mut DocumentMut, section: &str) -> Result<&'a mut Table> {
+    if !doc.contains_key(section) || !doc[section].is_table() {
         doc[section] = Item::Table(Table::new());
     }
-    doc[section][key] = Item::Value(Value::from(value));
+    doc[section]
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("{section} must be a table"))
 }
 
-fn set_bool(doc: &mut DocumentMut, section: &str, key: &str, value: bool) {
-    if !doc[section].is_table() {
-        doc[section] = Item::Table(Table::new());
+fn set_string(doc: &mut DocumentMut, section: &str, key: &str, value: &str) -> Result<()> {
+    if key.is_empty() {
+        doc[section] = Item::Value(Value::from(value));
+        return Ok(());
     }
-    doc[section][key] = Item::Value(Value::from(value));
+    ensure_table(doc, section)?[key] = Item::Value(Value::from(value));
+    Ok(())
 }
 
-fn set_array_strings(doc: &mut DocumentMut, section: &str, key: &str, values: &[&str]) {
-    if !doc[section].is_table() {
-        doc[section] = Item::Table(Table::new());
+fn set_bool(doc: &mut DocumentMut, section: &str, key: &str, value: bool) -> Result<()> {
+    if key.is_empty() {
+        doc[section] = Item::Value(Value::from(value));
+        return Ok(());
     }
+    ensure_table(doc, section)?[key] = Item::Value(Value::from(value));
+    Ok(())
+}
+
+fn set_array_strings(
+    doc: &mut DocumentMut,
+    section: &str,
+    key: &str,
+    values: &[&str],
+) -> Result<()> {
     let mut arr = toml_edit::Array::default();
     for value in values {
         arr.push(*value);
     }
-    doc[section][key] = Item::Value(Value::Array(arr));
+    ensure_table(doc, section)?[key] = Item::Value(Value::Array(arr));
+    Ok(())
 }
 
 fn discover_home_dir() -> Option<PathBuf> {
@@ -398,34 +415,30 @@ fn write_wizard_config(
             .with_context(|| format!("failed to parse {}", config_path.display()))?
     };
 
-    set_string(&mut doc, "mode", "", "standalone");
+    set_string(&mut doc, "mode", "", "standalone")?;
     if doc["mode"].is_table() {
         doc["mode"] = Item::Value(Value::from("standalone"));
     }
-    set_string(&mut doc, "gateway", "host", "127.0.0.1");
+    set_string(&mut doc, "gateway", "host", "127.0.0.1")?;
     doc["gateway"]["port"] = Item::Value(Value::from(8787));
 
-    set_bool(&mut doc, "browser", "enabled", webchat);
+    set_bool(&mut doc, "browser", "enabled", webchat)?;
     set_array_strings(
         &mut doc,
         "channels",
         "enabled",
         if webchat { &["webchat"] } else { &[] },
-    );
+    )?;
 
-    if !doc["models"].is_table() {
-        doc["models"] = Item::Table(Table::new());
-    }
-    doc["models"]["default_model"] = Item::Value(Value::from(format!("local/{model}")));
-
-    if !doc["models"]["providers"].is_array_of_tables() {
-        doc["models"]["providers"] = Item::ArrayOfTables(Default::default());
-    }
-    let arr = doc["models"]["providers"]
+    let models_table = ensure_table(&mut doc, "models")?;
+    models_table["default_model"] = Item::Value(Value::from(format!("local/{model}")));
+    models_table["providers"] = Item::ArrayOfTables(Default::default());
+    let arr = models_table["providers"]
         .as_array_of_tables_mut()
         .ok_or_else(|| anyhow::anyhow!("models.providers must be an array of tables"))?;
     arr.clear();
     let mut table = toml_edit::Table::new();
+    table.set_implicit(true);
     table["name"] = Item::Value(Value::from("local"));
     table["kind"] = Item::Value(Value::from(provider));
     table["api_key"] = Item::Value(Value::from(api_key));
@@ -437,16 +450,12 @@ fn write_wizard_config(
     table["models"] = Item::Value(Value::Array(models));
     arr.push(table);
 
-    if !doc["storage"].is_table() {
-        doc["storage"] = Item::Table(Table::new());
-    }
-    doc["storage"]["backend"] = Item::Value(Value::from("sqlite"));
-    doc["storage"]["sqlite_path"] = Item::Value(Value::from("state/rune.db"));
+    let storage_table = ensure_table(&mut doc, "storage")?;
+    storage_table["backend"] = Item::Value(Value::from("sqlite"));
+    storage_table["sqlite_path"] = Item::Value(Value::from("state/rune.db"));
 
-    if !doc["ui"].is_table() {
-        doc["ui"] = Item::Table(Table::new());
-    }
-    doc["ui"]["enabled"] = Item::Value(Value::from(true));
+    let ui_table = ensure_table(&mut doc, "ui")?;
+    ui_table["enabled"] = Item::Value(Value::from(true));
 
     std::fs::create_dir_all(workspace.join("state"))
         .with_context(|| format!("failed to create {}", workspace.join("state").display()))?;
@@ -486,6 +495,11 @@ async fn run_init_wizard(
     start: bool,
     open: bool,
     non_interactive: bool,
+    install_service: bool,
+    service_target: ServiceTarget,
+    service_name: &str,
+    service_enable: bool,
+    service_start: bool,
 ) -> Result<()> {
     let workspace = if path == "." {
         default_workspace_root()?
@@ -554,12 +568,35 @@ async fn run_init_wizard(
 
     let host = "127.0.0.1";
     let port = 8787u16;
+    let gateway_url = format!("http://{host}:{port}");
     let chat_path = if webchat { "/webchat" } else { "/dashboard" };
-    let url = format!("http://{host}:{port}{chat_path}");
-    if start {
+    let url = format!("{gateway_url}{chat_path}");
+    let should_start_service = install_service && service_start;
+
+    if install_service {
+        let service = install_service_definition(ServiceInstallOptions {
+            target: service_target,
+            name: service_name.to_string(),
+            workdir: workspace.clone(),
+            config: Some(config_path.display().to_string()),
+            gateway_url: Some(gateway_url.clone()),
+            yolo: false,
+            no_sandbox: false,
+            output: None,
+            enable: service_enable,
+            start: service_start,
+        })?;
+        if let Some(path) = service.output_path {
+            println!("✓ Installed {} service at {}", service.target, path);
+        } else {
+            println!("✓ Installed {} service", service.target);
+        }
+    }
+
+    if start && !should_start_service {
         let child = start_gateway_process(&workspace, &config_path)?;
         println!("✓ Started gateway (pid {})", child.id());
-    } else {
+    } else if !install_service {
         open_config_instructions(&workspace, &config_path);
     }
 
@@ -2878,6 +2915,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             start,
             open,
             non_interactive,
+            install_service,
+            service_target,
+            service_name,
+            service_enable,
+            service_start,
         } => {
             run_init_wizard(
                 &path,
@@ -2888,6 +2930,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 start,
                 open,
                 non_interactive,
+                install_service,
+                service_target,
+                &service_name,
+                service_enable,
+                service_start,
             )
             .await?;
         }
@@ -3008,6 +3055,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 start,
                 open,
                 non_interactive,
+                false,
+                ServiceTarget::Systemd,
+                "rune-gateway",
+                true,
+                true,
             )
             .await?;
         }

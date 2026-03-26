@@ -188,7 +188,7 @@ pub enum Command {
     },
     /// Run the interactive setup wizard.
     Configure,
-    /// Run the local first-run init wizard and optionally open WebChat.
+    /// Run the local first-run init wizard, optionally install a service, and open WebChat.
     Wizard {
         /// Target workspace/config directory (defaults to current directory).
         #[arg(long, default_value = ".")]
@@ -214,6 +214,21 @@ pub enum Command {
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
+        /// Install a service definition after writing config.
+        #[arg(long)]
+        install_service: bool,
+        /// Service manager target for --install-service.
+        #[arg(long, value_enum, default_value = "systemd")]
+        service_target: ServiceTarget,
+        /// Service label/name to use for --install-service.
+        #[arg(long, default_value = "rune-gateway")]
+        service_name: String,
+        /// Enable the service immediately after install.
+        #[arg(long, default_value_t = true)]
+        service_enable: bool,
+        /// Start the service immediately after install.
+        #[arg(long, default_value_t = true)]
+        service_start: bool,
     },
     /// Direct agent-turn invocation — send a single instruction to a session.
     Agent {
