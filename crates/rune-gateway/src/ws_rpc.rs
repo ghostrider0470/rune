@@ -151,6 +151,10 @@ impl RpcDispatcher {
             .map_err(|e| RpcError::internal(e.to_string()))?;
 
         let channel_filter = params.get("channel").and_then(|v| v.as_str());
+        let browser_session = params
+            .get("browser_session")
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.is_empty());
 
         let active_cutoff = params
             .get("active")
@@ -167,6 +171,11 @@ impl RpcDispatcher {
             .filter(|row| {
                 channel_filter
                     .map(|ch| row.channel_ref.as_deref() == Some(ch))
+                    .unwrap_or(true)
+            })
+            .filter(|row| {
+                browser_session
+                    .map(|token| row.channel_ref.as_deref() == Some(&format!("webchat:{token}")))
                     .unwrap_or(true)
             })
             .filter(|row| {
