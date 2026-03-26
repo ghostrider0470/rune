@@ -31,9 +31,12 @@ if [ ! -f "$REPO_DIR/target/release/rune" ]; then
 fi
 
 # Quick smoke tests — avoid commands that require a running gateway
-if ! "$REPO_DIR/target/release/rune-gateway" --version >/dev/null 2>&1; then
-    echo "[self-update] Gateway binary version check failed — aborting"
-    exit 1
+if ! timeout 10 "$REPO_DIR/target/release/rune-gateway" --config /nonexistent-rune-config.toml >/dev/null 2>&1; then
+    status=$?
+    if [ "$status" -ne 1 ]; then
+        echo "[self-update] Gateway binary startup sanity check failed with status $status — aborting"
+        exit 1
+    fi
 fi
 if ! "$REPO_DIR/target/release/rune" --version >/dev/null 2>&1; then
     echo "[self-update] CLI binary version check failed — aborting"
