@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, CornerDownLeft, ImagePlus, Paperclip, AlertCircle } from "lucide-react";
+import { Send, Loader2, CornerDownLeft, ImagePlus, Paperclip, AlertCircle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ImageAttachment } from "./ImageAttachment";
 import {
@@ -112,6 +112,14 @@ export function ChatInput({
   const handleRemoveAttachment = useCallback((index: number) => {
     setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index));
     setAttachmentNotice(null);
+  }, []);
+
+  const handleClearAttachments = useCallback(() => {
+    setAttachments([]);
+    setAttachmentNotice(null);
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.value = "";
+    }
   }, []);
 
   const handleSend = useCallback(() => {
@@ -233,8 +241,19 @@ export function ChatInput({
                 </span>
               )}
               {attachments.length > 0 && (
-                <span className="hidden w-full text-[10px] text-muted-foreground sm:block">
-                  {attachments.length}/{maxAttachments} image attachment{attachments.length === 1 ? "" : "s"} queued for this send.
+                <span className="hidden w-full items-center justify-between gap-2 text-[10px] text-muted-foreground sm:flex">
+                  <span>
+                    {attachments.length}/{maxAttachments} image attachment{attachments.length === 1 ? "" : "s"} queued for this send.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearAttachments}
+                    disabled={disabled}
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <X className="h-3 w-3" />
+                    Clear
+                  </button>
                 </span>
               )}
               {attachmentNotice && (
