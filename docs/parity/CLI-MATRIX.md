@@ -38,19 +38,19 @@
 | `sessions` | `rune sessions` | **Shipped** | `list`, `show`, `status` | #38 |
 | `config` | `rune config` + `rune gateway config` | **Partial** | local `show`, `file`, `get`, `set`, `unset`, `validate` shipped; live gateway `config show/apply` shipped. Interactive `configure` still missing. | #40/#30 |
 | `configure` | — | **Not started** | Interactive setup wizard — no Rune surface yet | #61 |
-| `secrets` | — | **Not started** | `reload`, `audit`, `configure`, `apply` — no Rune surface yet | #67 |
-| `security` | — | **Not started** | `audit` — no Rune surface yet | #64 |
+| `secrets` | `rune secrets` | **Shipped** | `reload`, `audit`, `configure`, `apply` | #67 |
+| `security` | `rune security` | **Shipped** | `audit` | #64 |
 | `system` | `rune system` | **Shipped** | `event inject`, `event schedule`, `event list`, `heartbeat presence/last/enable/disable/status` | #43 |
-| `sandbox` | — | **Not started** | `list`, `recreate`, `explain` — no Rune surface yet | #64 |
+| `sandbox` | `rune sandbox` | **Shipped** | `list`, `recreate`, `explain` | #64 |
 | `logs` | `rune logs` + `rune gateway logs` | **Partial** | query/list surface with `--level`, `--source`, `--limit`, `--since` shipped against current gateway stub. Follow/tail and richer filtering still missing. | #40 |
 | `dashboard` | `rune dashboard` | **Shipped** | Compact operator summary | #65 |
 | `completion` | `rune completion` | **Shipped** | `generate` for bash/zsh/fish/elvish/powershell | #74 (PR #143) |
 
 ### Tier 0 summary
 
-- **Shipped:** 13 / 20 families
+- **Shipped:** 16 / 20 families
 - **Partial:** 3 (`channels` — missing mutation verbs; `config` — interactive configure still missing; `logs` — query surface landed, follow/tail breadth still missing)
-- **Not started:** 4 (`configure`, `secrets`, `security`, `sandbox`)
+- **Not started:** 1 (`configure`)
 
 ---
 
@@ -59,7 +59,7 @@
 | OpenClaw family | Rune equivalent | Status | Subcommand coverage | Tracking |
 |-----------------|----------------|--------|---------------------|----------|
 | `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack`, `list-reactions` shipped | #74 |
-| `agent` | — | **Not started** | Direct agent-turn invocation | #70 |
+| `agent` | `rune agent` | **Shipped** | `run`, `result` | #70 |
 | `agents` | `rune agents` | **Partial** | `list`, `show`, `status`, `tree`, `templates`, `start --template` shipped. `steer`/`kill` remain blocked because no client-facing transport surface exists yet to send those control actions, even though internal lifecycle/session logic already exists. | #63/#70 |
 | `acp` | `acp_dispatch` tool | **Partial** | Tool dispatches tasks to Claude Code / Codex CLIs as subprocesses. CLI `rune acp send/inbox/ack` surface not yet wired. | #70 |
 | `devices` | — | **Not started** | `list`, `remove`, `clear`, `approve`, `reject`, `rotate`, `revoke` | — |
@@ -67,20 +67,20 @@
 | `node` | — | **Not started** | `run`, `status`, `install`, `uninstall`, `stop`, `restart` | — |
 | `nodes` | — | **Not started** | 20+ subcommands (remote exec, camera, screen, canvas, location) | — |
 | `skills` | `rune skills` | **Partial** | `list`, `info`, `check`, `enable`, `disable` shipped. Plugins/hooks lifecycle and broader extension management still missing. | #71 |
-| `plugins` | — | **Not started** | `list`, `info`, `enable`, `disable`, `install`, `update`, `doctor` | #68 |
-| `hooks` | — | **Not started** | `list`, `info`, `check`, `enable`, `disable`, `install`, `update` | #68 |
+| `plugins` | `rune plugins` | **Shipped** | `list`, `info`, `enable`, `disable`, `install`, `uninstall`, `update`, `doctor` | #68 |
+| `hooks` | `rune hooks` | **Shipped** | `list`, `info`, `check`, `enable`, `disable`, `install`, `update` | #68 |
 | `webhooks` | — | **Not started** | `setup`, `run` | — |
-| `backup` | — | **Not started** | `create`, `restore`, `list` | #67 |
-| `update` | — | **Not started** | `wizard`, `status` | — |
+| `backup` | `rune backup` | **Shipped** | `create`, `restore`, `list` | #67 |
+| `update` | `rune update` | **Partial** | `check`, `apply`, `status` shipped; `wizard` still missing | — |
 | `setup` | — | **Not started** | Interactive setup wizard | #61 |
 | `onboard` | — | **Not started** | First-run onboarding | #61 |
 | `uninstall` | — | **Not started** | Clean removal | — |
 
 ### Tier 1 summary
 
-- **Shipped:** 0
-- **Partial:** 3 (`message` — breadth verbs remain; `agents` — inspect/start flows ship but `steer`/`kill` are still blocked on missing client-facing transport; `skills` — plugins/hooks lifecycle still missing)
-- **Not started:** 14
+- **Shipped:** 4
+- **Partial:** 4 (`message` — breadth verbs remain; `agents` — inspect/start/spawn/steer/kill surface exists but transport/runtime parity still needs validation; `skills` — plugins/hooks lifecycle still missing; `update` — wizard still missing)
+- **Not started:** 9
 
 ---
 
@@ -100,7 +100,7 @@
 
 ### Tier 2 summary
 
-- **Shipped:** 0
+- **Shipped:** 4
 - **N/A:** 1 (`clawbot`)
 - **Not started:** 8
 
@@ -149,12 +149,12 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 
 | Tier | Total families | Shipped | Partial | Not started | N/A |
 |------|---------------|---------|---------|-------------|-----|
-| 0 — Release blockers | 20 | 13 | 3 | 4 | 0 |
-| 1 — Must-follow | 17 | 0 | 3 | 14 | 0 |
+| 0 — Release blockers | 20 | 16 | 3 | 1 | 0 |
+| 1 — Must-follow | 17 | 4 | 4 | 9 | 0 |
 | 2 — Breadth | 9 | 0 | 0 | 8 | 1 |
-| **Total** | **46** | **13** | **6** | **26** | **1** |
+| **Total** | **46** | **20** | **7** | **18** | **1** |
 
-**Parity coverage: 13 shipped + 6 partial out of 46 families (28% fully shipped, 41% with partial credit).**
+**Parity coverage: 20 shipped + 7 partial out of 46 families (43% fully shipped, 59% with partial credit).**
 
 ---
 
@@ -162,9 +162,8 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 
 ### Immediate (Tier 0, not started)
 1. `configure` — interactive setup wizard (#61)
-2. `secrets` — secret management surface (#67)
-3. `security` — security audit surface (#64)
-4. `sandbox` — sandbox inspection (#64)
+2. `update` wizard — lifecycle UX parity on top of shipped `check`/`apply`/`status` surface
+3. `secrets` / `security` / `sandbox` were previously marked missing in this audit but now ship via first-class CLI families
 
 ### Near-term (Tier 0, partial)
 5. `logs` — add follow/tail/richer filtering on top of the shipped query surface (#40)
@@ -172,9 +171,9 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 7. `config` — bridge from shipped local/gateway config surfaces to true interactive configure parity (#40/#61)
 
 ### Medium-term (Tier 1, highest value)
-8. `agent` / `acp` — agent orchestration CLI breadth beyond current `agents` inspect/start surfaces, including the missing client-facing transport needed for `steer` / `kill` parity (#70). **`acp_dispatch` tool now ships** — dispatches to Claude Code / Codex CLIs as subprocesses. CLI `rune acp send/inbox/ack` surface still needs gateway route wiring.
-9. `skills` / `plugins` / `hooks` — complete extension lifecycle beyond the shipped `skills` family core (#71/#68)
-10. `backup` — backup/restore workflow (#67)
+8. `agent` / `acp` — direct agent-turn CLI now ships via `rune agent`; ACP CLI/gateway route wiring still needs parity work (#70).
+9. `skills` / `plugins` / `hooks` — `plugins` and `hooks` CLI families now ship, but broader runtime lifecycle parity still needs backing implementations where applicable (#71/#68)
+10. `backup` — CLI family now ships; end-to-end durable backup workflow depth still needs validation (#67)
 11. `devices` / `pairing` / `node` / `nodes` — multi-node surface (no issue yet)
 
 ---
