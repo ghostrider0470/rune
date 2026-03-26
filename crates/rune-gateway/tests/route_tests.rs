@@ -8035,6 +8035,58 @@ async fn configure_with_providers_reports_configured() {
 }
 
 #[tokio::test]
+async fn approval_decision_route_rejects_resume_for_non_resumeable_approval() {
+    let app = build_test_app(None);
+
+    let approval_id = Uuid::now_v7();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/approvals")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(
+                    r#"{{"id":"{}","decision":"allow-once"}}"#,
+                    approval_id
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "bad_request");
+}
+
+#[tokio::test]
+async fn approval_decision_route_denies_resume_without_tool_context() {
+    let app = build_test_app(None);
+
+    let approval_id = Uuid::now_v7();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/approvals")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(
+                    r#"{{"id":"{}","decision":"allow-once"}}"#,
+                    approval_id
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "bad_request");
+    assert!(json["message"]
+        .as_str()
+        .unwrap()
+        .contains("no pending approval found"));
+}
+
+#[tokio::test]
 async fn set_get_list_and_clear_approval_policy_routes() {
     let app = build_test_app(None);
 
