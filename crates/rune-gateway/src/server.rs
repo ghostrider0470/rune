@@ -20,7 +20,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
-    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
+    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo, TranscriptRepo, TurnRepo,
 };
 use rune_stt::SttEngine;
 use rune_stt::openai::OpenAiStt;
@@ -81,6 +81,7 @@ pub struct Services {
     pub reminder_store: Arc<ReminderStore>,
     pub approval_repo: Arc<dyn ApprovalRepo>,
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
+    pub tool_execution_repo: Arc<dyn ToolExecutionRepo>,
     pub process_manager: ProcessManager,
     pub capabilities: Capabilities,
     pub device_repo: Arc<dyn DeviceRepo>,
@@ -243,6 +244,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         reminder_store: services.reminder_store,
         approval_repo: services.approval_repo,
         tool_approval_repo: services.tool_approval_repo,
+        tool_execution_repo: services.tool_execution_repo,
         process_manager: services.process_manager,
         capabilities: Arc::new(services.capabilities),
         device_repo: services.device_repo.clone(),
@@ -567,11 +569,23 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/turns/{id}", get(routes::get_turn))
         // Tool / approval parity routes
         .route("/api/tools", get(routes::list_tools))
-        .route("/api/approvals", get(routes::list_pending_approvals))
+        .route("/api/tools/{id}", get(routes::get_tool_execution))
+        .route(
+            "/api/approvals",
+            get(routes::list_pending_approvals).post(routes::submit_approval_decision),
+        )
+        .route("/api/approvals/policies", get(routes::list_approval_policies))
+        .route(
+            "/api/approvals/policies/{tool}",
+            get(routes::get_approval_policy)
+                .put(routes::set_approval_policy)
+                .delete(routes::clear_approval_policy),
+        )
         // Process parity routes
         .route("/api/processes", get(routes::list_processes))
         .route("/api/processes/{id}", get(routes::get_process))
         .route("/api/processes/{id}/log", get(routes::get_process_log))
+        .route("/api/processes/{id}/kill", post(routes::kill_process))
         // Auth routes
         .route("/api/auth", get(routes::auth_token_info))
         .route("/api/skills", get(routes::list_skills))

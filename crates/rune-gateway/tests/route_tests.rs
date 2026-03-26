@@ -44,10 +44,9 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
+use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
-use rune_gateway::{
-    AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry,
-};
+use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
@@ -1543,6 +1542,8 @@ fn build_test_app_parts_with_ms365_services(
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -1570,10 +1571,11 @@ fn build_test_app_parts_with_ms365_services(
 
 fn test_event_sender() -> &'static tokio::sync::broadcast::Sender<rune_gateway::SessionEvent> {
     use once_cell::sync::Lazy;
-    static EVENT_TX: Lazy<tokio::sync::broadcast::Sender<rune_gateway::SessionEvent>> = Lazy::new(|| {
-        let (tx, _) = tokio::sync::broadcast::channel(64);
-        tx
-    });
+    static EVENT_TX: Lazy<tokio::sync::broadcast::Sender<rune_gateway::SessionEvent>> =
+        Lazy::new(|| {
+            let (tx, _) = tokio::sync::broadcast::channel(64);
+            tx
+        });
     &EVENT_TX
 }
 
@@ -1694,7 +1696,8 @@ fn sample_todo_task(list_id: &str, id: &str) -> TodoTask {
 
 #[tokio::test]
 async fn ws_rpc_status_matches_http_status_basics() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
     use rune_runtime::{Lane, LaneQueue};
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -1751,6 +1754,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(3),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -1796,7 +1801,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
 
 #[tokio::test]
 async fn ws_rpc_skills_reload_and_toggle_round_trip() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -1861,6 +1867,8 @@ enabled: true
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -1983,6 +1991,8 @@ async fn status_reports_configured_lane_capacities() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2025,7 +2035,8 @@ async fn status_reports_configured_lane_capacities() {
 
 #[tokio::test]
 async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
     use rune_runtime::{Lane, LaneQueue};
 
     let session_repo = Arc::new(MemSessionRepo::new());
@@ -2082,6 +2093,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2127,7 +2140,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
 
 #[tokio::test]
 async fn ws_rpc_health_reports_session_count() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -2219,6 +2233,8 @@ async fn ws_rpc_health_reports_session_count() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2255,7 +2271,8 @@ async fn ws_rpc_health_reports_session_count() {
 
 #[tokio::test]
 async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -2331,6 +2348,8 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2375,7 +2394,8 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
 
 #[tokio::test]
 async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -2464,6 +2484,8 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2525,7 +2547,8 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
 
 #[tokio::test]
 async fn ws_rpc_session_get_includes_last_turn_timestamps() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -2614,6 +2637,8 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2655,7 +2680,8 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
 
 #[tokio::test]
 async fn ws_rpc_session_status_rejects_invalid_uuid() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -2709,6 +2735,8 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2746,7 +2774,8 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
 
 #[tokio::test]
 async fn ws_rpc_turns_list_and_get_return_turn_rows() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -2800,6 +2829,8 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -2889,7 +2920,8 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
 
 #[tokio::test]
 async fn ws_rpc_tools_and_approvals_list_surface_state() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -2974,6 +3006,8 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(1),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -3086,6 +3120,8 @@ async fn approvals_list_route_includes_durable_resume_refs() {
         approval_repo: approval_repo.clone() as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
@@ -3150,7 +3186,8 @@ async fn approvals_list_route_includes_durable_resume_refs() {
 #[tokio::test]
 async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     use rune_gateway::ws::{ConnState, handle_text_message};
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -3204,6 +3241,8 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -3302,7 +3341,8 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
 #[tokio::test]
 async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
     use rune_gateway::ws::{ConnState, handle_text_message};
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -3356,6 +3396,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -3450,7 +3492,8 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
 async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not() {
     use rune_gateway::ws::ConnState;
     use rune_gateway::ws::handle_text_message;
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -3504,6 +3547,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -3563,7 +3608,8 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
 #[tokio::test]
 async fn ws_handle_text_message_dispatches_rpc_errors() {
     use rune_gateway::ws::{ConnState, handle_text_message};
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
@@ -3617,6 +3663,8 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -6002,6 +6050,8 @@ async fn send_message_and_transcript_with_shared_state() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -6236,6 +6286,8 @@ async fn get_session_status_surfaces_subagent_metadata() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -7247,6 +7299,8 @@ async fn list_sessions_filters_by_channel_and_activity() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -7503,6 +7557,8 @@ async fn reminders_list_includes_outcome_fields() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
@@ -7610,6 +7666,8 @@ async fn reminders_cancel_returns_success() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
@@ -7734,6 +7792,8 @@ async fn agent_steer_success() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -7891,6 +7951,8 @@ async fn agent_kill_success() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -7970,7 +8032,8 @@ async fn agent_kill_not_found() {
 
 #[tokio::test]
 async fn ws_rpc_agent_steer_and_kill() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let session_repo = Arc::new(MemSessionRepo::new());
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
@@ -8046,6 +8109,8 @@ async fn ws_rpc_agent_steer_and_kill() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -8812,7 +8877,6 @@ async fn webchat_route_marks_synthetic_current_session_with_auth_mode_metadata()
     assert!(body.contains("metadata: { browser_auth_mode: authLabel() }"));
 }
 
-
 #[tokio::test]
 async fn webchat_route_mentions_browser_token_bootstrap_auth_mode() {
     let app = build_test_app(None);
@@ -8882,7 +8946,6 @@ async fn websocket_accepts_query_api_key_when_gateway_auth_is_enabled() {
     server.abort();
 }
 
-
 #[tokio::test]
 async fn websocket_query_session_id_subscribes_connection_to_target_session() {
     use futures_util::StreamExt;
@@ -8913,17 +8976,14 @@ async fn websocket_query_session_id_subscribes_connection_to_target_session() {
         payload: serde_json::json!({"text": "hello from event"}),
         state_changed: true,
     };
-    let message = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            test_event_sender().send(frame).unwrap();
-            ws.next().await
-        },
-    )
-        .await
-        .expect("event timeout")
-        .expect("socket closed")
-        .expect("websocket frame");
+    let message = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        test_event_sender().send(frame).unwrap();
+        ws.next().await
+    })
+    .await
+    .expect("event timeout")
+    .expect("socket closed")
+    .expect("websocket frame");
 
     match message {
         tokio_tungstenite::tungstenite::Message::Text(text) => {
@@ -9037,6 +9097,8 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_channels() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
@@ -9161,6 +9223,8 @@ async fn ws_rpc_processes_log_surfaces_output() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn rune_store::repos::ToolExecutionRepo>,
         process_manager,
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
@@ -9194,7 +9258,8 @@ async fn ws_rpc_processes_log_surfaces_output() {
 
 #[tokio::test]
 async fn ws_rpc_memory_search_returns_workspace_hits() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -9263,6 +9328,8 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -9307,7 +9374,8 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
 
 #[tokio::test]
 async fn ws_rpc_doctor_run_matches_http_contract() {
-    use rune_gateway::ws_rpc::RpcDispatcher;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+use rune_gateway::ws_rpc::RpcDispatcher;
 
     let mut config = AppConfig::default();
     config.gateway.auth_token = Some("secret-token".into());
@@ -9377,6 +9445,8 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
@@ -9618,6 +9688,8 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
@@ -9777,6 +9849,8 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
         approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
         tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
             as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         capabilities: test_capabilities(0),
         device_repo: device_repo as Arc<dyn DeviceRepo>,
@@ -9817,4 +9891,175 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
 
     let updated = session_repo.find_by_id(existing_id).await.unwrap();
     assert_eq!(updated.metadata["browser_auth_mode"], "api key");
+}
+
+#[tokio::test]
+async fn api_tool_execution_route_returns_persisted_execution() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let tool_execution_repo = Arc::new(InMemoryToolExecutionRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+
+    let mut config = AppConfig::default();
+    config.paths.skills_dir = std::env::temp_dir();
+    let config = Arc::new(RwLock::new(config));
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(std::env::temp_dir(), skill_registry.clone()));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config,
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo.clone() as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: tool_execution_repo.clone() as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx: test_event_sender().clone(),
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let app = build_router(state, None);
+
+    let session_id = Uuid::now_v7();
+    let turn_id = Uuid::now_v7();
+    let execution_id = Uuid::now_v7();
+    tool_execution_repo
+        .create(NewToolExecution {
+            id: execution_id,
+            tool_call_id: Uuid::now_v7(),
+            session_id,
+            turn_id,
+            tool_name: "exec".to_string(),
+            arguments: serde_json::json!({"command": "echo hi"}),
+            status: "completed".to_string(),
+            started_at: chrono::Utc::now(),
+            approval_id: None,
+            execution_mode: Some("sync".to_string()),
+        })
+        .await
+        .unwrap();
+    tool_execution_repo
+        .complete(
+            execution_id,
+            "completed",
+            Some("ok"),
+            None,
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/api/tools/{execution_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["id"], execution_id.to_string());
+    assert_eq!(json["tool_name"], "exec");
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["result_summary"], "ok");
+}
+
+#[tokio::test]
+async fn api_approvals_post_and_policy_routes_are_exposed() {
+    let app = build_test_app(None);
+    let approval_id = Uuid::now_v7();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/api/approvals")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(
+                    r#"{{"id":"{approval_id}","decision":"deny"}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::put("/api/approvals/policies/exec")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"decision":"allow-always"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::get("/api/approvals/policies/exec")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }

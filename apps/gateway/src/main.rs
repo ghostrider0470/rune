@@ -752,6 +752,7 @@ async fn build_services(
         reminder_store,
         approval_repo,
         tool_approval_repo,
+        tool_execution_repo: repos.tool_execution_repo.clone(),
         process_manager,
         capabilities,
         device_repo,

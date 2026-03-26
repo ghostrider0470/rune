@@ -11,6 +11,7 @@ mod routes;
 mod server;
 mod state;
 mod supervisor;
+pub mod tool_execution_repo;
 mod webchat;
 pub mod ws;
 pub mod ws_rpc;

@@ -13,7 +13,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
 };
 use rune_store::repos::{
-    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
+    ApprovalRepo, DeviceRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo, TranscriptRepo, TurnRepo,
 };
 use rune_stt::SttEngine;
 use rune_tools::process_tool::ProcessManager;
@@ -123,6 +123,8 @@ pub struct AppState {
     pub approval_repo: Arc<dyn ApprovalRepo>,
     /// Tool approval policy repository.
     pub tool_approval_repo: Arc<dyn ToolApprovalPolicyRepo>,
+    /// Tool execution audit repository.
+    pub tool_execution_repo: Arc<dyn ToolExecutionRepo>,
     /// Background process manager for operator inspection/control surfaces.
     pub process_manager: ProcessManager,
     /// Consolidated runtime capabilities (immutable after boot).

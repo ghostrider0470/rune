@@ -3588,10 +3588,26 @@ pub async fn list_tools(
 }
 
 /// `GET /api/tools/{id}` — get a tool execution by ID (stub).
-pub async fn get_tool_execution(Path(id): Path<String>) -> Result<Json<Value>, GatewayError> {
-    Err(GatewayError::BadRequest(format!(
-        "tool execution lookup not yet implemented: {id}"
-    )))
+pub async fn get_tool_execution(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, GatewayError> {
+    let execution_id = Uuid::parse_str(&id)
+        .map_err(|_| GatewayError::BadRequest(format!("invalid tool execution id: {id}")))?;
+    let execution = state
+        .tool_execution_repo
+        .find_by_id(execution_id)
+        .await
+        .map_err(|error| match error {
+            rune_store::StoreError::NotFound { .. } => {
+                GatewayError::BadRequest(format!("no tool execution found for id: {id}"))
+            }
+            other => GatewayError::Internal(other.to_string()),
+        })?;
+
+    Ok(Json(serde_json::to_value(execution).map_err(|error| {
+        GatewayError::Internal(error.to_string())
+    })?))
 }
 
 // ── Microsoft 365 ───────────────────────────────────────────────────────────

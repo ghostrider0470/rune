@@ -141,6 +141,8 @@ pub struct PluginScanner {
     agent_registry: Arc<AgentRegistry>,
     command_registry: Arc<CommandRegistry>,
     hook_registry: Arc<HookRegistry>,
+    /// MCP servers discovered during the last scan.
+    discovered_mcp_servers: Arc<tokio::sync::RwLock<Vec<claude_plugin::ClaudeMcpServer>>>,
 }
 
 impl PluginScanner {
@@ -160,7 +162,13 @@ impl PluginScanner {
             agent_registry,
             command_registry,
             hook_registry,
+            discovered_mcp_servers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
+    }
+
+    /// Return MCP servers discovered during the last scan.
+    pub async fn discovered_mcp_servers(&self) -> Vec<claude_plugin::ClaudeMcpServer> {
+        self.discovered_mcp_servers.read().await.clone()
     }
 
     /// Scan all configured directories and register discovered plugins.
@@ -170,6 +178,7 @@ impl PluginScanner {
     pub async fn scan(&self) -> UnifiedScanSummary {
         let mut summary = UnifiedScanSummary::default();
         let mut seen_names: HashSet<String> = HashSet::new();
+        let mut mcp_servers: Vec<claude_plugin::ClaudeMcpServer> = Vec::new();
 
         for dir in &self.scan_dirs {
             let expanded = expand_tilde(dir);
@@ -201,8 +210,13 @@ impl PluginScanner {
                         }
 
                         if claude_plugin::is_claude_plugin_dir(&path) {
-                            self.handle_claude_plugin(&path, &mut seen_names, &mut summary)
-                                .await;
+                            self.handle_claude_plugin(
+                                &path,
+                                &mut seen_names,
+                                &mut summary,
+                                &mut mcp_servers,
+                            )
+                            .await;
                         } else if path.join("PLUGIN.md").exists() {
                             let dir_name = path
                                 .file_name()
@@ -225,6 +239,8 @@ impl PluginScanner {
             }
         }
 
+        *self.discovered_mcp_servers.write().await = mcp_servers;
+
         info!(
             native = summary.native_plugins,
             claude = summary.claude_plugins,
@@ -236,6 +252,9 @@ impl PluginScanner {
             "unified plugin scan complete"
         );
 
+        // Store discovered MCP servers for later startup
+        *self.discovered_mcp_servers.write().await = mcp_servers;
+
         summary
     }
 
@@ -245,6 +264,7 @@ impl PluginScanner {
         path: &Path,
         seen_names: &mut HashSet<String>,
         summary: &mut UnifiedScanSummary,
+        mcp_servers: &mut Vec<claude_plugin::ClaudeMcpServer>,
     ) {
         let parsed = match claude_plugin::parse_claude_plugin(path).await {
             Ok(p) => p,
@@ -331,8 +351,9 @@ impl PluginScanner {
             summary.commands_registered += 1;
         }
 
-        // --- MCP servers (informational tally) ---
+        // --- MCP servers ---
         summary.mcp_servers_found += parsed.mcp_servers.len();
+        mcp_servers.extend(parsed.mcp_servers.iter().cloned());
 
         debug!(
             plugin = %plugin_name,
