@@ -45,7 +45,7 @@ What this does:
 - starts the gateway locally
 - opens `http://127.0.0.1:8787/webchat`
 
-For non-interactive CI/script usage, add `--non-interactive`. If you skip automatic startup, the wizard prints the exact `rune-gateway --config ...` and `rune service install --workdir ... --config ... --enable --start` commands to finish setup.
+For non-interactive CI/script usage, add `--non-interactive`. If you skip automatic startup, the wizard prints the exact `rune-gateway --config ...`, `rune service install --target systemd --name rune-gateway --workdir ... --config ... --enable --start`, `rune service install --target launchd --name rune-gateway --workdir ... --config ... --enable --start`, plus `rune --gateway-url http://127.0.0.1:8787 health` and `rune --gateway-url http://127.0.0.1:8787 doctor run` verification commands to finish setup.
 
 ## Create config
 

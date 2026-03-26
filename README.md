@@ -70,7 +70,7 @@ To generate and install a user service for unattended operation:
 
 On macOS, swap `--target launchd` to write a LaunchAgent plist instead. The install command also wires stdout/stderr logs next to the plist, bootstraps the agent with `launchctl bootstrap`, and kickstarts it when `--start` is passed.
 
-If you skip `--start`, Rune prints the exact manual `rune-gateway --config ...` command plus a ready-to-run `rune service install --workdir ... --config ... --enable --start` follow-up so the setup path still ends in a durable background service without hunting through docs.
+If you skip `--start`, Rune prints the exact manual `rune-gateway --config ...` command, ready-to-run `rune service install --target systemd --name rune-gateway --workdir ... --config ... --enable --start` and `rune service install --target launchd --name rune-gateway --workdir ... --config ... --enable --start` follow-ups, plus `rune --gateway-url http://127.0.0.1:8787 health` and `rune --gateway-url http://127.0.0.1:8787 doctor run` verification commands so the setup path still ends in a durable background service without hunting through docs.
 
 ### Zero-config Docker bring-up
 

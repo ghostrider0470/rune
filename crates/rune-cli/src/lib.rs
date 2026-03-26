@@ -237,9 +237,15 @@ fn open_config_instructions(workspace: &Path, config_path: &Path) {
     eprintln!("  - workspace: {}", workspace_hint);
     eprintln!("  - start manually: rune-gateway --config {}", config_hint);
     eprintln!(
-        "  - install a background service: rune service install --workdir {} --config {} --enable --start",
+        "  - install a background service: rune service install --target systemd --name rune-gateway --workdir {} --config {} --enable --start",
         workspace_hint, config_hint
     );
+    eprintln!(
+        "  - macOS launchd variant: rune service install --target launchd --name rune-gateway --workdir {} --config {} --enable --start",
+        workspace_hint, config_hint
+    );
+    eprintln!("  - verify runtime: rune --gateway-url http://127.0.0.1:8787 health");
+    eprintln!("  - verify diagnostics: rune --gateway-url http://127.0.0.1:8787 doctor run");
     eprintln!("  - open chat: http://127.0.0.1:8787/webchat");
     eprintln!("  - open dashboard: http://127.0.0.1:8787/dashboard");
 }
