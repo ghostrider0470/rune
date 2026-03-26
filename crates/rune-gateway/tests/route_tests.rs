@@ -2874,6 +2874,10 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
             binary_path: None,
             source_dir: std::env::temp_dir().join("memory_search"),
             enabled: true,
+            prompt_body: None,
+            model: None,
+            allowed_tools: None,
+            user_invocable: false,
         })
         .await;
 

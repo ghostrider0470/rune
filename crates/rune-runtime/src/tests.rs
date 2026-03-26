@@ -1960,6 +1960,10 @@ async fn enabled_skills_are_injected_into_system_prompt() {
             binary_path: Some(PathBuf::from("/tmp/skill-alpha")),
             source_dir: PathBuf::from("/tmp/skills/skill-alpha"),
             enabled: true,
+            prompt_body: None,
+            model: None,
+            allowed_tools: None,
+            user_invocable: false,
         })
         .await;
     skill_registry
@@ -1970,6 +1974,10 @@ async fn enabled_skills_are_injected_into_system_prompt() {
             binary_path: None,
             source_dir: PathBuf::from("/tmp/skills/skill-beta"),
             enabled: false,
+            prompt_body: None,
+            model: None,
+            allowed_tools: None,
+            user_invocable: false,
         })
         .await;
 

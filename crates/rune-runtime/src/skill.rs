@@ -23,6 +23,18 @@ pub struct Skill {
     pub source_dir: PathBuf,
     /// Whether this skill is currently enabled.
     pub enabled: bool,
+    /// Optional prompt body for Claude Code-style agentic skills.
+    #[serde(default)]
+    pub prompt_body: Option<String>,
+    /// Optional model override for this skill.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Optional list of tools this skill is allowed to use.
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
+    /// Whether this skill can be directly invoked by the user.
+    #[serde(default)]
+    pub user_invocable: bool,
 }
 
 /// YAML frontmatter parsed from a SKILL.md file.
@@ -271,6 +283,10 @@ enabled: false
                 binary_path: Some(PathBuf::from("/tmp/run-enabled")),
                 source_dir: PathBuf::from("/tmp/enabled-skill"),
                 enabled: true,
+                prompt_body: None,
+                model: None,
+                allowed_tools: None,
+                user_invocable: false,
             })
             .await;
             reg.register(Skill {
@@ -280,6 +296,10 @@ enabled: false
                 binary_path: None,
                 source_dir: PathBuf::from("/tmp/disabled-skill"),
                 enabled: false,
+                prompt_body: None,
+                model: None,
+                allowed_tools: None,
+                user_invocable: false,
             })
             .await;
 
@@ -304,6 +324,10 @@ enabled: false
             binary_path: None,
             source_dir: PathBuf::from("/tmp"),
             enabled: true,
+            prompt_body: None,
+            model: None,
+            allowed_tools: None,
+            user_invocable: false,
         };
 
         reg.register(skill).await;

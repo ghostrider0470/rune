@@ -209,6 +209,10 @@ async fn load_skill_from_path(path: &Path) -> Result<Skill, String> {
         binary_path,
         source_dir: source_dir.to_path_buf(),
         enabled: frontmatter.enabled.unwrap_or(true),
+        prompt_body: None,
+        model: None,
+        allowed_tools: None,
+        user_invocable: false,
     })
 }
 
