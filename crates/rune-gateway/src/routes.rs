@@ -28,6 +28,7 @@ use rune_tools::{ToolCall, ToolExecutor};
 use serde_json::Value;
 
 use crate::error::GatewayError;
+use crate::events::{ApprovalEvent, RuntimeEvent, broadcast_runtime_event};
 use crate::ms365::{
     CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest, FileItem,
     FileMetadata, FileSearchItem, ForwardMailRequest, Ms365CalendarServiceError,
@@ -2031,6 +2032,21 @@ pub async fn submit_approval_decision(
             .resume_approval(decided.id)
             .await
             .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    }
+
+    if let Some(session_id) = decided
+        .handle_ref
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    {
+        let _ = broadcast_runtime_event(
+            &state.event_tx,
+            RuntimeEvent::Approval(ApprovalEvent::Resolved {
+                session_id,
+                approval_id: decided.id,
+                decision: normalised.clone(),
+            }),
+        );
     }
 
     let decided = state
