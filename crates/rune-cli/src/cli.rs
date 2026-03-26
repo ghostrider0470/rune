@@ -206,10 +206,10 @@ pub enum Command {
         #[arg(long, default_value_t = true)]
         webchat: bool,
         /// Start the gateway after writing config.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
         /// Open the chat URL in the default browser after startup.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
@@ -224,10 +224,10 @@ pub enum Command {
         #[arg(long, default_value = "rune-gateway")]
         service_name: String,
         /// Enable the service immediately after install.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_enable: bool,
         /// Start the service immediately after install.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_start: bool,
     },
     /// Direct agent-turn invocation — send a single instruction to a session.
@@ -268,10 +268,10 @@ pub enum Command {
         #[arg(long, default_value_t = true)]
         webchat: bool,
         /// Start the gateway after writing config.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
         /// Open the chat URL in the default browser after startup.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
@@ -286,10 +286,10 @@ pub enum Command {
         #[arg(long, default_value = "rune-gateway")]
         service_name: String,
         /// Enable the service immediately after install.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_enable: bool,
         /// Start the service immediately after install.
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_start: bool,
     },
     /// Manage backups of durable state.

@@ -519,6 +519,7 @@ struct InitWizardOptions<'a> {
     service_name: &'a str,
     service_enable: bool,
     service_start: bool,
+    print_next_steps: bool,
 }
 
 async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
@@ -622,7 +623,9 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     if options.start && !should_start_service {
         let child = start_gateway_process(&workspace, &config_path)?;
         println!("✓ Started gateway (pid {})", child.id());
-    } else if !options.install_service {
+    }
+
+    if options.print_next_steps {
         open_config_instructions(&workspace, &config_path);
     }
 
@@ -3003,6 +3006,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 service_name: &service_name,
                 service_enable,
                 service_start,
+                print_next_steps: true,
             })
             .await?;
         }
@@ -3133,6 +3137,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 service_name: &service_name,
                 service_enable,
                 service_start,
+                print_next_steps: false,
             })
             .await?;
         }
