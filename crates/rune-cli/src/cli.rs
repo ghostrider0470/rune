@@ -202,6 +202,9 @@ pub enum Command {
         /// Model id to configure as default.
         #[arg(long)]
         model: Option<String>,
+        /// Telegram bot token to enable Telegram during setup.
+        #[arg(long)]
+        telegram_token: Option<String>,
         /// Enable the browser WebChat flow after writing config.
         #[arg(long, default_value_t = true)]
         webchat: bool,
@@ -264,6 +267,9 @@ pub enum Command {
         /// Model id to configure as default.
         #[arg(long)]
         model: Option<String>,
+        /// Telegram bot token to enable Telegram during setup.
+        #[arg(long)]
+        telegram_token: Option<String>,
         /// Enable the browser WebChat flow after writing config.
         #[arg(long, default_value_t = true)]
         webchat: bool,

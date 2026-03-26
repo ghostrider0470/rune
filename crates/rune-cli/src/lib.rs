@@ -408,6 +408,7 @@ fn write_wizard_config(
     provider: &str,
     model: &str,
     api_key: &str,
+    telegram_token: Option<&str>,
     webchat: bool,
 ) -> Result<PathBuf> {
     let config_path = workspace.join("config.toml");
@@ -436,12 +437,18 @@ fn write_wizard_config(
     doc["gateway"]["port"] = Item::Value(Value::from(8787));
 
     set_bool(&mut doc, "browser", "enabled", webchat)?;
-    set_array_strings(
-        &mut doc,
-        "channels",
-        "enabled",
-        if webchat { &["webchat"] } else { &[] },
-    )?;
+    let enabled_channels: Vec<&str> = if webchat {
+        if telegram_token.is_some() {
+            vec!["webchat", "telegram"]
+        } else {
+            vec!["webchat"]
+        }
+    } else if telegram_token.is_some() {
+        vec!["telegram"]
+    } else {
+        Vec::new()
+    };
+    set_array_strings(&mut doc, "channels", "enabled", &enabled_channels)?;
 
     let models_table = ensure_table(&mut doc, "models")?;
     models_table["default_model"] = Item::Value(Value::from(format!("local/{model}")));
@@ -475,6 +482,17 @@ fn write_wizard_config(
 
     let ui_table = ensure_table(&mut doc, "ui")?;
     ui_table["enabled"] = Item::Value(Value::from(true));
+
+    if let Some(token) = telegram_token.filter(|value| !value.trim().is_empty()) {
+        let channels_table = ensure_table(&mut doc, "channels")?;
+        if !channels_table.contains_key("telegram") || !channels_table["telegram"].is_table() {
+            channels_table["telegram"] = Item::Table(Table::new());
+        }
+        let telegram = channels_table["telegram"]
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("channels.telegram must be a table"))?;
+        telegram["bot_token"] = Item::Value(Value::from(token));
+    }
 
     std::fs::create_dir_all(workspace.join("state"))
         .with_context(|| format!("failed to create {}", workspace.join("state").display()))?;
@@ -510,6 +528,7 @@ struct InitWizardOptions<'a> {
     api_key: Option<String>,
     provider: Option<String>,
     model: Option<String>,
+    telegram_token: Option<String>,
     webchat: bool,
     start: bool,
     open: bool,
@@ -558,6 +577,26 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
         None => model_default.to_string(),
     };
 
+
+
+    let telegram_token = match options.telegram_token {
+        Some(value) if !value.trim().is_empty() => Some(value),
+        _ if interactive => {
+            let enable = prompt_text("Enable Telegram channel? (y/N)", Some("N"))?;
+            if matches!(enable.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+                let token = prompt_text("Telegram bot token", None)?;
+                if token.trim().is_empty() {
+                    None
+                } else {
+                    Some(token)
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
     let api_key = match options.api_key {
         Some(value) => value,
         None if provider == "ollama" => String::new(),
@@ -580,8 +619,14 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
         }
     };
 
-    let config_path =
-        write_wizard_config(&workspace, &provider, &model, &api_key, options.webchat)?;
+    let config_path = write_wizard_config(
+        &workspace,
+        &provider,
+        &model,
+        &api_key,
+        telegram_token.as_deref(),
+        options.webchat,
+    )?;
     println!("✓ Wrote {}", config_path.display());
     if provider == "ollama" {
         if let Some(host) = detected_ollama {
@@ -2982,6 +3027,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             api_key,
             provider,
             model,
+            telegram_token,
             webchat,
             start,
             open,
@@ -2997,6 +3043,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 api_key,
                 provider,
                 model,
+                telegram_token,
                 webchat,
                 start,
                 open,
@@ -3113,6 +3160,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             api_key,
             provider,
             model,
+            telegram_token,
             webchat,
             start,
             open,
@@ -3128,6 +3176,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 api_key,
                 provider,
                 model,
+                telegram_token,
                 webchat,
                 start,
                 open,
@@ -3281,7 +3330,7 @@ mod tests {
     fn write_wizard_config_uses_env_var_for_openai_api_key() {
         let tmp = TempDir::new().unwrap();
         let config_path =
-            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "", true).unwrap();
+            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "", None, true).unwrap();
 
         let written = std::fs::read_to_string(config_path).unwrap();
         assert!(written.contains("api_key_env = \"OPENAI_API_KEY\""));
@@ -3292,7 +3341,7 @@ mod tests {
     fn write_wizard_config_keeps_inline_api_key_when_provided() {
         let tmp = TempDir::new().unwrap();
         let config_path =
-            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "test-key", true).unwrap();
+            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "test-key", None, true).unwrap();
 
         let written = std::fs::read_to_string(config_path).unwrap();
         assert!(written.contains("api_key = \"test-key\""));
