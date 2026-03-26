@@ -137,11 +137,13 @@
   const sendBtn    = document.getElementById('send-btn');
   const statusEl   = document.getElementById('status');
   const statusText = document.getElementById('status-text');
+  const query = new URLSearchParams(location.search);
 
   let ws = null;
-  let sessionId = null;
+  let sessionId = query.get('session_id');
   let reqCounter = 0;
   const pendingRpc = {};
+  const authToken = query.get('api_key') || '';
 
   function setStatus(connected, text) {
     statusEl.className = connected ? 'connected' : '';
@@ -157,12 +159,53 @@
     transcript.scrollTop = transcript.scrollHeight;
   }
 
+  function appendTranscriptEntry(entry) {
+    if (!entry || !entry.kind || !entry.payload) return;
+    if (entry.kind === 'user_message') {
+      const text = entry.payload.content || entry.payload.text || '';
+      if (text) appendMsg('user', text);
+    } else if (entry.kind === 'assistant_message') {
+      const text = entry.payload.content || entry.payload.text || '';
+      if (text) appendMsg('assistant', text);
+    }
+  }
+
+  function persistSessionInUrl() {
+    if (!sessionId) return;
+    const next = new URLSearchParams(location.search);
+    next.set('session_id', sessionId);
+    if (authToken) next.set('api_key', authToken);
+    history.replaceState(null, '', location.pathname + '?' + next.toString());
+  }
+
   function rpc(method, params) {
     return new Promise((resolve, reject) => {
       const id = String(++reqCounter);
       pendingRpc[id] = { resolve, reject };
-      ws.send(JSON.stringify({ type: 'req', id, method, params: params || {} }));
+      const payload = Object.assign({}, params || {});
+      if (authToken && payload.api_key === undefined) payload.api_key = authToken;
+      ws.send(JSON.stringify({ type: 'req', id, method, params: payload }));
     });
+  }
+
+  async function hydrateSession() {
+    if (sessionId) {
+      ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
+      appendMsg('system', 'Resumed session.');
+      const existing = await rpc('session.transcript', { session_id: sessionId });
+      if (Array.isArray(existing)) {
+        existing.forEach(appendTranscriptEntry);
+      }
+      sendBtn.disabled = false;
+      return;
+    }
+
+    const res = await rpc('session.create', { kind: 'direct', channel_ref: 'webchat' });
+    sessionId = res.id;
+    persistSessionInUrl();
+    sendBtn.disabled = false;
+    ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
+    appendMsg('system', 'Session started.');
   }
 
   function connect() {
@@ -172,14 +215,9 @@
     ws.onopen = async function() {
       setStatus(true, 'Connected');
       try {
-        const res = await rpc('session.create', { kind: 'direct', channel_ref: 'webchat' });
-        sessionId = res.id;
-        sendBtn.disabled = false;
-        // Subscribe to events for this session.
-        ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
-        appendMsg('system', 'Session started.');
+        await hydrateSession();
       } catch(e) {
-        appendMsg('system', 'Failed to create session: ' + (e.message || e));
+        appendMsg('system', 'Failed to initialize session: ' + (e.message || e));
       }
     };
 
@@ -201,7 +239,6 @@
 
     ws.onclose = function() {
       setStatus(false, 'Disconnected. Reconnecting...');
-      sessionId = null;
       sendBtn.disabled = true;
       setTimeout(connect, 2000);
     };
@@ -214,7 +251,6 @@
   function handleEvent(frame) {
     const p = frame.payload || {};
     const kind = frame.kind || p.kind || '';
-    // Show assistant text from turn_complete or transcript_append events.
     if (kind === 'turn_complete' || kind === 'turn_finished') {
       const text = p.assistant_text || p.response || p.text || '';
       if (text) appendMsg('assistant', text);
@@ -232,7 +268,6 @@
     sendBtn.disabled = true;
     try {
       const res = await rpc('session.send', { session_id: sessionId, content: text });
-      // If the response contains inline assistant text, show it.
       const inlineReply = res && (res.assistant_reply || res.assistant_text || res.response || res.text);
       if (inlineReply) {
         appendMsg('assistant', inlineReply);
