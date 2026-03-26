@@ -267,7 +267,11 @@ fn open_config_instructions(workspace: &Path, config_path: &Path) {
     eprintln!("  - open dashboard: http://127.0.0.1:8787/dashboard");
 }
 
-fn start_gateway_process(workspace: &Path, config_path: &Path, repo_root_hint: Option<&Path>) -> Result<Child> {
+fn start_gateway_process(
+    workspace: &Path,
+    config_path: &Path,
+    repo_root_hint: Option<&Path>,
+) -> Result<Child> {
     let mut candidates: Vec<(String, StdCommand)> = Vec::new();
 
     let mut direct = StdCommand::new("rune-gateway");
@@ -664,7 +668,14 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     }
 
     if options.start && !should_start_service {
-        let child = start_gateway_process(&workspace, &config_path, Some(&std::env::current_dir().context("failed to resolve current directory for cargo fallback")?))?;
+        let child = start_gateway_process(
+            &workspace,
+            &config_path,
+            Some(
+                &std::env::current_dir()
+                    .context("failed to resolve current directory for cargo fallback")?,
+            ),
+        )?;
         println!("✓ Started gateway (pid {})", child.id());
     }
 
@@ -3036,6 +3047,40 @@ pub async fn run(cli: Cli) -> Result<()> {
             service_name,
             service_enable,
             service_start,
+        }
+        | Command::Setup {
+            path,
+            api_key,
+            provider,
+            model,
+            telegram_token,
+            webchat,
+            start,
+            open,
+            no_open,
+            non_interactive,
+            install_service,
+            service_target,
+            service_name,
+            service_enable,
+            service_start,
+        }
+        | Command::Onboard {
+            path,
+            api_key,
+            provider,
+            model,
+            telegram_token,
+            webchat,
+            start,
+            open,
+            no_open,
+            non_interactive,
+            install_service,
+            service_target,
+            service_name,
+            service_enable,
+            service_start,
         } => {
             run_init_wizard(InitWizardOptions {
                 path: &path,
@@ -3154,59 +3199,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
-        Command::Setup {
-            path,
-            api_key,
-            provider,
-            model,
-            telegram_token,
-            webchat,
-            start,
-            open,
-            no_open,
-            non_interactive,
-            install_service,
-            service_target,
-            service_name,
-            service_enable,
-            service_start,
-        }
-        | Command::Onboard {
-            path,
-            api_key,
-            provider,
-            model,
-            telegram_token,
-            webchat,
-            start,
-            open,
-            no_open,
-            non_interactive,
-            install_service,
-            service_target,
-            service_name,
-            service_enable,
-            service_start,
-        } => {
-            run_init_wizard(InitWizardOptions {
-                path: &path,
-                api_key,
-                provider,
-                model,
-                telegram_token,
-                webchat,
-                start,
-                open: open && !no_open,
-                non_interactive,
-                install_service,
-                service_target,
-                service_name: &service_name,
-                service_enable,
-                service_start,
-                print_next_steps: false,
-            })
-            .await?;
-        }
+
         Command::Backup { action } => match action {
             BackupAction::Create { label } => {
                 let result = client.backup_create(label.as_deref()).await?;
