@@ -39,7 +39,7 @@ if ! "$REPO_DIR/target/release/rune" completion generate bash >/dev/null 2>&1; t
     echo "[self-update] CLI completion smoke check failed — aborting"
     exit 1
 fi
-if ! strings "$BINARY" | grep -q "rune-gateway"; then
+if ! strings "$BINARY" | grep -q "rune_gateway::ws"; then
     echo "[self-update] Gateway binary fingerprint check failed — aborting"
     exit 1
 fi
