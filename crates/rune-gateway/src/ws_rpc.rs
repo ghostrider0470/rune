@@ -412,7 +412,10 @@ impl RpcDispatcher {
 
         let rate_limit_key = session
             .channel_ref
-            .clone()
+            .as_deref()
+            .and_then(|channel| channel.strip_prefix("webchat:"))
+            .filter(|token| !token.is_empty() && *token != "anonymous")
+            .map(str::to_owned)
             .unwrap_or_else(|| format!("session:{}", session_id));
         if let Err(retry_after) = self.state.webchat_rate_limiter.check(rate_limit_key).await {
             return Err(rate_limited_error(retry_after));
