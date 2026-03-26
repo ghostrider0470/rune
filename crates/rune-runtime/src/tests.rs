@@ -293,6 +293,10 @@ impl SessionRepo for MemSessionRepo {
         status: &str,
         updated_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<SessionRow, StoreError> {
+        let target: SessionStatus = status
+            .parse()
+            .map_err(|e: rune_core::CoreError| StoreError::InvalidTransition(e.to_string()))?;
+
         let mut sessions = self.sessions.lock().await;
         let session = sessions
             .iter_mut()
@@ -301,6 +305,15 @@ impl SessionRepo for MemSessionRepo {
                 entity: "session",
                 id: id.to_string(),
             })?;
+
+        let current: SessionStatus = session
+            .status
+            .parse()
+            .map_err(|e: rune_core::CoreError| StoreError::InvalidTransition(e.to_string()))?;
+        current
+            .transition(target)
+            .map_err(|e| StoreError::InvalidTransition(e.to_string()))?;
+
         session.status = status.to_string();
         session.updated_at = updated_at;
         session.last_activity_at = updated_at;
@@ -1017,6 +1030,7 @@ async fn mark_running_allows_resuming_from_waiting_states() {
             )
             .await
             .unwrap();
+        engine.mark_running(session.id).await.unwrap();
         h.session_repo
             .update_status(session.id, status, chrono::Utc::now())
             .await
@@ -1083,6 +1097,51 @@ async fn invalid_session_transition_rejected() {
 
     let err = engine.mark_running(session.id).await.unwrap_err();
     assert!(err.to_string().contains("running"), "got: {err}");
+}
+
+
+#[tokio::test]
+async fn approval_wait_transition_requires_running_session() {
+    let h = TestHarness::new();
+    let session = h
+        .session_engine()
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let err = h
+        .session_repo
+        .update_status(session.id, "waiting_for_approval", chrono::Utc::now())
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("invalid transition"), "got: {err}");
+}
+
+#[tokio::test]
+async fn approval_wait_transition_allowed_from_running_session() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    engine.mark_running(session.id).await.unwrap();
+
+    let updated = h
+        .session_repo
+        .update_status(session.id, "waiting_for_approval", chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(updated.status, "waiting_for_approval");
 }
 
 #[tokio::test]
