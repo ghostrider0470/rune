@@ -237,7 +237,7 @@
   const requestedSessionId = query.get('session_id') || '';
   let sessionId = requestedSessionId || window.sessionStorage.getItem(sessionStorageKey);
   let reqCounter = 0;
-  const pendingRpc = {};
+  let pendingRpc = {};
   let pendingAssistantMsg = null;
   const authToken = query.get('api_key') || '';
   const authHeaderToken = query.get('auth') || authToken;
@@ -301,9 +301,13 @@
   }
 
   async function openSession(nextSessionId, fromLink) {
+    const previousSessionId = sessionId;
     sessionId = nextSessionId;
     resetTranscript();
     persistSessionInUrl();
+    if (previousSessionId && previousSessionId !== sessionId) {
+      ws.send(JSON.stringify({ type: 'req', id: 'unsub-' + String(++reqCounter), method: 'unsubscribe', params: { session_id: previousSessionId } }));
+    }
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
     appendMsg('system', fromLink ? 'Opened session from browser history.' : 'Switched session.');
     const existing = await rpc('session.transcript', { session_id: sessionId });
@@ -317,6 +321,7 @@
     const wsQuery = new URLSearchParams();
     if (authToken) wsQuery.set('api_key', authToken);
     if (browserSessionToken) wsQuery.set('session_token', browserSessionToken);
+    if (sessionId) wsQuery.set('session_id', sessionId);
     const suffix = wsQuery.toString();
     return proto + '//' + location.host + '/ws' + (suffix ? '?' + suffix : '');
   }
@@ -372,7 +377,15 @@
   }
 
   function persistSessionInUrl() {
-    if (!sessionId) return;
+    const next = new URLSearchParams(location.search);
+    if (!sessionId) {
+      next.delete('session_id');
+      if (authToken) next.set('api_key', authToken);
+      if (browserSessionToken) next.set('session_token', browserSessionToken);
+      history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next.toString() : ''));
+      renderSessionList();
+      return;
+    }
     window.sessionStorage.setItem(sessionStorageKey, sessionId);
     renderSessionList();
     const next = new URLSearchParams(location.search);
@@ -442,6 +455,7 @@
 
   function connect() {
     ws = new WebSocket(buildWsUrl(), wsProtocols());
+    pendingRpc = {};
 
     ws.onopen = async function() {
       setStatus(true, 'Connected');
