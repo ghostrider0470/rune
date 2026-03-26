@@ -6,7 +6,8 @@ services:
     ports:
       - "8787:8787"
     environment:
-      RUNE__DATABASE__DATABASE_URL: sqlite:///data/db/rune.db
+      RUNE__DATABASE__BACKEND: sqlite
+      RUNE__DATABASE__SQLITE_PATH: /data/db/rune.db
       RUNE__GATEWAY__HOST: 0.0.0.0
       RUNE__GATEWAY__PORT: 8787
       RUNE__BROWSER__ENABLED: "true"
@@ -17,9 +18,11 @@ services:
       OLLAMA_HOST: ${OLLAMA_HOST:-}
     volumes:
       - rune-data:/data
-      - ./config:/config:ro
-      - ./secrets:/secrets:ro
+      - rune-config:/config
+      - rune-secrets:/secrets
     restart: unless-stopped
 
 volumes:
   rune-data:
+  rune-config:
+  rune-secrets:

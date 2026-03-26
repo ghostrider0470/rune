@@ -109,7 +109,7 @@ cd ~/Development/rune
 docker compose -f docker-compose.zero-config.yml up --build -d
 ```
 
-This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` remains the admin SPA route) and persists state in the `rune-data` volume. The compose file explicitly enables the browser UI + WebChat and passes through `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` when provided.
+This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` redirects into WebChat) and persists state/config/secrets in the named `rune-data`, `rune-config`, and `rune-secrets` volumes. The compose file explicitly enables the browser UI + WebChat and passes through `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` when provided.
 
 Useful follow-ups:
 
