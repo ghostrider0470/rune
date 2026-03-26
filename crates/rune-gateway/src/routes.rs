@@ -26,8 +26,9 @@ use serde_json::Value;
 
 use crate::error::GatewayError;
 use crate::ms365::{
-    CreatePlannerTaskRequest, CreateTodoTaskRequest, ForwardMailRequest, Ms365MailServiceError,
-    Ms365PlannerServiceError, Ms365TodoServiceError, PlannerTask, ReplyMailRequest,
+    CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest,
+    ForwardMailRequest, Ms365CalendarServiceError, Ms365MailServiceError, Ms365PlannerServiceError,
+    Ms365TodoServiceError, PlannerTask, ReplyMailRequest, RespondCalendarEventRequest,
     SendMailRequest, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
@@ -3598,6 +3599,75 @@ pub struct Ms365MailMutationResponse {
     pub message: String,
 }
 
+#[derive(Serialize)]
+pub struct Ms365CalendarMutationResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+/// `POST /ms365/calendar/events` — create a Microsoft 365 calendar event.
+pub async fn ms365_calendar_create_event(
+    State(state): State<AppState>,
+    Json(request): Json<CreateCalendarEventRequest>,
+) -> Result<(StatusCode, Json<Ms365CalendarMutationResponse>), GatewayError> {
+    state
+        .ms365_calendar_service
+        .create_event(request)
+        .await
+        .map_err(map_ms365_calendar_service_error)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(Ms365CalendarMutationResponse {
+            success: true,
+            message: "Calendar event created".to_string(),
+        }),
+    ))
+}
+
+/// `DELETE /ms365/calendar/events/{id}` — delete a Microsoft 365 calendar event.
+pub async fn ms365_calendar_delete_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Ms365CalendarMutationResponse>, GatewayError> {
+    state
+        .ms365_calendar_service
+        .delete_event(&id)
+        .await
+        .map_err(map_ms365_calendar_service_error)?;
+
+    Ok(Json(Ms365CalendarMutationResponse {
+        success: true,
+        message: "Calendar event deleted".to_string(),
+    }))
+}
+
+/// `POST /ms365/calendar/events/{id}/delete` — compatibility alias for existing clients.
+pub async fn ms365_calendar_delete_event_compat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Ms365CalendarMutationResponse>, GatewayError> {
+    ms365_calendar_delete_event(State(state), Path(id)).await
+}
+
+/// `POST /ms365/calendar/events/{id}/respond` — respond to a Microsoft 365 calendar invitation.
+pub async fn ms365_calendar_respond_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<RespondCalendarEventRequest>,
+) -> Result<Json<Ms365CalendarMutationResponse>, GatewayError> {
+    state
+        .ms365_calendar_service
+        .respond_to_event(&id, request)
+        .await
+        .map_err(map_ms365_calendar_service_error)?;
+
+    Ok(Json(Ms365CalendarMutationResponse {
+        success: true,
+        message: "Calendar response sent".to_string(),
+    }))
+}
+
 /// `POST /ms365/mail/send` — send a Microsoft 365 mail message.
 pub async fn ms365_mail_send(
     State(state): State<AppState>,
@@ -3752,6 +3822,17 @@ pub async fn ms365_todo_complete_task(
         .map_err(map_ms365_todo_service_error)?;
 
     Ok(Json(Ms365TodoTaskMutationResponse { task }))
+}
+
+fn map_ms365_calendar_service_error(error: Ms365CalendarServiceError) -> GatewayError {
+    match error {
+        Ms365CalendarServiceError::Validation(message)
+        | Ms365CalendarServiceError::NotFound(message) => GatewayError::BadRequest(message),
+        Ms365CalendarServiceError::NotConfigured(message)
+        | Ms365CalendarServiceError::Upstream(message) => GatewayError::Internal(message),
+        Ms365CalendarServiceError::Unauthorized => GatewayError::Unauthorized,
+        Ms365CalendarServiceError::Forbidden(message) => GatewayError::Forbidden(message),
+    }
 }
 
 fn map_ms365_planner_service_error(error: Ms365PlannerServiceError) -> GatewayError {
@@ -4270,7 +4351,9 @@ fn build_configure_items(
             config
                 .models
                 .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
-                .map(|base| format!("no explicit model providers; zero-config Ollama available at {base}"))
+                .map(|base| {
+                    format!("no explicit model providers; zero-config Ollama available at {base}")
+                })
                 .unwrap_or_else(|| "no model providers; using demo echo backend".into())
         },
     });

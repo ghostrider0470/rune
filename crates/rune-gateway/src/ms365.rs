@@ -201,6 +201,69 @@ pub struct TodoTask {
     pub body_preview: Option<String>,
 }
 
+/// Gateway request for creating a Microsoft 365 calendar event.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CreateCalendarEventRequest {
+    pub subject: String,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub attendees: Vec<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+impl CreateCalendarEventRequest {
+    pub fn validate(&self) -> Result<(), Ms365CalendarServiceError> {
+        if self.subject.trim().is_empty() {
+            return Err(Ms365CalendarServiceError::Validation(
+                "calendar event subject is required".to_string(),
+            ));
+        }
+
+        validate_optional_mail_recipients(&self.attendees, "calendar attendees")?;
+        validate_calendar_datetime(&self.start, "calendar event start")?;
+        validate_calendar_datetime(&self.end, "calendar event end")?;
+
+        let start = DateTime::parse_from_rfc3339(self.start.trim()).map_err(|error| {
+            Ms365CalendarServiceError::Validation(format!(
+                "calendar event start must be valid RFC3339: {error}"
+            ))
+        })?;
+        let end = DateTime::parse_from_rfc3339(self.end.trim()).map_err(|error| {
+            Ms365CalendarServiceError::Validation(format!(
+                "calendar event end must be valid RFC3339: {error}"
+            ))
+        })?;
+
+        if end <= start {
+            return Err(Ms365CalendarServiceError::Validation(
+                "calendar event end must be after start".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Gateway request for responding to a Microsoft 365 calendar invitation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RespondCalendarEventRequest {
+    pub response: String,
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+impl RespondCalendarEventRequest {
+    pub fn validate(&self, id: &str) -> Result<(), Ms365CalendarServiceError> {
+        validate_calendar_event_id(id)?;
+        validate_calendar_response(self.response.as_str())?;
+        Ok(())
+    }
+}
+
 /// Gateway request for sending a Microsoft 365 mail message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SendMailRequest {
@@ -292,6 +355,7 @@ pub enum Ms365ServiceError {
 pub type Ms365PlannerServiceError = Ms365ServiceError;
 pub type Ms365TodoServiceError = Ms365ServiceError;
 pub type Ms365MailServiceError = Ms365ServiceError;
+pub type Ms365CalendarServiceError = Ms365ServiceError;
 
 #[async_trait]
 pub trait Ms365PlannerService: Send + Sync {
@@ -346,6 +410,22 @@ pub trait Ms365MailService: Send + Sync {
         id: &str,
         request: ForwardMailRequest,
     ) -> Result<(), Ms365MailServiceError>;
+}
+
+#[async_trait]
+pub trait Ms365CalendarService: Send + Sync {
+    async fn create_event(
+        &self,
+        request: CreateCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError>;
+
+    async fn delete_event(&self, id: &str) -> Result<(), Ms365CalendarServiceError>;
+
+    async fn respond_to_event(
+        &self,
+        id: &str,
+        request: RespondCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError>;
 }
 
 /// Planner mutation service backed by Microsoft Graph.
@@ -770,6 +850,123 @@ impl Ms365TodoService for GraphMs365TodoService {
         .await?;
 
         self.read_task(list_id, task_id).await
+    }
+}
+
+/// Calendar mutation service backed by Microsoft Graph.
+pub struct GraphMs365CalendarService {
+    client: Client,
+}
+
+impl Default for GraphMs365CalendarService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphMs365CalendarService {
+    pub fn new() -> Self {
+        Self {
+            client: Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl Ms365CalendarService for GraphMs365CalendarService {
+    async fn create_event(
+        &self,
+        request: CreateCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError> {
+        request.validate()?;
+
+        let mut body = Map::new();
+        body.insert("subject".to_string(), json!(request.subject.trim()));
+        body.insert("start".to_string(), graph_datetime_value(&request.start)?);
+        body.insert("end".to_string(), graph_datetime_value(&request.end)?);
+
+        if !request.attendees.is_empty() {
+            body.insert(
+                "attendees".to_string(),
+                graph_calendar_attendees_value(&request.attendees)?,
+            );
+        }
+
+        if let Some(location) = request
+            .location
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            body.insert(
+                "location".to_string(),
+                json!({
+                    "displayName": location.trim(),
+                }),
+            );
+        }
+
+        if let Some(content) = request
+            .body
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            body.insert("body".to_string(), graph_item_body_value(content.trim()));
+        }
+
+        send_graph_empty(
+            graph_request(&self.client, reqwest::Method::POST, "/me/events")?
+                .json(&Value::Object(body)),
+            "calendar",
+        )
+        .await
+    }
+
+    async fn delete_event(&self, id: &str) -> Result<(), Ms365CalendarServiceError> {
+        validate_calendar_event_id(id)?;
+
+        send_graph_empty(
+            graph_request(
+                &self.client,
+                reqwest::Method::DELETE,
+                &format!("/me/events/{}", id.trim()),
+            )?,
+            "calendar",
+        )
+        .await
+    }
+
+    async fn respond_to_event(
+        &self,
+        id: &str,
+        request: RespondCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError> {
+        request.validate(id)?;
+
+        let event_id = id.trim();
+        let action = match request.response.trim() {
+            "accept" => "accept",
+            "decline" => "decline",
+            "tentative" => "tentativelyAccept",
+            _ => unreachable!("calendar response validated before dispatch"),
+        };
+
+        send_graph_empty(
+            graph_request(
+                &self.client,
+                reqwest::Method::POST,
+                &format!("/me/events/{event_id}/{action}"),
+            )?
+            .json(&json!({
+                "comment": request
+                    .comment
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or_default(),
+                "sendResponse": true,
+            })),
+            "calendar",
+        )
+        .await
     }
 }
 
@@ -1214,6 +1411,71 @@ fn graph_mail_recipient_value(recipient: &str) -> Value {
             "address": recipient.trim(),
         }
     })
+}
+
+fn graph_calendar_attendees_value(
+    attendees: &[String],
+) -> Result<Value, Ms365CalendarServiceError> {
+    validate_optional_mail_recipients(attendees, "calendar attendees")?;
+
+    Ok(Value::Array(
+        attendees
+            .iter()
+            .map(|attendee| {
+                json!({
+                    "emailAddress": {
+                        "address": attendee.trim(),
+                    },
+                    "type": "required",
+                })
+            })
+            .collect(),
+    ))
+}
+
+fn validate_calendar_event_id(id: &str) -> Result<(), Ms365CalendarServiceError> {
+    if id.trim().is_empty() {
+        return Err(Ms365CalendarServiceError::Validation(
+            "calendar event id is required".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_calendar_response(value: &str) -> Result<(), Ms365CalendarServiceError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(Ms365CalendarServiceError::Validation(
+            "calendar response is required".to_string(),
+        ));
+    }
+
+    if !matches!(trimmed, "accept" | "decline" | "tentative") {
+        return Err(Ms365CalendarServiceError::Validation(
+            "calendar response must be one of accept, decline, or tentative".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_calendar_datetime(
+    value: &str,
+    field_name: &str,
+) -> Result<(), Ms365CalendarServiceError> {
+    if value.trim().is_empty() {
+        return Err(Ms365CalendarServiceError::Validation(format!(
+            "{field_name} is required"
+        )));
+    }
+
+    DateTime::parse_from_rfc3339(value.trim()).map_err(|error| {
+        Ms365CalendarServiceError::Validation(format!(
+            "{field_name} must be valid RFC3339: {error}"
+        ))
+    })?;
+
+    Ok(())
 }
 
 fn validate_todo_list_id(list_id: &str) -> Result<(), Ms365TodoServiceError> {
