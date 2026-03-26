@@ -57,6 +57,8 @@ cp config.example.toml config.toml
 
 Then open `http://127.0.0.1:8787/webchat` for browser chat or `http://127.0.0.1:8787/dashboard` for the admin UI. The legacy `/chat` path redirects into WebChat so old bookmarks keep working.
 
+WebChat keeps browser sessions isolated by channel token: use `?session_token=my-browser` to keep one browser's session list separate from another, and `?session_id=<uuid>` to reopen a specific thread directly. When gateway auth is enabled, the browser flow also accepts `?api_key=...` (and `?auth=...` for WebSocket bearer-header compatibility) so the embedded chat can be used without a custom proxy.
+
 To generate and install a user service for unattended operation:
 
 ```bash
