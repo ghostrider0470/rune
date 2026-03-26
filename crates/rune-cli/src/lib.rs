@@ -486,8 +486,8 @@ fn open_url_in_browser(url: &str) -> Result<()> {
     anyhow::bail!("failed to open browser for {url}")
 }
 
-async fn run_init_wizard(
-    path: &str,
+struct InitWizardOptions<'a> {
+    path: &'a str,
     api_key: Option<String>,
     provider: Option<String>,
     model: Option<String>,
@@ -497,21 +497,23 @@ async fn run_init_wizard(
     non_interactive: bool,
     install_service: bool,
     service_target: ServiceTarget,
-    service_name: &str,
+    service_name: &'a str,
     service_enable: bool,
     service_start: bool,
-) -> Result<()> {
-    let workspace = if path == "." {
+}
+
+async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
+    let workspace = if options.path == "." {
         default_workspace_root()?
     } else {
-        PathBuf::from(path)
+        PathBuf::from(options.path)
     };
-    init_workspace(&workspace, None, non_interactive).await?;
+    init_workspace(&workspace, None, options.non_interactive).await?;
 
-    let interactive = std::io::stdin().is_terminal() && !non_interactive;
+    let interactive = std::io::stdin().is_terminal() && !options.non_interactive;
     let detected_ollama = detect_ollama();
 
-    let provider = match provider {
+    let provider = match options.provider {
         Some(value) => normalize_provider_kind(&value),
         None if interactive => {
             let default_provider = if detected_ollama.is_some() {
@@ -530,13 +532,13 @@ async fn run_init_wizard(
     } else {
         provider_default_model(&provider)
     };
-    let model = match model {
+    let model = match options.model {
         Some(value) => value,
         None if interactive => prompt_text("Model", Some(model_default))?,
         None => model_default.to_string(),
     };
 
-    let api_key = match api_key {
+    let api_key = match options.api_key {
         Some(value) => value,
         None if provider == "ollama" => String::new(),
         None => {
@@ -558,7 +560,8 @@ async fn run_init_wizard(
         }
     };
 
-    let config_path = write_wizard_config(&workspace, &provider, &model, &api_key, webchat)?;
+    let config_path =
+        write_wizard_config(&workspace, &provider, &model, &api_key, options.webchat)?;
     println!("✓ Wrote {}", config_path.display());
     if provider == "ollama" {
         if let Some(host) = detected_ollama {
@@ -569,22 +572,26 @@ async fn run_init_wizard(
     let host = "127.0.0.1";
     let port = 8787u16;
     let gateway_url = format!("http://{host}:{port}");
-    let chat_path = if webchat { "/webchat" } else { "/dashboard" };
+    let chat_path = if options.webchat {
+        "/webchat"
+    } else {
+        "/dashboard"
+    };
     let url = format!("{gateway_url}{chat_path}");
-    let should_start_service = install_service && service_start;
+    let should_start_service = options.install_service && options.service_start;
 
-    if install_service {
+    if options.install_service {
         let service = install_service_definition(ServiceInstallOptions {
-            target: service_target,
-            name: service_name.to_string(),
+            target: options.service_target,
+            name: options.service_name.to_string(),
             workdir: workspace.clone(),
             config: Some(config_path.display().to_string()),
             gateway_url: Some(gateway_url.clone()),
             yolo: false,
             no_sandbox: false,
             output: None,
-            enable: service_enable,
-            start: service_start,
+            enable: options.service_enable,
+            start: options.service_start,
         })?;
         if let Some(path) = service.output_path {
             println!("✓ Installed {} service at {}", service.target, path);
@@ -593,14 +600,14 @@ async fn run_init_wizard(
         }
     }
 
-    if start && !should_start_service {
+    if options.start && !should_start_service {
         let child = start_gateway_process(&workspace, &config_path)?;
         println!("✓ Started gateway (pid {})", child.id());
-    } else if !install_service {
+    } else if !options.install_service {
         open_config_instructions(&workspace, &config_path);
     }
 
-    if open {
+    if options.open {
         open_url_in_browser(&url)?;
         println!("✓ Opened {url}");
     }
@@ -2921,8 +2928,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             service_enable,
             service_start,
         } => {
-            run_init_wizard(
-                &path,
+            run_init_wizard(InitWizardOptions {
+                path: &path,
                 api_key,
                 provider,
                 model,
@@ -2932,10 +2939,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 non_interactive,
                 install_service,
                 service_target,
-                &service_name,
+                service_name: &service_name,
                 service_enable,
                 service_start,
-            )
+            })
             .await?;
         }
         Command::Agent { action } => match action {
@@ -3046,8 +3053,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             open,
             non_interactive,
         } => {
-            run_init_wizard(
-                &path,
+            run_init_wizard(InitWizardOptions {
+                path: &path,
                 api_key,
                 provider,
                 model,
@@ -3055,12 +3062,12 @@ pub async fn run(cli: Cli) -> Result<()> {
                 start,
                 open,
                 non_interactive,
-                false,
-                ServiceTarget::Systemd,
-                "rune-gateway",
-                true,
-                true,
-            )
+                install_service: false,
+                service_target: ServiceTarget::Systemd,
+                service_name: "rune-gateway",
+                service_enable: true,
+                service_start: true,
+            })
             .await?;
         }
         Command::Backup { action } => match action {
