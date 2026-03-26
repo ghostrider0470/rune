@@ -668,8 +668,13 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     let host = "127.0.0.1";
     let port = 8787u16;
     let gateway_url = format!("http://{host}:{port}");
+    let auth_query = if api_key.trim().is_empty() || provider == "ollama" {
+        String::new()
+    } else {
+        format!("?api_key={}", urlencoding::encode(&api_key))
+    };
     let chat_path = if webchat { "/webchat" } else { "/dashboard" };
-    let url = format!("{gateway_url}{chat_path}");
+    let url = format!("{gateway_url}{chat_path}{auth_query}");
     let should_start_service = options.install_service && options.service_start;
 
     if options.install_service {
@@ -3583,6 +3588,23 @@ ok",
         let written = std::fs::read_to_string(config_path).unwrap();
         assert!(written.contains("api_key = \"test-key\""));
         assert!(!written.contains("api_key_env"));
+    }
+
+    #[test]
+    fn setup_open_url_includes_api_key_query_for_browser_auth_flow() {
+        let gateway_url = "http://127.0.0.1:8787";
+        let api_key = "test key/with?chars";
+        let auth_query = if api_key.trim().is_empty() {
+            String::new()
+        } else {
+            format!("?api_key={}", urlencoding::encode(api_key))
+        };
+        let url = format!("{gateway_url}/webchat{auth_query}");
+
+        assert_eq!(
+            url,
+            "http://127.0.0.1:8787/webchat?api_key=test%20key%2Fwith%3Fchars"
+        );
     }
 
     #[test]
