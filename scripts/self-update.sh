@@ -56,9 +56,13 @@ enabled = false
 enabled = false
 CFG
 status=0
-timeout 10s "$BINARY" --config "$SMOKE_CONFIG_DIR/config.toml" >/dev/null 2>&1 || status=$?
+timeout 15s "$BINARY" --config "$SMOKE_CONFIG_DIR/config.toml" >/dev/null 2>&1 || status=$?
 if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     echo "[self-update] Gateway standalone smoke boot failed — aborting"
+    exit 1
+fi
+if ! timeout 10s "$REPO_DIR/target/release/rune" health --config "$SMOKE_CONFIG_DIR/config.toml" >/dev/null 2>&1; then
+    echo "[self-update] CLI health smoke check failed — aborting"
     exit 1
 fi
 

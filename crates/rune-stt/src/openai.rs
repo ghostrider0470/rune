@@ -131,7 +131,6 @@ impl SttProvider for OpenAiStt {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::extension_for_mime;
