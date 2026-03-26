@@ -96,6 +96,14 @@ fn is_conflict(err: &azure_core::Error) -> bool {
     msg.contains("409") || msg.contains("Conflict")
 }
 
+/// Build a [`PartitionKey`] from an owned or borrowed string.
+///
+/// The Azure SDK's `From<&str>` impl requires `'static`, so for local
+/// strings we go through `String → PartitionKey`.
+pub(crate) fn pk(value: &str) -> azure_data_cosmos::PartitionKey {
+    azure_data_cosmos::PartitionKey::from(value.to_string())
+}
+
 /// Deserialize a [`serde_json::Value`] into `T`.
 pub(crate) fn parse_doc<T: DeserializeOwned>(doc: serde_json::Value) -> Result<T, StoreError> {
     serde_json::from_value(doc).map_err(|e| StoreError::Serialization(e.to_string()))
