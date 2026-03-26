@@ -541,7 +541,10 @@ fn browser_launch_url(
         params.push(format!("auth={encoded}"));
     }
 
-    if let Some(token) = session_token.map(str::trim).filter(|token| !token.is_empty()) {
+    if let Some(token) = session_token
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
         let encoded = urlencoding::encode(token);
         params.push(format!("session_token={encoded}"));
     }
@@ -771,7 +774,9 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
 fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
     let base = gateway_url.trim_end_matches('/');
     let probe_targets = [
+        format!("{base}/ready"),
         format!("{base}/health"),
+        format!("{base}/gateway/ready"),
         format!("{base}/gateway/health"),
         base.to_string(),
     ];
@@ -3627,12 +3632,26 @@ ok",
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = std::thread::spawn(move || {
-            for _ in 0..2 {
+            for _ in 0..4 {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut buf = [0u8; 1024];
                 let read = stream.read(&mut buf).unwrap();
                 let request = String::from_utf8_lossy(&buf[..read]);
-                let response = if request.starts_with("GET /health ") {
+                let response = if request.starts_with("GET /ready ") {
+                    b"HTTP/1.1 404 Not Found
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                } else if request.starts_with("GET /health ") {
+                    b"HTTP/1.1 404 Not Found
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                } else if request.starts_with("GET /gateway/ready ") {
                     b"HTTP/1.1 404 Not Found
 content-length: 0
 connection: close
@@ -3700,7 +3719,6 @@ connection: close
             "http://127.0.0.1:8787/chat?api_key=test%20key%2Fwith%3Fchars&auth=test%20key%2Fwith%3Fchars"
         );
     }
-
 
     #[test]
     fn setup_open_url_includes_session_token_for_webchat_resume() {

@@ -10418,3 +10418,60 @@ async fn doctor_route_reports_custom_path_profile_and_server_mode() {
     assert_eq!(body["paths"]["mode"], "server");
     assert_eq!(body["paths"]["auto_create_missing"], false);
 }
+
+#[tokio::test]
+async fn ready_returns_200_for_standalone_defaults_even_without_explicit_model_provider() {
+    let mut config = rune_config::AppConfig::default();
+    let home = tempfile::tempdir().unwrap();
+    config.mode = rune_config::RuntimeMode::Standalone;
+    config.paths = rune_config::PathsConfig {
+        db_dir: home.path().join("db"),
+        sessions_dir: home.path().join("sessions"),
+        memory_dir: home.path().join("memory"),
+        media_dir: home.path().join("media"),
+        skills_dir: home.path().join("skills"),
+        plugins_dir: home.path().join("plugins"),
+        logs_dir: home.path().join("logs"),
+        backups_dir: home.path().join("backups"),
+        config_dir: home.path().join("config"),
+        secrets_dir: home.path().join("secrets"),
+    };
+    config.ensure_dirs().unwrap();
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(Request::get("/ready").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["service"], "rune-gateway");
+    assert!(json["checks"].is_array());
+}
+
+#[tokio::test]
+async fn api_ready_returns_200_for_standalone_defaults_even_without_explicit_model_provider() {
+    let mut config = rune_config::AppConfig::default();
+    let home = tempfile::tempdir().unwrap();
+    config.mode = rune_config::RuntimeMode::Standalone;
+    config.paths = rune_config::PathsConfig {
+        db_dir: home.path().join("db"),
+        sessions_dir: home.path().join("sessions"),
+        memory_dir: home.path().join("memory"),
+        media_dir: home.path().join("media"),
+        skills_dir: home.path().join("skills"),
+        plugins_dir: home.path().join("plugins"),
+        logs_dir: home.path().join("logs"),
+        backups_dir: home.path().join("backups"),
+        config_dir: home.path().join("config"),
+        secrets_dir: home.path().join("secrets"),
+    };
+    config.ensure_dirs().unwrap();
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(Request::get("/api/ready").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}

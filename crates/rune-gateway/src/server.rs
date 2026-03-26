@@ -380,6 +380,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let public_routes = Router::new()
         .route("/health", get(routes::health))
+        .route("/ready", get(routes::ready))
         .route("/chat", get(webchat::legacy_chat_redirect))
         .route("/webchat", get(webchat::webchat_handler))
         .route("/assets/{path}", get(routes::branded_asset))
@@ -389,6 +390,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let protected_routes = Router::new()
         .route("/gateway/health", get(routes::health))
+        .route("/gateway/ready", get(routes::ready))
         .route("/status", get(routes::status))
         .route("/dashboard", get(routes::spa_index))
         .route("/ui", get(routes::spa_index))
@@ -594,6 +596,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/auth", get(routes::auth_token_info))
         .route("/api/skills", get(routes::list_skills))
         .route("/api/health", get(routes::health))
+        .route("/api/ready", get(routes::ready))
         .route("/api/status", get(routes::status))
         .route("/ws", get(ws::ws_handler))
         // Channel routes
@@ -657,6 +660,9 @@ async fn content_negotiate_spa(
         || path.starts_with("/webhook/")
         || path.starts_with("/devices/")
         || path == "/health"
+        || path == "/ready"
+        || path == "/gateway/ready"
+        || path == "/api/ready"
         || path == "/ws"
     {
         return next.run(request).await;

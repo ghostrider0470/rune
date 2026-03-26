@@ -44,7 +44,7 @@ use crate::{SupervisorDeps, run_job_lifecycle};
 
 // ── Health & Status ───────────────────────────────────────────────────────────
 
-/// Response for `GET /health`.
+/// Response for `GET /health` and `GET /ready`.
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
@@ -56,6 +56,16 @@ pub struct HealthResponse {
     pub ws_connections: usize,
     pub mode: &'static str,
     pub storage_backend: String,
+}
+
+#[derive(Serialize)]
+pub struct ReadinessResponse {
+    pub status: &'static str,
+    pub service: &'static str,
+    pub version: &'static str,
+    pub mode: &'static str,
+    pub storage_backend: String,
+    pub checks: Vec<DoctorCheck>,
 }
 
 /// Health check with runtime counters.
@@ -77,6 +87,28 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         mode: state.capabilities.mode.as_str(),
         storage_backend: state.capabilities.storage_backend.clone(),
     }))
+}
+
+/// Readiness check for startup/service probes.
+pub async fn ready(State(state): State<AppState>) -> Result<Response, GatewayError> {
+    let config = state.config.read().await;
+    let checks = readiness_checks(&config);
+    let failing = checks.iter().any(|check| check.status == "fail");
+    let status = if failing { "degraded" } else { "ok" };
+    let body = ReadinessResponse {
+        status,
+        service: "rune-gateway",
+        version: env!("CARGO_PKG_VERSION"),
+        mode: state.capabilities.mode.as_str(),
+        storage_backend: state.capabilities.storage_backend.clone(),
+        checks,
+    };
+    let code = if failing {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    };
+    Ok((code, Json(body)).into_response())
 }
 
 /// Response for `GET /status`.
@@ -4418,9 +4450,9 @@ pub async fn memory_delete(
         .mem0()
         .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
 
-    mem0.delete_memory(&id).await.map_err(|e| {
-        GatewayError::Internal(format!("failed to delete memory: {e}"))
-    })?;
+    mem0.delete_memory(&id)
+        .await
+        .map_err(|e| GatewayError::Internal(format!("failed to delete memory: {e}")))?;
 
     Ok(Json(json!({"success": true, "id": id})))
 }
@@ -4517,6 +4549,57 @@ fn gateway_path_hint(
             path.display()
         ),
     }
+}
+
+fn readiness_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+    let resolved_mode = config.mode.resolve(config);
+
+    let path_checks = storage_path_checks(config);
+    let mut hard_fail_names = vec![
+        "paths.db_dir",
+        "paths.sessions_dir",
+        "paths.memory_dir",
+        "paths.media_dir",
+        "paths.logs_dir",
+    ];
+    if resolved_mode == rune_config::RuntimeMode::Server {
+        hard_fail_names.extend([
+            "paths.skills_dir",
+            "paths.plugins_dir",
+            "paths.backups_dir",
+            "paths.config_dir",
+            "paths.secrets_dir",
+        ]);
+    }
+
+    for mut check in path_checks {
+        if hard_fail_names.iter().any(|name| *name == check.name) {
+            check.status = match check.status {
+                "pass" => "pass",
+                _ => "fail",
+            };
+        }
+        checks.push(check);
+    }
+
+    checks.push(DoctorCheck {
+        name: "model_backend".to_string(),
+        status: if !config.models.providers.is_empty() || resolved_mode == rune_config::RuntimeMode::Standalone {
+            "pass"
+        } else {
+            "warn"
+        },
+        message: if !config.models.providers.is_empty() {
+            format!("{} provider(s) configured", config.models.providers.len())
+        } else if resolved_mode == rune_config::RuntimeMode::Standalone {
+            "No explicit providers configured; standalone startup may still succeed via zero-config Ollama or echo fallback".to_string()
+        } else {
+            "No explicit model providers configured; server deployments should provision at least one provider".to_string()
+        },
+    });
+
+    checks
 }
 
 fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
