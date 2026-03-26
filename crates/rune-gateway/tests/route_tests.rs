@@ -8053,6 +8053,22 @@ async fn set_approval_policy_rejects_invalid_decision() {
 }
 
 #[tokio::test]
+async fn chat_route_redirects_to_webchat() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/chat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        response.headers().get(axum::http::header::LOCATION).unwrap(),
+        "/webchat"
+    );
+}
+
+#[tokio::test]
 async fn webchat_route_serves_embedded_chat_ui() {
     let app = build_test_app(None);
 
@@ -8084,9 +8100,11 @@ async fn webchat_route_preserves_session_and_auth_query_params() {
 
     let response = app
         .oneshot(
-            Request::get("/webchat?session_id=sess-123&api_key=test-key&session_token=browser-token")
-                .body(Body::empty())
-                .unwrap(),
+            Request::get(
+                "/webchat?session_id=sess-123&api_key=test-key&session_token=browser-token",
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();

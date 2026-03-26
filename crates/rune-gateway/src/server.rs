@@ -323,7 +323,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
 
     let public_routes = Router::new()
         .route("/health", get(routes::health))
-        .route("/chat", get(routes::spa_index))
+        .route("/chat", get(webchat::legacy_chat_redirect))
         .route("/webchat", get(webchat::webchat_handler))
         .route("/ws", get(ws::ws_handler))
         .route("/assets/{path}", get(routes::branded_asset))

@@ -55,7 +55,7 @@ cp config.example.toml config.toml
 ./target/release/rune-gateway --config config.toml
 ```
 
-Then open `http://127.0.0.1:8787/dashboard`.
+Then open `http://127.0.0.1:8787/webchat` for browser chat or `http://127.0.0.1:8787/dashboard` for the admin UI. The legacy `/chat` path redirects into WebChat so old bookmarks keep working.
 
 To generate and install a user service for unattended operation:
 
