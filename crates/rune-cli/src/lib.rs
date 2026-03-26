@@ -677,6 +677,8 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
             ),
         )?;
         println!("✓ Started gateway (pid {})", child.id());
+        wait_for_gateway_ready(&gateway_url)?;
+        println!("✓ Gateway ready at {gateway_url}");
     }
 
     if options.print_next_steps {
@@ -689,6 +691,36 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
+    let health_url = format!("{}/health", gateway_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(1200))
+        .build()
+        .context("failed to build gateway readiness client")?;
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut last_err: Option<String> = None;
+
+    while std::time::Instant::now() < deadline {
+        match client.get(&health_url).send() {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            Ok(response) => {
+                last_err = Some(format!("health returned {}", response.status()));
+            }
+            Err(err) => {
+                last_err = Some(err.to_string());
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+
+    anyhow::bail!(
+        "gateway did not become ready at {} ({})",
+        health_url,
+        last_err.unwrap_or_else(|| "unknown error".to_string())
+    )
 }
 
 fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
@@ -3362,6 +3394,44 @@ mod tests {
         assert!(stdout.contains("--install-service --service-target systemd"));
         assert!(stdout.contains("--service-target launchd"));
         assert!(stdout.contains("docker compose -f docker-compose.zero-config.yml up --build -d"));
+    }
+
+    #[test]
+    fn wait_for_gateway_ready_accepts_healthy_server() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK
+content-length: 2
+connection: close
+
+ok",
+                )
+                .unwrap();
+        });
+
+        wait_for_gateway_ready(&format!("http://{}", addr)).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn wait_for_gateway_ready_errors_when_server_never_starts() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let err = wait_for_gateway_ready(&format!("http://{}", addr)).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("gateway did not become ready"));
+        assert!(message.contains("/health"));
     }
 
     #[test]
