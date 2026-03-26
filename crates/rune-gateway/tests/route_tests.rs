@@ -8907,6 +8907,24 @@ async fn webchat_route_rejects_non_object_session_token_storage_payloads() {
     assert!(body.contains("!Array.isArray(parsed) ? parsed : {}"));
 }
 
+
+#[tokio::test]
+async fn webchat_route_mentions_session_isolation_hinting() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("const sessionHintEl = document.getElementById('session-hint')"));
+    assert!(body.contains("function updateSessionHint()"));
+    assert!(body.contains("Shared gateway auth link active. Use distinct session_token values per browser to keep users isolated."));
+    assert!(body.contains("Anonymous browser mode — starting a new session rotates a fresh browser token for isolation."));
+}
+
 #[tokio::test]
 async fn webchat_allows_query_api_key_when_gateway_auth_is_enabled() {
     let app = build_test_app(Some("test-token".to_string()));

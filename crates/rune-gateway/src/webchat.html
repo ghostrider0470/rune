@@ -114,6 +114,12 @@
     color: var(--text-muted);
     vertical-align: middle;
   }
+  #session-hint {
+    padding: 10px 12px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
   #main {
     min-width: 0;
     display: flex;
@@ -220,6 +226,7 @@
 <div id="layout">
   <aside id="sidebar">
     <div id="sidebar-header">Browser sessions <span id="auth-badge"></span></div>
+    <div id="session-hint"></div>
     <div id="session-list"></div>
   </aside>
   <main id="main">
@@ -241,6 +248,7 @@
   const newSessionBtn = document.getElementById('new-session-btn');
   const sessionListEl = document.getElementById('session-list');
   const authBadgeEl = document.getElementById('auth-badge');
+  const sessionHintEl = document.getElementById('session-hint');
   const query = new URLSearchParams(location.search);
 
   let ws = null;
@@ -316,6 +324,19 @@
     authBadgeEl.title = authToken
       ? 'Using shared gateway API key from the URL.'
       : 'Using per-session browser token so each thread can be reopened safely without a shared gateway key.';
+  }
+
+  function updateSessionHint() {
+    if (!sessionHintEl) return;
+    if (authToken) {
+      sessionHintEl.textContent = 'Shared gateway auth link active. Use distinct session_token values per browser to keep users isolated.';
+      return;
+    }
+    if (browserSessionToken) {
+      sessionHintEl.textContent = 'This browser is pinned to session_token ' + browserSessionToken.slice(0, 8) + '… — bookmark this URL to reopen the same session list.';
+      return;
+    }
+    sessionHintEl.textContent = 'Anonymous browser mode — starting a new session rotates a fresh browser token for isolation.';
   }
 
   function formatRelative(iso) {
@@ -529,6 +550,7 @@
     } else {
       window.sessionStorage.removeItem(browserSessionKey);
     }
+    updateSessionHint();
   }
 
   persistBrowserSessionToken();
@@ -628,7 +650,8 @@
     reconnectTimer = window.setTimeout(function() {
       reconnectTimer = null;
       updateAuthBadge();
-  connect();
+      updateSessionHint();
+      connect();
     }, delay);
   }
 
@@ -790,6 +813,7 @@
   msgInput.addEventListener('input', autoResize);
 
   updateAuthBadge();
+  updateSessionHint();
   connect();
 })();
 </script>
