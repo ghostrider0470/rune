@@ -29,8 +29,8 @@ use rune_config::{
 };
 use rune_core::ToolCategory;
 use rune_gateway::ms365::{
-    GraphMs365CalendarService, GraphMs365MailService, GraphMs365PlannerService,
-    GraphMs365TodoService, GraphMs365UsersService,
+    GraphMs365CalendarService, GraphMs365FilesService, GraphMs365MailService,
+    GraphMs365PlannerService, GraphMs365TodoService, GraphMs365UsersService,
 };
 use rune_gateway::{Services, init_logging, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
@@ -754,6 +754,7 @@ async fn build_services(
         ms365_planner_service: Arc::new(GraphMs365PlannerService::new()),
         ms365_todo_service: Arc::new(GraphMs365TodoService::new()),
         ms365_mail_service: Arc::new(GraphMs365MailService::new()),
+        ms365_files_service: Arc::new(GraphMs365FilesService::new()),
         ms365_users_service: Arc::new(GraphMs365UsersService::new()),
     };
 

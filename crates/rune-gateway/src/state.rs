@@ -20,8 +20,8 @@ use rune_tts::TtsEngine;
 use tokio::sync::{RwLock, broadcast};
 
 use crate::ms365::{
-    Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService,
-    Ms365UsersService,
+    Ms365CalendarService, Ms365FilesService, Ms365MailService, Ms365PlannerService,
+    Ms365TodoService, Ms365UsersService,
 };
 use crate::pairing::DeviceRegistry;
 
@@ -99,6 +99,8 @@ pub struct AppState {
     pub ms365_todo_service: Arc<dyn Ms365TodoService>,
     /// Microsoft 365 Mail mutation backend.
     pub ms365_mail_service: Arc<dyn Ms365MailService>,
+    /// Microsoft 365 Files read backend.
+    pub ms365_files_service: Arc<dyn Ms365FilesService>,
     /// Microsoft 365 Users read backend.
     pub ms365_users_service: Arc<dyn Ms365UsersService>,
 }
