@@ -1791,6 +1791,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             telegram_token,
             webchat,
             start,
+            no_start,
             open,
             no_open,
             non_interactive,
@@ -1798,7 +1799,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             service_target,
             service_name,
             service_enable,
+            no_service_enable,
             service_start,
+            no_service_start,
         } => {
             run_init_wizard(InitWizardOptions {
                 path: &path,
@@ -1807,14 +1810,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 model,
                 telegram_token,
                 webchat,
-                start,
+                start: start && !no_start,
                 open: open && !no_open,
                 non_interactive,
                 install_service,
                 service_target,
                 service_name: &service_name,
-                service_enable,
-                service_start,
+                service_enable: service_enable && !no_service_enable,
+                service_start: service_start && !no_service_start,
                 print_next_steps: true,
             })
             .await?;
@@ -3125,6 +3128,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             telegram_token,
             webchat,
             start,
+            no_start,
             open,
             no_open,
             non_interactive,
@@ -3132,7 +3136,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             service_target,
             service_name,
             service_enable,
+            no_service_enable,
             service_start,
+            no_service_start,
         }
         | Command::Setup {
             path,
@@ -3142,6 +3148,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             telegram_token,
             webchat,
             start,
+            no_start,
             open,
             no_open,
             non_interactive,
@@ -3149,7 +3156,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             service_target,
             service_name,
             service_enable,
+            no_service_enable,
             service_start,
+            no_service_start,
         }
         | Command::Onboard {
             path,
@@ -3159,6 +3168,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             telegram_token,
             webchat,
             start,
+            no_start,
             open,
             no_open,
             non_interactive,
@@ -3166,7 +3176,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             service_target,
             service_name,
             service_enable,
+            no_service_enable,
             service_start,
+            no_service_start,
         } => {
             run_init_wizard(InitWizardOptions {
                 path: &path,
@@ -3175,14 +3187,14 @@ pub async fn run(cli: Cli) -> Result<()> {
                 model,
                 telegram_token,
                 webchat,
-                start,
+                start: start && !no_start,
                 open: open && !no_open,
                 non_interactive,
                 install_service,
                 service_target,
                 service_name: &service_name,
-                service_enable,
-                service_start,
+                service_enable: service_enable && !no_service_enable,
+                service_start: service_start && !no_service_start,
                 print_next_steps: true,
             })
             .await?;
@@ -3393,6 +3405,46 @@ mod tests {
     use super::*;
     use clap::Parser;
     use tempfile::TempDir;
+
+    #[test]
+    fn cli_setup_alias_supports_negative_quickstart_flags() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "setup",
+            "--no-start",
+            "--no-open",
+            "--install-service",
+            "--no-service-enable",
+            "--no-service-start",
+        ])
+        .expect("setup flags should parse");
+
+        match cli.command {
+            Command::Setup {
+                start,
+                no_start,
+                open,
+                no_open,
+                install_service,
+                service_enable,
+                no_service_enable,
+                service_start,
+                no_service_start,
+                ..
+            } => {
+                assert!(start);
+                assert!(no_start);
+                assert!(open);
+                assert!(no_open);
+                assert!(install_service);
+                assert!(service_enable);
+                assert!(no_service_enable);
+                assert!(service_start);
+                assert!(no_service_start);
+            }
+            other => panic!("expected setup command, got {:?}", other),
+        }
+    }
 
     #[test]
     fn update_wizard_mentions_service_install_and_docker_quickstart() {

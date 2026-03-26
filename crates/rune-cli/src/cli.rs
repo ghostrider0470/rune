@@ -177,6 +177,9 @@ pub enum Command {
         /// Start the gateway after writing config.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
+        /// Skip starting the gateway after writing config.
+        #[arg(long = "no-start", default_value_t = false)]
+        no_start: bool,
         /// Open the chat URL in the default browser after startup.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
@@ -198,9 +201,15 @@ pub enum Command {
         /// Enable the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_enable: bool,
+        /// Skip enabling the service after install.
+        #[arg(long = "no-service-enable", default_value_t = false)]
+        no_service_enable: bool,
         /// Start the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_start: bool,
+        /// Skip starting the service after install.
+        #[arg(long = "no-service-start", default_value_t = false)]
+        no_service_start: bool,
     },
     /// Manage configuration.
     Config {
@@ -247,6 +256,9 @@ pub enum Command {
         /// Start the gateway after writing config.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
+        /// Skip starting the gateway after writing config.
+        #[arg(long = "no-start", default_value_t = false)]
+        no_start: bool,
         /// Open the chat URL in the default browser after startup.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
@@ -268,9 +280,15 @@ pub enum Command {
         /// Enable the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_enable: bool,
+        /// Skip enabling the service after install.
+        #[arg(long = "no-service-enable", default_value_t = false)]
+        no_service_enable: bool,
         /// Start the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_start: bool,
+        /// Skip starting the service after install.
+        #[arg(long = "no-service-start", default_value_t = false)]
+        no_service_start: bool,
     },
     /// Direct agent-turn invocation — send a single instruction to a session.
     Agent {
@@ -315,6 +333,9 @@ pub enum Command {
         /// Start the gateway after writing config.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
+        /// Skip starting the gateway after writing config.
+        #[arg(long = "no-start", default_value_t = false)]
+        no_start: bool,
         /// Open the chat URL in the default browser after startup.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
@@ -336,9 +357,15 @@ pub enum Command {
         /// Enable the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_enable: bool,
+        /// Skip enabling the service after install.
+        #[arg(long = "no-service-enable", default_value_t = false)]
+        no_service_enable: bool,
         /// Start the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_start: bool,
+        /// Skip starting the service after install.
+        #[arg(long = "no-service-start", default_value_t = false)]
+        no_service_start: bool,
     },
     /// First-run onboarding alias for the local setup wizard.
     Onboard {
@@ -363,6 +390,9 @@ pub enum Command {
         /// Start the gateway after writing config.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
+        /// Skip starting the gateway after writing config.
+        #[arg(long = "no-start", default_value_t = false)]
+        no_start: bool,
         /// Open the chat URL in the default browser after startup.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
@@ -384,9 +414,15 @@ pub enum Command {
         /// Enable the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_enable: bool,
+        /// Skip enabling the service after install.
+        #[arg(long = "no-service-enable", default_value_t = false)]
+        no_service_enable: bool,
         /// Start the service immediately after install.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         service_start: bool,
+        /// Skip starting the service after install.
+        #[arg(long = "no-service-start", default_value_t = false)]
+        no_service_start: bool,
     },
     /// Manage backups of durable state.
     Backup {
