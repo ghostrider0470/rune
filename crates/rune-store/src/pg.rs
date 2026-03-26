@@ -579,7 +579,7 @@ impl TranscriptRepo for PgTranscriptRepo {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// PgJobRepo (Phase 3 -- stubbed)
+// PgJobRepo
 // ══════════════════════════════════════════════════════════════════════
 
 /// PostgreSQL-backed job repository.
@@ -597,71 +597,206 @@ impl PgJobRepo {
 
 #[async_trait]
 impl JobRepo for PgJobRepo {
-    async fn create(&self, _job: NewJob) -> Result<JobRow, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+    async fn create(&self, j: NewJob) -> Result<JobRow, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let row = client
+            .query_one(
+                "INSERT INTO jobs (
+                    id, job_type, schedule, due_at, enabled,
+                    last_run_at, next_run_at, payload_kind, delivery_mode,
+                    payload, created_at, updated_at, claimed_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                RETURNING *",
+                &[
+                    &j.id, &j.job_type, &j.schedule, &j.due_at, &j.enabled,
+                    &None::<DateTime<Utc>>, &j.next_run_at, &j.payload_kind, &j.delivery_mode,
+                    &j.payload, &j.created_at, &j.updated_at, &None::<DateTime<Utc>>,
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(row_to_job(&row))
     }
 
-    async fn find_by_id(&self, _id: Uuid) -> Result<JobRow, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+    async fn find_by_id(&self, id: Uuid) -> Result<JobRow, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let row = client
+            .query_opt("SELECT * FROM jobs WHERE id = $1", &[&id])
+            .await
+            .map_err(StoreError::from)?
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "job",
+                id: id.to_string(),
+            })?;
+        Ok(row_to_job(&row))
     }
 
     async fn list_enabled(&self) -> Result<Vec<JobRow>, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let rows = client
+            .query(
+                "SELECT * FROM jobs WHERE enabled = true ORDER BY created_at ASC",
+                &[],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(rows.iter().map(row_to_job).collect())
     }
 
     async fn list_by_type(
         &self,
-        _job_type: &str,
-        _include_disabled: bool,
+        job_type: &str,
+        include_disabled: bool,
     ) -> Result<Vec<JobRow>, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let rows = if include_disabled {
+            client
+                .query(
+                    "SELECT * FROM jobs WHERE job_type = $1 \
+                     ORDER BY COALESCE(due_at, '9999-12-31'::timestamptz) ASC, created_at ASC",
+                    &[&job_type],
+                )
+                .await
+                .map_err(StoreError::from)?
+        } else {
+            client
+                .query(
+                    "SELECT * FROM jobs WHERE job_type = $1 AND enabled = true \
+                     ORDER BY COALESCE(due_at, '9999-12-31'::timestamptz) ASC, created_at ASC",
+                    &[&job_type],
+                )
+                .await
+                .map_err(StoreError::from)?
+        };
+        Ok(rows.iter().map(row_to_job).collect())
     }
 
     async fn update_job(
         &self,
-        _id: Uuid,
-        _enabled: bool,
-        _due_at: Option<DateTime<Utc>>,
-        _payload_kind: &str,
-        _delivery_mode: &str,
-        _payload: serde_json::Value,
-        _updated_at: DateTime<Utc>,
-        _last_run_at: Option<DateTime<Utc>>,
-        _next_run_at: Option<DateTime<Utc>>,
+        id: Uuid,
+        enabled: bool,
+        due_at: Option<DateTime<Utc>>,
+        payload_kind: &str,
+        delivery_mode: &str,
+        payload: serde_json::Value,
+        updated_at: DateTime<Utc>,
+        last_run_at: Option<DateTime<Utc>>,
+        next_run_at: Option<DateTime<Utc>>,
     ) -> Result<JobRow, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let row = client
+            .query_opt(
+                "UPDATE jobs SET enabled=$1, due_at=$2, payload_kind=$3, delivery_mode=$4, \
+                 payload=$5, updated_at=$6, last_run_at=$7, next_run_at=$8 \
+                 WHERE id=$9 RETURNING *",
+                &[
+                    &enabled, &due_at, &payload_kind, &delivery_mode,
+                    &payload, &updated_at, &last_run_at, &next_run_at, &id,
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "job",
+                id: id.to_string(),
+            })?;
+        Ok(row_to_job(&row))
     }
 
-    async fn delete(&self, _id: Uuid) -> Result<bool, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+    async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let n = client
+            .execute("DELETE FROM jobs WHERE id = $1", &[&id])
+            .await
+            .map_err(StoreError::from)?;
+        Ok(n > 0)
     }
 
     async fn record_run(
         &self,
-        _id: Uuid,
-        _last_run_at: DateTime<Utc>,
-        _next_run_at: Option<DateTime<Utc>>,
+        id: Uuid,
+        last_run_at: DateTime<Utc>,
+        next_run_at: Option<DateTime<Utc>>,
     ) -> Result<JobRow, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let row = client
+            .query_opt(
+                "UPDATE jobs SET last_run_at=$1, next_run_at=$2, updated_at=$1 \
+                 WHERE id=$3 RETURNING *",
+                &[&last_run_at, &next_run_at, &id],
+            )
+            .await
+            .map_err(StoreError::from)?
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "job",
+                id: id.to_string(),
+            })?;
+        Ok(row_to_job(&row))
     }
 
     async fn claim_due_jobs(
         &self,
-        _job_type: &str,
-        _now: DateTime<Utc>,
-        _stale_before: DateTime<Utc>,
-        _limit: i64,
+        job_type: &str,
+        now: DateTime<Utc>,
+        stale_before: DateTime<Utc>,
+        limit: i64,
     ) -> Result<Vec<JobRow>, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+
+        // Use the due-at column for reminders, next_run_at for cron.
+        let due_col = if job_type == "reminder" {
+            "due_at"
+        } else {
+            "next_run_at"
+        };
+
+        // Atomically claim: UPDATE ... WHERE selects only claimable rows.
+        let update_sql = format!(
+            "UPDATE jobs SET claimed_at = $1 WHERE id IN (\
+                SELECT id FROM jobs \
+                WHERE job_type = $2 AND enabled = true \
+                  AND {due_col} IS NOT NULL AND {due_col} <= $1 \
+                  AND (claimed_at IS NULL OR claimed_at < $3) \
+                ORDER BY {due_col} ASC \
+                LIMIT $4\
+            )"
+        );
+        client
+            .execute(
+                &update_sql,
+                &[&now, &job_type, &stale_before, &limit],
+            )
+            .await
+            .map_err(StoreError::from)?;
+
+        // Fetch the rows we just claimed.
+        let select_sql = format!(
+            "SELECT * FROM jobs \
+             WHERE job_type = $1 AND claimed_at = $2 \
+             ORDER BY {due_col} ASC"
+        );
+        let rows = client
+            .query(&select_sql, &[&job_type, &now])
+            .await
+            .map_err(StoreError::from)?;
+        Ok(rows.iter().map(row_to_job).collect())
     }
 
-    async fn release_claim(&self, _id: Uuid) -> Result<(), StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+    async fn release_claim(&self, id: Uuid) -> Result<(), StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        client
+            .execute(
+                "UPDATE jobs SET claimed_at = NULL WHERE id = $1",
+                &[&id],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(())
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// PgJobRunRepo (Phase 3 -- stubbed)
+// PgJobRunRepo
 // ══════════════════════════════════════════════════════════════════════
 
 /// PostgreSQL-backed durable job-run repository.
@@ -679,26 +814,72 @@ impl PgJobRunRepo {
 
 #[async_trait]
 impl JobRunRepo for PgJobRunRepo {
-    async fn create(&self, _run: NewJobRun) -> Result<JobRunRow, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+    async fn create(&self, r: NewJobRun) -> Result<JobRunRow, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let row = client
+            .query_one(
+                "INSERT INTO job_runs (
+                    id, job_id, started_at, finished_at,
+                    trigger_kind, status, output, created_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                RETURNING *",
+                &[
+                    &r.id, &r.job_id, &r.started_at, &r.finished_at,
+                    &r.trigger_kind, &r.status, &r.output, &r.created_at,
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(row_to_job_run(&row))
     }
 
     async fn complete(
         &self,
-        _id: Uuid,
-        _status: &str,
-        _output: Option<&str>,
-        _finished_at: DateTime<Utc>,
+        id: Uuid,
+        status: &str,
+        output: Option<&str>,
+        finished_at: DateTime<Utc>,
     ) -> Result<JobRunRow, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let row = client
+            .query_opt(
+                "UPDATE job_runs SET status=$1, output=$2, finished_at=$3 \
+                 WHERE id=$4 RETURNING *",
+                &[&status, &output, &finished_at, &id],
+            )
+            .await
+            .map_err(StoreError::from)?
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "job_run",
+                id: id.to_string(),
+            })?;
+        Ok(row_to_job_run(&row))
     }
 
     async fn list_by_job(
         &self,
-        _job_id: Uuid,
-        _limit: Option<i64>,
+        job_id: Uuid,
+        limit: Option<i64>,
     ) -> Result<Vec<JobRunRow>, StoreError> {
-        todo!("Phase 3: implement scheduler PG repos")
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let rows = if let Some(lim) = limit {
+            client
+                .query(
+                    "SELECT * FROM job_runs WHERE job_id = $1 ORDER BY started_at DESC LIMIT $2",
+                    &[&job_id, &lim],
+                )
+                .await
+                .map_err(StoreError::from)?
+        } else {
+            client
+                .query(
+                    "SELECT * FROM job_runs WHERE job_id = $1 ORDER BY started_at DESC",
+                    &[&job_id],
+                )
+                .await
+                .map_err(StoreError::from)?
+        };
+        Ok(rows.iter().map(row_to_job_run).collect())
     }
 }
 
