@@ -45,6 +45,8 @@ pub struct AppConfig {
     pub approval: ApprovalConfig,
     #[serde(default)]
     pub security: SecurityConfig,
+    #[serde(default)]
+    pub plugins: PluginsConfig,
 }
 
 impl AppConfig {
@@ -561,6 +563,41 @@ pub struct RuntimeConfig {
     pub lanes: LaneQueueConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+}
+
+/// Plugin system configuration.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginsConfig {
+    #[serde(default = "default_plugin_scan_dirs")]
+    pub scan_dirs: Vec<String>,
+    #[serde(default = "default_plugin_scan_interval")]
+    pub scan_interval_secs: u64,
+    #[serde(default)]
+    pub overrides: HashMap<String, PluginOverride>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginOverride {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub session_kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub mcp_lifecycle: Option<String>,
+}
+
+impl Default for PluginOverride {
+    fn default() -> Self {
+        Self { enabled: true, session_kinds: None, mcp_lifecycle: None }
+    }
+}
+
+fn default_plugin_scan_dirs() -> Vec<String> {
+    vec!["~/.rune/plugins".to_string(), "~/.claude/plugins/cache".to_string()]
+}
+
+fn default_plugin_scan_interval() -> u64 {
+    300
 }
 
 /// MCP server configuration entry.
