@@ -132,8 +132,8 @@ impl SessionRepo for CosmosStore {
 
     async fn list(&self, limit: i64, offset: i64) -> Result<Vec<SessionRow>, StoreError> {
         let query = format!(
-            "SELECT * FROM c WHERE c.type = 'session' ORDER BY c.created_at DESC OFFSET {} LIMIT {}",
-            offset, limit
+            "SELECT TOP {} * FROM c WHERE c.type = 'session' ORDER BY c.created_at DESC",
+            limit
         );
         let stream = self
             .container()
@@ -150,7 +150,7 @@ impl SessionRepo for CosmosStore {
         let query = format!(
             "SELECT * FROM c WHERE c.type = 'session' AND c.channel_ref = '{}' \
              AND c.status NOT IN ('completed', 'failed', 'cancelled') \
-             ORDER BY c.created_at DESC OFFSET 0 LIMIT 1",
+             ORDER BY c.created_at DESC",
             channel_ref.replace('\'', "''")
         );
         let stream = self

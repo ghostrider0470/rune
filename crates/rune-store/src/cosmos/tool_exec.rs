@@ -131,8 +131,8 @@ impl ToolExecutionRepo for CosmosStore {
 
     async fn list_recent(&self, limit: i64) -> Result<Vec<ToolExecutionRow>, StoreError> {
         let query = format!(
-            "SELECT * FROM c WHERE c.type = 'tool_execution' \
-             ORDER BY c.started_at DESC OFFSET 0 LIMIT {}",
+            "SELECT TOP {} * FROM c WHERE c.type = 'tool_execution' \
+             ORDER BY c.started_at DESC",
             limit
         );
         let stream = self

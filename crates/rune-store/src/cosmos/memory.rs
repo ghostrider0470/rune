@@ -108,11 +108,10 @@ impl MemoryEmbeddingRepo for CosmosStore {
     ) -> Result<Vec<KeywordSearchRow>, StoreError> {
         let escaped = query.replace('\'', "''").to_lowercase();
         let sql = format!(
-            "SELECT c.file_path, c.chunk_text FROM c \
+            "SELECT TOP {} c.file_path, c.chunk_text FROM c \
              WHERE c.type = 'memory_embedding' \
-             AND CONTAINS(LOWER(c.chunk_text), '{}') \
-             OFFSET 0 LIMIT {}",
-            escaped, limit
+             AND CONTAINS(LOWER(c.chunk_text), '{}')",
+            limit, escaped
         );
         let stream = self
             .container()

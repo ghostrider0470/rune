@@ -131,13 +131,13 @@ impl JobRunRepo for CosmosStore {
         limit: Option<i64>,
     ) -> Result<Vec<JobRunRow>, StoreError> {
         let pk_val = format!("job:{}", job_id);
-        let limit_clause = match limit {
-            Some(l) => format!("OFFSET 0 LIMIT {}", l),
+        let top_clause = match limit {
+            Some(l) => format!("TOP {}", l),
             None => String::new(),
         };
         let query = format!(
-            "SELECT * FROM c WHERE c.type = 'job_run' ORDER BY c.started_at DESC {}",
-            limit_clause
+            "SELECT {} * FROM c WHERE c.type = 'job_run' ORDER BY c.started_at DESC",
+            top_clause
         );
         let stream = self
             .container()

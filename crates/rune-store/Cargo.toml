@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-default = ["postgres", "sqlite"]
+default = ["postgres", "sqlite", "cosmos"]
 postgres = ["dep:tokio-postgres", "dep:deadpool-postgres", "dep:postgres-native-tls", "dep:native-tls", "dep:postgresql_embedded"]
 sqlite = ["dep:rusqlite", "dep:tokio-rusqlite"]
 cosmos = ["dep:azure_data_cosmos", "dep:azure_core", "dep:futures"]
