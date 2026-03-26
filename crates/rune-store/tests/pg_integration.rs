@@ -723,6 +723,8 @@ async fn turn_repo_rejects_invalid_status_transition() {
             channel_ref: None,
             requester_session_id: None,
             latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
             metadata: serde_json::json!({}),
             created_at: now,
             updated_at: now,
