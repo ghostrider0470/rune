@@ -615,11 +615,17 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         // Channel routes
         .route("/api/channels", get(routes::list_channels))
         .route("/api/channels/status", get(routes::channels_status))
-        // Memory routes
+        // Memory routes (legacy)
         .route("/api/memory/status", get(routes::memory_status))
         .route("/api/memory/search", get(routes::memory_search))
         .route("/api/memory/graph", get(routes::memory_graph))
         .route("/api/memory/{id}", delete(routes::memory_delete))
+        // Shared Memory API v1 (#294) — cross-runtime access
+        .route("/api/v1/memory/recall", post(routes::v1_memory_recall))
+        .route("/api/v1/memory/capture", post(routes::v1_memory_capture))
+        .route("/api/v1/memory/store", post(routes::v1_memory_store))
+        .route("/api/v1/memory/list", get(routes::v1_memory_list))
+        .route("/api/v1/memory/{id}", delete(routes::v1_memory_delete))
         // Log routes
         .route("/api/logs", get(routes::query_logs))
         // Doctor routes
