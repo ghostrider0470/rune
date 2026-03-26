@@ -22,6 +22,8 @@ use rune_runtime::scheduler::{
 };
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
+use rune_tools::memory_tool::MemoryToolExecutor;
+use rune_tools::{ToolCall, ToolExecutor};
 use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
 use serde_json::Value;
 
@@ -4227,6 +4229,25 @@ pub struct MemorySearchResponse {
     pub message: String,
 }
 
+fn parse_memory_search_output(output: &str) -> Vec<Value> {
+    output
+        .split("\n---\n")
+        .filter_map(|chunk| {
+            let chunk = chunk.trim();
+            if chunk.is_empty() || chunk.starts_with("No results found for query:") {
+                return None;
+            }
+
+            let (source_line, snippet) = chunk.split_once("\n")?;
+            let source = source_line.strip_prefix("Source: ")?.trim();
+            Some(json!({
+                "source": source,
+                "snippet": snippet.trim(),
+            }))
+        })
+        .collect()
+}
+
 /// `GET /api/memory/status` — memory subsystem status.
 pub async fn memory_status(
     State(state): State<AppState>,
@@ -4241,6 +4262,7 @@ pub async fn memory_status(
 
 /// `GET /api/memory/search` — search memory (stub; backend integration pending).
 pub async fn memory_search(
+    State(state): State<AppState>,
     Query(query): Query<MemorySearchQuery>,
 ) -> Result<Json<MemorySearchResponse>, GatewayError> {
     let q = query.q.unwrap_or_default();
@@ -4250,10 +4272,42 @@ pub async fn memory_search(
         ));
     }
 
+    let limit = query._limit.unwrap_or(10).clamp(1, 50);
+    let workspace_root = {
+        let config = state.config.read().await;
+        config
+            .agents
+            .defaults
+            .workspace
+            .clone()
+            .unwrap_or_else(|| ".".to_string())
+    };
+
+    let call = ToolCall {
+        tool_call_id: rune_core::ToolCallId::new(),
+        tool_name: "memory_search".to_string(),
+        arguments: json!({
+            "query": q.clone(),
+            "maxResults": limit,
+        }),
+    };
+
+    let tool = MemoryToolExecutor::new(workspace_root);
+    let result = tool
+        .execute(call)
+        .await
+        .map_err(|error| GatewayError::Internal(error.to_string()))?;
+    let results = parse_memory_search_output(&result.output);
+    let message = if results.is_empty() {
+        format!("No results found for query: {q}")
+    } else {
+        format!("Found {} memory result(s)", results.len())
+    };
+
     Ok(Json(MemorySearchResponse {
         query: q,
-        results: vec![],
-        message: "memory search not yet wired to gateway-level index".to_string(),
+        results,
+        message,
     }))
 }
 

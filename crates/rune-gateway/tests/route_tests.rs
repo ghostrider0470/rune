@@ -8308,6 +8308,52 @@ async fn webchat_route_documents_multi_user_browser_sessions() {
     assert!(body.contains("channel_ref: sessionChannelRef()"));
 }
 #[tokio::test]
+async fn memory_search_route_returns_workspace_hits() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("MEMORY.md"),
+        "# Memory\nMet Hamza at Horizon Tech\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("memory")).unwrap();
+    std::fs::write(
+        tmp.path().join("memory/2026-03-26.md"),
+        "Shipped webchat support today\n",
+    )
+    .unwrap();
+
+    let mut config = AppConfig::default();
+    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(Request::get("/api/memory/search?q=Hamza&limit=5").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["query"], "Hamza");
+    assert_eq!(body["results"].as_array().unwrap().len(), 1);
+    assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
+    assert!(body["results"][0]["snippet"]
+        .as_str()
+        .unwrap()
+        .contains("Met Hamza at Horizon Tech"));
+}
+
+#[tokio::test]
+async fn memory_search_route_requires_query_param() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(Request::get("/api/memory/search").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn webchat_route_preserves_session_and_auth_query_params() {
     let app = build_test_app(None);
 
