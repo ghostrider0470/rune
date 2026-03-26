@@ -356,6 +356,7 @@ pub type Ms365PlannerServiceError = Ms365ServiceError;
 pub type Ms365TodoServiceError = Ms365ServiceError;
 pub type Ms365MailServiceError = Ms365ServiceError;
 pub type Ms365CalendarServiceError = Ms365ServiceError;
+pub type Ms365UsersServiceError = Ms365ServiceError;
 
 #[async_trait]
 pub trait Ms365PlannerService: Send + Sync {
@@ -426,6 +427,42 @@ pub trait Ms365CalendarService: Send + Sync {
         id: &str,
         request: RespondCalendarEventRequest,
     ) -> Result<(), Ms365CalendarServiceError>;
+}
+
+/// Gateway-facing user profile shape used by read and me routes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserProfile {
+    pub id: String,
+    pub display_name: String,
+    pub user_principal_name: String,
+    pub mail: Option<String>,
+    pub job_title: Option<String>,
+    pub department: Option<String>,
+    pub office_location: Option<String>,
+    pub mobile_phone: Option<String>,
+}
+
+/// Summary user entry for list responses.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserSummary {
+    pub id: String,
+    pub display_name: String,
+    pub user_principal_name: String,
+    pub job_title: Option<String>,
+}
+
+/// Response from list users.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsersList {
+    pub users: Vec<UserSummary>,
+    pub total: u32,
+}
+
+#[async_trait]
+pub trait Ms365UsersService: Send + Sync {
+    async fn me(&self) -> Result<UserProfile, Ms365UsersServiceError>;
+    async fn list(&self, limit: u32) -> Result<UsersList, Ms365UsersServiceError>;
+    async fn read(&self, id: &str) -> Result<UserProfile, Ms365UsersServiceError>;
 }
 
 /// Planner mutation service backed by Microsoft Graph.
@@ -1208,6 +1245,151 @@ impl TodoTask {
                 .body
                 .map(|body| body.content.trim().to_string())
                 .filter(|body| !body.is_empty()),
+        }
+    }
+}
+
+/// Microsoft 365 Users read backend.
+pub struct GraphMs365UsersService {
+    client: Client,
+}
+
+impl Default for GraphMs365UsersService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphMs365UsersService {
+    pub fn new() -> Self {
+        Self {
+            client: Client::new(),
+        }
+    }
+
+    async fn fetch_me(&self) -> Result<GraphUser, Ms365UsersServiceError> {
+        send_graph_json(
+            graph_request(&self.client, reqwest::Method::GET, "/me")?,
+            "users",
+        )
+        .await
+    }
+
+    async fn fetch_user(&self, id: &str) -> Result<GraphUser, Ms365UsersServiceError> {
+        send_graph_json(
+            graph_request(&self.client, reqwest::Method::GET, &format!("/users/{id}"))?,
+            "users",
+        )
+        .await
+    }
+
+    async fn list_users(&self, limit: u32) -> Result<GraphUsersList, Ms365UsersServiceError> {
+        send_graph_json(
+            graph_request(
+                &self.client,
+                reqwest::Method::GET,
+                &format!("/users?$top={limit}&$count=true"),
+            )?
+            .header(
+                reqwest::header::HeaderName::from_static("consistencylevel"),
+                "eventual",
+            ),
+            "users",
+        )
+        .await
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphUser {
+    id: String,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    #[serde(rename = "userPrincipalName")]
+    user_principal_name: String,
+    mail: Option<String>,
+    #[serde(rename = "jobTitle")]
+    job_title: Option<String>,
+    department: Option<String>,
+    #[serde(rename = "officeLocation")]
+    office_location: Option<String>,
+    #[serde(rename = "mobilePhone")]
+    mobile_phone: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphUsersList {
+    value: Vec<GraphUserSummary>,
+    #[serde(rename = "@odata.count")]
+    total: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphUserSummary {
+    id: String,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    #[serde(rename = "userPrincipalName")]
+    user_principal_name: String,
+    #[serde(rename = "jobTitle")]
+    job_title: Option<String>,
+}
+
+#[async_trait]
+impl Ms365UsersService for GraphMs365UsersService {
+    async fn me(&self) -> Result<UserProfile, Ms365UsersServiceError> {
+        let user = self.fetch_me().await?;
+        Ok(UserProfile::from_graph(user))
+    }
+
+    async fn list(&self, limit: u32) -> Result<UsersList, Ms365UsersServiceError> {
+        let clamped_limit = limit.clamp(1, 100);
+        let list = self.list_users(clamped_limit).await?;
+        let total = list.total.unwrap_or(list.value.len() as u32);
+        Ok(UsersList {
+            users: list
+                .value
+                .into_iter()
+                .map(UserSummary::from_graph)
+                .collect(),
+            total,
+        })
+    }
+
+    async fn read(&self, id: &str) -> Result<UserProfile, Ms365UsersServiceError> {
+        if id.trim().is_empty() {
+            return Err(Ms365UsersServiceError::Validation(
+                "user id is required".to_string(),
+            ));
+        }
+
+        let user = self.fetch_user(id.trim()).await?;
+        Ok(UserProfile::from_graph(user))
+    }
+}
+
+impl UserProfile {
+    fn from_graph(user: GraphUser) -> Self {
+        Self {
+            id: user.id,
+            display_name: user.display_name.unwrap_or_default(),
+            user_principal_name: user.user_principal_name,
+            mail: user.mail,
+            job_title: user.job_title,
+            department: user.department,
+            office_location: user.office_location,
+            mobile_phone: user.mobile_phone,
+        }
+    }
+}
+
+impl UserSummary {
+    fn from_graph(summary: GraphUserSummary) -> Self {
+        Self {
+            id: summary.id,
+            display_name: summary.display_name.unwrap_or_default(),
+            user_principal_name: summary.user_principal_name,
+            job_title: summary.job_title,
         }
     }
 }

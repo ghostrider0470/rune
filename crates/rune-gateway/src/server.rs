@@ -32,7 +32,10 @@ use tokio::sync::RwLock;
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
-use crate::ms365::{Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService};
+use crate::ms365::{
+    Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService,
+    Ms365UsersService,
+};
 use crate::pairing::DeviceRegistry;
 use crate::routes;
 use crate::state::{AppState, SessionEvent};
@@ -85,6 +88,7 @@ pub struct Services {
     pub ms365_planner_service: Arc<dyn Ms365PlannerService>,
     pub ms365_todo_service: Arc<dyn Ms365TodoService>,
     pub ms365_mail_service: Arc<dyn Ms365MailService>,
+    pub ms365_users_service: Arc<dyn Ms365UsersService>,
 }
 
 /// Start the gateway HTTP server.
@@ -207,6 +211,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         ms365_planner_service: services.ms365_planner_service,
         ms365_todo_service: services.ms365_todo_service,
         ms365_mail_service: services.ms365_mail_service,
+        ms365_users_service: services.ms365_users_service,
     };
 
     // Build operator delivery for heartbeat/scheduled output to Telegram.
@@ -424,6 +429,9 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/stt/disable", post(routes::stt_disable))
         // Microsoft 365 routes
         .route("/ms365/auth/status", get(routes::ms365_auth_status))
+        .route("/ms365/users/me", get(routes::ms365_users_me))
+        .route("/ms365/users", get(routes::ms365_users_list))
+        .route("/ms365/users/{id}", get(routes::ms365_users_read))
         .route(
             "/ms365/calendar/events",
             post(routes::ms365_calendar_create_event),

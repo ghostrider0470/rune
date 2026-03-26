@@ -10,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use tracing::info;
 use uuid::Uuid;
 
@@ -28,8 +29,9 @@ use crate::error::GatewayError;
 use crate::ms365::{
     CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest,
     ForwardMailRequest, Ms365CalendarServiceError, Ms365MailServiceError, Ms365PlannerServiceError,
-    Ms365TodoServiceError, PlannerTask, ReplyMailRequest, RespondCalendarEventRequest,
-    SendMailRequest, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest,
+    Ms365TodoServiceError, Ms365UsersServiceError, PlannerTask, ReplyMailRequest,
+    RespondCalendarEventRequest, SendMailRequest, TodoTask, UpdatePlannerTaskRequest,
+    UpdateTodoTaskRequest, UserProfile, UserSummary,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
 use crate::state::{AppState, SessionEvent};
@@ -3594,6 +3596,67 @@ pub async fn ms365_auth_status(
 }
 
 #[derive(Serialize)]
+pub struct Ms365UsersReadResponse {
+    pub user: UserProfile,
+}
+
+#[derive(Serialize)]
+pub struct Ms365UsersListResponse {
+    pub users: Vec<UserSummary>,
+    pub total: u32,
+}
+
+/// `GET /ms365/users/me` — return the authenticated user's profile.
+pub async fn ms365_users_me(
+    State(state): State<AppState>,
+) -> Result<Json<Ms365UsersReadResponse>, GatewayError> {
+    let user = state
+        .ms365_users_service
+        .me()
+        .await
+        .map_err(map_ms365_users_service_error)?;
+
+    Ok(Json(Ms365UsersReadResponse { user }))
+}
+
+/// `GET /ms365/users` — list users in the organization directory.
+pub async fn ms365_users_list(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Ms365UsersListResponse>, GatewayError> {
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(25)
+        .clamp(1, 100);
+
+    let list = state
+        .ms365_users_service
+        .list(limit)
+        .await
+        .map_err(map_ms365_users_service_error)?;
+
+    Ok(Json(Ms365UsersListResponse {
+        users: list.users,
+        total: list.total,
+    }))
+}
+
+/// `GET /ms365/users/{id}` — read a single user's profile by ID or UPN.
+pub async fn ms365_users_read(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Ms365UsersReadResponse>, GatewayError> {
+    let user = state
+        .ms365_users_service
+        .read(&id)
+        .await
+        .map_err(map_ms365_users_service_error)?;
+
+    Ok(Json(Ms365UsersReadResponse { user }))
+}
+
+#[derive(Serialize)]
 pub struct Ms365MailMutationResponse {
     pub success: bool,
     pub message: String,
@@ -3867,6 +3930,18 @@ fn map_ms365_todo_service_error(error: Ms365TodoServiceError) -> GatewayError {
         | Ms365TodoServiceError::Upstream(message) => GatewayError::Internal(message),
         Ms365TodoServiceError::Unauthorized => GatewayError::Unauthorized,
         Ms365TodoServiceError::Forbidden(message) => GatewayError::Forbidden(message),
+    }
+}
+
+fn map_ms365_users_service_error(error: Ms365UsersServiceError) -> GatewayError {
+    match error {
+        Ms365UsersServiceError::Validation(message) | Ms365UsersServiceError::NotFound(message) => {
+            GatewayError::BadRequest(message)
+        }
+        Ms365UsersServiceError::NotConfigured(message)
+        | Ms365UsersServiceError::Upstream(message) => GatewayError::Internal(message),
+        Ms365UsersServiceError::Unauthorized => GatewayError::Unauthorized,
+        Ms365UsersServiceError::Forbidden(message) => GatewayError::Forbidden(message),
     }
 }
 

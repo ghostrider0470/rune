@@ -19,7 +19,10 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tts::TtsEngine;
 use tokio::sync::{RwLock, broadcast};
 
-use crate::ms365::{Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService};
+use crate::ms365::{
+    Ms365CalendarService, Ms365MailService, Ms365PlannerService, Ms365TodoService,
+    Ms365UsersService,
+};
 use crate::pairing::DeviceRegistry;
 
 /// Events emitted for WebSocket subscribers.
@@ -96,4 +99,6 @@ pub struct AppState {
     pub ms365_todo_service: Arc<dyn Ms365TodoService>,
     /// Microsoft 365 Mail mutation backend.
     pub ms365_mail_service: Arc<dyn Ms365MailService>,
+    /// Microsoft 365 Users read backend.
+    pub ms365_users_service: Arc<dyn Ms365UsersService>,
 }
