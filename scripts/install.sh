@@ -165,6 +165,13 @@ Next steps:
 
 Or if Ollama is already running locally:
   rune setup --path ~/.rune
+
+Optional background service install after setup:
+  rune service install --target systemd --name rune-gateway --workdir ~/.rune --config ~/.rune/config.toml --enable --start
+  # macOS: rune service install --target launchd --name rune-gateway --workdir ~/.rune --config ~/.rune/config.toml --enable --start
+
+Optional zero-config Docker evaluation:
+  docker compose -f docker-compose.zero-config.yml up --build -d
 EOF
 }
 
