@@ -260,6 +260,7 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
     let resolved_backend = match config.database.backend {
         rune_config::StorageBackend::Postgres => "postgres",
         rune_config::StorageBackend::Sqlite => "sqlite",
+        rune_config::StorageBackend::Cosmos => "cosmos",
         rune_config::StorageBackend::Auto => {
             if using_external_postgres {
                 "postgres"

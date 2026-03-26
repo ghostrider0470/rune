@@ -294,6 +294,7 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
                 "postgres (embedded)"
             }
         }
+        StorageBackend::Cosmos => "cosmos",
         StorageBackend::Auto => {
             if config.database.database_url.is_some() {
                 "postgres (external)"

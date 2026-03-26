@@ -504,6 +504,7 @@ pub enum StorageBackend {
     Auto,
     Sqlite,
     Postgres,
+    Cosmos,
 }
 
 /// Database connectivity and migration settings.
@@ -517,6 +518,12 @@ pub struct DatabaseConfig {
     /// Path to the SQLite database file. Defaults to `{db_dir}/rune.db`.
     #[serde(default)]
     pub sqlite_path: Option<PathBuf>,
+    /// Cosmos DB NoSQL endpoint URL.
+    #[serde(default)]
+    pub cosmos_endpoint: Option<String>,
+    /// Cosmos DB master key for auth.
+    #[serde(default)]
+    pub cosmos_key: Option<String>,
 }
 
 impl Default for DatabaseConfig {
@@ -527,6 +534,8 @@ impl Default for DatabaseConfig {
             max_connections: 10,
             run_migrations: true,
             sqlite_path: None,
+            cosmos_endpoint: None,
+            cosmos_key: None,
         }
     }
 }

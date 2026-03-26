@@ -103,6 +103,11 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
             #[cfg(not(feature = "sqlite"))]
             panic!("storage backend set to 'sqlite' but the 'sqlite' feature is not compiled in");
         }
+        StorageBackend::Cosmos => {
+            panic!(
+                "storage backend set to 'cosmos' but the Cosmos repo implementations are not yet wired up"
+            );
+        }
         StorageBackend::Auto => {
             if db.database_url.is_some() {
                 #[cfg(feature = "postgres")]
