@@ -120,6 +120,11 @@ impl SkillRegistry {
         self.inner.read().await.get(name).cloned()
     }
 
+    /// Clear all registered skills.
+    pub async fn clear(&self) {
+        self.inner.write().await.clear();
+    }
+
     /// Number of registered skills.
     pub async fn len(&self) -> usize {
         self.inner.read().await.len()

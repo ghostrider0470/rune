@@ -9,7 +9,6 @@ use tracing::info;
 use crate::agent_registry::AgentRegistry;
 use crate::command_registry::CommandRegistry;
 use crate::hooks::HookRegistry;
-use crate::plugin::PluginRegistry;
 use crate::plugin_scanner::{PluginScanner, UnifiedScanSummary};
 use crate::skill::SkillRegistry;
 
@@ -226,6 +225,7 @@ impl PluginManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin::PluginRegistry;
 
     #[tokio::test]
     async fn plugin_status_empty() {

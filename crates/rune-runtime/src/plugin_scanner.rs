@@ -21,6 +21,7 @@ use crate::command_registry::{Command, CommandRegistry};
 use crate::hooks::{HookEvent, HookHandler, HookRegistry};
 use crate::plugin::PluginRegistry;
 use crate::skill::{Skill, SkillRegistry};
+use rune_config::{PluginOverride, PluginsConfig};
 
 // ---------------------------------------------------------------------------
 // Summary
@@ -134,6 +135,7 @@ impl HookHandler for ClaudeHookHandler {
 /// native plugins into the appropriate registries.
 pub struct PluginScanner {
     scan_dirs: Vec<PathBuf>,
+    overrides: std::collections::HashMap<String, PluginOverride>,
     /// Held so the registry Arc stays alive; not read directly.
     #[allow(dead_code)]
     plugin_registry: Arc<PluginRegistry>,
@@ -148,7 +150,7 @@ pub struct PluginScanner {
 impl PluginScanner {
     /// Create a new scanner.
     pub fn new(
-        scan_dirs: Vec<PathBuf>,
+        plugins_config: &PluginsConfig,
         plugin_registry: Arc<PluginRegistry>,
         skill_registry: Arc<SkillRegistry>,
         agent_registry: Arc<AgentRegistry>,
@@ -156,7 +158,8 @@ impl PluginScanner {
         hook_registry: Arc<HookRegistry>,
     ) -> Self {
         Self {
-            scan_dirs,
+            scan_dirs: plugins_config.scan_dirs.iter().map(PathBuf::from).collect(),
+            overrides: plugins_config.overrides.clone(),
             plugin_registry,
             skill_registry,
             agent_registry,
@@ -252,7 +255,6 @@ impl PluginScanner {
             "unified plugin scan complete"
         );
 
-
         summary
     }
 
@@ -277,6 +279,16 @@ impl PluginScanner {
         // First-directory-wins.
         if !seen_names.insert(plugin_name.clone()) {
             debug!(plugin = %plugin_name, "plugin already registered from an earlier directory, skipping");
+            return;
+        }
+
+        let plugin_override = self
+            .overrides
+            .get(&plugin_name)
+            .cloned()
+            .unwrap_or_default();
+        if !plugin_override.enabled {
+            debug!(plugin = %plugin_name, "plugin disabled by config override, skipping");
             return;
         }
 
@@ -330,7 +342,7 @@ impl PluginScanner {
                 matcher_tool_name: ch.matcher.as_ref().and_then(|m| m.tool_name.clone()),
                 command: ch.hook.command.clone(),
                 action_type: ch.hook.action_type.clone(),
-                session_kinds: None,
+                session_kinds: plugin_override.session_kinds.clone(),
             };
 
             self.hook_registry.register(event, Box::new(handler)).await;
@@ -479,7 +491,10 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
 
         let scanner = PluginScanner::new(
-            vec![tmp.path().to_path_buf()],
+            &PluginsConfig {
+                scan_dirs: vec![tmp.path().display().to_string()],
+                ..Default::default()
+            },
             Arc::new(PluginRegistry::new()),
             Arc::new(SkillRegistry::new()),
             Arc::new(AgentRegistry::new()),
@@ -521,7 +536,10 @@ mod tests {
 
         let skill_registry = Arc::new(SkillRegistry::new());
         let scanner = PluginScanner::new(
-            vec![tmp.path().to_path_buf()],
+            &PluginsConfig {
+                scan_dirs: vec![tmp.path().display().to_string()],
+                ..Default::default()
+            },
             Arc::new(PluginRegistry::new()),
             skill_registry.clone(),
             Arc::new(AgentRegistry::new()),
@@ -539,6 +557,61 @@ mod tests {
         assert_eq!(skill.description, "Greet the user");
         assert!(skill.prompt_body.as_deref().unwrap().contains("Say hello"));
         assert!(skill.user_invocable);
+    }
+
+    #[tokio::test]
+    async fn disabled_plugin_override_skips_registration() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plugin_dir = tmp.path().join("my-plugin");
+        tokio::fs::create_dir_all(plugin_dir.join(".claude-plugin"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            plugin_dir.join(".claude-plugin/plugin.json"),
+            r#"{"name":"my-plugin","description":"Test","version":"1.0.0"}"#,
+        )
+        .await
+        .unwrap();
+        let skill_dir = plugin_dir.join("skills/greet");
+        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+        tokio::fs::write(
+            skill_dir.join("greet.md"),
+            "---
+name: greet
+description: Greet the user
+---
+
+Say hello.
+",
+        )
+        .await
+        .unwrap();
+
+        let skill_registry = Arc::new(SkillRegistry::new());
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(
+            "my-plugin".to_string(),
+            PluginOverride {
+                enabled: false,
+                ..Default::default()
+            },
+        );
+        let scanner = PluginScanner::new(
+            &PluginsConfig {
+                scan_dirs: vec![tmp.path().display().to_string()],
+                overrides,
+                ..Default::default()
+            },
+            Arc::new(PluginRegistry::new()),
+            skill_registry.clone(),
+            Arc::new(AgentRegistry::new()),
+            Arc::new(CommandRegistry::new()),
+            Arc::new(HookRegistry::new()),
+        );
+
+        let summary = scanner.scan().await;
+        assert_eq!(summary.claude_plugins, 0);
+        assert!(skill_registry.get("my-plugin:greet").await.is_none());
     }
 
     #[tokio::test]
@@ -566,7 +639,10 @@ mod tests {
 
         let skill_registry = Arc::new(SkillRegistry::new());
         let scanner = PluginScanner::new(
-            vec![dir_a, dir_b],
+            &PluginsConfig {
+                scan_dirs: vec![dir_a.display().to_string(), dir_b.display().to_string()],
+                ..Default::default()
+            },
             Arc::new(PluginRegistry::new()),
             skill_registry.clone(),
             Arc::new(AgentRegistry::new()),

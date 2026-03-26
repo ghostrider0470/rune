@@ -116,14 +116,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let workspace_root = services.config.agents.defaults.workspace.clone();
     let webchat_send_window_seconds = services.config.browser.webchat_send_window_seconds.max(1);
     let webchat_send_max_requests = services.config.browser.webchat_send_max_requests.max(1);
-    let plugin_scan_dirs: Vec<std::path::PathBuf> = services
-        .config
-        .plugins
-        .scan_dirs
-        .iter()
-        .map(|s| std::path::PathBuf::from(s))
-        .collect();
     let plugin_scan_interval_secs = services.config.plugins.scan_interval_secs;
+    let plugins_config = services.config.plugins.clone();
 
     // Build TTS engine if an API key is configured.
     let tts_engine = services
@@ -194,7 +188,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         .unwrap_or_else(|| Arc::new(CommandRegistry::new()));
 
     let plugin_scanner = Arc::new(PluginScanner::new(
-        plugin_scan_dirs,
+        &plugins_config,
         plugin_registry.clone(),
         skill_registry.clone(),
         agent_registry.clone(),
@@ -214,7 +208,6 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
 
     let plugin_manager = Arc::new(PluginManager::new(
         plugin_scanner.clone(),
-        plugin_registry.clone(),
         skill_registry.clone(),
         agent_registry.clone(),
         command_registry.clone(),
