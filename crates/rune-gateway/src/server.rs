@@ -411,6 +411,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             get(routes::list_pending_approvals).post(routes::submit_approval_decision),
         )
         .route("/approvals/policies", get(routes::list_approval_policies))
+        .route("/turns", get(routes::list_turns))
+        .route("/turns/{id}", get(routes::get_turn))
+        .route("/tools", get(routes::list_tools))
+        .route("/tools/{id}", get(routes::get_tool_execution))
         .route("/processes", get(routes::list_processes))
         .route("/processes/{id}", get(routes::get_process))
         .route("/processes/{id}/log", get(routes::get_process_log))
