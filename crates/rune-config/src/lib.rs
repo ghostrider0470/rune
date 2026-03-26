@@ -1125,11 +1125,11 @@ impl Default for BrowserConfig {
 }
 
 const fn default_webchat_send_window_seconds() -> u64 {
-    10
+    5
 }
 
 const fn default_webchat_send_max_requests() -> u32 {
-    4
+    8
 }
 
 const fn default_max_browser_instances() -> usize {
