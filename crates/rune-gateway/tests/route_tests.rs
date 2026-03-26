@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde_json::Value;
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{Mutex, RwLock};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -46,7 +46,7 @@ use rune_gateway::ms365::{
 };
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{
-    AppState, SessionEvent, WebChatRateLimiter, build_router, pairing::DeviceRegistry,
+    AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry,
 };
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
@@ -1517,7 +1517,7 @@ fn build_test_app_parts_with_ms365_services(
         .with_default_model("fake-model"),
     );
 
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
 
     config.gateway.auth_token = auth_token.clone();
     let skills_dir = config.paths.skills_dir.clone();
@@ -1565,6 +1565,15 @@ fn build_test_app_parts_with_ms365_services(
     };
 
     (build_router(state, auth_token), device_repo)
+}
+
+fn test_event_sender() -> &'static tokio::sync::broadcast::Sender<rune_gateway::SessionEvent> {
+    use once_cell::sync::Lazy;
+    static EVENT_TX: Lazy<tokio::sync::broadcast::Sender<rune_gateway::SessionEvent>> = Lazy::new(|| {
+        let (tx, _) = tokio::sync::broadcast::channel(64);
+        tx
+    });
+    &EVENT_TX
 }
 
 async fn body_json(response: axum::http::Response<Body>) -> Value {
@@ -1716,7 +1725,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         .with_default_model("fake-model")
         .with_lane_queue(lane_queue.clone()),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -1814,7 +1823,7 @@ async fn ws_rpc_skills_reload_and_toggle_round_trip() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skills_dir = std::env::temp_dir().join(format!("rune-ws-skills-{}", Uuid::now_v7()));
     std::fs::create_dir_all(skills_dir.join("rpc-skill")).unwrap();
@@ -1939,7 +1948,7 @@ async fn status_reports_configured_lane_capacities() {
         .with_default_model("fake-model")
         .with_lane_queue(lane_queue),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2044,7 +2053,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         .with_default_model("fake-model")
         .with_lane_queue(lane_queue.clone()),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2142,7 +2151,7 @@ async fn ws_rpc_health_reports_session_count() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2269,7 +2278,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2388,7 +2397,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2537,7 +2546,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2666,7 +2675,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2756,7 +2765,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -2898,7 +2907,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -3041,7 +3050,7 @@ async fn approvals_list_route_includes_durable_resume_refs() {
         .with_default_model("fake-model"),
     );
 
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skills_dir = config.paths.skills_dir.clone();
     let config = Arc::new(RwLock::new(config));
     let skill_registry = Arc::new(SkillRegistry::new());
@@ -3157,7 +3166,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -3308,7 +3317,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -3455,7 +3464,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -3567,7 +3576,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -5951,7 +5960,7 @@ async fn send_message_and_transcript_with_shared_state() {
         .with_default_model("fake-model"),
     );
 
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -6156,7 +6165,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -7194,7 +7203,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -7439,7 +7448,7 @@ async fn reminders_list_includes_outcome_fields() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -7546,7 +7555,7 @@ async fn reminders_cancel_returns_success() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -7678,7 +7687,7 @@ async fn agent_steer_success() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -7834,7 +7843,7 @@ async fn agent_kill_success() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -7988,7 +7997,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -8814,6 +8823,64 @@ async fn websocket_accepts_query_api_key_when_gateway_auth_is_enabled() {
     server.abort();
 }
 
+
+#[tokio::test]
+async fn websocket_query_session_id_subscribes_connection_to_target_session() {
+    use futures_util::StreamExt;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    let app = build_test_app(Some("test-token".to_string()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    let session_id = Uuid::now_v7();
+    let url = format!(
+        "ws://{}/ws?api_key=test-token&session_id={}",
+        addr, session_id
+    );
+    let (mut ws, response) = connect_async(url).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    let frame = rune_gateway::SessionEvent {
+        session_id: session_id.to_string(),
+        kind: "turn.completed".to_string(),
+        payload: serde_json::json!({"text": "hello from event"}),
+        state_changed: true,
+    };
+    let message = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            test_event_sender().send(frame).unwrap();
+            ws.next().await
+        },
+    )
+        .await
+        .expect("event timeout")
+        .expect("socket closed")
+        .expect("websocket frame");
+
+    match message {
+        tokio_tungstenite::tungstenite::Message::Text(text) => {
+            let payload: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(payload["type"], "event");
+            assert_eq!(payload["event"], "turn.completed");
+            assert_eq!(payload["payload"]["session_id"], session_id.to_string());
+            assert_eq!(payload["payload"]["data"]["text"], "hello from event");
+        }
+        other => panic!("expected text frame, got {other:?}"),
+    }
+
+    drop(ws);
+    server.abort();
+}
+
 #[tokio::test]
 async fn websocket_rejects_invalid_query_api_key_when_gateway_auth_is_enabled() {
     use tokio::net::TcpListener;
@@ -8894,7 +8961,7 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_channels() {
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -9017,7 +9084,7 @@ async fn ws_rpc_processes_log_surfaces_output() {
     ));
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -9108,7 +9175,7 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -9223,7 +9290,7 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
         )
         .with_default_model("fake-model"),
     );
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
     let skill_registry = Arc::new(SkillRegistry::new());
     let skill_loader = Arc::new(SkillLoader::new(
         std::env::temp_dir(),
@@ -9471,7 +9538,7 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-    let (event_tx, _) = broadcast::channel::<SessionEvent>(64);
+    let event_tx = test_event_sender().clone();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),

@@ -6,10 +6,11 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use once_cell::sync::Lazy;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
@@ -93,11 +94,32 @@ struct EventFrame {
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 /// `GET /ws` -- upgrade to WebSocket for RPC and live event streaming.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> Response {
     let rx = state.event_tx.subscribe();
     let dispatcher = RpcDispatcher::new(state);
     let state_version = Arc::clone(&STATE_VERSION);
-    ws.on_upgrade(move |socket| handle_socket(socket, rx, dispatcher, state_version))
+    let initial_session_id = params
+        .get("session_id")
+        .cloned()
+        .filter(|value| !value.trim().is_empty());
+    let subscribe_all = params
+        .get("all")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on"))
+        .unwrap_or(false);
+    ws.on_upgrade(move |socket| {
+        handle_socket(
+            socket,
+            rx,
+            dispatcher,
+            state_version,
+            initial_session_id,
+            subscribe_all,
+        )
+    })
 }
 
 /// Per-connection state tracking subscribed sessions.
@@ -146,11 +168,19 @@ async fn handle_socket<D>(
     mut rx: broadcast::Receiver<SessionEvent>,
     dispatcher: D,
     state_version: Arc<AtomicU64>,
+    initial_session_id: Option<String>,
+    subscribe_all: bool,
 ) where
     D: RpcDispatch,
 {
     let _connection_guard = ActiveConnectionGuard::new();
     let mut conn = ConnState::new();
+    if let Some(session_id) = initial_session_id {
+        conn.subscribed_sessions.insert(session_id);
+    }
+    if subscribe_all {
+        conn.subscribe_all = true;
+    }
 
     loop {
         tokio::select! {
