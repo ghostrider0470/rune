@@ -32,8 +32,13 @@ pub async fn bearer_auth(
         .and_then(|value| value.strip_prefix("Bearer "));
 
     let query_token = request.uri().query().and_then(extract_query_bearer_token);
+    let websocket_protocol_token = request
+        .headers()
+        .get(header::SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|value| value.to_str().ok())
+        .and_then(extract_websocket_protocol_bearer_token);
 
-    let Some(token) = auth_header.or(query_token) else {
+    let Some(token) = auth_header.or(query_token).or(websocket_protocol_token) else {
         return Err(GatewayError::Unauthorized);
     };
 
@@ -52,4 +57,30 @@ fn extract_query_bearer_token(query: &str) -> Option<&str> {
             "api_key" | "auth" => Some(value),
             _ => None,
         })
+}
+
+fn extract_websocket_protocol_bearer_token(value: &str) -> Option<&str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .find_map(|protocol| protocol.strip_prefix("Bearer "))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn extracts_websocket_protocol_bearer_token() {
+        assert_eq!(
+            super::extract_websocket_protocol_bearer_token("rune-ws, Bearer shared-secret"),
+            Some("shared-secret")
+        );
+    }
+
+    #[test]
+    fn ignores_non_bearer_websocket_protocol_values() {
+        assert_eq!(
+            super::extract_websocket_protocol_bearer_token("rune-ws, chat"),
+            None
+        );
+    }
 }
