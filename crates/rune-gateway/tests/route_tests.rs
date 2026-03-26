@@ -8159,10 +8159,10 @@ async fn webchat_route_preserves_session_and_auth_query_params() {
     assert!(body.contains("query.get('session_token')"));
     assert!(body.contains("buildWsUrl"));
     assert!(body.contains("wsQuery.set('api_key', authToken)"));
-    assert!(body.contains("wsQuery.set('session_token', sessionToken)"));
+    assert!(body.contains("wsQuery.set('session_token', browserSessionToken)"));
     assert!(body.contains("next.set('session_id', sessionId)"));
     assert!(body.contains("next.set('api_key', authToken)"));
-    assert!(body.contains("next.set('session_token', sessionToken)"));
+    assert!(body.contains("next.set('session_token', browserSessionToken)"));
 }
 
 #[tokio::test]

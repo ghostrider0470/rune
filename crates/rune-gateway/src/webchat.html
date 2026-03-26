@@ -169,12 +169,14 @@
   const authToken = query.get('api_key') || '';
   const authHeaderToken = query.get('auth') || authToken;
   const sessionToken = query.get('session_token') || '';
+  const browserSessionKey = 'rune.webchat.browser_session_token';
+  const browserSessionToken = sessionToken || query.get('browser_session') || window.sessionStorage.getItem(browserSessionKey) || '';
 
   function buildWsUrl() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsQuery = new URLSearchParams();
     if (authToken) wsQuery.set('api_key', authToken);
-    if (sessionToken) wsQuery.set('session_token', sessionToken);
+    if (browserSessionToken) wsQuery.set('session_token', browserSessionToken);
     const suffix = wsQuery.toString();
     return proto + '//' + location.host + '/ws' + (suffix ? '?' + suffix : '');
   }
@@ -214,8 +216,12 @@
     const next = new URLSearchParams(location.search);
     next.set('session_id', sessionId);
     if (authToken) next.set('api_key', authToken);
-    if (sessionToken) next.set('session_token', sessionToken);
+    if (browserSessionToken) next.set('session_token', browserSessionToken);
     history.replaceState(null, '', location.pathname + '?' + next.toString());
+  }
+
+  if (browserSessionToken) {
+    window.sessionStorage.setItem(browserSessionKey, browserSessionToken);
   }
 
   function resetTranscript() {
@@ -228,7 +234,7 @@
     const next = new URLSearchParams(location.search);
     next.delete('session_id');
     if (authToken) next.set('api_key', authToken);
-    if (sessionToken) next.set('session_token', sessionToken);
+    if (browserSessionToken) next.set('session_token', browserSessionToken);
     history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next.toString() : ''));
     resetTranscript();
     appendMsg('system', 'Starting a new session...');
