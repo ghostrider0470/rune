@@ -24,7 +24,9 @@ pub struct AgentRegistry {
 
 impl AgentRegistry {
     pub fn new() -> Self {
-        Self { inner: Arc::new(RwLock::new(HashMap::new())) }
+        Self {
+            inner: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     pub async fn register(&self, template: AgentTemplate) {
@@ -59,7 +61,9 @@ impl AgentRegistry {
 }
 
 impl Default for AgentRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -76,7 +80,8 @@ mod tests {
             system_prompt: "Review carefully".into(),
             model: None,
             allowed_tools: None,
-        }).await;
+        })
+        .await;
         assert_eq!(reg.len().await, 1);
         let t = reg.get("test:reviewer").await.unwrap();
         assert_eq!(t.description, "Reviews code");

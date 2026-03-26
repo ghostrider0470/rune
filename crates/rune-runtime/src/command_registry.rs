@@ -17,7 +17,10 @@ pub struct Command {
 
 impl Command {
     pub fn short_name(&self) -> &str {
-        self.name.split_once(':').map(|(_, s)| s).unwrap_or(&self.name)
+        self.name
+            .split_once(':')
+            .map(|(_, s)| s)
+            .unwrap_or(&self.name)
     }
 
     pub fn expand(&self, args: &str) -> String {
@@ -84,7 +87,9 @@ impl CommandRegistry {
 }
 
 impl Default for CommandRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -99,7 +104,8 @@ mod tests {
             description: "Create a commit".into(),
             prompt_body: "Commit changes. $ARGUMENTS".into(),
             plugin_name: "superpowers".into(),
-        }).await;
+        })
+        .await;
         assert!(reg.get("superpowers:commit").await.is_some());
         assert!(reg.get("commit").await.is_some());
         assert_eq!(reg.len().await, 1);
@@ -113,7 +119,10 @@ mod tests {
             prompt_body: "Deploy to $ARGUMENTS environment.".into(),
             plugin_name: "test".into(),
         };
-        assert_eq!(cmd.expand("production"), "Deploy to production environment.");
+        assert_eq!(
+            cmd.expand("production"),
+            "Deploy to production environment."
+        );
     }
 
     #[test]
@@ -125,6 +134,9 @@ mod tests {
             plugin_name: "test".into(),
         };
         assert_eq!(cmd.expand(""), "Show system status.");
-        assert_eq!(cmd.expand("verbose"), "Show system status.\n\nARGUMENTS: verbose");
+        assert_eq!(
+            cmd.expand("verbose"),
+            "Show system status.\n\nARGUMENTS: verbose"
+        );
     }
 }

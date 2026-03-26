@@ -189,10 +189,15 @@ pub async fn parse_claude_plugin(dir: &Path) -> Result<ParsedClaudePlugin, Strin
 
     let manifest_bytes = tokio::fs::read_to_string(&manifest_path)
         .await
-        .map_err(|e| format!("failed to read plugin.json at {}: {e}", manifest_path.display()))?;
+        .map_err(|e| {
+            format!(
+                "failed to read plugin.json at {}: {e}",
+                manifest_path.display()
+            )
+        })?;
 
-    let manifest: ClaudePluginManifest = serde_json::from_str(&manifest_bytes)
-        .map_err(|e| format!("invalid plugin.json: {e}"))?;
+    let manifest: ClaudePluginManifest =
+        serde_json::from_str(&manifest_bytes).map_err(|e| format!("invalid plugin.json: {e}"))?;
 
     let plugin_name = manifest.name.clone();
 
@@ -470,11 +475,7 @@ async fn load_skill(
     })
 }
 
-async fn load_agent(
-    md_path: &Path,
-    stem: &str,
-    plugin_name: &str,
-) -> Result<ClaudeAgent, String> {
+async fn load_agent(md_path: &Path, stem: &str, plugin_name: &str) -> Result<ClaudeAgent, String> {
     let content = tokio::fs::read_to_string(md_path)
         .await
         .map_err(|e| format!("read error: {e}"))?;
@@ -788,7 +789,9 @@ mod tests {
         .unwrap();
 
         // agents/my-agent.md
-        tokio::fs::create_dir_all(root.join("agents")).await.unwrap();
+        tokio::fs::create_dir_all(root.join("agents"))
+            .await
+            .unwrap();
         tokio::fs::write(
             root.join("agents/my-agent.md"),
             "---\nname: my-agent\ndescription: An agent\nwhen-to-use: When needed\n---\n\nSystem prompt here.\n",
@@ -806,7 +809,9 @@ mod tests {
         .unwrap();
 
         // commands/do-thing.md
-        tokio::fs::create_dir_all(root.join("commands")).await.unwrap();
+        tokio::fs::create_dir_all(root.join("commands"))
+            .await
+            .unwrap();
         tokio::fs::write(
             root.join("commands/do-thing.md"),
             "---\nname: do-thing\ndescription: Does a thing\n---\n\nDo the thing.\n",
@@ -899,6 +904,9 @@ mod tests {
         assert_eq!(s.transport, "stdio");
         assert_eq!(s.command.as_deref(), Some("npx"));
         assert_eq!(s.args, vec!["-y", "@upstash/context7-mcp@latest"]);
-        assert_eq!(s.env.get("NODE_ENV").map(|s| s.as_str()), Some("production"));
+        assert_eq!(
+            s.env.get("NODE_ENV").map(|s| s.as_str()),
+            Some("production")
+        );
     }
 }

@@ -588,12 +588,19 @@ pub struct PluginOverride {
 
 impl Default for PluginOverride {
     fn default() -> Self {
-        Self { enabled: true, session_kinds: None, mcp_lifecycle: None }
+        Self {
+            enabled: true,
+            session_kinds: None,
+            mcp_lifecycle: None,
+        }
     }
 }
 
 fn default_plugin_scan_dirs() -> Vec<String> {
-    vec!["~/.rune/plugins".to_string(), "~/.claude/plugins/cache".to_string()]
+    vec![
+        "~/.rune/plugins".to_string(),
+        "~/.claude/plugins/cache".to_string(),
+    ]
 }
 
 fn default_plugin_scan_interval() -> u64 {
