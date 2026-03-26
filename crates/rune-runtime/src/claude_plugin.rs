@@ -692,6 +692,63 @@ pub fn parse_yaml_value(yaml: &str) -> serde_json::Value {
 }
 
 // ---------------------------------------------------------------------------
+// Standalone MCP discovery (for use before full plugin scan)
+// ---------------------------------------------------------------------------
+
+/// Scan directories for Claude Code plugins and return all MCP server
+/// declarations, without registering skills/agents/hooks/commands.
+///
+/// This is used at gateway startup to discover plugin MCP servers before
+/// the full plugin scan runs, so they can be connected alongside
+/// config-declared MCP servers.
+pub async fn discover_plugin_mcp_servers(scan_dirs: &[PathBuf]) -> Vec<ClaudeMcpServer> {
+    let mut servers = Vec::new();
+
+    for scan_dir in scan_dirs {
+        if !scan_dir.is_dir() {
+            continue;
+        }
+        // Recurse up to 3 levels (cache/marketplace/name/version/)
+        let mut dirs = vec![scan_dir.clone()];
+        for _depth in 0..3 {
+            let mut next = Vec::new();
+            for dir in &dirs {
+                let mut entries = match tokio::fs::read_dir(dir).await {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let mcp_path = path.join(".mcp.json");
+                    if mcp_path.is_file() {
+                        let mcp = parse_mcp_file(&mcp_path).await;
+                        if !mcp.is_empty() {
+                            debug!(
+                                dir = %path.display(),
+                                count = mcp.len(),
+                                "discovered plugin MCP servers"
+                            );
+                            servers.extend(mcp);
+                        }
+                    } else if !is_claude_plugin_dir(&path) && !path.join("PLUGIN.md").exists() {
+                        next.push(path);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            dirs = next;
+        }
+    }
+
+    servers
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

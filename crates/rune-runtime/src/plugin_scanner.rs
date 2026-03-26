@@ -252,8 +252,6 @@ impl PluginScanner {
             "unified plugin scan complete"
         );
 
-        // Store discovered MCP servers for later startup
-        *self.discovered_mcp_servers.write().await = mcp_servers;
 
         summary
     }

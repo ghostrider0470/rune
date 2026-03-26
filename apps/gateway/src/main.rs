@@ -546,7 +546,7 @@ async fn build_services(
     let mut registry = ToolRegistry::new();
     let browse = build_browse_tool_executor(&config).await;
     register_real_tool_definitions(&mut registry, browse.is_some());
-    let mcp = build_mcp_tool_executor(&config, &workspace_root).await?;
+    let mcp = build_mcp_tool_executor(&config, &workspace_root, &config.plugins.scan_dirs).await?;
     if let Some(ref executor) = mcp {
         registry.register_many(executor.tool_definitions());
     }
@@ -820,16 +820,44 @@ async fn build_memory_tool_executor(
 async fn build_mcp_tool_executor(
     config: &AppConfig,
     workspace_root: &Path,
+    plugin_scan_dirs: &[String],
 ) -> Result<Option<Arc<McpToolExecutor>>> {
-    if config.mcp_servers.iter().all(|server| !server.enabled) {
-        return Ok(None);
-    }
-
-    let server_configs = config
+    let mut server_configs: Vec<RuntimeMcpServerConfig> = config
         .mcp_servers
         .iter()
         .map(|server| runtime_mcp_config(server, workspace_root))
-        .collect::<Vec<_>>();
+        .collect();
+
+    // Discover MCP servers from Claude Code plugins
+    let scan_paths: Vec<PathBuf> = plugin_scan_dirs.iter().map(PathBuf::from).collect();
+    let plugin_mcp = rune_runtime::claude_plugin::discover_plugin_mcp_servers(&scan_paths).await;
+    for srv in &plugin_mcp {
+        let transport = match srv.transport.as_str() {
+            "stdio" => rune_mcp::discovery::McpTransportKind::Stdio,
+            "http" | "sse" => rune_mcp::discovery::McpTransportKind::Http,
+            _ => {
+                warn!(server = %srv.name, transport = %srv.transport, "unknown MCP transport, skipping");
+                continue;
+            }
+        };
+        server_configs.push(RuntimeMcpServerConfig {
+            name: srv.name.clone(),
+            transport,
+            command: srv.command.clone(),
+            args: Some(srv.args.clone()),
+            env: srv.env.clone(),
+            cwd: None,
+            url: None,
+            enabled: true,
+        });
+    }
+    if !plugin_mcp.is_empty() {
+        info!(count = plugin_mcp.len(), "discovered MCP servers from plugins");
+    }
+
+    if server_configs.iter().all(|s| !s.enabled) {
+        return Ok(None);
+    }
 
     let mut manager = McpManager::new();
     manager.connect_all(&server_configs).await?;
