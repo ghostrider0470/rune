@@ -14,8 +14,8 @@ use tracing::info;
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
-    HookRegistry, PluginLoader, PluginRegistry, SessionEngine, SkillLoader, SkillRegistry,
-    TurnExecutor,
+    AgentRegistry, CommandRegistry, HookRegistry, PluginLoader, PluginRegistry, PluginScanner,
+    SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -111,6 +111,14 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let skills_dir = services.config.paths.skills_dir.clone();
     let plugins_dir = services.config.paths.plugins_dir.clone();
     let workspace_root = services.config.agents.defaults.workspace.clone();
+    let plugin_scan_dirs: Vec<std::path::PathBuf> = services
+        .config
+        .plugins
+        .scan_dirs
+        .iter()
+        .map(|s| std::path::PathBuf::from(s))
+        .collect();
+    let plugin_scan_interval_secs = services.config.plugins.scan_interval_secs;
 
     // Build TTS engine if an API key is configured.
     let tts_engine = services
@@ -173,6 +181,28 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let _ = plugin_loader.scan().await;
     let hook_registry = Arc::new(HookRegistry::new());
     plugin_registry.register_hooks(&hook_registry).await;
+
+    let agent_registry = Arc::new(AgentRegistry::new());
+    let command_registry = Arc::new(CommandRegistry::new());
+
+    let plugin_scanner = Arc::new(PluginScanner::new(
+        plugin_scan_dirs,
+        plugin_registry.clone(),
+        skill_registry.clone(),
+        agent_registry.clone(),
+        command_registry.clone(),
+        hook_registry.clone(),
+    ));
+
+    let scan_summary = plugin_scanner.scan().await;
+    info!(
+        native = scan_summary.native_plugins,
+        claude = scan_summary.claude_plugins,
+        skills = scan_summary.skills_registered,
+        agents = scan_summary.agents_registered,
+        commands = scan_summary.commands_registered,
+        "unified plugin scan complete"
+    );
 
     let turn_executor = Arc::new(
         Arc::try_unwrap(services.turn_executor)
