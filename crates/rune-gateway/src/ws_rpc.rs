@@ -84,6 +84,7 @@ impl RpcDispatcher {
         match method {
             "session.list" => self.session_list(params).await,
             "session.get" => self.session_get(params).await,
+            "session.resolve" => self.session_resolve(params).await,
             "session.create" => self.session_create(params).await,
             "session.send" => self.session_send(params).await,
             "session.transcript" => self.session_transcript(params).await,
@@ -224,6 +225,82 @@ impl RpcDispatcher {
             "usage_completion_tokens": completion_tokens,
             "last_turn_started_at": last_turn_started_at,
             "last_turn_ended_at": last_turn_ended_at,
+        }))
+    }
+    /// Resolve or create a session for a durable channel reference. Params:
+    /// `channel_ref` (required), `kind` (optional, default "channel"),
+    /// `workspace_root`, `requester_session_id`, `metadata`.
+    async fn session_resolve(&self, params: Value) -> Result<Value, RpcError> {
+        let channel_ref = require_string(&params, "channel_ref")?;
+        let kind_str = params
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("channel");
+        let kind = parse_session_kind(kind_str)?;
+
+        if let Some(existing) = self
+            .state
+            .session_engine
+            .get_session_by_channel_ref(channel_ref)
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+        {
+            return Ok(json!({
+                "id": existing.id,
+                "kind": existing.kind,
+                "status": existing.status,
+                "created_at": existing.created_at.to_rfc3339(),
+                "resumed": true,
+            }));
+        }
+
+        let workspace_root = params
+            .get("workspace_root")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let requester_session_id = params
+            .get("requester_session_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok());
+
+        let row = self
+            .state
+            .session_engine
+            .create_session_full(
+                kind,
+                workspace_root,
+                requester_session_id,
+                Some(channel_ref.to_string()),
+            )
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?;
+
+        if let Some(metadata) = params.get("metadata") {
+            self.state
+                .session_engine
+                .patch_metadata(row.id, metadata.clone())
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+        }
+
+        let _ = self.state.event_tx.send(crate::state::SessionEvent {
+            session_id: row.id.to_string(),
+            kind: "session_created".to_string(),
+            payload: json!({
+                "session_id": row.id,
+                "kind": row.kind,
+                "status": row.status,
+                "channel_ref": row.channel_ref,
+            }),
+            state_changed: true,
+        });
+
+        Ok(json!({
+            "id": row.id,
+            "kind": row.kind,
+            "status": row.status,
+            "created_at": row.created_at.to_rfc3339(),
+            "resumed": false,
         }))
     }
 
