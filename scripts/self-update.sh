@@ -61,10 +61,24 @@ if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     echo "[self-update] Gateway standalone smoke boot failed — aborting"
     exit 1
 fi
-if ! timeout 10s "$REPO_DIR/target/release/rune" health --config "$SMOKE_CONFIG_DIR/config.toml" >/dev/null 2>&1; then
+SMOKE_PORT=43123
+python3 - <<PYCFG
+from pathlib import Path
+path = Path(r"$SMOKE_CONFIG_DIR/config.toml")
+text = path.read_text()
+text = text.replace('port = 0', f'port = {43123}', 1)
+path.write_text(text)
+PYCFG
+"$BINARY" --config "$SMOKE_CONFIG_DIR/config.toml" >/dev/null 2>&1 &
+smoke_pid=$!
+trap 'kill "$smoke_pid" >/dev/null 2>&1 || true; rm -rf "$SMOKE_CONFIG_DIR"' EXIT
+if ! timeout 15s bash -lc 'until "$REPO_DIR/target/release/rune" --gateway-url "http://127.0.0.1:${SMOKE_PORT}" health >/dev/null 2>&1; do sleep 0.5; done' ; then
     echo "[self-update] CLI health smoke check failed — aborting"
+    kill "$smoke_pid" >/dev/null 2>&1 || true
     exit 1
 fi
+kill "$smoke_pid" >/dev/null 2>&1 || true
+wait "$smoke_pid" >/dev/null 2>&1 || true
 
 echo "[self-update] Building UI..."
 cd "$REPO_DIR/ui"
