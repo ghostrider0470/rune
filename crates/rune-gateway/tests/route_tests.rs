@@ -9281,6 +9281,90 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
 }
 
 #[tokio::test]
+async fn api_gateway_parity_auth_and_memory_routes_are_registered() {
+    let app = build_test_app(None);
+
+    let auth = app
+        .clone()
+        .oneshot(Request::get("/api/auth").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(auth.status(), StatusCode::OK);
+
+    let channels = app
+        .clone()
+        .oneshot(Request::get("/api/channels").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(channels.status(), StatusCode::OK);
+
+    let channels_status = app
+        .clone()
+        .oneshot(
+            Request::get("/api/channels/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(channels_status.status(), StatusCode::OK);
+
+    let memory_status = app
+        .clone()
+        .oneshot(
+            Request::get("/api/memory/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(memory_status.status(), StatusCode::OK);
+
+    let memory_search = app
+        .clone()
+        .oneshot(
+            Request::get("/api/memory/search?q=test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(memory_search.status(), StatusCode::OK);
+
+    let memory_graph = app
+        .clone()
+        .oneshot(
+            Request::get("/api/memory/graph?threshold=0.5&neighbors=3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        memory_graph.status(),
+        StatusCode::OK | StatusCode::BAD_REQUEST
+    ));
+
+    let logs = app
+        .clone()
+        .oneshot(Request::get("/api/logs").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(logs.status(), StatusCode::OK);
+
+    let doctor_results = app
+        .clone()
+        .oneshot(
+            Request::get("/api/doctor/results")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(doctor_results.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn api_gateway_parity_routes_are_registered() {
     let app = build_test_app(None);
 
