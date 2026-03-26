@@ -390,6 +390,19 @@ fn provider_default_model(provider: &str) -> &'static str {
     }
 }
 
+fn provider_env_key(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("OPENAI_API_KEY"),
+        "anthropic" => Some("ANTHROPIC_API_KEY"),
+        "groq" => Some("GROQ_API_KEY"),
+        "mistral" => Some("MISTRAL_API_KEY"),
+        "deepseek" => Some("DEEPSEEK_API_KEY"),
+        "google" => Some("GOOGLE_API_KEY"),
+        "azure" => Some("AZURE_OPENAI_API_KEY"),
+        _ => None,
+    }
+}
+
 fn write_wizard_config(
     workspace: &Path,
     provider: &str,
@@ -441,7 +454,13 @@ fn write_wizard_config(
     table.set_implicit(true);
     table["name"] = Item::Value(Value::from("local"));
     table["kind"] = Item::Value(Value::from(provider));
-    table["api_key"] = Item::Value(Value::from(api_key));
+    if provider == "ollama" || api_key.trim().is_empty() {
+        if let Some(env_key) = provider_env_key(provider) {
+            table["api_key_env"] = Item::Value(Value::from(env_key));
+        }
+    } else {
+        table["api_key"] = Item::Value(Value::from(api_key));
+    }
     if let Some(base_url) = provider_default_base_url(provider) {
         table["base_url"] = Item::Value(Value::from(base_url));
     }
@@ -3166,6 +3185,40 @@ mod tests {
     use super::*;
     use clap::Parser;
     use tempfile::TempDir;
+
+    #[test]
+    fn write_wizard_config_uses_env_var_for_openai_api_key() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = write_wizard_config(
+            tmp.path(),
+            "openai",
+            "gpt-4o-mini",
+            "",
+            true,
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(config_path).unwrap();
+        assert!(written.contains("api_key_env = \"OPENAI_API_KEY\""));
+        assert!(!written.contains("api_key = \"\""));
+    }
+
+    #[test]
+    fn write_wizard_config_keeps_inline_api_key_when_provided() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = write_wizard_config(
+            tmp.path(),
+            "openai",
+            "gpt-4o-mini",
+            "test-key",
+            true,
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(config_path).unwrap();
+        assert!(written.contains("api_key = \"test-key\""));
+        assert!(!written.contains("api_key_env"));
+    }
 
     #[test]
     fn set_default_model_updates_existing_models_section() {
