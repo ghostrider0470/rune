@@ -324,13 +324,11 @@ fn activation_commands(
                     "systemctl --user cat {} # verify installed unit",
                     unit
                 ));
-                commands.push(format!("systemctl --user enable --now {}", unit));
-                commands.push(format!("systemctl --user status {}", unit));
                 commands.push(format!("# file: {}", path.display()));
-            } else {
-                commands.push(format!("systemctl --user enable --now {}", unit));
-                commands.push(format!("systemctl --user status {}", unit));
             }
+            commands.push(format!("systemctl --user enable {}", unit));
+            commands.push(format!("systemctl --user start {}", unit));
+            commands.push(format!("systemctl --user status {}", unit));
             commands
         }
         ServiceTarget::Launchd => {
@@ -357,6 +355,7 @@ fn service_notes(target: ServiceTarget) -> Vec<String> {
     match target {
         ServiceTarget::Systemd => vec![
             "Use --enable and --start during install to activate automatically.".to_string(),
+            "Systemd service names are normalized to <name>.service automatically.".to_string(),
             "Logs stream via `journalctl --user -u rune-gateway -f` unless you override the service name.".to_string(),
         ],
         ServiceTarget::Launchd => vec![
@@ -385,6 +384,11 @@ fn activate_systemd_service(
     enable: bool,
     start: bool,
 ) -> Result<()> {
+    let unit_name = if name.ends_with(".service") {
+        name.to_string()
+    } else {
+        format!("{name}.service")
+    };
     run_command(
         std::process::Command::new("systemctl")
             .arg("--user")
@@ -398,14 +402,14 @@ fn activate_systemd_service(
         if start {
             cmd.arg("--now");
         }
-        cmd.arg(name);
+        cmd.arg(&unit_name);
         run_command(&mut cmd, "systemctl --user enable")?;
     } else if start {
         run_command(
             std::process::Command::new("systemctl")
                 .arg("--user")
                 .arg("start")
-                .arg(name),
+                .arg(&unit_name),
             "systemctl --user start",
         )?;
     }
@@ -571,6 +575,26 @@ fn xml_escape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn systemd_activation_commands_use_normalized_unit_name() {
+        let commands = activation_commands(ServiceTarget::Systemd, "rune-gateway", None);
+        assert!(
+            commands
+                .iter()
+                .any(|cmd| cmd == "systemctl --user enable rune-gateway.service")
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|cmd| cmd == "systemctl --user start rune-gateway.service")
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|cmd| cmd == "systemctl --user status rune-gateway.service")
+        );
+    }
 
     #[test]
     fn install_writes_systemd_unit_to_requested_path() {
