@@ -8787,6 +8787,23 @@ async fn webchat_route_marks_synthetic_current_session_with_auth_mode_metadata()
     assert!(body.contains("metadata: { browser_auth_mode: authLabel() }"));
 }
 
+
+#[tokio::test]
+async fn webchat_route_mentions_browser_token_bootstrap_auth_mode() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("function authLabelFor(targetSessionId)"));
+    assert!(body.contains("return 'browser token';"));
+    assert!(body.contains("authLabelFor(item.id)"));
+}
+
 #[tokio::test]
 async fn webchat_route_rejects_non_object_session_token_storage_payloads() {
     let app = build_test_app(None);

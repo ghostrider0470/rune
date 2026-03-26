@@ -285,9 +285,14 @@
     }
   }
 
-  function authLabel() {
+  function authLabelFor(targetSessionId) {
     if (authToken) return 'gateway auth';
-    return 'session auth';
+    if (targetSessionId && sessionAuthTokens[targetSessionId]) return 'session auth';
+    return 'browser token';
+  }
+
+  function authLabel() {
+    return authLabelFor(sessionId);
   }
 
   function authTokenForSession(targetSessionId) {
@@ -346,7 +351,7 @@
       button.className = 'session-item' + (item.id === sessionId ? ' active' : '');
       button.innerHTML = '<div class="session-item-title">' + (item.id === sessionId ? 'Current session' : 'Session') + '</div>' +
         '<div class="session-item-meta">' +
-        (item.channel || 'webchat') + ' • ' + (item.status || 'unknown') + ' • ' + (((item.metadata || {}).browser_auth_mode) || authLabel()) + ' • ' + formatRelative(item.created_at) +
+        (item.channel || 'webchat') + ' • ' + (item.status || 'unknown') + ' • ' + (((item.metadata || {}).browser_auth_mode) || authLabelFor(item.id)) + ' • ' + formatRelative(item.created_at) +
         '</div>';
       button.addEventListener('click', function() {
         if (item.id === sessionId) return;
