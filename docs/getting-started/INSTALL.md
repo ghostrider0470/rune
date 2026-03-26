@@ -101,21 +101,21 @@ On macOS, use `--target launchd --enable` instead. The command writes `~/Library
 
 ## Zero-config Docker Compose
 
-For a fast local evaluation with persisted state and no manual config, use the bundled Compose file from a repo checkout:
+For a fast local evaluation with persisted state and no manual config, use the default bundled Compose file from a repo checkout:
 
 ```bash
 git clone --depth 1 --branch main https://github.com/ghostrider0470/rune ~/Development/rune
 cd ~/Development/rune
-docker compose -f docker-compose.zero-config.yml up --build -d
+docker compose up --build -d
 ```
 
-This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` redirects into WebChat) and persists state/config/secrets in the named `rune-data`, `rune-config`, and `rune-secrets` volumes. The compose file explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file, and still allows shell-exported `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` overrides when provided.
+This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` redirects into WebChat) and persists state/config/secrets in the named `rune-data`, `rune-config`, and `rune-secrets` volumes. The default `docker-compose.yml` now ships the zero-config profile directly: it explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file, and still allows shell-exported `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` overrides when provided.
 
 Useful follow-ups:
 
 ```bash
-docker compose -f docker-compose.zero-config.yml logs -f
-docker compose -f docker-compose.zero-config.yml down
+docker compose logs -f
+docker compose down
 ```
 
 To point the container at a real provider instead of local Ollama auto-detect, either export env vars inline or copy `config.example.env` to `.env` and fill it in:
@@ -123,13 +123,13 @@ To point the container at a real provider instead of local Ollama auto-detect, e
 ```bash
 cp config.example.env .env
 $EDITOR .env
-docker compose -f docker-compose.zero-config.yml up --build -d
+docker compose up --build -d
 ```
 
 Inline env vars still work too:
 
 ```bash
-OPENAI_API_KEY=... docker compose -f docker-compose.zero-config.yml up --build -d
+OPENAI_API_KEY=... docker compose up --build -d
 ```
 
 ## Verify startup

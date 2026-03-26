@@ -80,10 +80,10 @@ Rune also ships a zero-config Docker Compose path for fast evaluation with persi
 ```bash
 git clone --depth 1 --branch main https://github.com/ghostrider0470/rune ~/Development/rune
 cd ~/Development/rune
-docker compose -f docker-compose.zero-config.yml up --build -d
+docker compose up --build -d
 ```
 
-This variant mounts durable state under the named `rune-data`, `rune-config`, and `rune-secrets` volumes, explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file (see `config.example.env`), and exposes chat on `http://127.0.0.1:8787/webchat` (`/chat` redirects into WebChat and `/dashboard` is also available).
+The default Compose file now ships the zero-config path: it mounts durable state under the named `rune-data`, `rune-config`, and `rune-secrets` volumes, explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file (see `config.example.env`), and exposes chat on `http://127.0.0.1:8787/webchat` (`/chat` redirects into WebChat and `/dashboard` is also available).
 
 Next docs from there:
 - [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)
