@@ -288,6 +288,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         device_registry: state.device_registry.clone(),
         event_tx: state.event_tx.clone(),
         operator_delivery,
+        plugin_scanner: Some(plugin_scanner.clone()),
+        plugin_scan_interval_ticks: plugin_scan_interval_secs / 10,
     };
 
     let app = build_router(state, auth_token);

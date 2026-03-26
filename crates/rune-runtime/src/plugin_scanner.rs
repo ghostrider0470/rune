@@ -128,6 +128,8 @@ impl HookHandler for ClaudeHookHandler {
 /// native plugins into the appropriate registries.
 pub struct PluginScanner {
     scan_dirs: Vec<PathBuf>,
+    /// Held so the registry Arc stays alive; not read directly.
+    #[allow(dead_code)]
     plugin_registry: Arc<PluginRegistry>,
     skill_registry: Arc<SkillRegistry>,
     agent_registry: Arc<AgentRegistry>,
@@ -292,9 +294,7 @@ impl PluginScanner {
                 action_type: ch.hook.action_type.clone(),
             };
 
-            self.hook_registry
-                .register(event, Box::new(handler))
-                .await;
+            self.hook_registry.register(event, Box::new(handler)).await;
             summary.hooks_registered += 1;
         }
 

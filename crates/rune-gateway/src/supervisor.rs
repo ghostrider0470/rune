@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 use rune_core::{SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind, TriggerKind};
 use rune_runtime::heartbeat::{HeartbeatResponseAction, HeartbeatRunner};
 use rune_runtime::scheduler::{Job, JobPayload, ReminderStore, Scheduler, SessionTarget};
-use rune_runtime::{SessionEngine, TurnExecutor};
+use rune_runtime::{PluginScanner, SessionEngine, TurnExecutor};
 use rune_store::models::SessionRow;
 
 use crate::pairing::DeviceRegistry;
@@ -104,6 +104,10 @@ pub struct SupervisorDeps {
     pub event_tx: broadcast::Sender<SessionEvent>,
     /// Optional delivery to the operator's user-facing channel.
     pub operator_delivery: Option<Arc<dyn OperatorDelivery>>,
+    /// Optional plugin scanner for hot-reload.
+    pub plugin_scanner: Option<Arc<PluginScanner>>,
+    /// How many supervisor ticks (each ~10s) between re-scans. 0 = disabled.
+    pub plugin_scan_interval_ticks: u64,
 }
 
 impl BackgroundSupervisor {
@@ -450,6 +454,22 @@ async fn supervisor_loop(deps: SupervisorDeps, mut shutdown_rx: watch::Receiver<
                 Ok(0) => {}
                 Ok(n) => info!(count = n, "cleaned up stale running sessions"),
                 Err(e) => warn!(error = %e, "stale session cleanup failed"),
+            }
+        }
+
+        // --- Plugin re-scan ---
+        if let Some(ref scanner) = deps.plugin_scanner {
+            if deps.plugin_scan_interval_ticks > 0
+                && tick_count % deps.plugin_scan_interval_ticks == 0
+            {
+                let summary = scanner.scan().await;
+                if summary.claude_plugins > 0 || summary.native_plugins > 0 {
+                    debug!(
+                        native = summary.native_plugins,
+                        claude = summary.claude_plugins,
+                        "plugin re-scan complete"
+                    );
+                }
             }
         }
     }

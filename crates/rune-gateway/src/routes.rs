@@ -788,6 +788,8 @@ pub async fn cron_run(
         device_registry: state.device_registry.clone(),
         event_tx: state.event_tx.clone(),
         operator_delivery: None,
+        plugin_scanner: None,
+        plugin_scan_interval_ticks: 0,
     };
 
     let (_status, _output) =
