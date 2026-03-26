@@ -60,6 +60,8 @@ struct ClaudeHookHandler {
     command: Option<String>,
     /// Hook action type (e.g. "command"). Non-command types are no-ops for now.
     action_type: String,
+    /// Session kinds this handler applies to. None = all kinds.
+    session_kinds: Option<Vec<String>>,
 }
 
 #[async_trait::async_trait]
@@ -117,6 +119,10 @@ impl HookHandler for ClaudeHookHandler {
 
     fn plugin_name(&self) -> &str {
         &self.plugin
+    }
+
+    fn session_kinds_filter(&self) -> Option<&[String]> {
+        self.session_kinds.as_deref()
     }
 }
 
@@ -306,6 +312,7 @@ impl PluginScanner {
                 matcher_tool_name: ch.matcher.as_ref().and_then(|m| m.tool_name.clone()),
                 command: ch.hook.command.clone(),
                 action_type: ch.hook.action_type.clone(),
+                session_kinds: None,
             };
 
             self.hook_registry.register(event, Box::new(handler)).await;

@@ -112,6 +112,11 @@ pub trait HookHandler: Send + Sync {
 
     /// Name of the plugin that owns this handler (for logging).
     fn plugin_name(&self) -> &str;
+
+    /// Session kinds this handler applies to. None = all kinds.
+    fn session_kinds_filter(&self) -> Option<&[String]> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +163,12 @@ impl HookRegistry {
             return;
         };
 
+        let session_kind = context
+            .get("session_kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned();
+
         debug!(
             event = %event.as_str(),
             handler_count = event_handlers.len(),
@@ -165,6 +176,22 @@ impl HookRegistry {
         );
 
         for handler in event_handlers {
+            if let Some(allowed) = handler.session_kinds_filter() {
+                if !session_kind.is_empty()
+                    && !allowed
+                        .iter()
+                        .any(|k| k.eq_ignore_ascii_case(&session_kind))
+                {
+                    debug!(
+                        event = %event.as_str(),
+                        plugin = %handler.plugin_name(),
+                        session_kind = %session_kind,
+                        "skipping hook handler (session kind filtered)"
+                    );
+                    continue;
+                }
+            }
+
             if let Err(e) = handler.handle(event, context).await {
                 warn!(
                     event = %event.as_str(),

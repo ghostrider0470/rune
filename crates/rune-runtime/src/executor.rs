@@ -926,6 +926,7 @@ impl TurnExecutor {
                             "arguments": &args,
                             "session_id": session_id.to_string(),
                             "turn_id": turn_id.into_uuid().to_string(),
+                            "session_kind": format!("{:?}", session_kind),
                         });
                         hook_reg.emit(&HookEvent::PreToolCall, &mut hook_ctx).await;
                         // Allow hooks to modify arguments
@@ -1111,6 +1112,7 @@ impl TurnExecutor {
                             "turn_id": turn_id.into_uuid().to_string(),
                             "output": tool_result.output,
                             "is_error": tool_result.is_error,
+                            "session_kind": format!("{:?}", session_kind),
                         });
                         hook_reg.emit(&HookEvent::PostToolCall, &mut hook_ctx).await;
                     }
