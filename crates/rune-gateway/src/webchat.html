@@ -373,7 +373,7 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'session-item' + (item.id === sessionId ? ' active' : '');
-      const resumeTitle = item.id === sessionId ? 'Current session' : 'Session';
+      const resumeTitle = item.id === sessionId ? 'Current session' : 'Saved session';
       const resumeUrl = new URL(location.pathname, location.origin);
       resumeUrl.searchParams.set('session_id', item.id);
       if (authToken) resumeUrl.searchParams.set('api_key', authToken);
@@ -412,7 +412,7 @@
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
     updateAuthBadge();
     syncCurrentSessionLink();
-    appendMsg('system', fromLink ? 'Opened session from browser history.' : 'Switched session.');
+    appendMsg('system', fromLink ? 'Opened session from browser history. ' + continuityMessage : 'Switched session.');
     const existing = await rpc('session.transcript', { session_id: sessionId });
     if (Array.isArray(existing)) existing.forEach(function(entry) {
       appendTranscriptEntry(entry);
@@ -640,7 +640,7 @@
     if (sessionId) {
       const resumedLabel = requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.';
       await openSession(sessionId, explicitSessionRequested);
-      appendMsg('system', resumedLabel);
+      appendMsg('system', resumedLabel + ' ' + continuityMessage);
       await refreshSessionList();
       return;
     }
@@ -654,7 +654,7 @@
     updateAuthBadge();
     sessionPollCursor = '';
     syncCurrentSessionLink();
-    appendMsg('system', 'Session started.');
+    appendMsg('system', 'Session started. ' + continuityMessage);
     await refreshSessionList();
   }
 
