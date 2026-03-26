@@ -538,7 +538,12 @@ impl SessionStatus {
             | (Self::Ready, Self::Cancelled)
             // Suspended ↔ any non-terminal
             | (Self::Suspended, Self::Ready)
-            | (_, Self::Suspended)
+            | (Self::Created, Self::Suspended)
+            | (Self::Ready, Self::Suspended)
+            | (Self::Running, Self::Suspended)
+            | (Self::WaitingForTool, Self::Suspended)
+            | (Self::WaitingForApproval, Self::Suspended)
+            | (Self::WaitingForSubagent, Self::Suspended)
         )
     }
 
@@ -989,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn fsm_any_to_suspended() {
+    fn fsm_active_states_can_suspend() {
         for from in [
             SessionStatus::Created,
             SessionStatus::Ready,
@@ -997,10 +1002,19 @@ mod tests {
             SessionStatus::WaitingForTool,
             SessionStatus::WaitingForApproval,
             SessionStatus::WaitingForSubagent,
-            SessionStatus::Completed,
-            SessionStatus::Failed,
         ] {
             assert!(from.can_transition_to(&SessionStatus::Suspended));
+        }
+    }
+
+    #[test]
+    fn fsm_terminal_states_cannot_suspend() {
+        for from in [
+            SessionStatus::Completed,
+            SessionStatus::Failed,
+            SessionStatus::Cancelled,
+        ] {
+            assert!(!from.can_transition_to(&SessionStatus::Suspended));
         }
     }
 
