@@ -538,17 +538,54 @@ impl TurnExecutor {
 
         let tool_result = match self.tool_executor.execute(call.clone()).await {
             Ok(result) => result,
-            Err(rune_tools::ToolError::ApprovalRequired { .. }) => {
+            Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
+                warn!(
+                    approval_id = %approval.id,
+                    tool = %tool,
+                    "tool requested follow-up approval during resume"
+                );
+
+                let followup_approval_id = ApprovalId::new();
+                let followup_approval = TranscriptItem::ApprovalRequest {
+                    approval_id: followup_approval_id,
+                    summary: details.clone(),
+                    command: extract_approval_command(&details),
+                };
+                self.append_transcript(
+                    session_id,
+                    Some(turn_uuid),
+                    &followup_approval,
+                )
+                .await?;
+
+                self.approval_repo
+                    .create(NewApproval {
+                        id: followup_approval_id.into_uuid(),
+                        subject_type: "tool_call".to_string(),
+                        subject_id: tool_call_id,
+                        reason: tool.clone(),
+                        presented_payload: approval_payload(
+                            session_id,
+                            TurnId::from(turn_uuid),
+                            ToolCallId::from(tool_call_id),
+                            &tool,
+                            &details,
+                            &call.arguments,
+                        ),
+                        created_at: Utc::now(),
+                        handle_ref: Some(session_id.to_string()),
+                        host_ref: Some(turn_uuid.to_string()),
+                    })
+                    .await?;
+
                 self.update_approval_progress(
                     approval.id,
                     resumed_at,
-                    "failed",
-                    Some("approved tool call still requested approval during resume".to_string()),
+                    "waiting_for_approval",
+                    Some(format!("tool resume requires another approval gate for {tool}")),
                 )
                 .await?;
-                return Err(RuntimeError::Aborted(
-                    "approved tool call still requested approval during resume".to_string(),
-                ));
+                return Ok((turn, usage));
             }
             Err(e) => ToolResult {
                 tool_call_id: call.tool_call_id,

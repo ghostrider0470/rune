@@ -146,6 +146,7 @@ enum FakeToolStep {
         output: String,
         tool_execution_id: Uuid,
     },
+    Error(ToolError),
     ApprovalRequired {
         tool: String,
         details: String,
@@ -200,6 +201,7 @@ impl ToolExecutor for FakeToolExecutor {
                 is_error: false,
                 tool_execution_id: Some(tool_execution_id),
             }),
+            FakeToolStep::Error(error) => Err(error),
             FakeToolStep::ApprovalRequired { tool, details } => {
                 Err(ToolError::ApprovalRequired { tool, details })
             }
@@ -1746,6 +1748,100 @@ async fn resume_approval_rejects_redeciding_completed_approval() {
         err.to_string()
             .contains("approval already resumed with status completed")
     );
+}
+
+
+#[tokio::test]
+async fn approval_resume_retains_reapproval_linkage_for_followup_approval() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"echo hi"}"#),
+        FakeModelProvider::text_response("done"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::with_steps(vec![
+            FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({"command": "echo hi"}),
+                    command: Some("echo hi".to_string()),
+                })
+                .unwrap(),
+            },
+            FakeToolStep::Error(ToolError::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::High,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({"command": "echo hi", "phase": "resume"}),
+                    command: Some("echo hi".to_string()),
+                })
+                .unwrap(),
+            }),
+        ])),
+        registry,
+    );
+
+    let (blocked_turn, _) = executor.execute(session.id, "run it", None).await.unwrap();
+    assert_eq!(blocked_turn.status, "tool_executing");
+
+    let approvals = h.approval_repo.list(false).await.unwrap();
+    assert_eq!(approvals.len(), 1);
+    let first_approval = approvals[0].clone();
+    let session_id = session.id.to_string();
+    let turn_id = blocked_turn.id.to_string();
+    assert_eq!(first_approval.handle_ref.as_deref(), Some(session_id.as_str()));
+    assert_eq!(first_approval.host_ref.as_deref(), Some(turn_id.as_str()));
+
+    h.approval_repo
+        .decide(
+            first_approval.id,
+            "allow_once",
+            "operator",
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+    let resumed_turn = executor.resume_approval(first_approval.id).await.unwrap().0;
+    assert_eq!(resumed_turn.status, "tool_executing");
+
+    let approvals = h.approval_repo.list(false).await.unwrap();
+    assert_eq!(approvals.len(), 2);
+    let followup = approvals
+        .into_iter()
+        .find(|approval| approval.id != first_approval.id)
+        .expect("follow-up approval created");
+    assert_eq!(followup.handle_ref.as_deref(), Some(session_id.as_str()));
+    assert_eq!(followup.host_ref.as_deref(), Some(turn_id.as_str()));
+    assert_eq!(followup.presented_payload["session_id"], session_id);
+    assert_eq!(followup.presented_payload["turn_id"], turn_id);
 }
 
 #[tokio::test]
