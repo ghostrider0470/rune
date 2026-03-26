@@ -313,11 +313,7 @@ fn activation_commands(
 ) -> Vec<String> {
     match target {
         ServiceTarget::Systemd => {
-            let unit = if name.ends_with(".service") {
-                name.to_string()
-            } else {
-                format!("{name}.service")
-            };
+            let unit = normalized_systemd_unit_name(name);
             let mut commands = vec!["systemctl --user daemon-reload".to_string()];
             if let Some(path) = output_path {
                 commands.push(format!(
@@ -384,11 +380,7 @@ fn activate_systemd_service(
     enable: bool,
     start: bool,
 ) -> Result<()> {
-    let unit_name = if name.ends_with(".service") {
-        name.to_string()
-    } else {
-        format!("{name}.service")
-    };
+    let unit_name = normalized_systemd_unit_name(name);
     run_command(
         std::process::Command::new("systemctl")
             .arg("--user")
@@ -515,15 +507,32 @@ fn default_output_path(target: ServiceTarget, name: &str) -> PathBuf {
                 .map(PathBuf::from)
                 .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
                 .unwrap_or_else(|| PathBuf::from(".config"));
-            base.join("systemd/user").join(format!("{name}.service"))
+            base.join("systemd/user")
+                .join(normalized_systemd_unit_name(name))
         }
         ServiceTarget::Launchd => {
             let base = std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("."));
             base.join("Library/LaunchAgents")
-                .join(format!("{name}.plist"))
+                .join(normalized_launchd_label_name(name))
         }
+    }
+}
+
+fn normalized_systemd_unit_name(name: &str) -> String {
+    if name.ends_with(".service") {
+        name.to_string()
+    } else {
+        format!("{name}.service")
+    }
+}
+
+fn normalized_launchd_label_name(name: &str) -> String {
+    if name.ends_with(".plist") {
+        name.to_string()
+    } else {
+        format!("{name}.plist")
     }
 }
 
@@ -688,5 +697,14 @@ mod tests {
         assert!(written.contains(&output.with_extension("log").display().to_string()));
         assert!(written.contains("<key>StandardErrorPath</key>"));
         assert!(written.contains(&output.with_extension("err.log").display().to_string()));
+    }
+
+    #[test]
+    fn default_output_paths_do_not_double_suffix_service_names() {
+        let systemd = default_output_path(ServiceTarget::Systemd, "rune-gateway.service");
+        assert!(systemd.ends_with("systemd/user/rune-gateway.service"));
+
+        let launchd = default_output_path(ServiceTarget::Launchd, "rune-gateway.plist");
+        assert!(launchd.ends_with("Library/LaunchAgents/rune-gateway.plist"));
     }
 }
