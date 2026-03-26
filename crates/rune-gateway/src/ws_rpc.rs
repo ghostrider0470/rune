@@ -114,6 +114,7 @@ impl RpcDispatcher {
             "turns.list" => self.turns_list(params).await,
             "turns.get" => self.turns_get(params).await,
             "tools.list" => self.tools_list().await,
+            "tools.get" => self.tools_get(params).await,
             "approvals.list" => self.approvals_list().await,
             "approvals.decide" => self.approvals_decide(params).await,
             "processes.list" => self.processes_list().await,
@@ -1029,6 +1030,27 @@ impl RpcDispatcher {
         Ok(json!(items))
     }
 
+    /// Get a persisted tool execution. Params: `id` (required).
+    async fn tools_get(&self, params: Value) -> Result<Value, RpcError> {
+        let id = require_string(&params, "id")?;
+        let execution_id = Uuid::parse_str(id)
+            .map_err(|_| RpcError::bad_request(format!("invalid tool execution id: {id}")))?;
+
+        let execution = self
+            .state
+            .tool_execution_repo
+            .find_by_id(execution_id)
+            .await
+            .map_err(|error| match error {
+                rune_store::StoreError::NotFound { .. } => {
+                    RpcError::not_found(format!("no tool execution found for id: {id}"))
+                }
+                other => RpcError::internal(other.to_string()),
+            })?;
+
+        serde_json::to_value(execution).map_err(|error| RpcError::internal(error.to_string()))
+    }
+
     // ── Approvals ───────────────────────────────────────────────────────
 
     /// List pending approval requests.
@@ -1050,6 +1072,8 @@ impl RpcDispatcher {
                     "reason": a.reason,
                     "decision": a.decision,
                     "decided_by": a.decided_by,
+                    "handle_ref": a.handle_ref,
+                    "host_ref": a.host_ref,
                     "presented_payload": a.presented_payload,
                     "created_at": a.created_at.to_rfc3339(),
                     "decided_at": a.decided_at.map(|t| t.to_rfc3339()),

@@ -8801,7 +8801,9 @@ async fn webchat_route_polls_incremental_transcript_updates_after_disconnect() {
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_text(response).await;
     assert!(html.contains("let sessionPollCursor = '';"));
-    assert!(html.contains("if (sessionPollCursor) queryParts.push('after=' + encodeURIComponent(sessionPollCursor));"));
+    assert!(html.contains(
+        "if (sessionPollCursor) queryParts.push('after=' + encodeURIComponent(sessionPollCursor));"
+    ));
     assert!(html.contains("if (!Array.isArray(existing) || !existing.length) return;"));
     assert!(html.contains("if (entry && entry.id) sessionPollCursor = String(entry.id);"));
 }
@@ -10115,4 +10117,129 @@ async fn webchat_route_only_shows_one_reconnect_queue_notice_until_reconnected()
     assert!(html.contains("if (!reconnectToastVisible) {"));
     assert!(html.contains("reconnectToastVisible = true;"));
     assert!(html.contains("reconnectToastVisible = false;"));
+}
+
+#[tokio::test]
+async fn ws_rpc_tools_get_returns_persisted_execution() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let tool_execution_repo = Arc::new(InMemoryToolExecutionRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+
+    let mut config = AppConfig::default();
+    config.paths.skills_dir = std::env::temp_dir();
+    let config = Arc::new(RwLock::new(config));
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config,
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo.clone() as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: tool_execution_repo.clone() as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx: test_event_sender().clone(),
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let session_id = Uuid::now_v7();
+    let turn_id = Uuid::now_v7();
+    let execution_id = Uuid::now_v7();
+    tool_execution_repo
+        .create(NewToolExecution {
+            id: execution_id,
+            tool_call_id: Uuid::now_v7(),
+            session_id,
+            turn_id,
+            tool_name: "exec".to_string(),
+            arguments: serde_json::json!({"command": "echo hi"}),
+            status: "completed".to_string(),
+            started_at: chrono::Utc::now(),
+            approval_id: None,
+            execution_mode: Some("sync".to_string()),
+        })
+        .await
+        .unwrap();
+    tool_execution_repo
+        .complete(
+            execution_id,
+            "completed",
+            Some("ok"),
+            None,
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+    let dispatcher = RpcDispatcher::new(state);
+    let json = dispatcher
+        .dispatch("tools.get", serde_json::json!({ "id": execution_id }))
+        .await
+        .unwrap();
+
+    assert_eq!(json["id"], execution_id.to_string());
+    assert_eq!(json["tool_name"], "exec");
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["result_summary"], "ok");
 }
