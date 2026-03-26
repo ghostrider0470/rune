@@ -530,14 +530,25 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             "/config",
             get(routes::get_config).put(routes::update_config),
         )
+        // Session parity routes
+        .route("/api/sessions", get(routes::list_sessions))
+        .route("/api/sessions/{id}", get(routes::get_session))
+        .route("/api/sessions/{id}/status", get(routes::get_session_status))
         // Turn routes
         .route("/api/turns", get(routes::list_turns))
         .route("/api/turns/{id}", get(routes::get_turn))
-        // Tool routes
+        // Tool / approval parity routes
         .route("/api/tools", get(routes::list_tools))
-        .route("/api/tools/{id}", get(routes::get_tool_execution))
+        .route("/api/approvals", get(routes::list_pending_approvals))
+        // Process parity routes
+        .route("/api/processes", get(routes::list_processes))
+        .route("/api/processes/{id}", get(routes::get_process))
+        .route("/api/processes/{id}/log", get(routes::get_process_log))
         // Auth routes
         .route("/api/auth", get(routes::auth_token_info))
+        .route("/api/skills", get(routes::list_skills))
+        .route("/api/health", get(routes::health))
+        .route("/api/status", get(routes::status))
         .route("/ws", get(ws::ws_handler))
         // Channel routes
         .route("/api/channels", get(routes::list_channels))

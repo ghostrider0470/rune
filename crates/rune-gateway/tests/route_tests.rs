@@ -9104,17 +9104,22 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
 
     let dispatcher = RpcDispatcher::new(state);
     let body = dispatcher
-        .dispatch("memory.search", serde_json::json!({ "q": "Hamza", "limit": 5 }))
+        .dispatch(
+            "memory.search",
+            serde_json::json!({ "q": "Hamza", "limit": 5 }),
+        )
         .await
         .unwrap();
 
     assert_eq!(body["query"], "Hamza");
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
-    assert!(body["results"][0]["snippet"]
-        .as_str()
-        .unwrap()
-        .contains("Met Hamza at Horizon Tech"));
+    assert!(
+        body["results"][0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("Met Hamza at Horizon Tech")
+    );
 }
 
 #[tokio::test]
@@ -9219,4 +9224,51 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
     assert_eq!(ws_body["overall"], http_body["overall"]);
     assert_eq!(ws_body["checks"], http_body["checks"]);
     assert!(ws_body["run_at"].as_str().unwrap().contains('T'));
+}
+
+#[tokio::test]
+async fn api_gateway_parity_routes_are_registered() {
+    let app = build_test_app(None);
+
+    let sessions = app
+        .clone()
+        .oneshot(Request::get("/api/sessions").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(sessions.status(), StatusCode::OK);
+
+    let approvals = app
+        .clone()
+        .oneshot(Request::get("/api/approvals").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(approvals.status(), StatusCode::OK);
+
+    let processes = app
+        .clone()
+        .oneshot(Request::get("/api/processes").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(processes.status(), StatusCode::OK);
+
+    let skills = app
+        .clone()
+        .oneshot(Request::get("/api/skills").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(skills.status(), StatusCode::OK);
+
+    let health = app
+        .clone()
+        .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+
+    let status = app
+        .clone()
+        .oneshot(Request::get("/api/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
 }
