@@ -214,6 +214,9 @@ pub enum Command {
         /// Open the chat URL in the default browser after startup.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
+        /// Skip opening the browser after startup.
+        #[arg(long = "no-open", default_value_t = false)]
+        no_open: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
@@ -279,6 +282,9 @@ pub enum Command {
         /// Open the chat URL in the default browser after startup.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
+        /// Skip opening the browser after startup.
+        #[arg(long = "no-open", default_value_t = false)]
+        no_open: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
@@ -324,6 +330,9 @@ pub enum Command {
         /// Open the chat URL in the default browser after startup.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         open: bool,
+        /// Skip opening the browser after startup.
+        #[arg(long = "no-open", default_value_t = false)]
+        no_open: bool,
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
@@ -5377,6 +5386,42 @@ mod subagent_cli_tests {
     fn parse_setup() {
         let cli = Cli::try_parse_from(["rune", "setup"]).unwrap();
         assert!(matches!(cli.command, Command::Setup { .. }));
+    }
+
+    #[test]
+    fn parse_setup_no_open() {
+        let cli = Cli::try_parse_from(["rune", "setup", "--no-open"]).unwrap();
+        match cli.command {
+            Command::Setup { open, no_open, .. } => {
+                assert!(open);
+                assert!(no_open);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_wizard_no_open() {
+        let cli = Cli::try_parse_from(["rune", "wizard", "--no-open"]).unwrap();
+        match cli.command {
+            Command::Wizard { open, no_open, .. } => {
+                assert!(open);
+                assert!(no_open);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_onboard_no_open() {
+        let cli = Cli::try_parse_from(["rune", "onboard", "--no-open"]).unwrap();
+        match cli.command {
+            Command::Onboard { open, no_open, .. } => {
+                assert!(open);
+                assert!(no_open);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 
     #[test]
