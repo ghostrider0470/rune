@@ -641,10 +641,7 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     let repo_display = repo_root.display().to_string();
     let exe_display = exe.display().to_string();
 
-    println!(
-        "Rune update wizard
-"
-    );
+    println!("Rune update wizard\n");
     println!("Fresh install:");
     println!("  curl -fsSL {install_script_url} | sh");
     println!();
@@ -657,7 +654,13 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     println!(
         r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>" --install-service --service-target systemd"#
     );
-    println!("  # macOS: swap --service-target launchd");
+    println!(
+        r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>" --install-service --service-target launchd"#
+    );
+    println!(
+        "  # or: rune service install --target systemd --name rune-gateway --workdir ~/.rune --config ~/.rune/config.toml --enable --start"
+    );
+    println!("  # macOS direct service flow swaps --target launchd");
     println!();
     println!("Zero-config Docker Compose:");
     println!("  docker compose -f docker-compose.zero-config.yml up --build -d");
