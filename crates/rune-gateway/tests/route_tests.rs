@@ -8327,7 +8327,11 @@ async fn memory_search_route_returns_workspace_hits() {
 
     let app = build_test_app_with_config(config, None);
     let response = app
-        .oneshot(Request::get("/api/memory/search?q=Hamza&limit=5").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/api/memory/search?q=Hamza&limit=5")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -8336,21 +8340,146 @@ async fn memory_search_route_returns_workspace_hits() {
     assert_eq!(body["query"], "Hamza");
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
-    assert!(body["results"][0]["snippet"]
-        .as_str()
-        .unwrap()
-        .contains("Met Hamza at Horizon Tech"));
+    assert!(
+        body["results"][0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("Met Hamza at Horizon Tech")
+    );
 }
 
 #[tokio::test]
 async fn memory_search_route_requires_query_param() {
     let app = build_test_app(None);
     let response = app
-        .oneshot(Request::get("/api/memory/search").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/api/memory/search")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn auth_token_info_route_reports_auth_disabled_and_device_count() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(Request::get("/api/auth").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["authenticated"], true);
+    assert_eq!(body["auth_enabled"], false);
+    assert_eq!(body["device_count"], 0);
+}
+
+#[tokio::test]
+async fn channels_routes_report_configured_adapters_and_active_channel_sessions() {
+    let mut config = AppConfig::default();
+    config.channels.telegram_token = Some("bot-token".to_string());
+    config.channels.enabled.push("telegram".to_string());
+
+    let (app, _device_repo) = build_test_app_parts(config, None);
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "channel",
+                        "workspace_root": ".",
+                        "channel_ref": "telegram:test-chat"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+
+    let response = app
+        .clone()
+        .oneshot(Request::get("/api/channels").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let channels = body.as_array().unwrap();
+    assert!(channels.iter().any(|item| item["name"] == "telegram"));
+    assert!(channels.iter().any(|item| item["kind"] == "telegram"));
+    assert!(channels.iter().all(|item| item["enabled"] == true));
+
+    let response = app
+        .oneshot(
+            Request::get("/api/channels/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["active_sessions"], 1);
+    assert!(body["configured"].as_array().unwrap().iter().any(|item| item["name"] == "telegram"));
+}
+
+#[tokio::test]
+async fn logs_route_returns_logs_dir_hint() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(Request::get("/api/logs").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["entries"], serde_json::json!([]));
+    assert!(body["message"].as_str().unwrap().contains("structured log query not yet aggregated; logs directory:"));
+}
+
+#[tokio::test]
+async fn doctor_routes_return_checks_and_latest_results() {
+    let app = build_test_app(None);
+
+    let run_response = app
+        .clone()
+        .oneshot(
+            Request::post("/api/doctor/run")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(run_response.status(), StatusCode::OK);
+    let run_body = body_json(run_response).await;
+    assert!(run_body["overall"].is_string());
+    assert!(run_body["run_at"].is_string());
+    let checks = run_body["checks"].as_array().unwrap();
+    assert!(checks.iter().any(|check| check["name"] == "model_providers"));
+    assert!(checks.iter().any(|check| check["name"] == "auth"));
+    assert!(checks.iter().any(|check| check["name"] == "approval_mode"));
+    assert!(checks.iter().any(|check| check["name"] == "security_posture"));
+
+    let results_response = app
+        .oneshot(
+            Request::get("/api/doctor/results")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(results_response.status(), StatusCode::OK);
+    let results_body = body_json(results_response).await;
+    assert_eq!(results_body["overall"], run_body["overall"]);
+    assert!(results_body["checks"].as_array().unwrap().len() >= checks.len());
 }
 
 #[tokio::test]
