@@ -34,7 +34,7 @@ Today, the project already has:
 ### Install in one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ghostrider0470/rune/main/scripts/install.sh | sh
+curl -fsSL "$(rune update install-script 2>/dev/null || echo https://raw.githubusercontent.com/ghostrider0470/rune/main/scripts/install.sh)" | sh
 ```
 
 The installer builds `rune` and `rune-gateway`, places them in `~/.local/bin` by default, then you can run:

@@ -2160,6 +2160,15 @@ pub enum UpdateAction {
     Apply,
     /// Show current update status.
     Status,
+    /// Print a direct install script URL for one-command bootstrap.
+    InstallScript {
+        /// Install script URL to print.
+        #[arg(
+            long,
+            default_value = "https://raw.githubusercontent.com/ghostrider0470/rune/main/scripts/install.sh"
+        )]
+        install_script_url: String,
+    },
     /// Print the quickest self-update/install commands for this checkout.
     Wizard {
         /// Install script URL to print for one-command bootstrap.
@@ -5552,6 +5561,17 @@ mod subagent_cli_tests {
             cli.command,
             Command::Update {
                 action: UpdateAction::Status
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_update_install_script() {
+        let cli = Cli::try_parse_from(["rune", "update", "install-script"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Update {
+                action: UpdateAction::InstallScript { .. }
             }
         ));
     }

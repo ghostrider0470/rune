@@ -5,7 +5,7 @@ This is the fastest path to a local Rune browser chat.
 ## Option A — one-command install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ghostrider0470/rune/main/scripts/install.sh | sh
+curl -fsSL "$(rune update install-script 2>/dev/null || echo https://raw.githubusercontent.com/ghostrider0470/rune/main/scripts/install.sh)" | sh
 ```
 
 Then run the built-in first-run wizard:

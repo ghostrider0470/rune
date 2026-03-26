@@ -3290,6 +3290,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.update_status().await?;
                 println!("{}", render(&result, format));
             }
+            UpdateAction::InstallScript { install_script_url } => {
+                println!("{install_script_url}");
+            }
             UpdateAction::Wizard {
                 install_script_url,
                 branch,
