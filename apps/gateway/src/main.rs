@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use rune_browser::{
     BrowseTool, BrowserPool, BrowserPoolConfig, SnapshotOptions, browse_tool_definition,
 };
+use std::process::ExitCode;
 use tokio::signal;
 use tracing::{info, warn};
 
@@ -90,8 +91,27 @@ impl TelegramFileDownloader for TelegramFileDownloaderImpl {
     }
 }
 
+fn print_help_and_exit() -> ExitCode {
+    println!("Rune gateway\n");
+    println!("Usage: rune-gateway [--config <path>] [--yolo] [--no-sandbox]");
+    println!();
+    println!("Options:");
+    println!("  --config <path>   Load configuration from this file (or RUNE_CONFIG env var)");
+    println!("  --yolo            Start with approval.mode=yolo override");
+    println!("  --no-sandbox      Disable sandboxing for gateway-managed tool execution");
+    println!("  -h, --help        Show this help and exit");
+    ExitCode::SUCCESS
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<ExitCode> {
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--help" || arg == "-h")
+    {
+        return Ok(print_help_and_exit());
+    }
+
     let flags = parse_startup_flags();
     let config_path = flags.config_path.as_deref();
     let mut config = AppConfig::load(config_path).with_context(|| {
@@ -155,7 +175,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Lightweight startup flags parsed from argv.
