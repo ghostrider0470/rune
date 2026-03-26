@@ -6,8 +6,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use rune_core::{
-    ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, ToolCallId, TranscriptItem,
-    TriggerKind, TurnId, TurnStatus,
+    ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, SessionStatus, ToolCallId,
+    TranscriptItem, TriggerKind, TurnId, TurnStatus,
 };
 use rune_models::{CompletionRequest, ModelProvider, StreamEvent};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
@@ -60,6 +60,33 @@ pub struct TurnExecutor {
 }
 
 impl TurnExecutor {
+
+    async fn transition_session_status(
+        &self,
+        session_id: Uuid,
+        target: SessionStatus,
+    ) -> Result<(), RuntimeError> {
+        let row = self.session_repo.find_by_id(session_id).await?;
+        let current: SessionStatus =
+            row.status
+                .parse()
+                .map_err(|_| RuntimeError::InvalidSessionState {
+                    expected: target.as_str().to_string(),
+                    actual: row.status.clone(),
+                })?;
+
+        if !current.can_transition_to(&target) {
+            return Err(RuntimeError::InvalidSessionState {
+                expected: target.as_str().to_string(),
+                actual: row.status,
+            });
+        }
+
+        self.session_repo
+            .update_status(session_id, target.as_str(), Utc::now())
+            .await?;
+        Ok(())
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         session_repo: Arc<dyn SessionRepo>,
@@ -238,8 +265,7 @@ impl TurnExecutor {
         };
 
         // 1. Transition session Ready → Running
-        self.session_repo
-            .update_status(session_id, "running", Utc::now())
+        self.transition_session_status(session_id, SessionStatus::Running)
             .await?;
 
         // 2. Create turn in Started state
@@ -455,8 +481,7 @@ impl TurnExecutor {
                     )
                     .await?;
                 let final_turn = self.turn_repo.find_by_id(turn_uuid).await?;
-                self.session_repo
-                    .update_status(session_id, "running", Utc::now())
+                self.transition_session_status(session_id, SessionStatus::Running)
                     .await?;
                 return Ok((final_turn, usage));
             }
@@ -492,8 +517,7 @@ impl TurnExecutor {
             }
         }
 
-        self.session_repo
-            .update_status(session_id, "running", Utc::now())
+        self.transition_session_status(session_id, SessionStatus::Running)
             .await?;
         self.turn_repo
             .update_status(turn_uuid, status_str(TurnStatus::ToolExecuting), None)
@@ -976,8 +1000,7 @@ impl TurnExecutor {
                                     })
                                     .await?;
 
-                                self.session_repo
-                                    .update_status(session_id, "waiting_for_approval", Utc::now())
+                                self.transition_session_status(session_id, SessionStatus::WaitingForApproval)
                                     .await?;
 
                                 return Ok(TurnLoopOutcome::WaitingForApproval);

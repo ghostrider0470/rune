@@ -593,6 +593,21 @@ impl RpcDispatcher {
         let now = chrono::Utc::now();
         let note = format!("[kill] session cancelled: {reason}");
 
+        let current = self
+            .state
+            .session_repo
+            .find_by_id(session_id)
+            .await
+            .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
+
+        let current_status = current
+            .status
+            .parse::<rune_core::SessionStatus>()
+            .map_err(|_| RpcError::internal(format!("invalid persisted session status: {}", current.status)))?;
+        current_status
+            .transition(rune_core::SessionStatus::Cancelled)
+            .map_err(|e| RpcError::bad_request(e.to_string()))?;
+
         self.state
             .session_repo
             .update_status(session_id, "cancelled", now)
