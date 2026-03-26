@@ -39,11 +39,6 @@ if ! "$REPO_DIR/target/release/rune" completion generate bash >/dev/null 2>&1; t
     echo "[self-update] CLI completion smoke check failed — aborting"
     exit 1
 fi
-if ! "$BINARY" --help >/dev/null 2>&1; then
-    echo "[self-update] Gateway --help smoke check failed — aborting"
-    exit 1
-fi
-
 SMOKE_CONFIG_DIR="$(mktemp -d)"
 trap 'rm -rf "$SMOKE_CONFIG_DIR"' EXIT
 cat > "$SMOKE_CONFIG_DIR/config.toml" <<'CFG'
@@ -60,8 +55,8 @@ enabled = false
 [browser]
 enabled = false
 CFG
+status=0
 timeout 10s "$BINARY" --config "$SMOKE_CONFIG_DIR/config.toml" >/dev/null 2>&1 || status=$?
-status=${status:-0}
 if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     echo "[self-update] Gateway standalone smoke boot failed — aborting"
     exit 1

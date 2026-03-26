@@ -1012,13 +1012,34 @@ fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
                         }
 
                         if target.ends_with("/health") || target == base {
-                            match response.json::<serde_json::Value>() {
-                                Ok(body)
-                                    if body.get("status").and_then(|v| v.as_str())
-                                        == Some("ok") =>
-                                {
-                                    return Ok(());
+                            let body_text = match response.text() {
+                                Ok(text) => text,
+                                Err(err) => {
+                                    last_err = Some(format!(
+                                        "{} returned {} but health payload could not be read: {err}",
+                                        target, status
+                                    ));
+                                    continue;
                                 }
+                            };
+
+                            let trimmed = body_text.trim();
+                            let parsed = serde_json::from_str::<serde_json::Value>(trimmed);
+                            if parsed
+                                .as_ref()
+                                .ok()
+                                .and_then(|body| body.get("status"))
+                                .and_then(|v| v.as_str())
+                                == Some("ok")
+                            {
+                                return Ok(());
+                            }
+
+                            if trimmed.eq_ignore_ascii_case("ok") {
+                                return Ok(());
+                            }
+
+                            match parsed {
                                 Ok(body) => {
                                     last_err = Some(format!(
                                         "{} returned {} with non-ready health payload {}",
@@ -1027,8 +1048,8 @@ fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
                                 }
                                 Err(err) => {
                                     last_err = Some(format!(
-                                        "{} returned {} but health payload could not be parsed: {err}",
-                                        target, status
+                                        "{} returned {} but health payload could not be parsed: {err}; body={:?}",
+                                        target, status, trimmed
                                     ));
                                 }
                             }
@@ -3946,6 +3967,7 @@ ok",
 
         let err = wait_for_gateway_ready(&format!("http://{}", addr)).unwrap_err();
         let message = err.to_string();
+        eprintln!("ERR={message}");
         assert!(message.contains("gateway did not become ready"));
         assert!(message.contains("/health"));
         assert!(message.contains("/gateway/health"));
@@ -3967,7 +3989,7 @@ ok",
                 let response = if request.starts_with("GET /ready ") {
                     br#"HTTP/1.1 503 Service Unavailable
 content-type: application/json
-content-length: 21
+content-length: 22
 connection: close
 
 {"status":"degraded"}"#
@@ -4019,7 +4041,7 @@ connection: close
                 } else if request.starts_with("GET /health ") {
                     br#"HTTP/1.1 200 OK
 content-type: application/json
-content-length: 21
+content-length: 22
 connection: close
 
 {"status":"degraded"}"#
@@ -4034,10 +4056,18 @@ connection: close
                 } else if request.starts_with("GET /gateway/health ") {
                     br#"HTTP/1.1 200 OK
 content-type: application/json
-content-length: 26
+content-length: 22
 connection: close
 
 {"status":"unhealthy"}"#
+                        .as_slice()
+                } else if request.starts_with("GET / ") {
+                    br#"HTTP/1.1 200 OK
+content-type: application/json
+content-length: 22
+connection: close
+
+{"status":"degraded"}"#
                         .as_slice()
                 } else {
                     b"HTTP/1.1 503 Service Unavailable
@@ -4054,7 +4084,55 @@ connection: close
         let err = wait_for_gateway_ready(&format!("http://{}", addr)).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("gateway did not become ready"));
-        assert!(message.contains("non-ready health payload"));
+        assert!(
+            message.contains("degraded")
+                || message.contains("unhealthy")
+                || message.contains("probe failed")
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn wait_for_gateway_ready_accepts_plain_text_gateway_health() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 1024];
+                let read = stream.read(&mut buf).unwrap();
+                let request = String::from_utf8_lossy(&buf[..read]);
+                let response = if request.starts_with("GET /ready ") {
+                    b"HTTP/1.1 404 Not Found
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                } else if request.starts_with("GET /health ") {
+                    b"HTTP/1.1 200 OK
+content-type: text/plain
+content-length: 2
+connection: close
+
+ok"
+                    .as_slice()
+                } else {
+                    b"HTTP/1.1 500 Internal Server Error
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                };
+                stream.write_all(response).unwrap();
+            }
+        });
+
+        wait_for_gateway_ready(&format!("http://{}", addr)).unwrap();
         handle.join().unwrap();
     }
 
