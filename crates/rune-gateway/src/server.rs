@@ -478,7 +478,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         )
         .route(
             "/ms365/calendar/events/{id}",
-            delete(routes::ms365_calendar_delete_event),
+            post(routes::ms365_calendar_update_event).delete(routes::ms365_calendar_delete_event),
         )
         .route(
             "/ms365/calendar/events/{id}/delete",

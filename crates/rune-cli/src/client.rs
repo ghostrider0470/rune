@@ -3043,6 +3043,49 @@ impl GatewayClient {
             bail!("HTTP {}", r.status());
         }
     }
+    pub async fn ms365_calendar_update(
+        &self,
+        id: &str,
+        subject: Option<&str>,
+        start: Option<&str>,
+        end: Option<&str>,
+        attendees: Option<&[String]>,
+        location: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<crate::output::Ms365CalendarUpdateResponse> {
+        let mut payload = serde_json::Map::new();
+        if let Some(value) = subject {
+            payload.insert("subject".to_string(), serde_json::json!(value));
+        }
+        if let Some(value) = start {
+            payload.insert("start".to_string(), serde_json::json!(value));
+        }
+        if let Some(value) = end {
+            payload.insert("end".to_string(), serde_json::json!(value));
+        }
+        if let Some(value) = attendees {
+            payload.insert("attendees".to_string(), serde_json::json!(value));
+        }
+        if let Some(value) = location {
+            payload.insert("location".to_string(), serde_json::json!(value));
+        }
+        if let Some(value) = body {
+            payload.insert("body".to_string(), serde_json::json!(value));
+        }
+        let r = self
+            .http
+            .post(self.url(&format!("/ms365/calendar/events/{id}")))
+            .json(&payload)
+            .send()
+            .await
+            .context("gateway")?;
+        if r.status().is_success() {
+            Ok(r.json().await.context("json")?)
+        } else {
+            bail!("HTTP {}", r.status());
+        }
+    }
+
     pub async fn ms365_calendar_delete(
         &self,
         id: &str,

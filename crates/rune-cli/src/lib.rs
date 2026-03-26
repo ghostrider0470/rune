@@ -2016,6 +2016,35 @@ pub async fn run(cli: Cli) -> Result<()> {
                         .await?;
                     println!("{}", render(&result, format));
                 }
+                Ms365CalendarAction::Update {
+                    id,
+                    subject,
+                    start,
+                    end,
+                    attendees,
+                    location,
+                    body,
+                } => {
+                    let attendees = attendees.map(|value| {
+                        value
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect::<Vec<String>>()
+                    });
+                    let result = client
+                        .ms365_calendar_update(
+                            &id,
+                            subject.as_deref(),
+                            start.as_deref(),
+                            end.as_deref(),
+                            attendees.as_deref(),
+                            location.as_deref(),
+                            body.as_deref(),
+                        )
+                        .await?;
+                    println!("{}", render(&result, format));
+                }
                 Ms365CalendarAction::Delete { id } => {
                     let result = client.ms365_calendar_delete(&id).await?;
                     println!("{}", render(&result, format));

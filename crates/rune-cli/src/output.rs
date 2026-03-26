@@ -3660,6 +3660,20 @@ impl fmt::Display for Ms365CalendarCreateResponse {
     }
 }
 
+/// Response from `rune ms365 calendar update`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ms365CalendarUpdateResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+impl fmt::Display for Ms365CalendarUpdateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let icon = if self.success { "✓" } else { "✗" };
+        write!(f, "{icon} {}", self.message)
+    }
+}
+
 /// Response from `rune ms365 calendar delete`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ms365CalendarDeleteResponse {

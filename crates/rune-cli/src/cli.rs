@@ -641,6 +641,30 @@ pub enum Ms365CalendarAction {
         #[arg(long)]
         body: Option<String>,
     },
+    /// Update a calendar event by ID.
+    Update {
+        /// Event ID to update.
+        #[arg(long)]
+        id: String,
+        /// Updated event subject/title.
+        #[arg(long)]
+        subject: Option<String>,
+        /// Updated start date-time (ISO 8601).
+        #[arg(long)]
+        start: Option<String>,
+        /// Updated end date-time (ISO 8601).
+        #[arg(long)]
+        end: Option<String>,
+        /// Updated attendee email address(es), comma-separated.
+        #[arg(long)]
+        attendees: Option<String>,
+        /// Updated location description. Use empty string to clear.
+        #[arg(long)]
+        location: Option<String>,
+        /// Updated body/description (plain text). Use empty string to clear.
+        #[arg(long)]
+        body: Option<String>,
+    },
     /// Delete a calendar event by ID.
     Delete {
         /// Event ID to delete.
@@ -5672,6 +5696,47 @@ mod subagent_cli_tests {
                     },
             } => {
                 assert_eq!(id, "evt456");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+
+    #[test]
+    fn parse_ms365_calendar_update() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "ms365",
+            "calendar",
+            "update",
+            "--id",
+            "evt456",
+            "--subject",
+            "Updated",
+            "--start",
+            "2026-03-25T11:00:00Z",
+            "--end",
+            "2026-03-25T12:00:00Z",
+            "--attendees",
+            "a@example.com,b@example.com",
+            "--location",
+            "Teams",
+            "--body",
+            "Agenda",
+        ]).unwrap();
+        match cli.command {
+            Command::Ms365 {
+                action: Ms365Action::Calendar {
+                    action: Ms365CalendarAction::Update { id, subject, start, end, attendees, location, body },
+                },
+            } => {
+                assert_eq!(id, "evt456");
+                assert_eq!(subject.as_deref(), Some("Updated"));
+                assert_eq!(start.as_deref(), Some("2026-03-25T11:00:00Z"));
+                assert_eq!(end.as_deref(), Some("2026-03-25T12:00:00Z"));
+                assert_eq!(attendees.as_deref(), Some("a@example.com,b@example.com"));
+                assert_eq!(location.as_deref(), Some("Teams"));
+                assert_eq!(body.as_deref(), Some("Agenda"));
             }
             other => panic!("unexpected: {other:?}"),
         }

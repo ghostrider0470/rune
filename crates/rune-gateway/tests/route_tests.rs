@@ -41,7 +41,8 @@ use rune_gateway::ms365::{
     Ms365MailService, Ms365MailServiceError, Ms365PlannerService, Ms365PlannerServiceError,
     Ms365TodoService, Ms365TodoServiceError, Ms365UsersService, Ms365UsersServiceError,
     PlannerTask, ReplyMailRequest, RespondCalendarEventRequest, SendMailRequest, TodoTask,
-    UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile, UserSummary, UsersList,
+    UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
+    UserSummary, UsersList,
 };
 use rune_gateway::{AppState, SessionEvent, build_router, pairing::DeviceRegistry};
 
@@ -784,6 +785,10 @@ enum TodoMutationCall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CalendarMutationCall {
     Create(CreateCalendarEventRequest),
+    Update {
+        id: String,
+        request: UpdateCalendarEventRequest,
+    },
     Delete {
         id: String,
     },
@@ -796,6 +801,7 @@ enum CalendarMutationCall {
 #[derive(Debug)]
 struct FakeMs365CalendarService {
     create_response: Result<(), Ms365CalendarServiceError>,
+    update_response: Result<(), Ms365CalendarServiceError>,
     delete_response: Result<(), Ms365CalendarServiceError>,
     respond_response: Result<(), Ms365CalendarServiceError>,
     calls: Mutex<Vec<CalendarMutationCall>>,
@@ -874,6 +880,9 @@ impl Default for FakeMs365CalendarService {
     fn default() -> Self {
         Self {
             create_response: Err(Ms365CalendarServiceError::NotConfigured(
+                "test calendar service not configured".to_string(),
+            )),
+            update_response: Err(Ms365CalendarServiceError::NotConfigured(
                 "test calendar service not configured".to_string(),
             )),
             delete_response: Err(Ms365CalendarServiceError::NotConfigured(
@@ -973,6 +982,13 @@ impl FakeMs365CalendarService {
     fn with_create_response(response: Result<(), Ms365CalendarServiceError>) -> Self {
         Self {
             create_response: response,
+            ..Self::default()
+        }
+    }
+
+    fn with_update_response(response: Result<(), Ms365CalendarServiceError>) -> Self {
+        Self {
+            update_response: response,
             ..Self::default()
         }
     }
@@ -1122,6 +1138,18 @@ impl Ms365CalendarService for FakeMs365CalendarService {
             .await
             .push(CalendarMutationCall::Create(request));
         self.create_response.clone()
+    }
+
+    async fn update_event(
+        &self,
+        id: &str,
+        request: UpdateCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError> {
+        self.calls.lock().await.push(CalendarMutationCall::Update {
+            id: id.to_string(),
+            request,
+        });
+        self.update_response.clone()
     }
 
     async fn delete_event(&self, id: &str) -> Result<(), Ms365CalendarServiceError> {
@@ -4267,6 +4295,50 @@ async fn ms365_calendar_create_event_forwards_request_and_returns_created_respon
 
     let calls = calendar_service.calls().await;
     assert_eq!(calls, vec![CalendarMutationCall::Create(request)]);
+}
+
+#[tokio::test]
+async fn ms365_calendar_update_event_forwards_request_and_returns_success() {
+    let calendar_service = Arc::new(FakeMs365CalendarService::with_update_response(Ok(())));
+    let (app, _device_repo) = build_test_app_parts_with_calendar_service(
+        AppConfig::default(),
+        None,
+        calendar_service.clone(),
+    );
+
+    let request = UpdateCalendarEventRequest {
+        subject: Some("Updated review".to_string()),
+        start: Some("2026-03-25T11:00:00Z".to_string()),
+        end: Some("2026-03-25T12:00:00Z".to_string()),
+        attendees: Some(vec!["hamza@example.com".to_string()]),
+        location: Some("Teams".to_string()),
+        body: Some("Revised agenda".to_string()),
+    };
+
+    let response = app
+        .oneshot(
+            Request::post("/ms365/calendar/events/event-321")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_string(&request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["success"], true);
+    assert_eq!(json["message"], "Calendar event updated");
+
+    let calls = calendar_service.calls().await;
+    assert_eq!(
+        calls,
+        vec![CalendarMutationCall::Update {
+            id: "event-321".to_string(),
+            request,
+        }]
+    );
 }
 
 #[tokio::test]

@@ -256,6 +256,99 @@ pub struct RespondCalendarEventRequest {
     pub comment: Option<String>,
 }
 
+/// Gateway request for updating a Microsoft 365 calendar event.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UpdateCalendarEventRequest {
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub end: Option<String>,
+    #[serde(default)]
+    pub attendees: Option<Vec<String>>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+impl UpdateCalendarEventRequest {
+    pub fn validate(&self, id: &str) -> Result<(), Ms365CalendarServiceError> {
+        validate_calendar_event_id(id)?;
+
+        if !self.has_changes() {
+            return Err(Ms365CalendarServiceError::Validation(
+                "calendar event update requires at least one mutable field".to_string(),
+            ));
+        }
+
+        if let Some(subject) = &self.subject
+            && subject.trim().is_empty()
+        {
+            return Err(Ms365CalendarServiceError::Validation(
+                "calendar event subject cannot be empty".to_string(),
+            ));
+        }
+
+        if let Some(start) = &self.start {
+            validate_calendar_datetime(start, "calendar event start")?;
+        }
+
+        if let Some(end) = &self.end {
+            validate_calendar_datetime(end, "calendar event end")?;
+        }
+
+        if let Some(attendees) = &self.attendees {
+            validate_optional_mail_recipients(attendees, "calendar attendees")?;
+        }
+
+        let parsed_start = self
+            .start
+            .as_deref()
+            .map(str::trim)
+            .map(|value| {
+                DateTime::parse_from_rfc3339(value).map_err(|error| {
+                    Ms365CalendarServiceError::Validation(format!(
+                        "calendar event start must be valid RFC3339: {error}"
+                    ))
+                })
+            })
+            .transpose()?;
+        let parsed_end = self
+            .end
+            .as_deref()
+            .map(str::trim)
+            .map(|value| {
+                DateTime::parse_from_rfc3339(value).map_err(|error| {
+                    Ms365CalendarServiceError::Validation(format!(
+                        "calendar event end must be valid RFC3339: {error}"
+                    ))
+                })
+            })
+            .transpose()?;
+
+        if let (Some(start), Some(end)) = (parsed_start, parsed_end)
+            && end <= start
+        {
+            return Err(Ms365CalendarServiceError::Validation(
+                "calendar event end must be after start".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn has_changes(&self) -> bool {
+        self.subject.is_some()
+            || self.start.is_some()
+            || self.end.is_some()
+            || self.attendees.is_some()
+            || self.location.is_some()
+            || self.body.is_some()
+    }
+}
+
 impl RespondCalendarEventRequest {
     pub fn validate(&self, id: &str) -> Result<(), Ms365CalendarServiceError> {
         validate_calendar_event_id(id)?;
@@ -489,6 +582,12 @@ pub trait Ms365CalendarService: Send + Sync {
     async fn create_event(
         &self,
         request: CreateCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError>;
+
+    async fn update_event(
+        &self,
+        id: &str,
+        request: UpdateCalendarEventRequest,
     ) -> Result<(), Ms365CalendarServiceError>;
 
     async fn delete_event(&self, id: &str) -> Result<(), Ms365CalendarServiceError>;
@@ -978,6 +1077,45 @@ impl GraphMs365CalendarService {
             client: Client::new(),
         }
     }
+
+    async fn fetch_event_etag(
+        &self,
+        id: &str,
+    ) -> Result<Option<String>, Ms365CalendarServiceError> {
+        let response = graph_request(
+            &self.client,
+            reqwest::Method::GET,
+            &format!("/me/events/{}?$select=id", id.trim()),
+        )?
+        .send()
+        .await
+        .map_err(|error| {
+            Ms365CalendarServiceError::Upstream(format!("calendar request failed: {error}"))
+        })?;
+
+        match response.status() {
+            reqwest::StatusCode::OK => Ok(response
+                .headers()
+                .get(reqwest::header::ETAG)
+                .or_else(|| response.headers().get("etag"))
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_string())),
+            reqwest::StatusCode::UNAUTHORIZED => Err(Ms365CalendarServiceError::Unauthorized),
+            reqwest::StatusCode::FORBIDDEN => Err(Ms365CalendarServiceError::Forbidden(
+                "calendar access forbidden".to_string(),
+            )),
+            reqwest::StatusCode::NOT_FOUND => Err(Ms365CalendarServiceError::NotFound(format!(
+                "calendar event '{}' not found",
+                id.trim()
+            ))),
+            status => {
+                let body = response.text().await.unwrap_or_default();
+                Err(Ms365CalendarServiceError::Upstream(format!(
+                    "calendar request failed with status {status}: {body}"
+                )))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -1024,6 +1162,60 @@ impl Ms365CalendarService for GraphMs365CalendarService {
         send_graph_empty(
             graph_request(&self.client, reqwest::Method::POST, "/me/events")?
                 .json(&Value::Object(body)),
+            "calendar",
+        )
+        .await
+    }
+
+    async fn update_event(
+        &self,
+        id: &str,
+        request: UpdateCalendarEventRequest,
+    ) -> Result<(), Ms365CalendarServiceError> {
+        request.validate(id)?;
+
+        let event_id = id.trim();
+        let mut body = Map::new();
+
+        if let Some(subject) = request.subject.as_ref() {
+            body.insert("subject".to_string(), json!(subject.trim()));
+        }
+        if let Some(start) = request.start.as_ref() {
+            body.insert("start".to_string(), graph_datetime_value(start)?);
+        }
+        if let Some(end) = request.end.as_ref() {
+            body.insert("end".to_string(), graph_datetime_value(end)?);
+        }
+        if let Some(attendees) = request.attendees.as_ref() {
+            body.insert(
+                "attendees".to_string(),
+                graph_calendar_attendees_value(attendees)?,
+            );
+        }
+        if let Some(location) = request.location.as_ref() {
+            if location.trim().is_empty() {
+                body.insert("location".to_string(), json!({ "displayName": "" }));
+            } else {
+                body.insert(
+                    "location".to_string(),
+                    json!({ "displayName": location.trim() }),
+                );
+            }
+        }
+        if let Some(content) = request.body.as_ref() {
+            if content.trim().is_empty() {
+                body.insert("body".to_string(), graph_item_body_value(""));
+            } else {
+                body.insert("body".to_string(), graph_item_body_value(content.trim()));
+            }
+        }
+
+        let etag = self.fetch_event_etag(event_id).await?;
+        patch_graph_json(
+            &self.client,
+            &format!("/me/events/{event_id}"),
+            etag.as_deref(),
+            Value::Object(body),
             "calendar",
         )
         .await

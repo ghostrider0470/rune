@@ -31,8 +31,8 @@ use crate::ms365::{
     FileMetadata, FileSearchItem, ForwardMailRequest, Ms365CalendarServiceError,
     Ms365FilesServiceError, Ms365MailServiceError, Ms365PlannerServiceError, Ms365TodoServiceError,
     Ms365UsersServiceError, PlannerTask, ReplyMailRequest, RespondCalendarEventRequest,
-    SendMailRequest, TodoTask, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
-    UserSummary,
+    SendMailRequest, TodoTask, UpdateCalendarEventRequest, UpdatePlannerTaskRequest,
+    UpdateTodoTaskRequest, UserProfile, UserSummary,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
 use crate::state::{AppState, SessionEvent};
@@ -3808,6 +3808,24 @@ pub async fn ms365_calendar_create_event(
             message: "Calendar event created".to_string(),
         }),
     ))
+}
+
+/// `POST /ms365/calendar/events/{id}` — update a Microsoft 365 calendar event.
+pub async fn ms365_calendar_update_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateCalendarEventRequest>,
+) -> Result<Json<Ms365CalendarMutationResponse>, GatewayError> {
+    state
+        .ms365_calendar_service
+        .update_event(&id, request)
+        .await
+        .map_err(map_ms365_calendar_service_error)?;
+
+    Ok(Json(Ms365CalendarMutationResponse {
+        success: true,
+        message: "Calendar event updated".to_string(),
+    }))
 }
 
 /// `DELETE /ms365/calendar/events/{id}` — delete a Microsoft 365 calendar event.
