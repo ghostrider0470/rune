@@ -267,7 +267,7 @@ fn open_config_instructions(workspace: &Path, config_path: &Path) {
     eprintln!("  - open dashboard: http://127.0.0.1:8787/dashboard");
 }
 
-fn start_gateway_process(workspace: &Path, config_path: &Path) -> Result<Child> {
+fn start_gateway_process(workspace: &Path, config_path: &Path, repo_root_hint: Option<&Path>) -> Result<Child> {
     let mut candidates: Vec<(String, StdCommand)> = Vec::new();
 
     let mut direct = StdCommand::new("rune-gateway");
@@ -305,7 +305,7 @@ fn start_gateway_process(workspace: &Path, config_path: &Path) -> Result<Child> 
         .arg("--")
         .arg("--config")
         .arg(config_path)
-        .current_dir(workspace);
+        .current_dir(repo_root_hint.unwrap_or(workspace));
     candidates.push(("cargo run --release --bin rune-gateway".to_string(), cargo));
 
     let mut last_err = None;
@@ -664,7 +664,7 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     }
 
     if options.start && !should_start_service {
-        let child = start_gateway_process(&workspace, &config_path)?;
+        let child = start_gateway_process(&workspace, &config_path, Some(&std::env::current_dir().context("failed to resolve current directory for cargo fallback")?))?;
         println!("✓ Started gateway (pid {})", child.id());
     }
 
