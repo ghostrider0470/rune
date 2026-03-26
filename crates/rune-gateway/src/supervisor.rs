@@ -466,7 +466,6 @@ async fn run_heartbeat(
         .create_session(SessionKind::Scheduled, deps.workspace_root.clone())
         .await?;
 
-    deps.session_engine.mark_ready(session.id).await?;
     deps.session_engine.mark_running(session.id).await?;
 
     let (_turn, _usage) = deps
@@ -608,9 +607,9 @@ async fn execute_in_session(
     trigger_kind: TriggerKind,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     if session.status == "created" {
-        deps.session_engine.mark_ready(session.id).await?;
+        return Err("scheduled session unexpectedly remained in created state".into());
     }
-    if matches!(session.status.as_str(), "created" | "ready") {
+    if matches!(session.status.as_str(), "ready") {
         deps.session_engine.mark_running(session.id).await?;
     }
 
