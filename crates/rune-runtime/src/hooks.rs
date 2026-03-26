@@ -29,6 +29,16 @@ pub enum HookEvent {
     SessionCreated,
     /// Emitted when a session completes.
     SessionCompleted,
+    /// Emitted when the agent stops (Claude Code stop hook).
+    Stop,
+    /// Emitted when a subagent stops.
+    SubagentStop,
+    /// Emitted when a user prompt is submitted.
+    UserPromptSubmit,
+    /// Emitted before context compaction occurs.
+    PreCompact,
+    /// Emitted to deliver a notification.
+    Notification,
 }
 
 impl HookEvent {
@@ -41,6 +51,11 @@ impl HookEvent {
             HookEvent::PostTurn => "post_turn",
             HookEvent::SessionCreated => "session_created",
             HookEvent::SessionCompleted => "session_completed",
+            HookEvent::Stop => "stop",
+            HookEvent::SubagentStop => "subagent_stop",
+            HookEvent::UserPromptSubmit => "user_prompt_submit",
+            HookEvent::PreCompact => "pre_compact",
+            HookEvent::Notification => "notification",
         }
     }
 
@@ -54,6 +69,11 @@ impl HookEvent {
             "post_turn" => Some(HookEvent::PostTurn),
             "session_created" => Some(HookEvent::SessionCreated),
             "session_completed" => Some(HookEvent::SessionCompleted),
+            "stop" | "Stop" => Some(HookEvent::Stop),
+            "subagent_stop" | "SubagentStop" => Some(HookEvent::SubagentStop),
+            "user_prompt_submit" | "UserPromptSubmit" => Some(HookEvent::UserPromptSubmit),
+            "pre_compact" | "PreCompact" => Some(HookEvent::PreCompact),
+            "notification" | "Notification" => Some(HookEvent::Notification),
             _ => None,
         }
     }
@@ -67,6 +87,11 @@ impl HookEvent {
             HookEvent::PostTurn,
             HookEvent::SessionCreated,
             HookEvent::SessionCompleted,
+            HookEvent::Stop,
+            HookEvent::SubagentStop,
+            HookEvent::UserPromptSubmit,
+            HookEvent::PreCompact,
+            HookEvent::Notification,
         ]
     }
 }
