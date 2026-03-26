@@ -344,6 +344,16 @@ impl Mem0Engine {
         stored
     }
 
+    /// Delete a memory by its ID.
+    pub async fn delete_memory(&self, id: &str) -> Result<(), String> {
+        let client = self.client.lock().await;
+        client
+            .execute("DELETE FROM rune_memories WHERE id = $1::uuid", &[&id])
+            .await
+            .map_err(|e| format!("failed to delete memory: {e}"))?;
+        Ok(())
+    }
+
     /// Return all memories (for graph visualization and admin dashboards).
     pub async fn list_all(&self) -> Vec<Memory> {
         let client = self.client.lock().await;

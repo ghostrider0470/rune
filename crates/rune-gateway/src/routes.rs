@@ -4408,6 +4408,23 @@ pub struct MemoryGraphQuery {
     pub neighbors: Option<usize>,
 }
 
+/// `DELETE /api/memory/:id` — delete a memory node.
+pub async fn memory_delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    mem0.delete_memory(&id).await.map_err(|e| {
+        GatewayError::Internal(format!("failed to delete memory: {e}"))
+    })?;
+
+    Ok(Json(json!({"success": true, "id": id})))
+}
+
 // ── Logs ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

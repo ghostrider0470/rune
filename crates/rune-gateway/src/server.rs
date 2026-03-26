@@ -603,6 +603,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/memory/status", get(routes::memory_status))
         .route("/api/memory/search", get(routes::memory_search))
         .route("/api/memory/graph", get(routes::memory_graph))
+        .route("/api/memory/{id}", delete(routes::memory_delete))
         // Log routes
         .route("/api/logs", get(routes::query_logs))
         // Doctor routes
