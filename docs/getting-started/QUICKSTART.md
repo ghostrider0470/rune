@@ -11,26 +11,26 @@ curl -fsSL "$(rune update install-script 2>/dev/null || echo https://raw.githubu
 Then run the built-in first-run wizard:
 
 ```bash
-rune setup --path ~/.rune --api-key "$OPENAI_API_KEY"
-# or: rune onboard --path ~/.rune --api-key "$OPENAI_API_KEY"
+rune setup --api-key "$OPENAI_API_KEY"
+# or: rune onboard --api-key "$OPENAI_API_KEY"
 ```
 
 Or install + configure + background the gateway in one flow:
 
 ```bash
-rune setup --path ~/.rune --api-key "$OPENAI_API_KEY" --install-service --service-target systemd
+rune setup --api-key "$OPENAI_API_KEY" --install-service --service-target systemd
 ```
 
 On macOS, swap the service target:
 
 ```bash
-rune setup --path ~/.rune --api-key "$OPENAI_API_KEY" --install-service --service-target launchd
+rune setup --api-key "$OPENAI_API_KEY" --install-service --service-target launchd
 ```
 
 If Ollama is already running locally, this also works without an API key:
 
 ```bash
-rune setup --path ~/.rune
+rune setup
 ```
 
 That flow uses the safe `setup` alias for the first-run wizard: it writes a local SQLite-backed config, enables the embedded UI + WebChat, starts the gateway or installs it as a background service, and opens browser chat at `http://127.0.0.1:8787/webchat`.
@@ -41,7 +41,7 @@ WebChat now resumes browser-scoped sessions automatically. Share or bookmark `ht
 
 ```bash
 cargo build --release --bin rune --bin rune-gateway
-cargo run --release --bin rune -- setup --path ~/.rune --api-key "$OPENAI_API_KEY"
+cargo run --release --bin rune -- setup --api-key "$OPENAI_API_KEY"
 ```
 
 

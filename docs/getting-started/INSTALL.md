@@ -24,14 +24,13 @@ cargo build --release
 If you just want Rune working with an API key and browser chat, use the built-in first-run wizard:
 
 ```bash
-cargo run --release --bin rune -- setup --path ~/.rune --api-key "$OPENAI_API_KEY"
+cargo run --release --bin rune -- setup --api-key "$OPENAI_API_KEY"
 ```
 
 Or choose a different provider/model explicitly:
 
 ```bash
 cargo run --release --bin rune -- setup \
-  --path ~/.rune \
   --provider anthropic \
   --model claude-3-7-sonnet-latest \
   --api-key "$ANTHROPIC_API_KEY"
@@ -45,7 +44,7 @@ What this does:
 - starts the gateway locally
 - opens `http://127.0.0.1:8787/webchat`
 
-For non-interactive CI/script usage, add `--non-interactive`. `rune setup` defaults to WebChat enabled, gateway startup enabled, and browser open enabled, so the happy path lands in chat immediately. If you skip automatic startup, the wizard prints the exact `rune-gateway --config ...`, `rune service install --target systemd --name rune-gateway --workdir ... --config ... --enable --start`, `rune service install --target launchd --name rune-gateway --workdir ... --config ... --enable --start`, plus `rune --gateway-url http://127.0.0.1:8787 health` and `rune --gateway-url http://127.0.0.1:8787 doctor run` verification commands to finish setup. For a one-shot install + configure + background-service flow, use `rune setup --path ~/.rune --api-key "$OPENAI_API_KEY" --install-service --service-target systemd` on Linux or swap `--service-target launchd` on macOS.
+For non-interactive CI/script usage, add `--non-interactive`. `rune setup` defaults to `~/.rune`, WebChat enabled, gateway startup enabled, and browser open enabled, so the happy path lands in chat immediately. If you skip automatic startup, the wizard prints the exact `rune-gateway --config ...`, `rune service install --target systemd --name rune-gateway --workdir ... --config ... --enable --start`, `rune service install --target launchd --name rune-gateway --workdir ... --config ... --enable --start`, plus `rune --gateway-url http://127.0.0.1:8787 health` and `rune --gateway-url http://127.0.0.1:8787 doctor run` verification commands to finish setup. For a one-shot install + configure + background-service flow, use `rune setup --api-key "$OPENAI_API_KEY" --install-service --service-target systemd` on Linux or swap `--service-target launchd` on macOS.
 
 ## Create config
 

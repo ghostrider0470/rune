@@ -246,6 +246,26 @@ fn default_workspace_root() -> Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("failed to resolve home directory for default workspace"))
 }
 
+fn resolve_workspace_path(input: &str) -> Result<PathBuf> {
+    if input == "." {
+        return default_workspace_root();
+    }
+
+    if let Some(stripped) = input.strip_prefix("~/") {
+        if let Some(home) = discover_home_dir() {
+            return Ok(home.join(stripped));
+        }
+    }
+
+    if input == "~" {
+        if let Some(home) = discover_home_dir() {
+            return Ok(home);
+        }
+    }
+
+    Ok(PathBuf::from(input))
+}
+
 fn open_config_instructions(workspace: &Path, config_path: &Path) {
     let workspace_hint = workspace.display();
     let config_hint = config_path.display();
@@ -546,11 +566,7 @@ struct InitWizardOptions<'a> {
 }
 
 async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
-    let workspace = if options.path == "." {
-        default_workspace_root()?
-    } else {
-        PathBuf::from(options.path)
-    };
+    let workspace = resolve_workspace_path(options.path)?;
     init_workspace(&workspace, None, options.non_interactive).await?;
 
     let interactive = std::io::stdin().is_terminal() && !options.non_interactive;
@@ -751,10 +767,10 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     println!();
     println!("Zero-config service install:");
     println!(
-        r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>" --install-service --service-target systemd"#
+        r#"  rune setup --api-key "<YOUR_API_KEY>" --install-service --service-target systemd"#
     );
     println!(
-        r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>" --install-service --service-target launchd"#
+        r#"  rune setup --api-key "<YOUR_API_KEY>" --install-service --service-target launchd"#
     );
     println!(
         "  # or: rune service install --target systemd --name rune-gateway --workdir ~/.rune --config ~/.rune/config.toml --enable --start"
@@ -765,8 +781,8 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     println!("  docker compose up --build -d");
     println!();
     println!("Then re-run first-run setup if needed:");
-    println!(r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>""#);
-    println!("  # or just: rune setup --path ~/.rune   # when Ollama is already running locally");
+    println!(r#"  rune setup --api-key "<YOUR_API_KEY>""#);
+    println!("  # or just: rune setup   # when Ollama is already running locally");
     println!();
     println!("Verify the install:");
     println!("  rune update wizard");

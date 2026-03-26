@@ -161,10 +161,10 @@ Rune installed.
 
 Next steps:
   export PATH="$INSTALL_DIR:\$PATH"
-  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>"
+  rune setup --api-key "<YOUR_API_KEY>"
 
 Or if Ollama is already running locally:
-  rune setup --path ~/.rune
+  rune setup
 
 Optional background service install after setup:
   rune service install --target systemd --name rune-gateway --workdir ~/.rune --config ~/.rune/config.toml --enable --start
