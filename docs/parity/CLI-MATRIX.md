@@ -71,16 +71,16 @@
 | `hooks` | `rune hooks` | **Shipped** | `list`, `info`, `check`, `enable`, `disable`, `install`, `update` | #68 |
 | `webhooks` | — | **Not started** | `setup`, `run` | — |
 | `backup` | `rune backup` | **Shipped** | `create`, `restore`, `list` | #67 |
-| `update` | `rune update` | **Partial** | `check`, `apply`, `status` shipped; `wizard` still missing | — |
-| `setup` | — | **Not started** | Interactive setup wizard | #61 |
+| `update` | `rune update` | **Shipped** | `check`, `apply`, `status`, and `wizard` shipped for lifecycle UX parity | #61 |
+| `setup` | `rune setup` | **Shipped** | Interactive first-run setup wizard with zero-config defaults, browser open, gateway startup, and optional service install | #61 |
 | `onboard` | `rune onboard` | **Shipped** | First-run onboarding alias to the local setup wizard with the same zero-config flags as `setup` | #61 |
 | `uninstall` | — | **Not started** | Clean removal | — |
 
 ### Tier 1 summary
 
-- **Shipped:** 4
-- **Partial:** 4 (`message` — breadth verbs remain; `agents` — inspect/start/spawn/steer/kill surface exists but transport/runtime parity still needs validation; `skills` — plugins/hooks lifecycle still missing; `update` — wizard still missing)
-- **Not started:** 8
+- **Shipped:** 6
+- **Partial:** 3 (`message` — breadth verbs remain; `agents` — inspect/start/spawn/steer/kill surface exists but transport/runtime parity still needs validation; `skills` — plugins/hooks lifecycle still missing)
+- **Not started:** 7
 
 ---
 
@@ -161,8 +161,8 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 ## Key gaps by urgency
 
 ### Immediate (Tier 0, not started)
-1. `configure` — interactive setup wizard (#61)
-2. `update` wizard — lifecycle UX parity on top of shipped `check`/`apply`/`status` surface
+1. `configure` — interactive setup wizard compatibility surface (#61)
+2. `uninstall` — clean removal flow
 3. `secrets` / `security` / `sandbox` were previously marked missing in this audit but now ship via first-class CLI families
 
 ### Near-term (Tier 0, partial)
