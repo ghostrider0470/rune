@@ -971,8 +971,8 @@ impl TurnExecutor {
                                             &call.arguments,
                                         ),
                                         created_at: Utc::now(),
-                                        handle_ref: None,
-                                        host_ref: None,
+                                        handle_ref: Some(session_id.to_string()),
+                                        host_ref: Some(turn_id.into_uuid().to_string()),
                                     })
                                     .await?;
 
