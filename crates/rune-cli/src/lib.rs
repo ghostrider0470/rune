@@ -748,7 +748,11 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
 
 fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
     let base = gateway_url.trim_end_matches('/');
-    let health_url = format!("{base}/health");
+    let probe_targets = [
+        format!("{base}/health"),
+        format!("{base}/gateway/health"),
+        base.to_string(),
+    ];
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(1200))
         .build()
@@ -758,35 +762,23 @@ fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
     let mut last_err: Option<String> = None;
 
     while std::time::Instant::now() < deadline {
-        match client.get(&health_url).send() {
-            Ok(response) if response.status().is_success() => return Ok(()),
-            Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
-                match client.get(base).send() {
-                    Ok(root_response) if root_response.status().is_success() => return Ok(()),
-                    Ok(root_response) => {
-                        last_err = Some(format!(
-                            "health returned 404 and root returned {}",
-                            root_response.status()
-                        ));
-                    }
-                    Err(err) => {
-                        last_err = Some(format!("health returned 404 and root probe failed: {err}"));
-                    }
+        for target in &probe_targets {
+            match client.get(target).send() {
+                Ok(response) if response.status().is_success() => return Ok(()),
+                Ok(response) => {
+                    last_err = Some(format!("{} returned {}", target, response.status()));
                 }
-            }
-            Ok(response) => {
-                last_err = Some(format!("health returned {}", response.status()));
-            }
-            Err(err) => {
-                last_err = Some(err.to_string());
+                Err(err) => {
+                    last_err = Some(format!("{} probe failed: {err}", target));
+                }
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
 
     anyhow::bail!(
-        "gateway did not become ready at {} ({})",
-        health_url,
+        "gateway did not become ready via {} ({})",
+        probe_targets.join(", "),
         last_err.unwrap_or_else(|| "unknown error".to_string())
     )
 }
@@ -3602,10 +3594,11 @@ ok",
         let message = err.to_string();
         assert!(message.contains("gateway did not become ready"));
         assert!(message.contains("/health"));
+        assert!(message.contains("/gateway/health"));
     }
 
     #[test]
-    fn wait_for_gateway_ready_falls_back_to_root_when_health_is_missing() {
+    fn wait_for_gateway_ready_falls_back_to_gateway_health_when_health_is_missing() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
 
@@ -3624,12 +3617,19 @@ connection: close
 
 "
                         .as_slice()
-                } else {
+                } else if request.starts_with("GET /gateway/health ") {
                     b"HTTP/1.1 200 OK
 content-length: 2
 connection: close
 
 ok"
+                        .as_slice()
+                } else {
+                    b"HTTP/1.1 500 Internal Server Error
+content-length: 0
+connection: close
+
+"
                         .as_slice()
                 };
                 stream.write_all(response).unwrap();
