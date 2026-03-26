@@ -585,10 +585,19 @@ impl SessionLoop {
             }
         }
 
-        // 2. Check database (survives restarts)
+        // 2. Serialize DB/create path per routing key to avoid duplicate channel
+        // sessions when multiple inbound events race before the cache is hydrated.
+        let mut index = self.sessions.lock().await;
+        if let Some(session_id) = index.get(routing_key).copied() {
+            drop(index);
+            if let Ok(session) = self.session_repo.find_by_id(session_id).await {
+                return Ok(session);
+            }
+            index = self.sessions.lock().await;
+        }
+
         if let Some(session) = self.session_repo.find_by_channel_ref(routing_key).await? {
             info!(session_id = %session.id, routing_key = %routing_key, "resumed existing session from DB");
-            let mut index = self.sessions.lock().await;
             index.insert(routing_key.to_string(), session.id);
             return Ok(session);
         }
