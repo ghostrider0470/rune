@@ -83,7 +83,7 @@ cd ~/Development/rune
 docker compose -f docker-compose.zero-config.yml up --build -d
 ```
 
-This variant mounts durable state under the named `rune-data`, `rune-config`, and `rune-secrets` volumes, explicitly enables the browser UI + WebChat, and exposes chat on `http://127.0.0.1:8787/webchat` (`/chat` redirects into WebChat and `/dashboard` is also available).
+This variant mounts durable state under the named `rune-data`, `rune-config`, and `rune-secrets` volumes, explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file (see `config.example.env`), and exposes chat on `http://127.0.0.1:8787/webchat` (`/chat` redirects into WebChat and `/dashboard` is also available).
 
 Next docs from there:
 - [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)

@@ -109,7 +109,7 @@ cd ~/Development/rune
 docker compose -f docker-compose.zero-config.yml up --build -d
 ```
 
-This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` redirects into WebChat) and persists state/config/secrets in the named `rune-data`, `rune-config`, and `rune-secrets` volumes. The compose file explicitly enables the browser UI + WebChat and passes through `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` when provided.
+This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` redirects into WebChat) and persists state/config/secrets in the named `rune-data`, `rune-config`, and `rune-secrets` volumes. The compose file explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file, and still allows shell-exported `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` overrides when provided.
 
 Useful follow-ups:
 
@@ -118,7 +118,15 @@ docker compose -f docker-compose.zero-config.yml logs -f
 docker compose -f docker-compose.zero-config.yml down
 ```
 
-To point the container at a real provider instead of local Ollama auto-detect, pass env vars through Compose, for example:
+To point the container at a real provider instead of local Ollama auto-detect, either export env vars inline or copy `config.example.env` to `.env` and fill it in:
+
+```bash
+cp config.example.env .env
+$EDITOR .env
+docker compose -f docker-compose.zero-config.yml up --build -d
+```
+
+Inline env vars still work too:
 
 ```bash
 OPENAI_API_KEY=... docker compose -f docker-compose.zero-config.yml up --build -d
