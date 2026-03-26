@@ -40,8 +40,8 @@ use rune_models::{
     RoutedModelProvider, Usage,
 };
 use rune_runtime::{
-    ContextAssembler, LaneQueue, Mem0Engine, SessionEngine, TelegramFileDownloader,
-    TokenBudgetCompaction, TurnExecutor,
+    CommandRegistry, ContextAssembler, LaneQueue, Mem0Engine, SessionEngine,
+    TelegramFileDownloader, TokenBudgetCompaction, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
@@ -688,6 +688,7 @@ async fn build_services(
                     adapter: adapter.clone(),
                 });
 
+            let command_registry = Arc::new(CommandRegistry::new());
             let mut loop_builder = SessionLoop::new(
                 session_engine.clone(),
                 turn_executor.clone(),
@@ -696,7 +697,8 @@ async fn build_services(
                 config.agents.clone(),
                 config.models.clone(),
             )
-            .with_file_downloader(downloader);
+            .with_file_downloader(downloader)
+            .with_command_registry(command_registry);
 
             if let Some(ref stt) = stt_engine {
                 loop_builder = loop_builder.with_stt(stt.clone());

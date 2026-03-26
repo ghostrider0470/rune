@@ -14,8 +14,8 @@ use tracing::info;
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
-    AgentRegistry, CommandRegistry, HookRegistry, PluginLoader, PluginRegistry, PluginScanner,
-    SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
+    AgentRegistry, CommandRegistry, HookRegistry, PluginLoader, PluginManager, PluginRegistry,
+    PluginScanner, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -206,12 +206,23 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         "unified plugin scan complete"
     );
 
+    let plugin_manager = Arc::new(PluginManager::new(
+        plugin_scanner.clone(),
+        plugin_registry.clone(),
+        skill_registry.clone(),
+        agent_registry.clone(),
+        command_registry.clone(),
+        hook_registry.clone(),
+    ));
+    plugin_manager.reload().await;
+
     let turn_executor = Arc::new(
         Arc::try_unwrap(services.turn_executor)
             .unwrap_or_else(|executor| (*executor).clone())
             .with_skill_registry(skill_registry.clone())
             .with_tool_approval_policy_repo(services.tool_approval_repo.clone())
-            .with_hook_registry(hook_registry.clone()),
+            .with_hook_registry(hook_registry.clone())
+            .with_agent_registry(agent_registry.clone()),
     );
 
     let state = AppState {
@@ -237,7 +248,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         plugin_registry,
         plugin_loader,
         hook_registry,
-        plugin_manager: None,
+        plugin_manager: Some(plugin_manager),
         event_tx,
         webchat_rate_limiter: Arc::new(crate::state::WebChatRateLimiter::new(
             Duration::from_secs(webchat_send_window_seconds),
