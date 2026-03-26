@@ -8790,6 +8790,23 @@ async fn webchat_route_filters_runtime_events_to_current_session() {
 }
 
 #[tokio::test]
+async fn webchat_route_polls_incremental_transcript_updates_after_disconnect() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(html.contains("let sessionPollCursor = '';"));
+    assert!(html.contains("if (sessionPollCursor) queryParts.push('after=' + encodeURIComponent(sessionPollCursor));"));
+    assert!(html.contains("if (!Array.isArray(existing) || !existing.length) return;"));
+    assert!(html.contains("if (entry && entry.id) sessionPollCursor = String(entry.id);"));
+}
+
+#[tokio::test]
 async fn webchat_route_includes_polling_reconnect_fallback() {
     let app = build_test_app(None);
 

@@ -265,6 +265,7 @@
   let reconnectToastVisible = false;
   let sendCooldownUntil = 0;
   const pendingOutbound = [];
+  let sessionPollCursor = '';
   const authToken = query.get('api_key') || '';
   const authHeaderToken = query.get('auth') || authToken;
   const sessionToken = query.get('session_token') || '';
@@ -406,7 +407,10 @@
     updateAuthBadge();
     appendMsg('system', fromLink ? 'Opened session from browser history.' : 'Switched session.');
     const existing = await rpc('session.transcript', { session_id: sessionId });
-    if (Array.isArray(existing)) existing.forEach(appendTranscriptEntry);
+    if (Array.isArray(existing)) existing.forEach(function(entry) {
+      appendTranscriptEntry(entry);
+      if (entry && entry.id) sessionPollCursor = String(entry.id);
+    });
     sendBtn.disabled = false;
     renderSessionList();
   }
@@ -563,6 +567,7 @@
   function resetTranscript() {
     transcript.innerHTML = '';
     clearPendingAssistant();
+    sessionPollCursor = '';
   }
 
   async function startFreshSession() {
@@ -619,6 +624,7 @@
     sendBtn.disabled = false;
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
     updateAuthBadge();
+    sessionPollCursor = '';
     appendMsg('system', 'Session started.');
     await refreshSessionList();
   }
@@ -630,11 +636,17 @@
       if (!sessionId) return;
       try {
         const transcriptToken = authTokenForSession(sessionId);
-        const response = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/transcript' + (transcriptToken ? ('?api_key=' + encodeURIComponent(transcriptToken)) : ''));
+        const queryParts = [];
+        if (transcriptToken) queryParts.push('api_key=' + encodeURIComponent(transcriptToken));
+        if (sessionPollCursor) queryParts.push('after=' + encodeURIComponent(sessionPollCursor));
+        const response = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/transcript' + (queryParts.length ? ('?' + queryParts.join('&')) : ''));
         if (!response.ok) return;
         const existing = await response.json();
-        resetTranscript();
-        if (Array.isArray(existing)) existing.forEach(appendTranscriptEntry);
+        if (!Array.isArray(existing) || !existing.length) return;
+        existing.forEach(function(entry) {
+          appendTranscriptEntry(entry);
+          if (entry && entry.id) sessionPollCursor = String(entry.id);
+        });
       } catch (_) {
       }
     }, 3000);
