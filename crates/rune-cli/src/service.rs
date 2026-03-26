@@ -27,6 +27,7 @@ pub struct ServiceDefinitionResponse {
     pub content: String,
     pub activation_commands: Vec<String>,
     pub notes: Vec<String>,
+    pub healthy: bool,
 }
 
 impl fmt::Display for ServiceDefinitionResponse {
@@ -50,6 +51,15 @@ impl fmt::Display for ServiceDefinitionResponse {
                 writeln!(f, "{}", command)?;
             }
         }
+        writeln!(
+            f,
+            "\n# health\n{}",
+            if self.healthy {
+                "ready"
+            } else {
+                "warnings present"
+            }
+        )?;
         if !self.notes.is_empty() {
             writeln!(
                 f,
@@ -91,6 +101,7 @@ pub fn print_service_definition(
         content,
         activation_commands: activation_commands(target, name, None),
         notes: service_notes(target),
+        healthy: true,
     })
 }
 
@@ -127,6 +138,7 @@ pub fn install_service_definition(
             options.enable,
             options.start,
         )?;
+        service_healthcheck(options.target, &options.name)?;
     }
 
     Ok(ServiceDefinitionResponse {
@@ -140,6 +152,7 @@ pub fn install_service_definition(
             Some(output_path.as_path()),
         ),
         notes: service_notes(options.target),
+        healthy: true,
     })
 }
 
@@ -375,7 +388,7 @@ fn activate_service(
 }
 
 fn activate_systemd_service(
-    output_path: &Path,
+    _output_path: &Path,
     name: &str,
     enable: bool,
     start: bool,
@@ -406,7 +419,6 @@ fn activate_systemd_service(
         )?;
     }
 
-    let _ = output_path;
     Ok(())
 }
 
@@ -497,6 +509,30 @@ fn run_command(cmd: &mut std::process::Command, display: &str) -> Result<()> {
         Ok(())
     } else {
         anyhow::bail!("{display} exited with status {status}");
+    }
+}
+
+fn service_healthcheck(target: ServiceTarget, name: &str) -> Result<()> {
+    match target {
+        ServiceTarget::Systemd => {
+            let unit_name = normalized_systemd_unit_name(name);
+            run_command(
+                std::process::Command::new("systemctl")
+                    .arg("--user")
+                    .arg("is-active")
+                    .arg(&unit_name),
+                "systemctl --user is-active",
+            )
+        }
+        ServiceTarget::Launchd => {
+            let service = format!("{}/{}", launchd_domain(), name);
+            run_command(
+                std::process::Command::new("launchctl")
+                    .arg("print")
+                    .arg(&service),
+                "launchctl print",
+            )
+        }
     }
 }
 
