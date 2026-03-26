@@ -8,6 +8,14 @@ services:
     environment:
       RUNE__DATABASE__BACKEND: sqlite
       RUNE__DATABASE__SQLITE_PATH: /data/db/rune.db
+      RUNE__PATHS__DATA_DIR: /data
+      RUNE__PATHS__DB_DIR: /data/db
+      RUNE__PATHS__SESSIONS_DIR: /data/sessions
+      RUNE__PATHS__MEMORY_DIR: /data/memory
+      RUNE__PATHS__MEDIA_DIR: /data/media
+      RUNE__PATHS__SKILLS_DIR: /data/skills
+      RUNE__PATHS__LOGS_DIR: /data/logs
+      RUNE__PATHS__BACKUPS_DIR: /data/backups
       RUNE__GATEWAY__HOST: 0.0.0.0
       RUNE__GATEWAY__PORT: 8787
       RUNE__BROWSER__ENABLED: "true"
