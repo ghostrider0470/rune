@@ -527,6 +527,13 @@ fn write_wizard_config(
 }
 
 fn open_url_in_browser(url: &str) -> Result<()> {
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        anyhow::bail!(
+            "no graphical browser session detected; rerun with --no-open or open {} manually",
+            url
+        );
+    }
+
     let candidates: &[(&str, &[&str])] = if cfg!(target_os = "macos") {
         &[("open", &[])]
     } else if cfg!(target_os = "windows") {
@@ -535,16 +542,20 @@ fn open_url_in_browser(url: &str) -> Result<()> {
         &[("xdg-open", &[]), ("gio", &["open"])]
     };
 
+    let mut failures = Vec::new();
     for (program, args) in candidates {
-        let status = StdCommand::new(program).args(*args).arg(url).status();
-        if let Ok(status) = status {
-            if status.success() {
-                return Ok(());
-            }
+        match StdCommand::new(program).args(*args).arg(url).status() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => failures.push(format!("{program} exited with status {status}")),
+            Err(err) => failures.push(format!("{program}: {err}")),
         }
     }
 
-    anyhow::bail!("failed to open browser for {url}")
+    anyhow::bail!(
+        "failed to open browser for {} ({})",
+        url,
+        failures.join("; ")
+    )
 }
 
 struct InitWizardOptions<'a> {
@@ -3605,6 +3616,22 @@ ok",
             url,
             "http://127.0.0.1:8787/webchat?api_key=test%20key%2Fwith%3Fchars"
         );
+    }
+
+    #[test]
+    fn open_url_in_browser_errors_cleanly_without_graphical_session() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::remove_var("DISPLAY");
+            std::env::remove_var("WAYLAND_DISPLAY");
+        }
+
+        let err = open_url_in_browser("http://127.0.0.1:8787/webchat").unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("no graphical browser session detected"));
+        assert!(message.contains("--no-open"));
     }
 
     #[test]
