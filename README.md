@@ -80,7 +80,7 @@ Rune also ships a zero-config Docker Compose path for fast evaluation with persi
 docker compose -f docker-compose.zero-config.yml up --build
 ```
 
-This variant mounts durable data under the `rune-data` volume, explicitly enables the browser UI + WebChat, and exposes chat on `http://127.0.0.1:8787/chat` (`/dashboard` is also available).
+This variant mounts durable data under the `rune-data` volume, explicitly enables the browser UI + WebChat, and exposes chat on `http://127.0.0.1:8787/webchat` (`/chat` redirects into the admin SPA and `/dashboard` is also available).
 
 Next docs from there:
 - [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)

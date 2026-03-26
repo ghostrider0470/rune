@@ -1,4 +1,4 @@
-//! Embedded WebChat UI served at `GET /chat`.
+//! Embedded WebChat UI served at `GET /webchat`.
 //!
 //! Provides a minimal browser-based chat interface that communicates with Rune
 //! over the existing WebSocket RPC protocol (`/ws`).
