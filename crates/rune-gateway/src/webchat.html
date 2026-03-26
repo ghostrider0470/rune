@@ -366,11 +366,15 @@
   function appendTranscriptEntry(entry) {
     if (!entry || !entry.kind || !entry.payload) return;
     if (entry.kind === 'user_message') {
-      const text = entry.payload.content || entry.payload.text || '';
+      const message = entry.payload.message || {};
+      const text = message.content || entry.payload.content || entry.payload.text || '';
       if (text) appendMsg('user', text);
     } else if (entry.kind === 'assistant_message') {
       const text = entry.payload.content || entry.payload.text || '';
       if (text) appendMsg('assistant', text);
+    } else if (entry.kind === 'tool_result') {
+      const output = entry.payload.output || '';
+      if (output) appendMsg(entry.payload.is_error ? 'system' : 'assistant', output);
     }
   }
 
