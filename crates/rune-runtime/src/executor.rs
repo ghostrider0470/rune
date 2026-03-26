@@ -362,8 +362,14 @@ impl TurnExecutor {
         let resumed_at = Utc::now();
         let decision = parse_approval_decision(&decision_raw)?;
         let payload = approval.presented_payload.clone();
-        if let Some(resume_status) = payload.get("resume_status").and_then(|value| value.as_str()) {
-            if matches!(resume_status, "completed" | "completed_error" | "failed" | "denied") {
+        if let Some(resume_status) = payload
+            .get("resume_status")
+            .and_then(|value| value.as_str())
+        {
+            if matches!(
+                resume_status,
+                "completed" | "completed_error" | "failed" | "denied"
+            ) {
                 return Err(RuntimeError::Aborted(format!(
                     "approval already resumed with status {resume_status}"
                 )));

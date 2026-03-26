@@ -1571,7 +1571,6 @@ async fn approval_resume_marks_failed_when_post_tool_continuation_fails() {
     assert_eq!(failed_turn.status, "failed");
 }
 
-
 #[tokio::test]
 async fn resume_approval_rejects_redeciding_completed_approval() {
     let h = TestHarness::new();
