@@ -527,12 +527,23 @@ fn write_wizard_config(
     Ok(config_path)
 }
 
-fn browser_launch_url(gateway_url: &str, chat_path: &str, provider: &str, api_key: &str) -> String {
+fn browser_launch_url(
+    gateway_url: &str,
+    chat_path: &str,
+    provider: &str,
+    api_key: &str,
+    session_token: Option<&str>,
+) -> String {
     let mut params: Vec<String> = Vec::new();
     if !api_key.trim().is_empty() && provider != "ollama" {
         let encoded = urlencoding::encode(api_key);
         params.push(format!("api_key={encoded}"));
         params.push(format!("auth={encoded}"));
+    }
+
+    if let Some(token) = session_token.map(str::trim).filter(|token| !token.is_empty()) {
+        let encoded = urlencoding::encode(token);
+        params.push(format!("session_token={encoded}"));
     }
 
     if params.is_empty() {
@@ -696,7 +707,18 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     let port = 8787u16;
     let gateway_url = format!("http://{host}:{port}");
     let chat_path = if webchat { "/webchat" } else { "/chat" };
-    let url = browser_launch_url(&gateway_url, chat_path, &provider, &api_key);
+    let session_token = if webchat {
+        Some(uuid::Uuid::new_v4().to_string())
+    } else {
+        None
+    };
+    let url = browser_launch_url(
+        &gateway_url,
+        chat_path,
+        &provider,
+        &api_key,
+        session_token.as_deref(),
+    );
     let should_start_service = options.install_service && options.service_start;
 
     if options.install_service {
@@ -3670,6 +3692,7 @@ connection: close
             "/chat",
             "openai",
             "test key/with?chars",
+            None,
         );
 
         assert_eq!(
@@ -3678,9 +3701,32 @@ connection: close
         );
     }
 
+
+    #[test]
+    fn setup_open_url_includes_session_token_for_webchat_resume() {
+        let url = browser_launch_url(
+            "http://127.0.0.1:8787",
+            "/webchat",
+            "openai",
+            "test-key",
+            Some("browser token"),
+        );
+
+        assert_eq!(
+            url,
+            "http://127.0.0.1:8787/webchat?api_key=test-key&auth=test-key&session_token=browser%20token"
+        );
+    }
+
     #[test]
     fn setup_open_url_skips_auth_query_for_ollama() {
-        let url = browser_launch_url("http://127.0.0.1:8787", "/webchat", "ollama", "ignored");
+        let url = browser_launch_url(
+            "http://127.0.0.1:8787",
+            "/webchat",
+            "ollama",
+            "ignored",
+            None,
+        );
         assert_eq!(url, "http://127.0.0.1:8787/webchat");
     }
 
