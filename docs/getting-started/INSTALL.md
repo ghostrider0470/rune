@@ -77,13 +77,16 @@ Generate a service definition with the built-in CLI:
 ./target/release/rune service install   --target systemd   --name rune-gateway   --workdir "$PWD"   --config "$PWD/config.toml"   --enable   --start
 ```
 
+The command now prints the exact follow-up activation/status commands as part of its output.
+
 Check status on Linux:
 
 ```bash
-systemctl --user status rune-gateway
+systemctl --user status rune-gateway.service
+journalctl --user -u rune-gateway -f
 ```
 
-On macOS, use `--target launchd --enable` instead. The command writes `~/Library/LaunchAgents/rune-gateway.plist`, adds stdout/stderr log files next to it, bootstraps it with `launchctl bootstrap`, enables it, and kickstarts it when `--start` is set.
+On macOS, use `--target launchd --enable` instead. The command writes `~/Library/LaunchAgents/rune-gateway.plist`, adds stdout/stderr log files next to it, prints the exact `launchctl bootstrap|enable|kickstart|print` commands, bootstraps it with `launchctl bootstrap`, enables it, and kickstarts it when `--start` is set.
 
 ## Verify startup
 

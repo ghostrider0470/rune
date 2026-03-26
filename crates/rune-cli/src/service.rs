@@ -25,6 +25,8 @@ pub struct ServiceDefinitionResponse {
     pub name: String,
     pub output_path: Option<String>,
     pub content: String,
+    pub activation_commands: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 impl fmt::Display for ServiceDefinitionResponse {
@@ -37,6 +39,26 @@ impl fmt::Display for ServiceDefinitionResponse {
             )?;
         } else {
             writeln!(f, "# {} service definition for {}", self.target, self.name)?;
+        }
+        if !self.activation_commands.is_empty() {
+            writeln!(
+                f,
+                "
+# activation"
+            )?;
+            for command in &self.activation_commands {
+                writeln!(f, "{}", command)?;
+            }
+        }
+        if !self.notes.is_empty() {
+            writeln!(
+                f,
+                "
+# notes"
+            )?;
+            for note in &self.notes {
+                writeln!(f, "- {}", note)?;
+            }
         }
         write!(f, "{}", self.content)
     }
@@ -67,6 +89,8 @@ pub fn print_service_definition(
         name: name.to_string(),
         output_path: None,
         content,
+        activation_commands: activation_commands(target, name, None),
+        notes: service_notes(target),
     })
 }
 
@@ -107,9 +131,15 @@ pub fn install_service_definition(
 
     Ok(ServiceDefinitionResponse {
         target: service_target_name(options.target).to_string(),
-        name: options.name,
+        name: options.name.clone(),
         output_path: Some(output_path.display().to_string()),
         content,
+        activation_commands: activation_commands(
+            options.target,
+            &options.name,
+            Some(output_path.as_path()),
+        ),
+        notes: service_notes(options.target),
     })
 }
 
@@ -244,6 +274,66 @@ fn render_launchd_plist(
 
     plist.push_str("</dict>\n</plist>\n");
     plist
+}
+
+fn activation_commands(
+    target: ServiceTarget,
+    name: &str,
+    output_path: Option<&Path>,
+) -> Vec<String> {
+    match target {
+        ServiceTarget::Systemd => {
+            let unit = if name.ends_with(".service") {
+                name.to_string()
+            } else {
+                format!("{name}.service")
+            };
+            let mut commands = vec!["systemctl --user daemon-reload".to_string()];
+            if let Some(path) = output_path {
+                commands.push(format!(
+                    "systemctl --user cat {} # verify installed unit",
+                    unit
+                ));
+                commands.push(format!("systemctl --user enable --now {}", unit));
+                commands.push(format!("systemctl --user status {}", unit));
+                commands.push(format!("# file: {}", path.display()));
+            } else {
+                commands.push(format!("systemctl --user enable --now {}", unit));
+                commands.push(format!("systemctl --user status {}", unit));
+            }
+            commands
+        }
+        ServiceTarget::Launchd => {
+            let domain = launchd_domain();
+            let service = format!("{domain}/{name}");
+            let mut commands = Vec::new();
+            if let Some(path) = output_path {
+                commands.push(format!("launchctl bootstrap {} {}", domain, path.display()));
+            } else {
+                commands.push(format!(
+                    "launchctl bootstrap {} /path/to/{}.plist",
+                    domain, name
+                ));
+            }
+            commands.push(format!("launchctl enable {}", service));
+            commands.push(format!("launchctl kickstart -k {}", service));
+            commands.push(format!("launchctl print {}", service));
+            commands
+        }
+    }
+}
+
+fn service_notes(target: ServiceTarget) -> Vec<String> {
+    match target {
+        ServiceTarget::Systemd => vec![
+            "Use --enable and --start during install to activate automatically.".to_string(),
+            "Logs stream via `journalctl --user -u rune-gateway -f` unless you override the service name.".to_string(),
+        ],
+        ServiceTarget::Launchd => vec![
+            "launchd writes stdout/stderr next to the plist when install chooses an output path.".to_string(),
+            "Use `launchctl bootout gui/$(id -u)/<label>` before reinstalling if you need a clean reset.".to_string(),
+        ],
+    }
 }
 
 fn activate_service(
