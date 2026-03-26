@@ -111,6 +111,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let skills_dir = services.config.paths.skills_dir.clone();
     let plugins_dir = services.config.paths.plugins_dir.clone();
     let workspace_root = services.config.agents.defaults.workspace.clone();
+    let webchat_send_window_seconds = services.config.browser.webchat_send_window_seconds.max(1);
+    let webchat_send_max_requests = services.config.browser.webchat_send_max_requests.max(1);
     let plugin_scan_dirs: Vec<std::path::PathBuf> = services
         .config
         .plugins
@@ -237,8 +239,8 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         hook_registry,
         event_tx,
         webchat_rate_limiter: Arc::new(crate::state::WebChatRateLimiter::new(
-            Duration::from_secs(10),
-            4,
+            Duration::from_secs(webchat_send_window_seconds),
+            webchat_send_max_requests,
         )),
         tts_engine,
         stt_engine,

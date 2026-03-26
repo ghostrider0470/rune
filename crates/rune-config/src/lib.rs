@@ -1090,6 +1090,10 @@ impl Default for MemoryConfig {
 pub struct BrowserConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default = "default_webchat_send_window_seconds")]
+    pub webchat_send_window_seconds: u64,
+    #[serde(default = "default_webchat_send_max_requests")]
+    pub webchat_send_max_requests: u32,
     #[serde(default)]
     pub chromium_path: Option<String>,
     #[serde(default)]
@@ -1108,6 +1112,8 @@ impl Default for BrowserConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            webchat_send_window_seconds: default_webchat_send_window_seconds(),
+            webchat_send_max_requests: default_webchat_send_max_requests(),
             chromium_path: None,
             cdp_endpoint: None,
             max_instances: default_max_browser_instances(),
@@ -1116,6 +1122,14 @@ impl Default for BrowserConfig {
             blocked_urls: Vec::new(),
         }
     }
+}
+
+const fn default_webchat_send_window_seconds() -> u64 {
+    10
+}
+
+const fn default_webchat_send_max_requests() -> u32 {
+    4
 }
 
 const fn default_max_browser_instances() -> usize {
