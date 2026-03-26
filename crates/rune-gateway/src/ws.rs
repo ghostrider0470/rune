@@ -95,7 +95,7 @@ struct EventFrame {
 
 /// `GET /ws` -- upgrade to WebSocket for RPC and live event streaming.
 pub async fn ws_handler(
-    ws: WebSocketUpgrade,
+    mut ws: WebSocketUpgrade,
     Query(params): Query<HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> Response {
@@ -115,6 +115,14 @@ pub async fn ws_handler(
             )
         })
         .unwrap_or(false);
+    let selected_protocol = params
+        .get("auth")
+        .or_else(|| params.get("api_key"))
+        .filter(|value| !value.trim().is_empty())
+        .map(|_| "rune-ws");
+    if let Some(protocol) = selected_protocol {
+        ws = ws.protocols([protocol]);
+    }
     ws.on_upgrade(move |socket| {
         handle_socket(
             socket,
