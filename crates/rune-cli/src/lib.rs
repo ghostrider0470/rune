@@ -597,23 +597,23 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
         _ => None,
     };
 
+    let provider_env_key = provider_env_key(&provider);
     let api_key = match options.api_key {
         Some(value) => value,
         None if provider == "ollama" => String::new(),
         None => {
-            let env_key = std::env::var("OPENAI_API_KEY")
-                .ok()
-                .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
-                .or_else(|| std::env::var("GROQ_API_KEY").ok())
-                .or_else(|| std::env::var("MISTRAL_API_KEY").ok())
-                .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
-                .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
-                .or_else(|| std::env::var("AZURE_OPENAI_API_KEY").ok());
-            match (env_key, interactive) {
-                (Some(value), _) => value,
-                (None, true) => prompt_text("API key", None)?,
-                (None, false) => anyhow::bail!(
-                    "missing API key; pass --api-key or set a provider API key env var"
+            let env_key = provider_env_key.and_then(|key| std::env::var(key).ok());
+            match (env_key, interactive, provider_env_key) {
+                (Some(value), _, _) => value,
+                (None, true, Some(env_name)) => {
+                    prompt_text(&format!("API key ({env_name})"), None)?
+                }
+                (None, true, None) => prompt_text("API key", None)?,
+                (None, false, Some(env_name)) => anyhow::bail!(
+                    "missing API key for provider `{provider}`; pass --api-key or set {env_name}"
+                ),
+                (None, false, None) => anyhow::bail!(
+                    "missing API key for provider `{provider}`; pass --api-key"
                 ),
             }
         }
