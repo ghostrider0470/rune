@@ -1099,7 +1099,6 @@ async fn invalid_session_transition_rejected() {
     assert!(err.to_string().contains("running"), "got: {err}");
 }
 
-
 #[tokio::test]
 async fn approval_wait_transition_requires_running_session() {
     let h = TestHarness::new();
@@ -1144,7 +1143,6 @@ async fn approval_wait_transition_allowed_from_running_session() {
     assert_eq!(updated.status, "waiting_for_approval");
 }
 
-
 #[tokio::test]
 async fn turn_executor_rejects_completed_session_restart() {
     let h = TestHarness::new();
@@ -1160,14 +1158,19 @@ async fn turn_executor_rejects_completed_session_restart() {
     engine.mark_running(session.id).await.unwrap();
     engine.mark_completed(session.id).await.unwrap();
 
-    let model: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("should not run")]));
+    let model: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("should not run"),
+    ]));
     let executor = h.turn_executor(
         model,
         Arc::new(FakeToolExecutor::new(vec![])),
         ToolRegistry::new(),
     );
 
-    let err = executor.execute(session.id, "Hello", None).await.unwrap_err();
+    let err = executor
+        .execute(session.id, "Hello", None)
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("invalid"), "got: {err}");
 }
 

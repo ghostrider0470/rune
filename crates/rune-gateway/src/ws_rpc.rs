@@ -603,7 +603,12 @@ impl RpcDispatcher {
         let current_status = current
             .status
             .parse::<rune_core::SessionStatus>()
-            .map_err(|_| RpcError::internal(format!("invalid persisted session status: {}", current.status)))?;
+            .map_err(|_| {
+                RpcError::internal(format!(
+                    "invalid persisted session status: {}",
+                    current.status
+                ))
+            })?;
         current_status
             .transition(rune_core::SessionStatus::Cancelled)
             .map_err(|e| RpcError::bad_request(e.to_string()))?;

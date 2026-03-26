@@ -17,7 +17,13 @@ pub async fn legacy_chat_redirect(
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let mut target = "/webchat".to_string();
-    let forwarded = ["api_key", "auth", "session_token", "browser_session", "session_id"];
+    let forwarded = [
+        "api_key",
+        "auth",
+        "session_token",
+        "browser_session",
+        "session_id",
+    ];
     let query = forwarded
         .iter()
         .filter_map(|key| {

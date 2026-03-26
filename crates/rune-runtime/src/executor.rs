@@ -60,7 +60,6 @@ pub struct TurnExecutor {
 }
 
 impl TurnExecutor {
-
     async fn transition_session_status(
         &self,
         session_id: Uuid,
@@ -1000,8 +999,11 @@ impl TurnExecutor {
                                     })
                                     .await?;
 
-                                self.transition_session_status(session_id, SessionStatus::WaitingForApproval)
-                                    .await?;
+                                self.transition_session_status(
+                                    session_id,
+                                    SessionStatus::WaitingForApproval,
+                                )
+                                .await?;
 
                                 return Ok(TurnLoopOutcome::WaitingForApproval);
                             }
