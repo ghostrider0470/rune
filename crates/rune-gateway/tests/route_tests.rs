@@ -8793,6 +8793,148 @@ async fn webchat_route_filters_runtime_events_to_current_session() {
 }
 
 #[tokio::test]
+async fn transcript_route_filters_entries_after_cursor() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let tool_execution_repo = Arc::new(InMemoryToolExecutionRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            Arc::new(FakeToolExecutor),
+            Arc::new(ToolRegistry::new()),
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: tool_execution_repo as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx: test_event_sender().clone(),
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+    };
+
+    let app = build_router(state, None);
+    let session_id = Uuid::now_v7();
+    let first_id = Uuid::now_v7();
+    let second_id = Uuid::now_v7();
+    let now = chrono::Utc::now();
+
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "direct".into(),
+            status: "ready".into(),
+            workspace_root: None,
+            channel_ref: Some("webchat:test-browser".to_string()),
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: first_id,
+            session_id,
+            turn_id: None,
+            seq: 1,
+            kind: "user_message".into(),
+            payload: serde_json::json!({ "message": { "content": "first" } }),
+            created_at: now,
+        })
+        .await
+        .unwrap();
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: second_id,
+            session_id,
+            turn_id: None,
+            seq: 2,
+            kind: "assistant_message".into(),
+            payload: serde_json::json!({ "content": "second" }),
+            created_at: now,
+        })
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!(
+                "/sessions/{session_id}/transcript?after={first_id}"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], second_id.to_string());
+}
+
+#[tokio::test]
 async fn webchat_route_polls_incremental_transcript_updates_after_disconnect() {
     let app = build_test_app(None);
 

@@ -1680,10 +1680,16 @@ pub struct TranscriptEntry {
     pub created_at: String,
 }
 
+#[derive(Deserialize, Default)]
+pub struct TranscriptQuery {
+    pub after: Option<Uuid>,
+}
+
 /// `GET /sessions/{id}/transcript` — full session transcript.
 pub async fn get_transcript(
     State(state): State<AppState>,
     Path(session_id): Path<Uuid>,
+    Query(query): Query<TranscriptQuery>,
 ) -> Result<Json<Vec<TranscriptEntry>>, GatewayError> {
     state
         .session_engine
@@ -1699,6 +1705,7 @@ pub async fn get_transcript(
 
     let entries: Vec<TranscriptEntry> = items
         .into_iter()
+        .filter(|item| query.after.map(|after| item.id > after).unwrap_or(true))
         .map(|item| TranscriptEntry {
             id: item.id,
             turn_id: item.turn_id,
