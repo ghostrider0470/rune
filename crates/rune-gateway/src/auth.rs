@@ -49,7 +49,7 @@ fn extract_query_bearer_token(query: &str) -> Option<&str> {
         .split('&')
         .filter_map(|pair| pair.split_once('='))
         .find_map(|(key, value)| match key {
-            "api_key" | "session_token" => Some(value),
+            "api_key" | "auth" => Some(value),
             _ => None,
         })
 }

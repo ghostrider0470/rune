@@ -44,7 +44,7 @@ Embedded WebChat is served by the gateway at `/webchat` with `/chat` redirecting
 
 Current behavior:
 - Uses the gateway WebSocket endpoint at `/ws`
-- Auth can be supplied by `api_key` query param or `Authorization`/subprotocol bearer token when gateway auth is enabled
+- Auth can be supplied by `api_key`/`auth` query params or `Authorization`/subprotocol bearer token when gateway auth is enabled
 - Browser-scoped routing uses `session_token` and maps to channel refs in the form `webchat:{session_token}`
 - Anonymous browser access without a `session_token` maps to `webchat:anonymous`
 - WebChat now resolves durable sessions instead of blindly creating a fresh direct session on each connect, so browser refresh/reconnect resumes the same conversation lane for that browser token
@@ -52,5 +52,5 @@ Current behavior:
 
 Operator notes:
 - For multi-user usage, always issue distinct `session_token` values per browser/client
-- If gateway auth is enabled, prefer short-lived links that carry `api_key` or terminate auth upstream and inject `Authorization`
+- If gateway auth is enabled, prefer short-lived links that carry `api_key`/`auth` or terminate auth upstream and inject `Authorization`
 - Active WebChat sessions appear in normal session listings with `channel_ref` values beginning with `webchat:`

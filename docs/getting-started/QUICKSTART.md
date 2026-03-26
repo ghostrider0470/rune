@@ -35,7 +35,7 @@ rune setup
 
 That flow uses the safe `setup` alias for the first-run wizard: it writes a local SQLite-backed config, enables the embedded UI + WebChat, starts the gateway or installs it as a background service, and opens browser chat at `http://127.0.0.1:8787/webchat`.
 
-WebChat now resumes browser-scoped sessions automatically. Share or bookmark `http://127.0.0.1:8787/webchat?session_id=...` to reopen a specific session, or pass `session_token=team-browser` so multiple browsers keep isolated session lists under distinct `webchat:<token>` channels. If gateway auth is enabled, append `api_key=...` (or `auth=...` for header-style bearer auth over WebSocket) to test the protected flow from a browser without extra tooling.
+WebChat now resumes browser-scoped sessions automatically. Share or bookmark `http://127.0.0.1:8787/webchat?session_id=...` to reopen a specific session, or pass `session_token=team-browser` so multiple browsers keep isolated session lists under distinct `webchat:<token>` channels. If gateway auth is enabled, append `api_key=...` (or `auth=...` to drive the WebSocket bearer subprotocol from a browser link) to test the protected flow from a browser without extra tooling.
 
 ## Option B — source checkout
 
