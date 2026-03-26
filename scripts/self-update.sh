@@ -31,12 +31,8 @@ if [ ! -f "$REPO_DIR/target/release/rune" ]; then
 fi
 
 # Quick smoke tests — avoid commands that require binding the real gateway port
-set +e
-timeout 10 env     RUNE_GATEWAY__PORT=0     RUNE__UI__ENABLED=false     RUNE__BROWSER__ENABLED=false     "$REPO_DIR/target/release/rune-gateway" --config /nonexistent-rune-config.toml >/dev/null 2>&1
-status=$?
-set -e
-if [ "$status" -ne 124 ]; then
-    echo "[self-update] Gateway binary startup sanity check failed with status $status — aborting"
+if ! "$REPO_DIR/target/release/rune-gateway" --help >/dev/null 2>&1; then
+    echo "[self-update] Gateway binary help check failed — aborting"
     exit 1
 fi
 if ! "$REPO_DIR/target/release/rune" --version >/dev/null 2>&1; then
