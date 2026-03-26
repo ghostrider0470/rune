@@ -8094,6 +8094,28 @@ async fn webchat_route_serves_embedded_chat_ui() {
     assert!(body.contains("assistant_reply"));
 }
 
+
+#[tokio::test]
+async fn webchat_route_documents_multi_user_browser_sessions() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::get("/webchat")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("const sessionStorageKey = 'rune.webchat.session_id'"));
+    assert!(body.contains("window.sessionStorage.getItem(sessionStorageKey)"));
+    assert!(body.contains("window.sessionStorage.setItem(sessionStorageKey, sessionId)"));
+    assert!(body.contains("history.replaceState"));
+    assert!(body.contains("sessionToken"));
+}
 #[tokio::test]
 async fn webchat_route_preserves_session_and_auth_query_params() {
     let app = build_test_app(None);

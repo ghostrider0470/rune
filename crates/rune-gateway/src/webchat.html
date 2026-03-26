@@ -140,7 +140,8 @@
   const query = new URLSearchParams(location.search);
 
   let ws = null;
-  let sessionId = query.get('session_id');
+  const sessionStorageKey = 'rune.webchat.session_id';
+  let sessionId = query.get('session_id') || window.sessionStorage.getItem(sessionStorageKey);
   let reqCounter = 0;
   const pendingRpc = {};
   const authToken = query.get('api_key') || '';
@@ -182,6 +183,7 @@
 
   function persistSessionInUrl() {
     if (!sessionId) return;
+    window.sessionStorage.setItem(sessionStorageKey, sessionId);
     const next = new URLSearchParams(location.search);
     next.set('session_id', sessionId);
     if (authToken) next.set('api_key', authToken);
@@ -202,7 +204,7 @@
   async function hydrateSession() {
     if (sessionId) {
       ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
-      appendMsg('system', 'Resumed session.');
+      appendMsg('system', query.get('session_id') ? 'Resumed session.' : 'Resumed this browser session.');
       const existing = await rpc('session.transcript', { session_id: sessionId });
       if (Array.isArray(existing)) {
         existing.forEach(appendTranscriptEntry);
