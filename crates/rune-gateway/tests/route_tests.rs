@@ -9613,6 +9613,54 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
 }
 
 #[tokio::test]
+async fn protected_http_routes_accept_api_key_query_auth() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("shared-secret".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::get("/api/status?api_key=shared-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn protected_http_routes_accept_auth_query_alias() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("shared-secret".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::get("/api/status?auth=shared-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn protected_http_routes_reject_invalid_query_auth() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("shared-secret".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::get("/api/status?api_key=wrong-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() {
     let now = chrono::Utc::now();
     let session_repo = Arc::new(MemSessionRepo::new());
