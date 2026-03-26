@@ -73,7 +73,7 @@ pub fn print_service_definition(
     yolo: bool,
     no_sandbox: bool,
 ) -> Result<ServiceDefinitionResponse> {
-    let content = render_service_definition(
+    let content = render_service_definition(RenderServiceDefinitionOptions {
         target,
         name,
         workdir,
@@ -81,8 +81,8 @@ pub fn print_service_definition(
         gateway_url,
         yolo,
         no_sandbox,
-        None,
-    )?;
+        output_path: None,
+    })?;
 
     Ok(ServiceDefinitionResponse {
         target: service_target_name(target).to_string(),
@@ -101,16 +101,16 @@ pub fn install_service_definition(
         .output
         .clone()
         .unwrap_or_else(|| default_output_path(options.target, &options.name));
-    let content = render_service_definition(
-        options.target,
-        &options.name,
-        &options.workdir,
-        options.config.as_deref(),
-        options.gateway_url.as_deref(),
-        options.yolo,
-        options.no_sandbox,
-        Some(&output_path),
-    )?;
+    let content = render_service_definition(RenderServiceDefinitionOptions {
+        target: options.target,
+        name: &options.name,
+        workdir: &options.workdir,
+        config: options.config.as_deref(),
+        gateway_url: options.gateway_url.as_deref(),
+        yolo: options.yolo,
+        no_sandbox: options.no_sandbox,
+        output_path: Some(&output_path),
+    })?;
 
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)
@@ -143,32 +143,46 @@ pub fn install_service_definition(
     })
 }
 
-fn render_service_definition(
+struct RenderServiceDefinitionOptions<'a> {
     target: ServiceTarget,
-    name: &str,
-    workdir: &Path,
-    config: Option<&str>,
-    gateway_url: Option<&str>,
+    name: &'a str,
+    workdir: &'a Path,
+    config: Option<&'a str>,
+    gateway_url: Option<&'a str>,
     yolo: bool,
     no_sandbox: bool,
-    output_path: Option<&Path>,
-) -> Result<String> {
+    output_path: Option<&'a Path>,
+}
+
+fn render_service_definition(options: RenderServiceDefinitionOptions<'_>) -> Result<String> {
     let exe = std::env::current_exe().context("failed to resolve current rune binary path")?;
     let mut args = vec!["gateway".to_string(), "run".to_string()];
-    if yolo {
+    if options.yolo {
         args.push("--yolo".to_string());
     }
-    if no_sandbox {
+    if options.no_sandbox {
         args.push("--no-sandbox".to_string());
     }
 
-    Ok(match target {
-        ServiceTarget::Systemd => {
-            render_systemd_unit(name, &exe, workdir, config, gateway_url, &args, output_path)
-        }
-        ServiceTarget::Launchd => {
-            render_launchd_plist(name, &exe, workdir, config, gateway_url, &args, output_path)
-        }
+    Ok(match options.target {
+        ServiceTarget::Systemd => render_systemd_unit(
+            options.name,
+            &exe,
+            options.workdir,
+            options.config,
+            options.gateway_url,
+            &args,
+            options.output_path,
+        ),
+        ServiceTarget::Launchd => render_launchd_plist(
+            options.name,
+            &exe,
+            options.workdir,
+            options.config,
+            options.gateway_url,
+            &args,
+            options.output_path,
+        ),
     })
 }
 
