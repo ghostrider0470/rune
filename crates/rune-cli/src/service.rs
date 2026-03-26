@@ -156,7 +156,23 @@ struct RenderServiceDefinitionOptions<'a> {
 
 fn render_service_definition(options: RenderServiceDefinitionOptions<'_>) -> Result<String> {
     let exe = std::env::current_exe().context("failed to resolve current rune binary path")?;
-    let mut args = vec!["gateway".to_string(), "run".to_string()];
+    let gateway_subcommand = if exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            name.eq_ignore_ascii_case("rune-gateway")
+                || name.eq_ignore_ascii_case("rune-gateway.exe")
+        })
+        .unwrap_or(false)
+    {
+        "run"
+    } else {
+        "gateway run"
+    };
+    let mut args = gateway_subcommand
+        .split_whitespace()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
     if options.yolo {
         args.push("--yolo".to_string());
     }
