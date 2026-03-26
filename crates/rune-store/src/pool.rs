@@ -51,6 +51,38 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), StoreError> {
         .await
         .map_err(|e| StoreError::Database(format!("pool error for migrations: {e}")))?;
 
+    // One-time fresh start: drop all old Diesel-era tables if they exist.
+    // This runs only if __diesel_schema_migrations exists (proving old schema).
+    let diesel_exists = client
+        .query_opt(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = '__diesel_schema_migrations'",
+            &[],
+        )
+        .await
+        .unwrap_or(None)
+        .is_some();
+
+    if diesel_exists {
+        warn!("detected old Diesel schema — dropping all tables for clean tokio-postgres migration");
+        client.batch_execute(
+            "DROP TABLE IF EXISTS __diesel_schema_migrations CASCADE;
+             DROP TABLE IF EXISTS _rune_pg_migrations CASCADE;
+             DROP TABLE IF EXISTS transcript_items CASCADE;
+             DROP TABLE IF EXISTS tool_executions CASCADE;
+             DROP TABLE IF EXISTS process_handles CASCADE;
+             DROP TABLE IF EXISTS job_runs CASCADE;
+             DROP TABLE IF EXISTS approvals CASCADE;
+             DROP TABLE IF EXISTS channel_deliveries CASCADE;
+             DROP TABLE IF EXISTS turns CASCADE;
+             DROP TABLE IF EXISTS sessions CASCADE;
+             DROP TABLE IF EXISTS jobs CASCADE;
+             DROP TABLE IF EXISTS paired_devices CASCADE;
+             DROP TABLE IF EXISTS pairing_requests CASCADE;
+             DROP TABLE IF EXISTS memory_embeddings CASCADE;"
+        ).await.map_err(|e| StoreError::Migration(format!("failed to drop old tables: {e}")))?;
+        info!("old tables dropped — clean slate for migration");
+    }
+
     // Create tracking table
     client
         .batch_execute(
@@ -61,6 +93,40 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), StoreError> {
         )
         .await
         .map_err(|e| StoreError::Migration(format!("failed to create migration tracker: {e}")))?;
+
+    // Detect prior Diesel migrations and seed our tracker from them.
+    // Diesel used __diesel_schema_migrations with a "version" column matching
+    // the directory name prefix (e.g. "2024-01-01-000000").
+    let diesel_table_exists = client
+        .query_opt(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = '__diesel_schema_migrations'",
+            &[],
+        )
+        .await
+        .map_err(|e| StoreError::Migration(format!("diesel check failed: {e}")))?
+        .is_some();
+
+    if diesel_table_exists {
+        let diesel_versions: Vec<String> = client
+            .query("SELECT version FROM __diesel_schema_migrations", &[])
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|row| row.get(0))
+            .collect();
+
+        if !diesel_versions.is_empty() {
+            info!(count = diesel_versions.len(), "detected prior Diesel migrations, seeding tracker");
+            for version in &diesel_versions {
+                let _ = client
+                    .execute(
+                        "INSERT INTO _rune_pg_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING",
+                        &[version],
+                    )
+                    .await;
+            }
+        }
+    }
 
     // Get already-applied migrations
     let applied: Vec<String> = client
