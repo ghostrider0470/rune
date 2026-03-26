@@ -271,6 +271,14 @@ impl RpcDispatcher {
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
         {
+            if let Some(metadata) = params.get("metadata") {
+                self.state
+                    .session_engine
+                    .patch_metadata(existing.id, metadata.clone())
+                    .await
+                    .map_err(|e| RpcError::internal(e.to_string()))?;
+            }
+
             return Ok(json!({
                 "id": existing.id,
                 "kind": existing.kind,
