@@ -357,7 +357,6 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/health", get(routes::health))
         .route("/chat", get(webchat::legacy_chat_redirect))
         .route("/webchat", get(webchat::webchat_handler))
-        .route("/ws", get(ws::ws_handler))
         .route("/assets/{path}", get(routes::branded_asset))
         .route("/webhook/telegram/{token}", post(routes::telegram_webhook))
         .route("/devices/pair/request", post(routes::device_pair_request))
@@ -535,6 +534,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/tools/{id}", get(routes::get_tool_execution))
         // Auth routes
         .route("/api/auth", get(routes::auth_token_info))
+        .route("/ws", get(ws::ws_handler))
         // Channel routes
         .route("/api/channels", get(routes::list_channels))
         .route("/api/channels/status", get(routes::channels_status))

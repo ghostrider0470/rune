@@ -8230,3 +8230,50 @@ async fn webchat_allows_query_api_key_when_gateway_auth_is_enabled() {
 
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+
+#[tokio::test]
+async fn websocket_accepts_query_api_key_when_gateway_auth_is_enabled() {
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    let app = build_test_app(Some("test-token".to_string()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service()).await.unwrap();
+    });
+
+    let (ws, response) = connect_async(format!("ws://{}/ws?api_key=test-token", addr))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    drop(ws);
+    server.abort();
+}
+
+#[tokio::test]
+async fn websocket_rejects_invalid_query_api_key_when_gateway_auth_is_enabled() {
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    let app = build_test_app(Some("test-token".to_string()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service()).await.unwrap();
+    });
+
+    let err = connect_async(format!("ws://{}/ws?api_key=wrong-token", addr))
+        .await
+        .expect_err("handshake should fail");
+
+    match err {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        other => panic!("expected HTTP handshake error, got {other:?}"),
+    }
+    server.abort();
+}
