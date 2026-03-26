@@ -180,9 +180,43 @@ impl ContextAssembler {
 }
 
 /// Ensures every `tool_call_id` in an Assistant message has a corresponding
-/// `Role::Tool` response. Injects synthetic tool responses for any orphaned
-/// tool calls. Model-agnostic — all providers require this invariant.
+/// `Role::Tool` response, AND every `Role::Tool` message has a preceding
+/// Assistant message with a matching `tool_calls` entry. Injects synthetic
+/// responses for orphaned tool calls, and removes orphaned tool results
+/// (e.g. after compaction drops the assistant message but preserves the result).
 fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
+    // Pass 1: Remove orphaned Role::Tool messages that have no preceding
+    // Assistant message with a matching tool_call_id. This can happen when
+    // compaction drops older messages including the assistant tool_calls
+    // but preserves the tool result in the tail.
+    let mut known_call_ids: HashSet<String> = HashSet::new();
+    let mut to_remove = Vec::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        if let Some(ref calls) = msg.tool_calls {
+            for tc in calls {
+                known_call_ids.insert(tc.id.clone());
+            }
+        }
+        if msg.role == Role::Tool {
+            if let Some(ref id) = msg.tool_call_id {
+                if !known_call_ids.contains(id) {
+                    to_remove.push(idx);
+                }
+            }
+        }
+    }
+    if !to_remove.is_empty() {
+        warn!(
+            orphaned_results = to_remove.len(),
+            "removing orphaned tool result messages with no preceding tool_calls"
+        );
+        for idx in to_remove.into_iter().rev() {
+            messages.remove(idx);
+        }
+    }
+
+    // Pass 2: Inject synthetic tool responses for assistant tool_calls
+    // that have no corresponding Role::Tool response.
     let mut i = 0;
     while i < messages.len() {
         let pending_ids: Vec<String> = match &messages[i] {
