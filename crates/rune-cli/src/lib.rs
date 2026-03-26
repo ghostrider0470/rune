@@ -556,6 +556,19 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     let interactive = std::io::stdin().is_terminal() && !options.non_interactive;
     let detected_ollama = detect_ollama();
 
+    let mut webchat = options.webchat;
+    if interactive {
+        let default_webchat = if webchat { "Y" } else { "N" };
+        let enable_webchat = prompt_text(
+            "Enable browser WebChat channel? (Y/n)",
+            Some(default_webchat),
+        )?;
+        webchat = !matches!(
+            enable_webchat.trim().to_ascii_lowercase().as_str(),
+            "n" | "no"
+        );
+    }
+
     let provider = match options.provider {
         Some(value) => normalize_provider_kind(&value),
         None if interactive => {
@@ -627,7 +640,7 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
         &model,
         &api_key,
         telegram_token.as_deref(),
-        options.webchat,
+        webchat,
     )?;
     println!("✓ Wrote {}", config_path.display());
     if provider == "ollama" {
@@ -639,11 +652,7 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     let host = "127.0.0.1";
     let port = 8787u16;
     let gateway_url = format!("http://{host}:{port}");
-    let chat_path = if options.webchat {
-        "/webchat"
-    } else {
-        "/dashboard"
-    };
+    let chat_path = if webchat { "/webchat" } else { "/dashboard" };
     let url = format!("{gateway_url}{chat_path}");
     let should_start_service = options.install_service && options.service_start;
 
