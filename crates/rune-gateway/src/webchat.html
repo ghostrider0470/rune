@@ -49,6 +49,67 @@
     background: var(--error);
   }
   #status.connected .dot { background: #3fb950; }
+  #layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  }
+  #sidebar {
+    border-right: 1px solid var(--border);
+    background: #141823;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #sidebar-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  #session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .session-item {
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+  }
+  .session-item:hover {
+    border-color: var(--accent);
+  }
+  .session-item.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(108,123,247,0.25) inset;
+  }
+  .session-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .session-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  #main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
   #transcript {
     flex: 1;
     overflow-y: auto;
@@ -146,11 +207,20 @@
     <div id="status"><span class="dot"></span><span id="status-text">Connecting...</span></div>
   </div>
 </header>
-<div id="transcript"></div>
-<div id="input-area">
-  <textarea id="msg" rows="1" placeholder="Type a message..." autofocus></textarea>
-  <button id="send-btn" disabled>Send</button>
+<div id="layout">
+  <aside id="sidebar">
+    <div id="sidebar-header">Browser sessions</div>
+    <div id="session-list"></div>
+  </aside>
+  <main id="main">
+    <div id="transcript"></div>
+    <div id="input-area">
+      <textarea id="msg" rows="1" placeholder="Type a message..." autofocus></textarea>
+      <button id="send-btn" disabled>Send</button>
+    </div>
+  </main>
 </div>
+
 <script>
 (function() {
   const transcript = document.getElementById('transcript');
@@ -159,6 +229,7 @@
   const statusEl   = document.getElementById('status');
   const statusText = document.getElementById('status-text');
   const newSessionBtn = document.getElementById('new-session-btn');
+  const sessionListEl = document.getElementById('session-list');
   const query = new URLSearchParams(location.search);
 
   let ws = null;
@@ -172,6 +243,73 @@
   const sessionToken = query.get('session_token') || '';
   const browserSessionKey = 'rune.webchat.browser_session_token';
   const browserSessionToken = sessionToken || query.get('browser_session') || window.sessionStorage.getItem(browserSessionKey) || '';
+
+  let knownSessions = [];
+
+  function formatRelative(iso) {
+    if (!iso) return 'unknown';
+    const value = new Date(iso);
+    if (Number.isNaN(value.getTime())) return iso;
+    const diffMs = Date.now() - value.getTime();
+    const diffMin = Math.max(0, Math.round(diffMs / 60000));
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return diffMin + 'm ago';
+    const diffHr = Math.round(diffMin / 60);
+    if (diffHr < 24) return diffHr + 'h ago';
+    const diffDay = Math.round(diffHr / 24);
+    return diffDay + 'd ago';
+  }
+
+  function renderSessionList() {
+    sessionListEl.innerHTML = '';
+    const sessions = knownSessions.slice();
+    if (sessionId && !sessions.some((item) => item.id === sessionId)) {
+      sessions.unshift({ id: sessionId, status: 'active', kind: 'direct', channel: sessionChannelRef(), created_at: new Date().toISOString() });
+    }
+    if (!sessions.length) {
+      const empty = document.createElement('div');
+      empty.className = 'msg system';
+      empty.textContent = 'No browser sessions yet.';
+      sessionListEl.appendChild(empty);
+      return;
+    }
+    sessions.forEach((item) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'session-item' + (item.id === sessionId ? ' active' : '');
+      button.innerHTML = '<div class="session-item-title">' + (item.id === sessionId ? 'Current session' : 'Session') + '</div>' +
+        '<div class="session-item-meta">' +
+        (item.channel || 'webchat') + ' • ' + (item.status || 'unknown') + ' • ' + formatRelative(item.created_at) +
+        '</div>';
+      button.addEventListener('click', function() {
+        if (item.id === sessionId) return;
+        openSession(item.id, true).catch((e) => appendMsg('system', 'Failed to switch session: ' + (e.message || e)));
+      });
+      sessionListEl.appendChild(button);
+    });
+  }
+
+  async function refreshSessionList() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const sessions = await rpc('session.list', { limit: 50, channel: sessionChannelRef() });
+      knownSessions = Array.isArray(sessions) ? sessions : [];
+      renderSessionList();
+    } catch (_) {
+    }
+  }
+
+  async function openSession(nextSessionId, fromLink) {
+    sessionId = nextSessionId;
+    resetTranscript();
+    persistSessionInUrl();
+    ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
+    appendMsg('system', fromLink ? 'Opened session from browser history.' : 'Switched session.');
+    const existing = await rpc('session.transcript', { session_id: sessionId });
+    if (Array.isArray(existing)) existing.forEach(appendTranscriptEntry);
+    sendBtn.disabled = false;
+    renderSessionList();
+  }
 
   function buildWsUrl() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -218,6 +356,7 @@
   function persistSessionInUrl() {
     if (!sessionId) return;
     window.sessionStorage.setItem(sessionStorageKey, sessionId);
+    renderSessionList();
     const next = new URLSearchParams(location.search);
     next.set('session_id', sessionId);
     if (authToken) next.set('api_key', authToken);
@@ -243,6 +382,7 @@
     history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next.toString() : ''));
     resetTranscript();
     appendMsg('system', 'Starting a new session...');
+    renderSessionList();
     setStatus(ws && ws.readyState === WebSocket.OPEN, ws && ws.readyState === WebSocket.OPEN ? 'Connected' : 'Reconnecting...');
     if (ws && ws.readyState === WebSocket.OPEN) {
       try {
@@ -265,13 +405,10 @@
 
   async function hydrateSession() {
     if (sessionId) {
-      ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
-      appendMsg('system', requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.');
-      const existing = await rpc('session.transcript', { session_id: sessionId });
-      if (Array.isArray(existing)) {
-        existing.forEach(appendTranscriptEntry);
-      }
-      sendBtn.disabled = false;
+      const resumedLabel = requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.';
+      await openSession(sessionId, requestedSessionId ? true : false);
+      appendMsg('system', resumedLabel);
+      await refreshSessionList();
       return;
     }
 
@@ -281,6 +418,7 @@
     sendBtn.disabled = false;
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
     appendMsg('system', 'Session started.');
+    await refreshSessionList();
   }
 
   function connect() {
@@ -290,6 +428,7 @@
       setStatus(true, 'Connected');
       try {
         await hydrateSession();
+        await refreshSessionList();
       } catch(e) {
         appendMsg('system', 'Failed to initialize session: ' + (e.message || e));
       }

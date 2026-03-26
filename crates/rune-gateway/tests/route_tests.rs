@@ -8171,6 +8171,25 @@ async fn webchat_route_preserves_session_and_auth_query_params() {
     assert!(body.contains("next.set('session_token', browserSessionToken)"));
 }
 
+
+#[tokio::test]
+async fn webchat_route_lists_browser_sessions_for_multi_user_switching() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("const sessionListEl = document.getElementById('session-list')"));
+    assert!(body.contains("rpc('session.list', { limit: 50, channel: sessionChannelRef() })"));
+    assert!(body.contains("async function openSession(nextSessionId, fromLink)"));
+    assert!(body.contains("Opened session from browser history."));
+    assert!(body.contains("Switched session."));
+}
+
 #[tokio::test]
 async fn webchat_route_mentions_authorization_header_auth() {
     let app = build_test_app(None);
