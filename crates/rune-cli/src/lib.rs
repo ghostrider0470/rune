@@ -634,6 +634,31 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     Ok(())
 }
 
+fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
+    let exe = std::env::current_exe().context("failed to resolve current rune binary path")?;
+    let repo_root =
+        std::env::current_dir().context("failed to resolve current working directory")?;
+    let repo_display = repo_root.display().to_string();
+    let exe_display = exe.display().to_string();
+
+    println!(
+        "Rune update wizard
+"
+    );
+    println!("Fresh install:");
+    println!("  curl -fsSL {install_script_url} | sh");
+    println!();
+    println!("Source checkout update ({repo_display}):");
+    println!("  git pull --ff-only origin {branch}");
+    println!("  cargo build --release --bin rune --bin rune-gateway");
+    println!("  {exe_display} update status");
+    println!();
+    println!("Then re-run first-run setup if needed:");
+    println!(r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>""#);
+    println!("  # or just: rune setup --path ~/.rune   # when Ollama is already running locally");
+    Ok(())
+}
+
 fn read_gateway_config_input(input: &str) -> Result<serde_json::Value> {
     let raw = if input == "-" {
         use std::io::Read as _;
@@ -3119,6 +3144,12 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.update_status().await?;
                 println!("{}", render(&result, format));
             }
+            UpdateAction::Wizard {
+                install_script_url,
+                branch,
+            } => {
+                print_update_wizard(&install_script_url, &branch)?;
+            }
         },
         Command::Service { action } => match action {
             ServiceAction::Print {
@@ -3189,14 +3220,8 @@ mod tests {
     #[test]
     fn write_wizard_config_uses_env_var_for_openai_api_key() {
         let tmp = TempDir::new().unwrap();
-        let config_path = write_wizard_config(
-            tmp.path(),
-            "openai",
-            "gpt-4o-mini",
-            "",
-            true,
-        )
-        .unwrap();
+        let config_path =
+            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "", true).unwrap();
 
         let written = std::fs::read_to_string(config_path).unwrap();
         assert!(written.contains("api_key_env = \"OPENAI_API_KEY\""));
@@ -3206,14 +3231,8 @@ mod tests {
     #[test]
     fn write_wizard_config_keeps_inline_api_key_when_provided() {
         let tmp = TempDir::new().unwrap();
-        let config_path = write_wizard_config(
-            tmp.path(),
-            "openai",
-            "gpt-4o-mini",
-            "test-key",
-            true,
-        )
-        .unwrap();
+        let config_path =
+            write_wizard_config(tmp.path(), "openai", "gpt-4o-mini", "test-key", true).unwrap();
 
         let written = std::fs::read_to_string(config_path).unwrap();
         assert!(written.contains("api_key = \"test-key\""));
