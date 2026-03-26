@@ -641,8 +641,10 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     let repo_display = repo_root.display().to_string();
     let exe_display = exe.display().to_string();
 
-    println!("Rune update wizard
-");
+    println!(
+        "Rune update wizard
+"
+    );
     println!("Fresh install:");
     println!("  curl -fsSL {install_script_url} | sh");
     println!();
@@ -652,7 +654,9 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     println!("  {exe_display} update status");
     println!();
     println!("Zero-config service install:");
-    println!(r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>" --install-service --service-target systemd"#);
+    println!(
+        r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>" --install-service --service-target systemd"#
+    );
     println!("  # macOS: swap --service-target launchd");
     println!();
     println!("Zero-config Docker Compose:");
@@ -3101,6 +3105,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             start,
             open,
             non_interactive,
+            install_service,
+            service_target,
+            service_name,
+            service_enable,
+            service_start,
         } => {
             run_init_wizard(InitWizardOptions {
                 path: &path,
@@ -3111,11 +3120,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 start,
                 open,
                 non_interactive,
-                install_service: false,
-                service_target: ServiceTarget::Systemd,
-                service_name: "rune-gateway",
-                service_enable: true,
-                service_start: true,
+                install_service,
+                service_target,
+                service_name: &service_name,
+                service_enable,
+                service_start,
             })
             .await?;
         }
@@ -3222,7 +3231,6 @@ mod tests {
     use clap::Parser;
     use tempfile::TempDir;
 
-
     #[test]
     fn update_wizard_mentions_service_install_and_docker_quickstart() {
         let _guard = crate::test_env_lock()
@@ -3230,12 +3238,26 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let cwd = std::env::current_dir().unwrap();
         let stdout = std::process::Command::new("cargo")
-            .args(["run", "--quiet", "-p", "rune-cli-app", "--bin", "rune", "--", "update", "wizard"])
+            .args([
+                "run",
+                "--quiet",
+                "-p",
+                "rune-cli-app",
+                "--bin",
+                "rune",
+                "--",
+                "update",
+                "wizard",
+            ])
             .current_dir(cwd)
             .env_remove("RUNE_CONFIG")
             .output()
             .expect("update wizard should run");
-        assert!(stdout.status.success(), "stderr: {}", String::from_utf8_lossy(&stdout.stderr));
+        assert!(
+            stdout.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&stdout.stderr)
+        );
         let stdout = String::from_utf8_lossy(&stdout.stdout);
         assert!(stdout.contains("--install-service --service-target systemd"));
         assert!(stdout.contains("--service-target launchd"));

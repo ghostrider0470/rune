@@ -276,6 +276,21 @@ pub enum Command {
         /// Do not prompt; derive missing values from defaults/environment where possible.
         #[arg(long)]
         non_interactive: bool,
+        /// Install a service definition after writing config.
+        #[arg(long)]
+        install_service: bool,
+        /// Service manager target for --install-service.
+        #[arg(long, value_enum, default_value = "systemd")]
+        service_target: ServiceTarget,
+        /// Service label/name to use for --install-service.
+        #[arg(long, default_value = "rune-gateway")]
+        service_name: String,
+        /// Enable the service immediately after install.
+        #[arg(long, default_value_t = true)]
+        service_enable: bool,
+        /// Start the service immediately after install.
+        #[arg(long, default_value_t = true)]
+        service_start: bool,
     },
     /// Manage backups of durable state.
     Backup {
