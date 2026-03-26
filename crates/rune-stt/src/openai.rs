@@ -53,7 +53,8 @@ fn extension_for_mime(mime_type: &str) -> Result<&'static str, SttError> {
         "audio/wav" | "audio/x-wav" => Ok("wav"),
         "audio/webm" => Ok("webm"),
         "audio/flac" | "audio/x-flac" => Ok("flac"),
-        "audio/ogg" => Ok("ogg"),
+        "audio/ogg" | "audio/opus" | "application/ogg" => Ok("ogg"),
+        "audio/aac" => Ok("aac"),
         other => Err(SttError::UnsupportedFormat(other.to_owned())),
     }
 }
@@ -127,5 +128,22 @@ impl SttProvider for OpenAiStt {
             language: None,
             duration_seconds: None,
         })
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::extension_for_mime;
+
+    #[test]
+    fn accepts_opus_and_application_ogg_inputs() {
+        assert_eq!(extension_for_mime("audio/opus").unwrap(), "ogg");
+        assert_eq!(extension_for_mime("application/ogg").unwrap(), "ogg");
+    }
+
+    #[test]
+    fn accepts_aac_inputs() {
+        assert_eq!(extension_for_mime("audio/aac").unwrap(), "aac");
     }
 }

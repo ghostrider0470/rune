@@ -58,7 +58,21 @@ pub struct SessionLoop {
 }
 
 /// MIME types considered audio for transcription purposes.
-const AUDIO_MIME_TYPES: &[&str] = &["audio/ogg", "audio/mpeg", "audio/mp4"];
+const AUDIO_MIME_TYPES: &[&str] = &[
+    "audio/ogg",
+    "audio/opus",
+    "application/ogg",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/m4a",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/webm",
+    "audio/flac",
+    "audio/x-flac",
+    "audio/aac",
+];
 
 /// MIME type prefixes considered images.
 const IMAGE_MIME_PREFIX: &str = "image/";
