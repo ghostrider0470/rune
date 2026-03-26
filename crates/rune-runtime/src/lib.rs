@@ -1,6 +1,7 @@
 #![doc = "Session engine, turn loop, context assembly, and tool orchestration for Rune."]
 
 pub mod agent_registry;
+pub mod claude_plugin;
 pub mod command_registry;
 mod compaction;
 mod context;
