@@ -415,23 +415,14 @@ async fn check_comms_inbox(deps: &SupervisorDeps) {
                     warn!(error = %e, "failed to archive comms message");
                 }
             }
-            "directive" => {
-                // Ack and archive — directive content available via workspace context.
-                info!(subject = %msg.subject, "received comms directive");
-                if let Err(e) = comms.send_ack(&msg, "Directive received and logged.").await {
-                    warn!(error = %e, "failed to send comms directive ack");
-                }
-                if let Err(e) = comms.archive(&path).await {
-                    warn!(error = %e, "failed to archive comms message");
-                }
-            }
-            "task" | "question" => {
-                // Create isolated agent turn and write result back.
+            "task" | "question" | "directive" | "answer" | "proposal" => {
+                // Route all substantive message types through an agent turn
+                // so that Rune actually reasons about the content.
                 let prompt = format!(
-                    "[Inter-Agent Comms] This message is from {} via the .comms/ mailbox.\n\
+                    "[Inter-Agent Comms] Incoming {} from {} via the .comms/ mailbox.\n\
                     Priority: {}\nSubject: {}\n\n{}\n\n\
                     Respond with a clear, actionable answer. Your response will be sent back as a result message.",
-                    msg.from, msg.priority, msg.subject, msg.body
+                    msg.msg_type, msg.from, msg.priority, msg.subject, msg.body
                 );
                 match run_agent_turn(deps, &prompt, None, SessionTarget::Isolated).await {
                     Ok(response) => {
@@ -449,11 +440,11 @@ async fn check_comms_inbox(deps: &SupervisorDeps) {
                             )
                             .await
                         {
-                            warn!(error = %e, "failed to send comms task result");
+                            warn!(error = %e, "failed to send comms result");
                         }
                     }
                     Err(e) => {
-                        warn!(error = %e, "comms task agent turn failed");
+                        warn!(error = %e, "comms agent turn failed");
                         let _ = comms
                             .send(
                                 "result",
