@@ -6,31 +6,39 @@ set -e
 # All settings use sensible defaults; override via RUNE__* env vars.
 
 # Default paths (match Dockerfile VOLUME layout)
-: "${RUNE__DATABASE__DATABASE_URL:=sqlite:///data/db/rune.db}"
+: "${RUNE__DATABASE__BACKEND:=sqlite}"
+: "${RUNE__DATABASE__SQLITE_PATH:=/data/db/rune.db}"
 : "${RUNE__GATEWAY__PORT:=8787}"
 : "${RUNE__GATEWAY__HOST:=0.0.0.0}"
 : "${RUNE__PATHS__DATA_DIR:=/data}"
+: "${RUNE__PATHS__DB_DIR:=/data/db}"
 : "${RUNE__PATHS__SESSIONS_DIR:=/data/sessions}"
 : "${RUNE__PATHS__MEMORY_DIR:=/data/memory}"
 : "${RUNE__PATHS__MEDIA_DIR:=/data/media}"
 : "${RUNE__PATHS__SKILLS_DIR:=/data/skills}"
 : "${RUNE__PATHS__LOGS_DIR:=/data/logs}"
 : "${RUNE__PATHS__BACKUPS_DIR:=/data/backups}"
+: "${RUNE__PATHS__CONFIG_DIR:=/config}"
+: "${RUNE__PATHS__SECRETS_DIR:=/secrets}"
 : "${RUNE__LOGGING__LOG_LEVEL:=info}"
 : "${RUNE__UI__ENABLED:=true}"
 : "${RUNE__BROWSER__ENABLED:=true}"
 : "${RUNE__CHANNELS__ENABLED:=webchat}"
 
-export RUNE__DATABASE__DATABASE_URL
+export RUNE__DATABASE__BACKEND
+export RUNE__DATABASE__SQLITE_PATH
 export RUNE__GATEWAY__PORT
 export RUNE__GATEWAY__HOST
 export RUNE__PATHS__DATA_DIR
+export RUNE__PATHS__DB_DIR
 export RUNE__PATHS__SESSIONS_DIR
 export RUNE__PATHS__MEMORY_DIR
 export RUNE__PATHS__MEDIA_DIR
 export RUNE__PATHS__SKILLS_DIR
 export RUNE__PATHS__LOGS_DIR
 export RUNE__PATHS__BACKUPS_DIR
+export RUNE__PATHS__CONFIG_DIR
+export RUNE__PATHS__SECRETS_DIR
 export RUNE__LOGGING__LOG_LEVEL
 export RUNE__UI__ENABLED
 export RUNE__BROWSER__ENABLED
@@ -66,9 +74,23 @@ mode = "standalone"
 host = "0.0.0.0"
 port = ${RUNE__GATEWAY__PORT}
 
-[storage]
+[database]
 backend = "sqlite"
 sqlite_path = "/data/db/rune.db"
+max_connections = 10
+run_migrations = true
+
+[paths]
+db_dir = "/data/db"
+sessions_dir = "/data/sessions"
+memory_dir = "/data/memory"
+media_dir = "/data/media"
+skills_dir = "/data/skills"
+plugins_dir = "/data/plugins"
+logs_dir = "/data/logs"
+backups_dir = "/data/backups"
+config_dir = "/config"
+secrets_dir = "/secrets"
 
 [ui]
 enabled = ${RUNE__UI__ENABLED}
