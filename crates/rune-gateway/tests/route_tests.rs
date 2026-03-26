@@ -10835,3 +10835,52 @@ async fn protected_http_routes_reject_session_token_query_auth_for_non_webchat_r
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[cfg(unix)]
+#[test]
+fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_standalone_first_run() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = rune_config::AppConfig::default();
+    config.mode = rune_config::RuntimeMode::Standalone;
+    config.paths = rune_config::PathsConfig {
+        db_dir: root.path().join("db"),
+        sessions_dir: root.path().join("sessions"),
+        memory_dir: root.path().join("memory"),
+        media_dir: root.path().join("media"),
+        skills_dir: std::path::PathBuf::from("/proc"),
+        plugins_dir: std::path::PathBuf::from("/sys"),
+        logs_dir: root.path().join("logs"),
+        backups_dir: std::path::PathBuf::from("/etc"),
+        config_dir: std::path::PathBuf::from("/bin"),
+        secrets_dir: std::path::PathBuf::from("/sbin"),
+    };
+    config.ensure_dirs().unwrap();
+    config.paths = rune_config::PathsConfig::default();
+
+    for path in [
+        root.path().join("db"),
+        root.path().join("sessions"),
+        root.path().join("memory"),
+        root.path().join("media"),
+        root.path().join("logs"),
+    ] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+
+    let checks = rune_gateway::storage_path_checks_for_tests(&config);
+    for name in [
+        "paths.skills_dir",
+        "paths.plugins_dir",
+        "paths.backups_dir",
+        "paths.config_dir",
+        "paths.secrets_dir",
+    ] {
+        let check = checks
+            .iter()
+            .find(|check| check.name == name)
+            .unwrap_or_else(|| panic!("missing check {name}"));
+        assert_eq!(check.status, "warn");
+    }
+}
+
+

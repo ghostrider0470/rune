@@ -4713,6 +4713,32 @@ fn probe_writable(dir: &std::path::Path) -> bool {
     }
 }
 
+fn path_is_root_owned(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path)
+            .map(|metadata| metadata.uid() == 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+fn standalone_root_owned_startup_path(name: &str) -> bool {
+    matches!(
+        name,
+        "paths.skills_dir"
+            | "paths.plugins_dir"
+            | "paths.backups_dir"
+            | "paths.config_dir"
+            | "paths.secrets_dir"
+    )
+}
+
 fn gateway_path_hint(
     path: &std::path::Path,
     mode: &rune_config::RuntimeMode,
@@ -4790,6 +4816,7 @@ fn readiness_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
 
 fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     let mode = config.mode.resolve(config);
+    let profile = config.paths.profile();
     [
         ("paths.db_dir", &config.paths.db_dir, true),
         ("paths.sessions_dir", &config.paths.sessions_dir, true),
@@ -4824,14 +4851,25 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
                 ),
             }
         } else if !probe_writable(path) {
+            let root_owned_standalone_exception = mode == rune_config::RuntimeMode::Standalone
+                && profile == rune_config::PathsProfile::DockerDefault
+                && standalone_root_owned_startup_path(name)
+                && path_is_root_owned(path);
             DoctorCheck {
                 name: name.to_string(),
-                status: "fail",
-                message: format!(
-                    "{} is not writable (write probe failed) — {}",
-                    path.display(),
-                    gateway_path_hint(path, &mode, false)
-                ),
+                status: if root_owned_standalone_exception { "warn" } else { "fail" },
+                message: if root_owned_standalone_exception {
+                    format!(
+                        "{} is root-owned and not writable yet; standalone first-run can continue while home-scoped paths bootstrap elsewhere",
+                        path.display()
+                    )
+                } else {
+                    format!(
+                        "{} is not writable (write probe failed) — {}",
+                        path.display(),
+                        gateway_path_hint(path, &mode, false)
+                    )
+                },
             }
         } else {
             DoctorCheck {
@@ -5409,4 +5447,8 @@ mod tests {
             );
         }
     }
+}
+
+pub fn storage_path_checks_for_tests(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
+    storage_path_checks(config)
 }
