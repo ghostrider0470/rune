@@ -237,6 +237,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         plugin_registry,
         plugin_loader,
         hook_registry,
+        plugin_manager: None,
         event_tx,
         webchat_rate_limiter: Arc::new(crate::state::WebChatRateLimiter::new(
             Duration::from_secs(webchat_send_window_seconds),
@@ -449,6 +450,12 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/skills/reload", post(routes::reload_skills))
         .route("/skills/{name}/enable", post(routes::enable_skill))
         .route("/skills/{name}/disable", post(routes::disable_skill))
+        // Plugin routes
+        .route("/api/plugins", get(routes::plugins_list))
+        .route("/api/plugins/reload", post(routes::plugins_reload))
+        .route("/api/plugins/{name}", get(routes::plugins_get))
+        .route("/api/plugins/{name}/enable", post(routes::plugins_enable))
+        .route("/api/plugins/{name}/disable", post(routes::plugins_disable))
         // Heartbeat routes
         .route("/heartbeat/status", get(routes::heartbeat_status))
         .route("/heartbeat/enable", post(routes::heartbeat_enable))

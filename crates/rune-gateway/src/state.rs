@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::{
-    HookRegistry, PluginLoader, PluginRegistry, SessionEngine, SkillLoader, SkillRegistry,
-    TurnExecutor,
+    HookRegistry, PluginLoader, PluginManager, PluginRegistry, SessionEngine, SkillLoader,
+    SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -141,6 +141,8 @@ pub struct AppState {
     pub plugin_loader: Arc<PluginLoader>,
     /// Hook registry for plugin event handlers.
     pub hook_registry: Arc<HookRegistry>,
+    /// Plugin lifecycle manager (enable/disable/reload).
+    pub plugin_manager: Option<Arc<PluginManager>>,
     /// Broadcast channel for session events (WebSocket fan-out).
     pub event_tx: broadcast::Sender<SessionEvent>,
     /// Per-browser WebChat send limiter used to smooth reconnect storms and abuse.

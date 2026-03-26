@@ -4886,6 +4886,78 @@ fn git_update_versions() -> Option<(String, String)> {
     Some((current, latest))
 }
 
+// ── Plugins ──────────────────────────────────────────────────────────────────
+
+pub async fn plugins_list(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let Some(ref mgr) = state.plugin_manager else {
+        return Ok(Json(serde_json::json!({"plugins": []})));
+    };
+    let plugins = mgr.status().await;
+    Ok(Json(serde_json::json!({"plugins": plugins})))
+}
+
+pub async fn plugins_get(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let Some(ref mgr) = state.plugin_manager else {
+        return Err(GatewayError::PluginNotFound(
+            "plugin manager not initialized".to_string(),
+        ));
+    };
+    match mgr.get_plugin(&name).await {
+        Some(plugin) => Ok(Json(serde_json::to_value(plugin).unwrap_or_default())),
+        None => Err(GatewayError::PluginNotFound(name)),
+    }
+}
+
+pub async fn plugins_enable(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let Some(ref mgr) = state.plugin_manager else {
+        return Err(GatewayError::PluginNotFound(
+            "plugin manager not initialized".to_string(),
+        ));
+    };
+    let success = mgr.enable(&name).await;
+    Ok(Json(serde_json::json!({"success": success})))
+}
+
+pub async fn plugins_disable(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let Some(ref mgr) = state.plugin_manager else {
+        return Err(GatewayError::PluginNotFound(
+            "plugin manager not initialized".to_string(),
+        ));
+    };
+    let success = mgr.disable(&name).await;
+    Ok(Json(serde_json::json!({"success": success})))
+}
+
+pub async fn plugins_reload(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let Some(ref mgr) = state.plugin_manager else {
+        return Err(GatewayError::PluginNotFound(
+            "plugin manager not initialized".to_string(),
+        ));
+    };
+    let summary = mgr.reload().await;
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "native_plugins": summary.native_plugins,
+        "claude_plugins": summary.claude_plugins,
+        "skills": summary.skills_registered,
+        "agents": summary.agents_registered,
+        "commands": summary.commands_registered,
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
