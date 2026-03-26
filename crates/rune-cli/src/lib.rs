@@ -285,6 +285,7 @@ fn open_config_instructions(workspace: &Path, config_path: &Path) {
     eprintln!("  - verify diagnostics: rune --gateway-url http://127.0.0.1:8787 doctor run");
     eprintln!("  - open chat: http://127.0.0.1:8787/webchat");
     eprintln!("  - open dashboard: http://127.0.0.1:8787/dashboard");
+    eprintln!("  - legacy chat redirect: http://127.0.0.1:8787/chat");
 }
 
 fn start_gateway_process(
@@ -684,7 +685,7 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     } else {
         format!("?api_key={}", urlencoding::encode(&api_key))
     };
-    let chat_path = if webchat { "/webchat" } else { "/dashboard" };
+    let chat_path = if webchat { "/webchat" } else { "/chat" };
     let url = format!("{gateway_url}{chat_path}{auth_query}");
     let should_start_service = options.install_service && options.service_start;
 
@@ -3610,11 +3611,11 @@ ok",
         } else {
             format!("?api_key={}", urlencoding::encode(api_key))
         };
-        let url = format!("{gateway_url}/webchat{auth_query}");
+        let url = format!("{gateway_url}/chat{auth_query}");
 
         assert_eq!(
             url,
-            "http://127.0.0.1:8787/webchat?api_key=test%20key%2Fwith%3Fchars"
+            "http://127.0.0.1:8787/chat?api_key=test%20key%2Fwith%3Fchars"
         );
     }
 
