@@ -684,6 +684,16 @@
     };
   }
 
+  function eventSessionId(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    return payload.session_id || payload.sessionId || '';
+  }
+
+  function isCurrentSessionEvent(payload) {
+    const target = eventSessionId(payload);
+    return !target || !sessionId || target === sessionId;
+  }
+
   function handleEvent(frame) {
     const p = frame.payload || {};
     const kind = frame.kind || p.kind || '';
@@ -692,6 +702,10 @@
       return;
     }
     if (kind === 'turn_complete' || kind === 'turn_finished' || kind === 'turn_completed' || kind === 'turn.completed') {
+      if (!isCurrentSessionEvent(p)) {
+        refreshSessionList();
+        return;
+      }
       const text = p.assistant_text || p.assistant_reply || p.response || p.text || '';
       if (text) {
         appendStreamingAssistant(text);
@@ -699,9 +713,11 @@
       clearPendingAssistant();
       refreshSessionList();
     } else if (kind === 'turn.progressed') {
+      if (!isCurrentSessionEvent(p)) return;
       const status = p.status || '';
       if (status) appendStreamingAssistant('[' + status + ']');
     } else if (kind === 'transcript_append') {
+      if (!isCurrentSessionEvent(p)) return;
       const role = p.role || p.kind || '';
       const content = p.content || p.text || '';
       if (role === 'assistant') {

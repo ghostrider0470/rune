@@ -8683,6 +8683,23 @@ async fn webchat_route_lists_browser_sessions_for_multi_user_switching() {
 }
 
 #[tokio::test]
+async fn webchat_route_filters_runtime_events_to_current_session() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("function eventSessionId(payload)"));
+    assert!(body.contains("function isCurrentSessionEvent(payload)"));
+    assert!(body.contains("if (!isCurrentSessionEvent(p)) {"));
+    assert!(body.contains("if (!isCurrentSessionEvent(p)) return;"));
+}
+
+#[tokio::test]
 async fn webchat_route_includes_polling_reconnect_fallback() {
     let app = build_test_app(None);
 
