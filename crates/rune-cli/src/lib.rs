@@ -762,7 +762,7 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     println!("  # macOS direct service flow swaps --target launchd");
     println!();
     println!("Zero-config Docker Compose:");
-    println!("  docker compose -f docker-compose.zero-config.yml up --build -d");
+    println!("  docker compose up --build -d");
     println!();
     println!("Then re-run first-run setup if needed:");
     println!(r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>""#);
@@ -3424,7 +3424,7 @@ mod tests {
         let stdout = String::from_utf8_lossy(&stdout.stdout);
         assert!(stdout.contains("--install-service --service-target systemd"));
         assert!(stdout.contains("--service-target launchd"));
-        assert!(stdout.contains("docker compose -f docker-compose.zero-config.yml up --build -d"));
+        assert!(stdout.contains("docker compose up --build -d"));
     }
 
     #[test]

@@ -173,7 +173,7 @@ Optional background service install after setup:
 Optional zero-config Docker evaluation (from a repo checkout):
   git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$HOME/Development/rune"
   cd "$HOME/Development/rune"
-  docker compose -f docker-compose.zero-config.yml up --build -d
+  docker compose up --build -d
 EOF
 }
 
