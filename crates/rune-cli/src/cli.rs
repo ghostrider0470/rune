@@ -2197,10 +2197,10 @@ pub enum ServiceAction {
         #[arg(long)]
         output: Option<String>,
         /// Enable the installed service after writing the definition.
-        #[arg(long)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         enable: bool,
         /// Start the installed service after writing the definition.
-        #[arg(long)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         start: bool,
     },
 }
