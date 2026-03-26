@@ -379,7 +379,7 @@
   }
 
   function sessionChannelRef() {
-    return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat';
+    return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat:anonymous';
   }
 
   function persistSessionInUrl() {
@@ -452,7 +452,7 @@
       return;
     }
 
-    const res = await rpc('session.create', { kind: 'direct', channel_ref: sessionChannelRef() });
+    const res = await rpc('session.resolve', { kind: 'direct', channel_ref: sessionChannelRef() });
     sessionId = res.id;
     persistSessionInUrl();
     sendBtn.disabled = false;

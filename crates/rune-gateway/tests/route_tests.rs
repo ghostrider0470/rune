@@ -8121,7 +8121,7 @@ async fn webchat_route_serves_embedded_chat_ui() {
     );
     assert!(body.contains("Rune WebChat"));
     assert!(body.contains("new WebSocket"));
-    assert!(body.contains("session.create"));
+    assert!(body.contains("session.resolve"));
     assert!(body.contains("session.send"));
     assert!(body.contains("assistant_reply"));
     assert!(body.contains("appendStreamingAssistant"));
@@ -8149,9 +8149,9 @@ async fn webchat_route_documents_multi_user_browser_sessions() {
     assert!(body.contains(
         "requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.'"
     ));
-    assert!(
-        body.contains("return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat';")
-    );
+    assert!(body.contains(
+        "return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat:anonymous';"
+    ));
     assert!(body.contains("channel_ref: sessionChannelRef()"));
 }
 #[tokio::test]
