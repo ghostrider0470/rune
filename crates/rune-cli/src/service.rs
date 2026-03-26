@@ -296,20 +296,81 @@ fn activate_systemd_service(
 
 fn activate_launchd_service(
     output_path: &Path,
-    _name: &str,
+    name: &str,
     enable: bool,
     start: bool,
 ) -> Result<()> {
-    if enable || start {
+    if !(enable || start) {
+        return Ok(());
+    }
+
+    let domain = launchd_domain();
+    let service = format!("{domain}/{name}");
+
+    if enable {
+        let _ = std::process::Command::new("launchctl")
+            .arg("bootout")
+            .arg(&service)
+            .status();
+
         run_command(
             std::process::Command::new("launchctl")
-                .arg("load")
-                .arg("-w")
+                .arg("bootstrap")
+                .arg(&domain)
                 .arg(output_path),
-            "launchctl load -w",
+            "launchctl bootstrap",
         )?;
+
+        run_command(
+            std::process::Command::new("launchctl")
+                .arg("enable")
+                .arg(&service),
+            "launchctl enable",
+        )?;
+
+        if start {
+            run_command(
+                std::process::Command::new("launchctl")
+                    .arg("kickstart")
+                    .arg("-k")
+                    .arg(&service),
+                "launchctl kickstart -k",
+            )?;
+        }
+        return Ok(());
     }
+
+    run_command(
+        std::process::Command::new("launchctl")
+            .arg("kickstart")
+            .arg("-k")
+            .arg(&service),
+        "launchctl kickstart -k",
+    )?;
     Ok(())
+}
+
+fn launchd_domain() -> String {
+    match std::env::var("UID") {
+        Ok(uid) if !uid.trim().is_empty() => format!("gui/{uid}"),
+        _ => "gui/$(id -u)".replace("$(id -u)", &nix_like_uid_fallback()),
+    }
+}
+
+fn nix_like_uid_fallback() -> String {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .filter(|uid| !uid.is_empty())
+        .unwrap_or_else(|| "0".to_string())
 }
 
 fn run_command(cmd: &mut std::process::Command, display: &str) -> Result<()> {

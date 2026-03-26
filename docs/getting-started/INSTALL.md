@@ -83,7 +83,7 @@ Check status on Linux:
 systemctl --user status rune-gateway
 ```
 
-On macOS, use `--target launchd --enable` instead. The command writes `~/Library/LaunchAgents/rune-gateway.plist`, adds stdout/stderr log files next to it, and loads it with `launchctl load -w`.
+On macOS, use `--target launchd --enable` instead. The command writes `~/Library/LaunchAgents/rune-gateway.plist`, adds stdout/stderr log files next to it, bootstraps it with `launchctl bootstrap`, enables it, and kickstarts it when `--start` is set.
 
 ## Verify startup
 

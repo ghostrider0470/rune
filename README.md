@@ -68,7 +68,7 @@ To generate and install a user service for unattended operation:
   --start
 ```
 
-On macOS, swap `--target launchd` to write a LaunchAgent plist instead. The install command now also wires stdout/stderr logs next to the plist for easier first-run debugging.
+On macOS, swap `--target launchd` to write a LaunchAgent plist instead. The install command also wires stdout/stderr logs next to the plist, bootstraps the agent with `launchctl bootstrap`, and kickstarts it when `--start` is passed.
 
 ### Zero-config Docker bring-up
 
