@@ -7678,3 +7678,29 @@ async fn webchat_route_serves_embedded_chat_ui() {
     assert!(body.contains("session.send"));
     assert!(body.contains("assistant_reply"));
 }
+
+#[tokio::test]
+async fn webchat_route_preserves_session_and_auth_query_params() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::get("/webchat?session_id=sess-123&api_key=test-key&session_token=browser-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("query.get('session_id')"));
+    assert!(body.contains("query.get('api_key')"));
+    assert!(body.contains("query.get('session_token')"));
+    assert!(body.contains("buildWsUrl"));
+    assert!(body.contains("wsQuery.set('api_key', authToken)"));
+    assert!(body.contains("wsQuery.set('session_token', sessionToken)"));
+    assert!(body.contains("next.set('session_id', sessionId)"));
+    assert!(body.contains("next.set('api_key', authToken)"));
+    assert!(body.contains("next.set('session_token', sessionToken)"));
+}

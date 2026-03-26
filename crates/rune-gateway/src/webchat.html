@@ -144,6 +144,16 @@
   let reqCounter = 0;
   const pendingRpc = {};
   const authToken = query.get('api_key') || '';
+  const sessionToken = query.get('session_token') || '';
+
+  function buildWsUrl() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsQuery = new URLSearchParams();
+    if (authToken) wsQuery.set('api_key', authToken);
+    if (sessionToken) wsQuery.set('session_token', sessionToken);
+    const suffix = wsQuery.toString();
+    return proto + '//' + location.host + '/ws' + (suffix ? '?' + suffix : '');
+  }
 
   function setStatus(connected, text) {
     statusEl.className = connected ? 'connected' : '';
@@ -175,6 +185,7 @@
     const next = new URLSearchParams(location.search);
     next.set('session_id', sessionId);
     if (authToken) next.set('api_key', authToken);
+    if (sessionToken) next.set('session_token', sessionToken);
     history.replaceState(null, '', location.pathname + '?' + next.toString());
   }
 
@@ -209,8 +220,7 @@
   }
 
   function connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    ws = new WebSocket(buildWsUrl());
 
     ws.onopen = async function() {
       setStatus(true, 'Connected');
