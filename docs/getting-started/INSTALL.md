@@ -30,7 +30,11 @@ cargo run --release --bin rune -- setup --path ~/.rune --api-key "$OPENAI_API_KE
 Or choose a different provider/model explicitly:
 
 ```bash
-cargo run --release --bin rune -- setup   --path ~/.rune   --provider anthropic   --model claude-3-7-sonnet-latest   --api-key "$ANTHROPIC_API_KEY"
+cargo run --release --bin rune -- setup \
+  --path ~/.rune \
+  --provider anthropic \
+  --model claude-3-7-sonnet-latest \
+  --api-key "$ANTHROPIC_API_KEY"
 ```
 
 What this does:
@@ -74,7 +78,13 @@ cargo build --release --bin rune-gateway --bin rune
 Generate a service definition with the built-in CLI:
 
 ```bash
-./target/release/rune service install   --target systemd   --name rune-gateway   --workdir "$PWD"   --config "$PWD/config.toml"   --enable   --start
+./target/release/rune service install \
+  --target systemd \
+  --name rune-gateway \
+  --workdir "$PWD" \
+  --config "$PWD/config.toml" \
+  --enable \
+  --start
 ```
 
 The command now prints the exact follow-up activation/status commands as part of its output.
@@ -87,6 +97,30 @@ journalctl --user -u rune-gateway -f
 ```
 
 On macOS, use `--target launchd --enable` instead. The command writes `~/Library/LaunchAgents/rune-gateway.plist`, adds stdout/stderr log files next to it, prints the exact `launchctl bootstrap|enable|kickstart|print` commands, bootstraps it with `launchctl bootstrap`, enables it, and kickstarts it when `--start` is set.
+
+
+## Zero-config Docker Compose
+
+For a fast local evaluation with persisted state and no manual config, use the bundled Compose file:
+
+```bash
+docker compose -f docker-compose.zero-config.yml up --build -d
+```
+
+This starts Rune on `http://127.0.0.1:8787/dashboard` and persists state in the `rune-data` volume.
+
+Useful follow-ups:
+
+```bash
+docker compose -f docker-compose.zero-config.yml logs -f
+docker compose -f docker-compose.zero-config.yml down
+```
+
+To point the container at a real provider instead of local Ollama auto-detect, pass env vars through Compose, for example:
+
+```bash
+OPENAI_API_KEY=... docker compose -f docker-compose.zero-config.yml up --build -d
+```
 
 ## Verify startup
 
