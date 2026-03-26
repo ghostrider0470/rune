@@ -54,11 +54,16 @@ impl HttpTransport {
     }
 
     /// Send a JSON-RPC request over HTTP POST and return the response.
+    ///
+    /// Handles both plain JSON responses and SSE (Server-Sent Events) responses.
+    /// SSE responses use `text/event-stream` content type and send data as
+    /// `event: message\ndata: {...}\n\n` formatted lines.
     pub async fn send(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse, McpError> {
         let resp = self
             .client
             .post(&self.url)
             .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
             .json(&request)
             .send()
             .await
@@ -70,15 +75,64 @@ impl HttpTransport {
             return Err(McpError::transport(format!("HTTP {status}: {body}",)));
         }
 
+        let content_type = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+
         let body = resp
             .text()
             .await
             .map_err(|e| McpError::transport(format!("failed to read response body: {e}")))?;
 
+        // SSE response: extract JSON from "data:" lines
+        if content_type.contains("text/event-stream") {
+            return self.parse_sse_response(&body);
+        }
+
         serde_json::from_str::<JsonRpcResponse>(&body).map_err(|e| {
+            // Check if it looks like SSE even without the content-type header
+            if body.contains("event:") && body.contains("data:") {
+                return self.parse_sse_response(&body).unwrap_err();
+            }
             McpError::protocol(format!(
                 "failed to parse JSON-RPC response: {e} (body: {})",
                 &body[..body.len().min(200)]
+            ))
+        })
+    }
+
+    /// Parse a Server-Sent Events response body to extract the JSON-RPC response.
+    ///
+    /// SSE format:
+    /// ```text
+    /// event: message
+    /// data: {"jsonrpc":"2.0","id":1,"result":{...}}
+    /// ```
+    fn parse_sse_response(&self, body: &str) -> Result<JsonRpcResponse, McpError> {
+        // Collect all "data:" lines and join them (SSE can split data across lines)
+        let mut data_parts = Vec::new();
+        for line in body.lines() {
+            let line = line.trim();
+            if let Some(data) = line.strip_prefix("data:") {
+                data_parts.push(data.trim());
+            }
+        }
+
+        if data_parts.is_empty() {
+            return Err(McpError::protocol(format!(
+                "SSE response contains no data lines (body: {})",
+                &body[..body.len().min(200)]
+            )));
+        }
+
+        let json_str = data_parts.join("");
+        serde_json::from_str::<JsonRpcResponse>(&json_str).map_err(|e| {
+            McpError::protocol(format!(
+                "failed to parse SSE JSON-RPC data: {e} (data: {})",
+                &json_str[..json_str.len().min(200)]
             ))
         })
     }
