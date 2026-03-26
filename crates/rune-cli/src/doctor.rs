@@ -494,10 +494,18 @@ async fn check_models_config(config: &AppConfig) -> Vec<CheckResult> {
             name: "models.providers".into(),
             category: "models".into(),
             status: CheckStatus::Warn,
-            message:
-                "No model providers configured; runtime will be limited to fallback/demo behavior"
-                    .into(),
-            hint: Some("Configure Azure OpenAI/OpenAI-compatible providers for parity work".into()),
+            message: config
+                .models
+                .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+                .map(|base| format!("No explicit model providers configured; zero-config Ollama auto-detect is available at {base}"))
+                .unwrap_or_else(|| "No model providers configured; runtime will be limited to fallback/demo behavior".into()),
+            hint: Some(
+                config
+                    .models
+                    .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+                    .map(|_| "Start Ollama locally or configure Azure/OpenAI-compatible providers for full parity".into())
+                    .unwrap_or_else(|| "Configure Azure OpenAI/OpenAI-compatible providers for parity work".into()),
+            ),
         });
         return results;
     }

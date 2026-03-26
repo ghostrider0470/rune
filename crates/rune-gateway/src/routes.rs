@@ -80,7 +80,7 @@ pub struct StatusResponse {
     pub bind: String,
     pub auth_enabled: bool,
     pub configured_model_providers: usize,
-    pub active_model_backend: &'static str,
+    pub active_model_backend: String,
     pub registered_tools: usize,
     pub session_count: usize,
     pub cron_job_count: usize,
@@ -152,9 +152,13 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
         auth_enabled: config.gateway.auth_token.is_some(),
         configured_model_providers: config.models.providers.len(),
         active_model_backend: if config.models.providers.is_empty() {
-            "demo-echo"
+            config
+                .models
+                .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+                .map(|_| "zero-config-ollama".to_string())
+                .unwrap_or_else(|| "demo-echo".to_string())
         } else {
-            "configured-provider"
+            "configured-provider".to_string()
         },
         registered_tools: state.capabilities.tool_count,
         session_count: sessions.len(),
@@ -424,8 +428,11 @@ pub async fn dashboard_diagnostics(
         items.push(DashboardDiagnosticItem {
             level: "warn",
             source: "models",
-            message: "No model providers configured; gateway is using the demo echo backend."
-                .to_string(),
+            message: config
+                .models
+                .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+                .map(|base| format!("No explicit model providers configured; zero-config Ollama auto-detect is active ({base})."))
+                .unwrap_or_else(|| "No model providers configured; gateway is using the demo echo backend.".to_string()),
             observed_at: now.clone(),
         });
     }
@@ -4122,7 +4129,11 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         message: if provider_ok {
             format!("{} provider(s) configured", config.models.providers.len())
         } else {
-            "no model providers configured; using demo echo backend".to_string()
+            config
+                .models
+                .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+                .map(|base| format!("no explicit model providers configured; zero-config Ollama available at {base}"))
+                .unwrap_or_else(|| "no model providers configured; using demo echo backend".to_string())
         },
     });
 
@@ -4256,7 +4267,11 @@ fn build_configure_items(
         message: if provider_count > 0 {
             format!("{provider_count} provider(s) configured")
         } else {
-            "no model providers; using demo echo backend".into()
+            config
+                .models
+                .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+                .map(|base| format!("no explicit model providers; zero-config Ollama available at {base}"))
+                .unwrap_or_else(|| "no model providers; using demo echo backend".into())
         },
     });
 
