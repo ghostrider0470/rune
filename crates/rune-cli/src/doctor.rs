@@ -108,11 +108,14 @@ async fn check_paths(config: &AppConfig) -> Vec<CheckResult> {
         ("paths.sessions_dir", &config.paths.sessions_dir, true),
         ("paths.memory_dir", &config.paths.memory_dir, true),
         ("paths.media_dir", &config.paths.media_dir, true),
-        ("paths.skills_dir", &config.paths.skills_dir, true),
+        ("paths.spells_dir", &config.paths.spells_dir, true),
         ("paths.logs_dir", &config.paths.logs_dir, true),
         ("paths.backups_dir", &config.paths.backups_dir, true),
         ("paths.config_dir", &config.paths.config_dir, true),
         ("paths.secrets_dir", &config.paths.secrets_dir, true),
+        ("paths.workspace_dir", &config.paths.workspace_dir, true),
+        ("paths.cache_dir", &config.paths.cache_dir, true),
+        ("paths.data_dir", &config.paths.data_dir, true),
     ] {
         results.push(check_single_path(
             name,
@@ -984,11 +987,15 @@ mod tests {
         config.paths.sessions_dir = root.join("data/sessions");
         config.paths.memory_dir = root.join("data/memory");
         config.paths.media_dir = root.join("data/media");
+        config.paths.spells_dir = root.join("data/spells");
         config.paths.skills_dir = root.join("data/skills");
         config.paths.logs_dir = root.join("data/logs");
         config.paths.backups_dir = root.join("data/backups");
         config.paths.config_dir = root.join("config");
         config.paths.secrets_dir = root.join("secrets");
+        config.paths.workspace_dir = root.join("data/workspace");
+        config.paths.cache_dir = root.join("data/cache");
+        config.paths.data_dir = root.join("data/data");
         config
     }
 
@@ -998,11 +1005,15 @@ mod tests {
             "data/sessions",
             "data/memory",
             "data/media",
+            "data/spells",
             "data/skills",
             "data/logs",
             "data/backups",
             "config",
             "secrets",
+            "data/workspace",
+            "data/cache",
+            "data/data",
         ] {
             tokio::fs::create_dir_all(root.join(rel)).await.unwrap();
         }

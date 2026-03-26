@@ -2066,6 +2066,12 @@ async fn enabled_skills_are_injected_into_system_prompt() {
             model: None,
             allowed_tools: None,
             user_invocable: false,
+            namespace: None,
+            version: None,
+            kind: Default::default(),
+            requires: vec![],
+            tags: vec![],
+            triggers: vec![],
         })
         .await;
     skill_registry
@@ -2080,6 +2086,12 @@ async fn enabled_skills_are_injected_into_system_prompt() {
             model: None,
             allowed_tools: None,
             user_invocable: false,
+            namespace: None,
+            version: None,
+            kind: Default::default(),
+            requires: vec![],
+            tags: vec![],
+            triggers: vec![],
         })
         .await;
 
@@ -2098,7 +2110,7 @@ async fn enabled_skills_are_injected_into_system_prompt() {
 
     let requests = model_handle.requests().await;
     let system = requests[0].messages[0].content.clone().unwrap();
-    assert!(system.contains("## Available Skills"));
+    assert!(system.contains("## Available Spells"));
     assert!(system.contains("skill-alpha"));
     assert!(system.contains("Alpha description"));
     assert!(system.contains("/tmp/skill-alpha"));

@@ -148,12 +148,15 @@ impl AppConfig {
             ("sessions_dir", &self.paths.sessions_dir),
             ("memory_dir", &self.paths.memory_dir),
             ("media_dir", &self.paths.media_dir),
-            ("skills_dir", &self.paths.skills_dir),
+            ("spells_dir", &self.paths.spells_dir),
             ("plugins_dir", &self.paths.plugins_dir),
             ("logs_dir", &self.paths.logs_dir),
             ("backups_dir", &self.paths.backups_dir),
             ("config_dir", &self.paths.config_dir),
             ("secrets_dir", &self.paths.secrets_dir),
+            ("workspace_dir", &self.paths.workspace_dir),
+            ("cache_dir", &self.paths.cache_dir),
+            ("data_dir", &self.paths.data_dir),
         ];
         let mut errors = Vec::new();
         for (name, path) in &dirs {
@@ -282,12 +285,16 @@ fn standalone_paths_root(home: &Path) -> PathsConfig {
         sessions_dir: root.join("sessions"),
         memory_dir: root.join("memory"),
         media_dir: root.join("media"),
+        spells_dir: root.join("spells"),
         skills_dir: root.join("skills"),
         plugins_dir: root.join("plugins"),
         logs_dir: root.join("logs"),
         backups_dir: root.join("backups"),
         config_dir: root.join("config"),
         secrets_dir: root.join("secrets"),
+        workspace_dir: root.join("workspace"),
+        cache_dir: root.join("cache"),
+        data_dir: root.join("data"),
     }
 }
 
@@ -1218,12 +1225,25 @@ pub struct PathsConfig {
     pub sessions_dir: PathBuf,
     pub memory_dir: PathBuf,
     pub media_dir: PathBuf,
+    /// Spells directory (renamed from `skills_dir` in #299).
+    pub spells_dir: PathBuf,
+    /// Backward-compat alias — deserialized from `skills_dir` in legacy configs.
+    #[serde(alias = "skills_dir")]
     pub skills_dir: PathBuf,
     pub plugins_dir: PathBuf,
     pub logs_dir: PathBuf,
     pub backups_dir: PathBuf,
     pub config_dir: PathBuf,
     pub secrets_dir: PathBuf,
+    /// Workspace scratch directory (#299).
+    #[serde(default)]
+    pub workspace_dir: PathBuf,
+    /// Cache directory (#299).
+    #[serde(default)]
+    pub cache_dir: PathBuf,
+    /// Persistent data directory (#299).
+    #[serde(default)]
+    pub data_dir: PathBuf,
 }
 
 impl Default for PathsConfig {
@@ -1233,12 +1253,16 @@ impl Default for PathsConfig {
             sessions_dir: PathBuf::from("/data/sessions"),
             memory_dir: PathBuf::from("/data/memory"),
             media_dir: PathBuf::from("/data/media"),
+            spells_dir: PathBuf::from("/data/spells"),
             skills_dir: PathBuf::from("/data/skills"),
             plugins_dir: PathBuf::from("/data/plugins"),
             logs_dir: PathBuf::from("/data/logs"),
             backups_dir: PathBuf::from("/data/backups"),
             config_dir: PathBuf::from("/config"),
             secrets_dir: PathBuf::from("/secrets"),
+            workspace_dir: PathBuf::from("/data/workspace"),
+            cache_dir: PathBuf::from("/data/cache"),
+            data_dir: PathBuf::from("/data/data"),
         }
     }
 }
@@ -1279,12 +1303,16 @@ impl PathsConfig {
         fix!(sessions_dir);
         fix!(memory_dir);
         fix!(media_dir);
+        fix!(spells_dir);
         fix!(skills_dir);
         fix!(plugins_dir);
         fix!(logs_dir);
         fix!(backups_dir);
         fix!(config_dir);
         fix!(secrets_dir);
+        fix!(workspace_dir);
+        fix!(cache_dir);
+        fix!(data_dir);
     }
 
     #[must_use]
@@ -3193,12 +3221,16 @@ models = ["gpt-5.4", "gpt-image-1"]
                 sessions_dir: base.join("sessions"),
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
+                spells_dir: base.join("spells"),
                 skills_dir: base.join("skills"),
                 plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
                 secrets_dir: base.join("secrets"),
+                workspace_dir: base.join("workspace"),
+                cache_dir: base.join("cache"),
+                data_dir: base.join("data"),
             },
             ..Default::default()
         };
@@ -3210,12 +3242,15 @@ models = ["gpt-5.4", "gpt-image-1"]
         assert!(base.join("sessions").is_dir());
         assert!(base.join("memory").is_dir());
         assert!(base.join("media").is_dir());
-        assert!(base.join("skills").is_dir());
+        assert!(base.join("spells").is_dir());
         assert!(base.join("plugins").is_dir());
         assert!(base.join("logs").is_dir());
         assert!(base.join("backups").is_dir());
         assert!(base.join("config").is_dir());
         assert!(base.join("secrets").is_dir());
+        assert!(base.join("workspace").is_dir());
+        assert!(base.join("cache").is_dir());
+        assert!(base.join("data").is_dir());
     }
 
     #[test]
@@ -3229,12 +3264,16 @@ models = ["gpt-5.4", "gpt-image-1"]
                 sessions_dir: base.join("sessions"),
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
+                spells_dir: base.join("spells"),
                 skills_dir: base.join("skills"),
                 plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
                 secrets_dir: base.join("secrets"),
+                workspace_dir: base.join("workspace"),
+                cache_dir: base.join("cache"),
+                data_dir: base.join("data"),
             },
             ..Default::default()
         };
@@ -3256,12 +3295,16 @@ models = ["gpt-5.4", "gpt-image-1"]
                 sessions_dir: base.join("sessions"),
                 memory_dir: base.join("memory"),
                 media_dir: base.join("media"),
+                spells_dir: base.join("spells"),
                 skills_dir: base.join("skills"),
                 plugins_dir: base.join("plugins"),
                 logs_dir: base.join("logs"),
                 backups_dir: base.join("backups"),
                 config_dir: base.join("config"),
                 secrets_dir: base.join("secrets"),
+                workspace_dir: base.join("workspace"),
+                cache_dir: base.join("cache"),
+                data_dir: base.join("data"),
             },
             ..Default::default()
         };
