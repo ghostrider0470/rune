@@ -8665,7 +8665,9 @@ async fn webchat_route_lists_browser_sessions_for_multi_user_switching() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
     assert!(body.contains("const sessionListEl = document.getElementById('session-list')"));
-    assert!(body.contains("rpc('session.list', { limit: 50, channel: sessionChannelRef() })"));
+    assert!(body.contains(
+        "rpc('session.list', { limit: 50, channel: sessionChannelRef(), include_metadata: true })"
+    ));
     assert!(body.contains("async function openSession(nextSessionId, fromLink)"));
     assert!(body.contains("Opened session from browser history."));
     assert!(body.contains("Switched session."));
@@ -8719,6 +8721,30 @@ async fn webchat_route_mentions_authorization_header_auth() {
     let body = body_text(response).await;
     assert!(body.contains("authHeaderToken"));
     assert!(body.contains("Bearer"));
+    assert!(body.contains("const sessionTokenKey = 'rune.webchat.session_auth_tokens'"));
+    assert!(body.contains("function authTokenForSession(targetSessionId)"));
+    assert!(body.contains("Using per-session browser token so each thread can be reopened safely without a shared gateway key."));
+}
+
+#[tokio::test]
+async fn webchat_route_mentions_session_auth_token_storage() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(Request::get("/webchat").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("window.localStorage.getItem(sessionTokenKey)"));
+    assert!(body.contains(
+        "window.localStorage.setItem(sessionTokenKey, JSON.stringify(sessionAuthTokens))"
+    ));
+    assert!(body.contains(
+        "const sessionApiKey = authTokenForSession((params || {}).session_id || sessionId)"
+    ));
+    assert!(body.contains("metadata: { browser_auth_mode: authLabel() }"));
 }
 
 #[tokio::test]

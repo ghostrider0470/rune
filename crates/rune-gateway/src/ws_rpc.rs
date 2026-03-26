@@ -157,6 +157,11 @@ impl RpcDispatcher {
             .and_then(|v| v.as_u64())
             .map(|minutes| chrono::Utc::now() - chrono::Duration::minutes(minutes as i64));
 
+        let include_metadata = params
+            .get("include_metadata")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         let items: Vec<Value> = rows
             .into_iter()
             .filter(|row| {
@@ -170,13 +175,17 @@ impl RpcDispatcher {
                     .unwrap_or(true)
             })
             .map(|row| {
-                json!({
+                let mut item = json!({
                     "id": row.id.to_string(),
                     "kind": row.kind,
                     "status": row.status,
                     "channel": row.channel_ref,
                     "created_at": row.created_at.to_rfc3339(),
-                })
+                });
+                if include_metadata {
+                    item["metadata"] = row.metadata;
+                }
+                item
             })
             .collect();
 

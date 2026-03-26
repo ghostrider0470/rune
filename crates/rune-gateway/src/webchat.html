@@ -104,6 +104,16 @@
     font-size: 11px;
     color: var(--text-muted);
   }
+  #auth-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text-muted);
+    vertical-align: middle;
+  }
   #main {
     min-width: 0;
     display: flex;
@@ -209,7 +219,7 @@
 </header>
 <div id="layout">
   <aside id="sidebar">
-    <div id="sidebar-header">Browser sessions</div>
+    <div id="sidebar-header">Browser sessions <span id="auth-badge"></span></div>
     <div id="session-list"></div>
   </aside>
   <main id="main">
@@ -230,6 +240,7 @@
   const statusText = document.getElementById('status-text');
   const newSessionBtn = document.getElementById('new-session-btn');
   const sessionListEl = document.getElementById('session-list');
+  const authBadgeEl = document.getElementById('auth-badge');
   const query = new URLSearchParams(location.search);
 
   let ws = null;
@@ -252,6 +263,55 @@
   let browserSessionToken = sessionToken || query.get('browser_session') || window.sessionStorage.getItem(browserSessionKey) || '';
 
   let knownSessions = [];
+  const sessionTokenKey = 'rune.webchat.session_auth_tokens';
+  let sessionAuthTokens = loadSessionAuthTokens();
+
+
+  function loadSessionAuthTokens() {
+    try {
+      const raw = window.localStorage.getItem(sessionTokenKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function persistSessionAuthTokens() {
+    try {
+      window.localStorage.setItem(sessionTokenKey, JSON.stringify(sessionAuthTokens));
+    } catch (_) {
+    }
+  }
+
+  function authLabel() {
+    if (authToken) return 'gateway auth';
+    return 'session auth';
+  }
+
+  function authTokenForSession(targetSessionId) {
+    if (authToken) return authToken;
+    if (!targetSessionId) return '';
+    return sessionAuthTokens[targetSessionId] || '';
+  }
+
+  function ensureSessionToken(targetSessionId, rotate) {
+    if (authToken || !targetSessionId) return '';
+    if (!rotate && sessionAuthTokens[targetSessionId]) return sessionAuthTokens[targetSessionId];
+    const token = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+    sessionAuthTokens[targetSessionId] = token;
+    persistSessionAuthTokens();
+    return token;
+  }
+
+  function updateAuthBadge() {
+    if (!authBadgeEl) return;
+    authBadgeEl.textContent = authLabel();
+    authBadgeEl.title = authToken
+      ? 'Using shared gateway API key from the URL.'
+      : 'Using per-session browser token so each thread can be reopened safely without a shared gateway key.';
+  }
 
   function formatRelative(iso) {
     if (!iso) return 'unknown';
@@ -286,7 +346,7 @@
       button.className = 'session-item' + (item.id === sessionId ? ' active' : '');
       button.innerHTML = '<div class="session-item-title">' + (item.id === sessionId ? 'Current session' : 'Session') + '</div>' +
         '<div class="session-item-meta">' +
-        (item.channel || 'webchat') + ' • ' + (item.status || 'unknown') + ' • ' + formatRelative(item.created_at) +
+        (item.channel || 'webchat') + ' • ' + (item.status || 'unknown') + ' • ' + (((item.metadata || {}).browser_auth_mode) || authLabel()) + ' • ' + formatRelative(item.created_at) +
         '</div>';
       button.addEventListener('click', function() {
         if (item.id === sessionId) return;
@@ -299,7 +359,7 @@
   async function refreshSessionList() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try {
-      const sessions = await rpc('session.list', { limit: 50, channel: sessionChannelRef() });
+      const sessions = await rpc('session.list', { limit: 50, channel: sessionChannelRef(), include_metadata: true });
       knownSessions = Array.isArray(sessions) ? sessions : [];
       renderSessionList();
     } catch (_) {
@@ -316,6 +376,7 @@
       ws.send(JSON.stringify({ type: 'req', id: 'unsub-' + String(++reqCounter), method: 'unsubscribe', params: { session_id: previousSessionId } }));
     }
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
+    updateAuthBadge();
     appendMsg('system', fromLink ? 'Opened session from browser history.' : 'Switched session.');
     const existing = await rpc('session.transcript', { session_id: sessionId });
     if (Array.isArray(existing)) existing.forEach(appendTranscriptEntry);
@@ -504,7 +565,8 @@
       const id = String(++reqCounter);
       pendingRpc[id] = { resolve, reject };
       const payload = Object.assign({}, params || {});
-      if (authToken && payload.api_key === undefined) payload.api_key = authToken;
+      const sessionApiKey = authTokenForSession((params || {}).session_id || sessionId);
+      if (sessionApiKey && payload.api_key === undefined) payload.api_key = sessionApiKey;
       ws.send(JSON.stringify({ type: 'req', id, method, params: payload }));
     });
   }
@@ -518,11 +580,13 @@
       return;
     }
 
-    const res = await rpc('session.resolve', { kind: 'direct', channel_ref: sessionChannelRef() });
+    const res = await rpc('session.resolve', { kind: 'direct', channel_ref: sessionChannelRef(), metadata: { browser_auth_mode: authLabel() } });
     sessionId = res.id;
+    ensureSessionToken(sessionId, false);
     persistSessionInUrl();
     sendBtn.disabled = false;
     ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
+    updateAuthBadge();
     appendMsg('system', 'Session started.');
     await refreshSessionList();
   }
@@ -533,7 +597,8 @@
       if (ws && ws.readyState === WebSocket.OPEN) return;
       if (!sessionId) return;
       try {
-        const response = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/transcript' + (authToken ? ('?api_key=' + encodeURIComponent(authToken)) : ''));
+        const transcriptToken = authTokenForSession(sessionId);
+        const response = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/transcript' + (transcriptToken ? ('?api_key=' + encodeURIComponent(transcriptToken)) : ''));
         if (!response.ok) return;
         const existing = await response.json();
         resetTranscript();
@@ -557,7 +622,8 @@
     setStatus(false, 'Disconnected. Reconnecting in ' + Math.ceil(delay / 1000) + 's...');
     reconnectTimer = window.setTimeout(function() {
       reconnectTimer = null;
-      connect();
+      updateAuthBadge();
+  connect();
     }, delay);
   }
 
@@ -695,6 +761,7 @@
   });
   msgInput.addEventListener('input', autoResize);
 
+  updateAuthBadge();
   connect();
 })();
 </script>
