@@ -641,10 +641,8 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     let repo_display = repo_root.display().to_string();
     let exe_display = exe.display().to_string();
 
-    println!(
-        "Rune update wizard
-"
-    );
+    println!("Rune update wizard
+");
     println!("Fresh install:");
     println!("  curl -fsSL {install_script_url} | sh");
     println!();
@@ -652,6 +650,13 @@ fn print_update_wizard(install_script_url: &str, branch: &str) -> Result<()> {
     println!("  git pull --ff-only origin {branch}");
     println!("  cargo build --release --bin rune --bin rune-gateway");
     println!("  {exe_display} update status");
+    println!();
+    println!("Zero-config service install:");
+    println!(r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>" --install-service --service-target systemd"#);
+    println!("  # macOS: swap --service-target launchd");
+    println!();
+    println!("Zero-config Docker Compose:");
+    println!("  docker compose -f docker-compose.zero-config.yml up --build -d");
     println!();
     println!("Then re-run first-run setup if needed:");
     println!(r#"  rune setup --path ~/.rune --api-key "<YOUR_API_KEY>""#);
@@ -3216,6 +3221,26 @@ mod tests {
     use super::*;
     use clap::Parser;
     use tempfile::TempDir;
+
+
+    #[test]
+    fn update_wizard_mentions_service_install_and_docker_quickstart() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let cwd = std::env::current_dir().unwrap();
+        let stdout = std::process::Command::new("cargo")
+            .args(["run", "--quiet", "-p", "rune-cli-app", "--bin", "rune", "--", "update", "wizard"])
+            .current_dir(cwd)
+            .env_remove("RUNE_CONFIG")
+            .output()
+            .expect("update wizard should run");
+        assert!(stdout.status.success(), "stderr: {}", String::from_utf8_lossy(&stdout.stderr));
+        let stdout = String::from_utf8_lossy(&stdout.stdout);
+        assert!(stdout.contains("--install-service --service-target systemd"));
+        assert!(stdout.contains("--service-target launchd"));
+        assert!(stdout.contains("docker compose -f docker-compose.zero-config.yml up --build -d"));
+    }
 
     #[test]
     fn write_wizard_config_uses_env_var_for_openai_api_key() {
