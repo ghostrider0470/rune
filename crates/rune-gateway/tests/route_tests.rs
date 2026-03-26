@@ -8120,6 +8120,9 @@ async fn webchat_route_serves_embedded_chat_ui() {
     assert!(body.contains("session.create"));
     assert!(body.contains("session.send"));
     assert!(body.contains("assistant_reply"));
+    assert!(body.contains("appendStreamingAssistant"));
+    assert!(body.contains("turn_completed"));
+    assert!(body.contains("clearPendingAssistant"));
 }
 
 #[tokio::test]
@@ -8139,8 +8142,12 @@ async fn webchat_route_documents_multi_user_browser_sessions() {
     assert!(body.contains("history.replaceState"));
     assert!(body.contains("sessionToken"));
     assert!(body.contains("const requestedSessionId = query.get('session_id') || ''"));
-    assert!(body.contains("requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.'"));
-    assert!(body.contains("return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat';"));
+    assert!(body.contains(
+        "requestedSessionId ? 'Resumed session from link.' : 'Resumed this browser session.'"
+    ));
+    assert!(
+        body.contains("return browserSessionToken ? 'webchat:' + browserSessionToken : 'webchat';")
+    );
     assert!(body.contains("channel_ref: sessionChannelRef()"));
 }
 #[tokio::test]
@@ -8170,7 +8177,6 @@ async fn webchat_route_preserves_session_and_auth_query_params() {
     assert!(body.contains("next.set('api_key', authToken)"));
     assert!(body.contains("next.set('session_token', browserSessionToken)"));
 }
-
 
 #[tokio::test]
 async fn webchat_route_lists_browser_sessions_for_multi_user_switching() {

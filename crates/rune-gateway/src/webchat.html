@@ -238,6 +238,7 @@
   let sessionId = requestedSessionId || window.sessionStorage.getItem(sessionStorageKey);
   let reqCounter = 0;
   const pendingRpc = {};
+  let pendingAssistantMsg = null;
   const authToken = query.get('api_key') || '';
   const authHeaderToken = query.get('auth') || authToken;
   const sessionToken = query.get('session_token') || '';
@@ -338,6 +339,23 @@
     transcript.scrollTop = transcript.scrollHeight;
   }
 
+  function appendStreamingAssistant(text) {
+    const value = text == null ? '' : String(text);
+    if (pendingAssistantMsg) {
+      pendingAssistantMsg.textContent = value;
+    } else {
+      pendingAssistantMsg = document.createElement('div');
+      pendingAssistantMsg.className = 'msg assistant';
+      pendingAssistantMsg.textContent = value;
+      transcript.appendChild(pendingAssistantMsg);
+    }
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  function clearPendingAssistant() {
+    pendingAssistantMsg = null;
+  }
+
   function appendTranscriptEntry(entry) {
     if (!entry || !entry.kind || !entry.payload) return;
     if (entry.kind === 'user_message') {
@@ -370,6 +388,7 @@
 
   function resetTranscript() {
     transcript.innerHTML = '';
+    clearPendingAssistant();
   }
 
   async function startFreshSession() {
@@ -464,11 +483,20 @@
   function handleEvent(frame) {
     const p = frame.payload || {};
     const kind = frame.kind || p.kind || '';
-    if (kind === 'turn_complete' || kind === 'turn_finished') {
-      const text = p.assistant_text || p.response || p.text || '';
-      if (text) appendMsg('assistant', text);
-    } else if (kind === 'transcript_append' && p.role === 'assistant') {
-      if (p.content) appendMsg('assistant', p.content);
+    if (kind === 'turn_complete' || kind === 'turn_finished' || kind === 'turn_completed') {
+      const text = p.assistant_text || p.assistant_reply || p.response || p.text || '';
+      if (text) {
+        appendStreamingAssistant(text);
+      }
+      clearPendingAssistant();
+    } else if (kind === 'transcript_append') {
+      const role = p.role || p.kind || '';
+      const content = p.content || p.text || '';
+      if (role === 'assistant') {
+        if (content) appendStreamingAssistant(content);
+      } else if (role === 'user' && content) {
+        appendMsg('user', content);
+      }
     }
   }
 
@@ -480,10 +508,12 @@
     appendMsg('user', text);
     sendBtn.disabled = true;
     try {
+      clearPendingAssistant();
       const res = await rpc('session.send', { session_id: sessionId, content: text });
       const inlineReply = res && (res.assistant_reply || res.assistant_text || res.response || res.text);
       if (inlineReply) {
-        appendMsg('assistant', inlineReply);
+        appendStreamingAssistant(inlineReply);
+        clearPendingAssistant();
       }
     } catch(e) {
       appendMsg('system', 'Error: ' + (e.message || JSON.stringify(e)));
