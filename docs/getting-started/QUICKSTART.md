@@ -42,6 +42,17 @@ cargo build --release --bin rune --bin rune-gateway
 cargo run --release --bin rune -- setup --path ~/.rune --api-key "$OPENAI_API_KEY"
 ```
 
+
+## Option C — zero-config Docker
+
+```bash
+git clone --depth 1 --branch main https://github.com/ghostrider0470/rune ~/Development/rune
+cd ~/Development/rune
+docker compose up --build -d
+```
+
+This uses the bundled zero-config Compose profile with durable Docker volumes mapped to Rune's `/data`, `/config`, and `/secrets` paths, so container restarts keep the same local SQLite database, sessions, memory, logs, generated config, and secret material. Fill `config.example.env` into `.env` first if you want OpenAI/Anthropic credentials injected on first boot.
+
 ## Manual fallback
 
 If you want to wire config yourself:

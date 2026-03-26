@@ -13,7 +13,9 @@ use std::collections::HashMap;
 const CHAT_HTML: &str = include_str!("webchat.html");
 
 /// Redirect legacy `/chat` traffic into the embedded WebChat entrypoint.
-pub async fn legacy_chat_redirect(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+pub async fn legacy_chat_redirect(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
     let mut target = "/webchat".to_string();
     let forwarded = ["api_key", "session_token", "session_id"];
     let query = forwarded

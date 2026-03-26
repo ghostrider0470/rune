@@ -83,7 +83,7 @@ cd ~/Development/rune
 docker compose up --build -d
 ```
 
-The default Compose file now ships the zero-config path: it mounts durable state under the named `rune-data`, `rune-config`, and `rune-secrets` volumes, explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file (see `config.example.env`), and exposes chat on `http://127.0.0.1:8787/webchat` (`/chat` redirects into WebChat and `/dashboard` is also available).
+The default Compose file now ships the zero-config path: it mounts durable state under the named `rune-data`, `rune-config`, and `rune-secrets` volumes, maps them onto Rune's Docker-first `/data`, `/config`, and `/secrets` paths, explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file (see `config.example.env`), and exposes chat on `http://127.0.0.1:8787/webchat` (`/chat` redirects into WebChat and `/dashboard` is also available).
 
 Next docs from there:
 - [`docs/getting-started/QUICKSTART.md`](docs/getting-started/QUICKSTART.md)

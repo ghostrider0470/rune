@@ -8077,9 +8077,11 @@ async fn chat_route_redirect_preserves_webchat_auth_query() {
 
     let response = app
         .oneshot(
-            Request::get("/chat?api_key=test-key&session_token=browser-token&session_id=session-123")
-                .body(Body::empty())
-                .unwrap(),
+            Request::get(
+                "/chat?api_key=test-key&session_token=browser-token&session_id=session-123",
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();

@@ -109,7 +109,7 @@ cd ~/Development/rune
 docker compose up --build -d
 ```
 
-This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` redirects into WebChat) and persists state/config/secrets in the named `rune-data`, `rune-config`, and `rune-secrets` volumes. The default `docker-compose.yml` now ships the zero-config profile directly: it explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file, and still allows shell-exported `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` overrides when provided.
+This starts Rune on `http://127.0.0.1:8787/webchat` (with `/dashboard` also available; `/chat` redirects into WebChat) and persists state/config/secrets in the named `rune-data`, `rune-config`, and `rune-secrets` volumes. The mounted paths line up with Rune's Docker-first layout: `/data/*` holds SQLite/session/media/log state, `/config` holds generated config, and `/secrets` holds provider credentials or future secret-store material. The default `docker-compose.yml` now ships the zero-config profile directly: it explicitly enables the browser UI + WebChat, reads optional provider credentials from a local `.env` file, and still allows shell-exported `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `OLLAMA_HOST` overrides when provided.
 
 Useful follow-ups:
 
@@ -118,7 +118,7 @@ docker compose logs -f
 docker compose down
 ```
 
-To point the container at a real provider instead of local Ollama auto-detect, either export env vars inline or copy `config.example.env` to `.env` and fill it in:
+To point the container at a real provider instead of local Ollama auto-detect, either export env vars inline or copy `config.example.env` to `.env` and fill it in. The `.env` file only seeds container environment variables; durable runtime state still lives in the mounted Docker volumes so restarts and image rebuilds keep the same SQLite DB, sessions, memory, logs, config, and secrets:
 
 ```bash
 cp config.example.env .env
