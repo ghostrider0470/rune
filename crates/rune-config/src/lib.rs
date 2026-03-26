@@ -47,6 +47,8 @@ pub struct AppConfig {
     pub security: SecurityConfig,
     #[serde(default)]
     pub plugins: PluginsConfig,
+    #[serde(default)]
+    pub comms: CommsConfig,
 }
 
 impl AppConfig {
@@ -605,6 +607,33 @@ fn default_plugin_scan_dirs() -> Vec<String> {
 
 fn default_plugin_scan_interval() -> u64 {
     300
+}
+
+/// Inter-agent communication via filesystem mailbox.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub comms_dir: Option<String>,
+    #[serde(default = "default_comms_agent_id")]
+    pub agent_id: String,
+    #[serde(default = "default_comms_peer_id")]
+    pub peer_id: String,
+}
+
+fn default_comms_agent_id() -> String { "rune".to_string() }
+fn default_comms_peer_id() -> String { "horizon-ai".to_string() }
+
+impl Default for CommsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            comms_dir: None,
+            agent_id: default_comms_agent_id(),
+            peer_id: default_comms_peer_id(),
+        }
+    }
 }
 
 /// MCP server configuration entry.
