@@ -7,6 +7,8 @@ import type {
   ActionResponse,
   ReminderResponse,
   ReminderAddRequest,
+  TtsStatusResponse,
+  SttStatusResponse,
 } from "@/lib/api-types";
 
 export function useHealth() {
@@ -121,5 +123,46 @@ export function useUpdateConfig() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["config"] });
     },
+  });
+}
+
+
+export function useTtsStatus() {
+  return useQuery({
+    queryKey: ["tts", "status"],
+    queryFn: () => api.get<TtsStatusResponse>("/tts/status"),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useTtsEnable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<{ enabled: boolean }>("/tts/enable"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tts"] });
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
+
+export function useTtsDisable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<{ enabled: boolean }>("/tts/disable"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tts"] });
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
+
+export function useSttStatus() {
+  return useQuery({
+    queryKey: ["stt", "status"],
+    queryFn: () => api.get<SttStatusResponse>("/stt/status"),
+    refetchInterval: 30_000,
   });
 }

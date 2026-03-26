@@ -5,6 +5,7 @@ import { QueryProvider, queryClient } from "@/integrations/tanstack-query/root-p
 import { routeTree } from "./routeTree.gen";
 import { registerServiceWorker } from "@/lib/register-sw";
 import "./styles.css";
+import { Toaster } from "@/components/ui/sonner";
 
 registerServiceWorker();
 
@@ -24,6 +25,7 @@ createRoot(document.getElementById("app")!).render(
   <StrictMode>
     <QueryProvider>
       <RouterProvider router={router} />
+      <Toaster richColors closeButton />
     </QueryProvider>
   </StrictMode>
 );
