@@ -44,8 +44,10 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
-use rune_gateway::{AppState, SessionEvent, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
 use rune_gateway::ws_rpc::RpcDispatcher;
+use rune_gateway::{
+    AppState, SessionEvent, WebChatRateLimiter, build_router, pairing::DeviceRegistry,
+};
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
@@ -8105,10 +8107,12 @@ async fn approval_decision_route_denies_resume_without_tool_context() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = body_json(response).await;
     assert_eq!(json["code"], "bad_request");
-    assert!(json["message"]
-        .as_str()
-        .unwrap()
-        .contains("no pending approval found"));
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("no pending approval found")
+    );
 }
 
 #[tokio::test]

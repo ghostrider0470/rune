@@ -82,7 +82,9 @@ impl WebChatRateLimiter {
         }
 
         if entry.count >= self.max_requests {
-            let retry_after = self.window.saturating_sub(now.duration_since(entry.window_started_at));
+            let retry_after = self
+                .window
+                .saturating_sub(now.duration_since(entry.window_started_at));
             entry.retry_after = retry_after;
             return Err(retry_after);
         }
