@@ -85,7 +85,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Context Compression | ❌ Missing | No intelligent context windowing or priority-based assembly — beyond OpenClaw |
 | Memory Bank | ❌ Missing | No architectural decision records or project knowledge base — beyond OpenClaw |
 | Extended Channels | ❌ Missing | No LINE/Mattermost/Matrix/Feishu/iMessage — OpenClaw breadth |
-| Calendar/Email | ❌ Missing | No calendar or email integration — OpenClaw productivity |
+| Calendar/Email | ✅ 2026-03-26 | Microsoft 365 calendar, mail, files, users, Planner, and To-Do routes/services landed in gateway with auth and integration coverage |
 
 ---
 

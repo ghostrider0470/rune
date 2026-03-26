@@ -130,7 +130,15 @@ peer_id = "horizon-ai"
 - OpenClaw TypeScript comms client (separate spec/plan)
 - Shared task board `.board/` integration
 - Message expiry enforcement
-- HTTP API comms endpoint (future enhancement)
+
+## Status
+
+Implemented 2026-03-26.
+
+Delivered beyond the original spec by also exposing native gateway HTTP routes for operator-driven comms access:
+- `POST /api/comms/send`
+- `GET /api/comms/inbox`
+- `POST /api/comms/ack`
 
 ## Success Criteria
 
