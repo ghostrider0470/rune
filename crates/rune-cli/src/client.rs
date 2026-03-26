@@ -25,7 +25,6 @@ use crate::output::{
     SecretsReloadResponse, SecurityAuditResponse, SessionDetailResponse, SessionListResponse,
     SessionStatusCard, SessionSummary, SessionTreeNode, SessionTreeResponse, SkillCheckResponse,
     SkillInfoResponse, SkillListResponse, SkillSummary, StatusResponse, SystemEventListResponse,
-    UpdateApplyResponse, UpdateCheckResponse, UpdateStatusResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.

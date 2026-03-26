@@ -20,6 +20,7 @@ use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
     SessionTarget, compute_initial_next_run,
 };
+use rune_runtime::comms::CommsMessage;
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
@@ -145,6 +146,10 @@ pub struct UpdateCheckResponse {
 pub struct UpdateApplyResponse {
     pub success: bool,
     pub detail: String,
+    pub previous_version: Option<String>,
+    pub installed_version: Option<String>,
+    pub binary_path: Option<String>,
+    pub asset_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -190,6 +195,44 @@ pub struct SkillStatusResponse {
     pub loaded: usize,
     pub enabled: usize,
     pub skills_dir: String,
+}
+
+#[derive(Deserialize)]
+pub struct CommsSendRequest {
+    pub msg_type: String,
+    pub subject: String,
+    pub body: String,
+    #[serde(default = "default_comms_priority")]
+    pub priority: String,
+}
+
+fn default_comms_priority() -> String {
+    "p1".to_string()
+}
+
+#[derive(Serialize)]
+pub struct CommsSendResponse {
+    pub success: bool,
+    pub id: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
+pub struct CommsInboxResponse {
+    pub messages: Vec<CommsMessage>,
+}
+
+#[derive(Deserialize)]
+pub struct CommsAckRequest {
+    pub id: String,
+    pub summary: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct CommsAckResponse {
+    pub success: bool,
+    pub ack_id: Option<String>,
+    pub detail: String,
 }
 
 /// Daemon status with useful runtime metadata.
@@ -250,6 +293,71 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             approval_mode: state.capabilities.approval_mode.clone(),
             security_posture: state.capabilities.security_posture.clone(),
         },
+    }))
+}
+
+pub async fn comms_send(
+    State(state): State<AppState>,
+    Json(body): Json<CommsSendRequest>,
+) -> Result<Json<CommsSendResponse>, GatewayError> {
+    let client = state
+        .comms_client
+        .clone()
+        .ok_or_else(|| GatewayError::BadRequest("native comms is not enabled".to_string()))?;
+
+    let id = client
+        .send(&body.msg_type, &body.subject, &body.body, &body.priority)
+        .await
+        .map_err(GatewayError::BadRequest)?;
+
+    Ok(Json(CommsSendResponse {
+        success: true,
+        id: Some(id),
+        detail: "message sent".to_string(),
+    }))
+}
+
+pub async fn comms_inbox(State(state): State<AppState>) -> Result<Json<CommsInboxResponse>, GatewayError> {
+    let client = state
+        .comms_client
+        .clone()
+        .ok_or_else(|| GatewayError::BadRequest("native comms is not enabled".to_string()))?;
+
+    let messages = client
+        .read_inbox()
+        .await
+        .into_iter()
+        .map(|(_, msg)| msg)
+        .collect();
+
+    Ok(Json(CommsInboxResponse { messages }))
+}
+
+pub async fn comms_ack(
+    State(state): State<AppState>,
+    Json(body): Json<CommsAckRequest>,
+) -> Result<Json<CommsAckResponse>, GatewayError> {
+    let client = state
+        .comms_client
+        .clone()
+        .ok_or_else(|| GatewayError::BadRequest("native comms is not enabled".to_string()))?;
+
+    let inbox = client.read_inbox().await;
+    let (path, original) = inbox
+        .into_iter()
+        .find(|(_, msg)| msg.id == body.id)
+        .ok_or_else(|| GatewayError::BadRequest(format!("comms message {} not found", body.id)))?;
+
+    let ack_id = client
+        .send_ack(&original, body.summary.as_deref().unwrap_or("received"))
+        .await
+        .map_err(GatewayError::BadRequest)?;
+    client.archive(&path).await.map_err(GatewayError::BadRequest)?;
+
+    Ok(Json(CommsAckResponse {
+        success: true,
+        ack_id: Some(ack_id),
+        detail: "message acknowledged and archived".to_string(),
     }))
 }
 
@@ -5212,6 +5320,10 @@ pub async fn update_apply() -> Result<Json<UpdateApplyResponse>, GatewayError> {
     Ok(Json(UpdateApplyResponse {
         success: false,
         detail: "automatic in-process update apply is not supported yet; pull the checkout, rebuild `rune` + `rune-gateway`, then restart the service (or run scripts/self-update.sh from the repo)".to_string(),
+        previous_version: None,
+        installed_version: None,
+        binary_path: None,
+        asset_name: None,
     }))
 }
 

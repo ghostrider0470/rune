@@ -2132,11 +2132,20 @@ impl fmt::Display for UpdateCheckResponse {
 pub struct UpdateApplyResponse {
     pub success: bool,
     pub detail: String,
+    pub previous_version: Option<String>,
+    pub installed_version: Option<String>,
+    pub binary_path: Option<String>,
+    pub asset_name: Option<String>,
 }
 impl fmt::Display for UpdateApplyResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let i = if self.success { "✓" } else { "✗" };
-        write!(f, "{i} {}", self.detail)
+        match (&self.previous_version, &self.installed_version) {
+            (Some(previous), Some(installed)) => {
+                write!(f, "{i} {previous} → {installed}: {}", self.detail)
+            }
+            _ => write!(f, "{i} {}", self.detail),
+        }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

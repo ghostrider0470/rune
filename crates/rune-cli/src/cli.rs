@@ -2217,7 +2217,18 @@ pub enum UpdateAction {
     /// Check for available updates.
     Check,
     /// Apply a pending update.
-    Apply,
+    /// Apply a pending update by downloading and replacing the current binary.
+    Apply {
+        /// Explicit release tag (for example `v0.1.0`). Defaults to the latest GitHub release.
+        #[arg(long)]
+        version: Option<String>,
+        /// GitHub repository to download releases from.
+        #[arg(long, default_value = "ghostrider0470/rune")]
+        repo: String,
+        /// Override the install destination for the downloaded binary.
+        #[arg(long)]
+        binary_path: Option<String>,
+    },
     /// Show current update status.
     Status,
     /// Print a direct install script URL for one-command bootstrap.
@@ -5612,8 +5623,12 @@ mod subagent_cli_tests {
         assert!(matches!(
             cli.command,
             Command::Update {
-                action: UpdateAction::Apply
-            }
+                action: UpdateAction::Apply {
+                    version: None,
+                    repo,
+                    binary_path: None,
+                }
+            } if repo == "ghostrider0470/rune"
         ));
     }
 

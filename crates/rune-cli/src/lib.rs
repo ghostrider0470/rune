@@ -8,10 +8,12 @@ pub mod memory;
 pub mod output;
 pub mod service;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
 use clap::CommandFactory;
 use clap_complete::{Shell, generate};
+use reqwest::blocking::Client as BlockingHttpClient;
+use sha2::{Digest, Sha256};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as StdCommand};
@@ -771,6 +773,217 @@ async fn run_init_wizard(options: InitWizardOptions<'_>) -> Result<()> {
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Debug)]
+struct ResolvedUpdateAsset {
+    version: String,
+    asset_name: String,
+    download_url: String,
+    checksum_url: String,
+}
+
+fn apply_self_update(
+    repo: &str,
+    version: Option<&str>,
+    binary_path: Option<&str>,
+) -> Result<output::UpdateApplyResponse> {
+    let current_binary = binary_path
+        .map(PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(resolve_current_executable_path)?;
+    let binary_name = current_binary
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            anyhow!(
+                "could not determine target binary name from {}",
+                current_binary.display()
+            )
+        })?
+        .to_string();
+    let client = BlockingHttpClient::builder()
+        .user_agent(format!("rune-cli/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .context("build update HTTP client")?;
+    let release = fetch_release_metadata(&client, repo, version)?;
+    let asset = resolve_update_asset(&release, &binary_name)?;
+    let install_dir = current_binary.parent().ok_or_else(|| {
+        anyhow!(
+            "binary path {} has no parent directory",
+            current_binary.display()
+        )
+    })?;
+    std::fs::create_dir_all(install_dir)
+        .with_context(|| format!("create install directory {}", install_dir.display()))?;
+
+    let temp_dir = tempfile::tempdir().context("create update staging dir")?;
+    let staged_binary = temp_dir.path().join(&asset.asset_name);
+    let checksum_file = temp_dir.path().join("SHA256SUMS");
+
+    download_to_path(&client, &asset.download_url, &staged_binary)?;
+    download_to_path(&client, &asset.checksum_url, &checksum_file)?;
+    verify_sha256(&staged_binary, &checksum_file, &asset.asset_name)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&staged_binary)
+            .with_context(|| format!("stat {}", staged_binary.display()))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&staged_binary, perms)
+            .with_context(|| format!("chmod {}", staged_binary.display()))?;
+    }
+
+    let backup_path = current_binary.with_extension("bak");
+    if backup_path.exists() {
+        std::fs::remove_file(&backup_path)
+            .with_context(|| format!("remove old backup {}", backup_path.display()))?;
+    }
+    if current_binary.exists() {
+        std::fs::rename(&current_binary, &backup_path).with_context(|| {
+            format!(
+                "move current binary {} to backup {}",
+                current_binary.display(),
+                backup_path.display()
+            )
+        })?;
+    }
+
+    if let Err(error) = std::fs::rename(&staged_binary, &current_binary) {
+        if backup_path.exists() {
+            let _ = std::fs::rename(&backup_path, &current_binary);
+        }
+        return Err(error).with_context(|| {
+            format!(
+                "replace binary {} with staged update {}",
+                current_binary.display(),
+                staged_binary.display()
+            )
+        });
+    }
+
+    Ok(output::UpdateApplyResponse {
+        success: true,
+        detail: format!(
+            "installed {} from GitHub release {}",
+            asset.asset_name, asset.version
+        ),
+        previous_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        installed_version: Some(asset.version),
+        binary_path: Some(current_binary.display().to_string()),
+        asset_name: Some(asset.asset_name),
+    })
+}
+
+fn resolve_current_executable_path() -> Result<PathBuf> {
+    std::env::current_exe().context("resolve current executable path")
+}
+
+fn fetch_release_metadata(
+    client: &BlockingHttpClient,
+    repo: &str,
+    version: Option<&str>,
+) -> Result<GitHubRelease> {
+    let url = match version {
+        Some(version) => format!("https://api.github.com/repos/{repo}/releases/tags/{version}"),
+        None => format!("https://api.github.com/repos/{repo}/releases/latest"),
+    };
+    let response = client
+        .get(&url)
+        .send()
+        .with_context(|| format!("fetch release metadata from {url}"))?;
+    if !response.status().is_success() {
+        bail!("release metadata request failed with {}", response.status());
+    }
+    response.json().context("parse GitHub release metadata")
+}
+
+fn resolve_update_asset(release: &GitHubRelease, binary_name: &str) -> Result<ResolvedUpdateAsset> {
+    let target = match std::env::consts::OS {
+        "linux" => "linux",
+        "macos" => "macos",
+        "windows" => "windows",
+        other => bail!("self-update is not supported on operating system {other}"),
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "aarch64",
+        other => bail!("self-update is not supported on architecture {other}"),
+    };
+    let expected_prefix = format!("{binary_name}-{target}-{arch}");
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| {
+            asset.name == expected_prefix || asset.name == format!("{expected_prefix}.exe")
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "release {} does not contain asset {} for this platform",
+                release.tag_name,
+                expected_prefix
+            )
+        })?;
+    let checksum_url = release
+        .assets
+        .iter()
+        .find(|candidate| candidate.name == "SHA256SUMS")
+        .map(|asset| asset.browser_download_url.clone())
+        .ok_or_else(|| anyhow!("release {} is missing SHA256SUMS", release.tag_name))?;
+
+    Ok(ResolvedUpdateAsset {
+        version: release.tag_name.clone(),
+        asset_name: asset.name.clone(),
+        download_url: asset.browser_download_url.clone(),
+        checksum_url,
+    })
+}
+
+fn download_to_path(client: &BlockingHttpClient, url: &str, path: &Path) -> Result<()> {
+    let response = client
+        .get(url)
+        .send()
+        .with_context(|| format!("download {url}"))?;
+    if !response.status().is_success() {
+        bail!("download {url} failed with {}", response.status());
+    }
+    let bytes = response.bytes().context("read download body")?;
+    std::fs::write(path, &bytes).with_context(|| format!("write {}", path.display()))
+}
+
+fn verify_sha256(binary_path: &Path, checksum_path: &Path, asset_name: &str) -> Result<()> {
+    let checksums = std::fs::read_to_string(checksum_path)
+        .with_context(|| format!("read {}", checksum_path.display()))?;
+    let expected = checksums
+        .lines()
+        .find_map(|line| {
+            let mut parts = line.split_whitespace();
+            let hash = parts.next()?;
+            let name = parts.next()?.trim_start_matches('*');
+            (name == asset_name).then_some(hash.to_string())
+        })
+        .ok_or_else(|| anyhow!("checksum for {asset_name} not found in SHA256SUMS"))?;
+    let bytes =
+        std::fs::read(binary_path).with_context(|| format!("read {}", binary_path.display()))?;
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual != expected.to_ascii_lowercase() {
+        bail!("checksum mismatch for {asset_name}: expected {expected}, got {actual}");
+    }
+    Ok(())
+}
+
 fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
     let base = gateway_url.trim_end_matches('/');
     let probe_targets = [
@@ -791,9 +1004,40 @@ fn wait_for_gateway_ready(gateway_url: &str) -> Result<()> {
     while std::time::Instant::now() < deadline {
         for target in &probe_targets {
             match client.get(target).send() {
-                Ok(response) if response.status().is_success() => return Ok(()),
                 Ok(response) => {
-                    last_err = Some(format!("{} returned {}", target, response.status()));
+                    let status = response.status();
+                    if status.is_success() {
+                        if target.ends_with("/ready") {
+                            return Ok(());
+                        }
+
+                        if target.ends_with("/health") || target == base {
+                            match response.json::<serde_json::Value>() {
+                                Ok(body)
+                                    if body.get("status").and_then(|v| v.as_str())
+                                        == Some("ok") =>
+                                {
+                                    return Ok(());
+                                }
+                                Ok(body) => {
+                                    last_err = Some(format!(
+                                        "{} returned {} with non-ready health payload {}",
+                                        target, status, body
+                                    ));
+                                }
+                                Err(err) => {
+                                    last_err = Some(format!(
+                                        "{} returned {} but health payload could not be parsed: {err}",
+                                        target, status
+                                    ));
+                                }
+                            }
+                        } else {
+                            return Ok(());
+                        }
+                    } else {
+                        last_err = Some(format!("{} returned {}", target, status));
+                    }
                 }
                 Err(err) => {
                     last_err = Some(format!("{} probe failed: {err}", target));
@@ -3426,8 +3670,12 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.update_check().await?;
                 println!("{}", render(&result, format));
             }
-            UpdateAction::Apply => {
-                let result = client.update_apply().await?;
+            UpdateAction::Apply {
+                version,
+                repo,
+                binary_path,
+            } => {
+                let result = apply_self_update(&repo, version.as_deref(), binary_path.as_deref())?;
                 println!("{}", render(&result, format));
             }
             UpdateAction::Status => {
@@ -3504,6 +3752,85 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn verify_sha256_accepts_matching_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("rune-linux-x86_64");
+        std::fs::write(&binary, b"hello world").unwrap();
+        let checksum = dir.path().join("SHA256SUMS");
+        std::fs::write(
+            &checksum,
+            format!("{:x}  rune-linux-x86_64\n", Sha256::digest(b"hello world")),
+        )
+        .unwrap();
+
+        verify_sha256(&binary, &checksum, "rune-linux-x86_64").unwrap();
+    }
+
+    #[test]
+    fn resolve_update_asset_requires_platform_binary_and_checksum() {
+        let release = GitHubRelease {
+            tag_name: "v1.2.3".to_string(),
+            assets: vec![
+                GitHubReleaseAsset {
+                    name: format!("rune-{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+                    browser_download_url: "https://example.test/rune".to_string(),
+                },
+                GitHubReleaseAsset {
+                    name: "SHA256SUMS".to_string(),
+                    browser_download_url: "https://example.test/SHA256SUMS".to_string(),
+                },
+            ],
+        };
+
+        let asset = resolve_update_asset(&release, "rune").unwrap();
+        assert_eq!(asset.version, "v1.2.3");
+        assert_eq!(
+            asset.asset_name,
+            format!("rune-{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+        );
+    }
+
+    #[test]
+    fn fetch_release_metadata_reads_latest_release() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let read = stream.read(&mut buf).unwrap();
+            let request = String::from_utf8_lossy(&buf[..read]);
+            assert!(request.starts_with("GET /repos/test/rune/releases/latest "));
+            let body = r#"{"tag_name":"v9.9.9","assets":[{"name":"SHA256SUMS","browser_download_url":"https://example.test/SHA256SUMS"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = BlockingHttpClient::builder()
+            .user_agent("rune-test")
+            .build()
+            .unwrap();
+        let release = client
+            .get(format!("http://{addr}/repos/test/rune/releases/latest"))
+            .send()
+            .unwrap()
+            .json::<GitHubRelease>()
+            .unwrap();
+        assert_eq!(release.tag_name, "v9.9.9");
+        handle.join().unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -3625,6 +3952,112 @@ ok",
     }
 
     #[test]
+    fn wait_for_gateway_ready_rejects_degraded_ready_status() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..8 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 1024];
+                let read = stream.read(&mut buf).unwrap();
+                let request = String::from_utf8_lossy(&buf[..read]);
+                let response = if request.starts_with("GET /ready ") {
+                    br#"HTTP/1.1 503 Service Unavailable
+content-type: application/json
+content-length: 21
+connection: close
+
+{"status":"degraded"}"#
+                        .as_slice()
+                } else if request.starts_with("GET /health ") {
+                    br#"HTTP/1.1 200 OK
+content-type: application/json
+content-length: 15
+connection: close
+
+{"status":"ok"}"#
+                        .as_slice()
+                } else {
+                    b"HTTP/1.1 404 Not Found
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                };
+                stream.write_all(response).unwrap();
+            }
+        });
+
+        wait_for_gateway_ready(&format!("http://{}", addr)).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn wait_for_gateway_ready_rejects_unhealthy_health_payloads() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..200 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 1024];
+                let read = stream.read(&mut buf).unwrap();
+                let request = String::from_utf8_lossy(&buf[..read]);
+                let response = if request.starts_with("GET /ready ") {
+                    b"HTTP/1.1 404 Not Found
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                } else if request.starts_with("GET /health ") {
+                    br#"HTTP/1.1 200 OK
+content-type: application/json
+content-length: 21
+connection: close
+
+{"status":"degraded"}"#
+                        .as_slice()
+                } else if request.starts_with("GET /gateway/ready ") {
+                    b"HTTP/1.1 404 Not Found
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                } else if request.starts_with("GET /gateway/health ") {
+                    br#"HTTP/1.1 200 OK
+content-type: application/json
+content-length: 26
+connection: close
+
+{"status":"unhealthy"}"#
+                        .as_slice()
+                } else {
+                    b"HTTP/1.1 503 Service Unavailable
+content-length: 0
+connection: close
+
+"
+                    .as_slice()
+                };
+                stream.write_all(response).unwrap();
+            }
+        });
+
+        let err = wait_for_gateway_ready(&format!("http://{}", addr)).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("gateway did not become ready"));
+        assert!(message.contains("non-ready health payload"));
+        handle.join().unwrap();
+    }
+
     fn wait_for_gateway_ready_falls_back_to_gateway_health_when_health_is_missing() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
