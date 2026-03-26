@@ -416,7 +416,7 @@ pub struct DashboardDiagnosticsResponse {
     pub items: Vec<DashboardDiagnosticItem>,
 }
 
-// SPA serving — runtime UI dist lookup so cargo check works even when ui/dist is absent.
+// SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
 
 pub async fn spa_index() -> Response {
     spa_response_for_path("")
@@ -643,7 +643,7 @@ pub struct ActionResponse {
     pub message: String,
 }
 
-/// `POST /gateway/start` — acknowledges the control-plane request in the current single-process gateway model.
+/// `POST /gateway/start` - acknowledges the control-plane request in the current single-process gateway model.
 pub async fn gateway_start() -> Json<ActionResponse> {
     Json(ActionResponse {
         success: true,
@@ -651,7 +651,7 @@ pub async fn gateway_start() -> Json<ActionResponse> {
     })
 }
 
-/// `POST /gateway/stop` — acknowledges the control-plane request in the current single-process gateway model.
+/// `POST /gateway/stop` - acknowledges the control-plane request in the current single-process gateway model.
 pub async fn gateway_stop() -> Json<ActionResponse> {
     Json(ActionResponse {
         success: true,
@@ -659,7 +659,7 @@ pub async fn gateway_stop() -> Json<ActionResponse> {
     })
 }
 
-/// `POST /gateway/restart` — acknowledges the control-plane request in the current single-process gateway model.
+/// `POST /gateway/restart` - acknowledges the control-plane request in the current single-process gateway model.
 pub async fn gateway_restart() -> Json<ActionResponse> {
     Json(ActionResponse {
         success: true,
@@ -1073,7 +1073,7 @@ pub struct SessionListItem {
     pub latest_model: Option<String>,
 }
 
-/// `GET /sessions` — list sessions.
+/// `GET /sessions` - list sessions.
 pub async fn list_sessions(
     State(state): State<AppState>,
     Query(query): Query<SessionsListQuery>,
@@ -1139,7 +1139,7 @@ pub async fn list_sessions(
     Ok(Json(items))
 }
 
-/// `POST /sessions` — create a new session.
+/// `POST /sessions` - create a new session.
 pub async fn create_session(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionRequest>,
@@ -1229,7 +1229,7 @@ pub struct SessionStatusResponse {
     pub unresolved: Vec<String>,
 }
 
-/// `GET /sessions/{id}` — get session by ID.
+/// `GET /sessions/{id}` - get session by ID.
 pub async fn get_session(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -1264,7 +1264,7 @@ pub async fn get_session(
     }))
 }
 
-/// `GET /sessions/{id}/status` — first-class session status parity card.
+/// `GET /sessions/{id}/status` - first-class session status parity card.
 pub async fn get_session_status(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -1365,7 +1365,7 @@ pub struct SessionTreeNode {
     pub children: Vec<SessionTreeNode>,
 }
 
-/// `GET /sessions/{id}/tree` — return the delegation tree rooted at a session.
+/// `GET /sessions/{id}/tree` - return the delegation tree rooted at a session.
 pub async fn get_session_tree(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -1447,7 +1447,7 @@ pub async fn get_session_tree(
     Ok(Json(tree))
 }
 
-/// `PATCH /sessions/{id}` — update session metadata fields used by operator surfaces.
+/// `PATCH /sessions/{id}` - update session metadata fields used by operator surfaces.
 pub async fn patch_session(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -1500,7 +1500,7 @@ pub async fn patch_session(
     }))
 }
 
-/// `DELETE /sessions/{id}` — delete session and transcript history.
+/// `DELETE /sessions/{id}` - delete session and transcript history.
 pub async fn delete_session(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -1559,7 +1559,7 @@ pub struct UsageInfo {
     pub completion_tokens: u32,
 }
 
-/// `POST /sessions/{id}/messages` — send a user message and get the assistant response.
+/// `POST /sessions/{id}/messages` - send a user message and get the assistant response.
 pub async fn send_message(
     State(state): State<AppState>,
     Path(session_id): Path<Uuid>,
@@ -1652,7 +1652,7 @@ pub struct AgentKillResponse {
     pub detail: String,
 }
 
-/// `POST /agents/{id}/steer` — inject a steering instruction into a running subagent.
+/// `POST /agents/{id}/steer` - inject a steering instruction into a running subagent.
 pub async fn agent_steer(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -1713,7 +1713,7 @@ pub async fn agent_steer(
     }))
 }
 
-/// `POST /agents/{id}/kill` — cancel/terminate a running subagent session.
+/// `POST /agents/{id}/kill` - cancel/terminate a running subagent session.
 pub async fn agent_kill(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -1801,7 +1801,7 @@ pub struct TranscriptQuery {
     pub session_token: Option<String>,
 }
 
-/// `GET /sessions/{id}/transcript` — full session transcript.
+/// `GET /sessions/{id}/transcript` - full session transcript.
 pub async fn get_transcript(
     State(state): State<AppState>,
     Path(session_id): Path<Uuid>,
@@ -2132,7 +2132,7 @@ pub struct SetApprovalPolicyRequest {
     pub decision: String,
 }
 
-/// `GET /approvals` — list durable approval requests.
+/// `GET /approvals` - list durable approval requests.
 pub async fn list_pending_approvals(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ApprovalRequestResponse>>, GatewayError> {
@@ -2147,7 +2147,7 @@ pub async fn list_pending_approvals(
     ))
 }
 
-/// `POST /approvals` — submit a decision for a durable approval request.
+/// `POST /approvals` - submit a decision for a durable approval request.
 pub async fn submit_approval_decision(
     State(state): State<AppState>,
     Json(body): Json<SubmitApprovalDecisionRequest>,
@@ -2259,7 +2259,7 @@ fn approval_to_response(approval: rune_store::models::ApprovalRow) -> ApprovalRe
     }
 }
 
-/// `GET /approvals/policies` — list all tool approval policies.
+/// `GET /approvals/policies` - list all tool approval policies.
 pub async fn list_approval_policies(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ApprovalPolicyResponse>>, GatewayError> {
@@ -2281,7 +2281,7 @@ pub async fn list_approval_policies(
     ))
 }
 
-/// `GET /approvals/policies/{tool}` — get approval policy for a specific tool.
+/// `GET /approvals/policies/{tool}` - get approval policy for a specific tool.
 pub async fn get_approval_policy(
     State(state): State<AppState>,
     Path(tool): Path<String>,
@@ -2300,7 +2300,7 @@ pub async fn get_approval_policy(
     }))
 }
 
-/// `PUT /approvals/policies/{tool}` — set approval policy for a tool.
+/// `PUT /approvals/policies/{tool}` - set approval policy for a tool.
 pub async fn set_approval_policy(
     State(state): State<AppState>,
     Path(tool): Path<String>,
@@ -2328,7 +2328,7 @@ pub async fn set_approval_policy(
     }))
 }
 
-/// `DELETE /approvals/policies/{tool}` — clear approval policy for a tool.
+/// `DELETE /approvals/policies/{tool}` - clear approval policy for a tool.
 pub async fn clear_approval_policy(
     State(state): State<AppState>,
     Path(tool): Path<String>,
@@ -2380,7 +2380,7 @@ pub struct ProcessLogQuery {
     pub limit: Option<usize>,
 }
 
-/// `GET /processes` — list live and restart-visible background process handles.
+/// `GET /processes` - list live and restart-visible background process handles.
 pub async fn list_processes(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ProcessResponse>>, GatewayError> {
@@ -2390,7 +2390,7 @@ pub async fn list_processes(
     ))
 }
 
-/// `GET /processes/{id}` — inspect a single background process handle.
+/// `GET /processes/{id}` - inspect a single background process handle.
 pub async fn get_process(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -2407,7 +2407,7 @@ pub async fn get_process(
     Ok(Json(process_to_response(process)))
 }
 
-/// `GET /processes/{id}/log` — fetch process log output or persisted post-restart metadata.
+/// `GET /processes/{id}/log` - fetch process log output or persisted post-restart metadata.
 pub async fn get_process_log(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -2434,7 +2434,7 @@ pub async fn get_process_log(
         .into_response())
 }
 
-/// `POST /processes/{id}/kill` — kill a running background process.
+/// `POST /processes/{id}/kill` - kill a running background process.
 pub async fn kill_process(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -2458,7 +2458,7 @@ pub async fn kill_process(
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────────
 
-/// `GET /heartbeat/status` — current heartbeat runner state.
+/// `GET /heartbeat/status` - current heartbeat runner state.
 pub async fn heartbeat_status(
     State(state): State<AppState>,
 ) -> Result<Json<HeartbeatState>, GatewayError> {
@@ -2466,7 +2466,7 @@ pub async fn heartbeat_status(
     Ok(Json(status))
 }
 
-/// `POST /heartbeat/enable` — enable the heartbeat runner.
+/// `POST /heartbeat/enable` - enable the heartbeat runner.
 pub async fn heartbeat_enable(
     State(state): State<AppState>,
 ) -> Result<Json<ActionResponse>, GatewayError> {
@@ -2477,7 +2477,7 @@ pub async fn heartbeat_enable(
     }))
 }
 
-/// `POST /heartbeat/disable` — disable the heartbeat runner.
+/// `POST /heartbeat/disable` - disable the heartbeat runner.
 pub async fn heartbeat_disable(
     State(state): State<AppState>,
 ) -> Result<Json<ActionResponse>, GatewayError> {
@@ -2488,7 +2488,7 @@ pub async fn heartbeat_disable(
     }))
 }
 
-/// `POST /heartbeat/interval` — set the heartbeat interval in seconds.
+/// `POST /heartbeat/interval` - set the heartbeat interval in seconds.
 pub async fn heartbeat_set_interval(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
@@ -2545,7 +2545,7 @@ pub struct RemindersListQuery {
     pub include_delivered: Option<bool>,
 }
 
-/// `GET /reminders` — list reminders.
+/// `GET /reminders` - list reminders.
 pub async fn reminders_list(
     State(state): State<AppState>,
     Query(query): Query<RemindersListQuery>,
@@ -2557,7 +2557,7 @@ pub async fn reminders_list(
     ))
 }
 
-/// `POST /reminders` — add a reminder.
+/// `POST /reminders` - add a reminder.
 pub async fn reminders_add(
     State(state): State<AppState>,
     Json(body): Json<ReminderAddRequest>,
@@ -2568,7 +2568,7 @@ pub async fn reminders_add(
     Ok((StatusCode::CREATED, Json(resp)))
 }
 
-/// `DELETE /reminders/{id}` — cancel a reminder.
+/// `DELETE /reminders/{id}` - cancel a reminder.
 pub async fn reminders_cancel(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -2677,7 +2677,7 @@ pub async fn disable_skill(
     }
 }
 
-/// `POST /webhook/telegram/{token}` — receive Telegram Bot API updates.
+/// `POST /webhook/telegram/{token}` - receive Telegram Bot API updates.
 ///
 /// The token in the URL is validated against the configured bot token
 /// to prevent unauthorized webhook calls.
@@ -2938,7 +2938,7 @@ pub async fn telegram_webhook(
 
 // ── Models ────────────────────────────────────────────────────────────────────
 
-/// `GET /models` — list all configured models across all providers.
+/// `GET /models` - list all configured models across all providers.
 pub async fn list_models(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<DashboardModelItem>>, GatewayError> {
@@ -2963,7 +2963,7 @@ pub struct ScannedModel {
     pub modified_at: Option<String>,
 }
 
-/// `POST /models/scan` — discover models from local providers (e.g. Ollama).
+/// `POST /models/scan` - discover models from local providers (e.g. Ollama).
 ///
 /// Scans any configured Ollama provider by calling `GET /api/tags` on its
 /// native API endpoint. Returns the list of locally available models.
@@ -3070,7 +3070,7 @@ pub struct PairRequestResponse {
     pub expires_at: DateTime<Utc>,
 }
 
-/// `POST /devices/pair/request` — initiate a new device pairing.
+/// `POST /devices/pair/request` - initiate a new device pairing.
 ///
 /// The device supplies its name and Ed25519 public key (hex-encoded).
 /// Returns a random challenge nonce that the device must sign with its private key.
@@ -3124,7 +3124,7 @@ pub struct PairApproveResponse {
     pub token_expires_at: DateTime<Utc>,
 }
 
-/// `POST /devices/pair/approve` — approve a pending pairing request.
+/// `POST /devices/pair/approve` - approve a pending pairing request.
 ///
 /// The caller supplies the request ID and the Ed25519 signature of the
 /// challenge nonce (hex-encoded).  On success the response contains the
@@ -3165,7 +3165,7 @@ pub struct PairRejectBody {
     pub request_id: Uuid,
 }
 
-/// `POST /devices/pair/reject` — reject and discard a pending pairing request.
+/// `POST /devices/pair/reject` - reject and discard a pending pairing request.
 #[derive(Serialize)]
 pub struct PairRejectResponse {
     pub rejected: bool,
@@ -3188,7 +3188,7 @@ pub async fn device_pair_reject(
     Ok(Json(PairRejectResponse { rejected: true }))
 }
 
-/// `GET /devices/pair/pending` — list all pending pairing requests.
+/// `GET /devices/pair/pending` - list all pending pairing requests.
 pub async fn device_pair_pending(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3250,7 +3250,7 @@ impl From<StoredPairedDevice> for DeviceListEntry {
     }
 }
 
-/// `GET /devices` — list all paired devices with masked tokens.
+/// `GET /devices` - list all paired devices with masked tokens.
 pub async fn device_list(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3287,7 +3287,7 @@ pub struct DeviceDeleteResponse {
     pub deleted: bool,
 }
 
-/// `DELETE /devices/{id}` — revoke a paired device.
+/// `DELETE /devices/{id}` - revoke a paired device.
 pub async fn device_revoke(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -3305,7 +3305,7 @@ pub async fn device_revoke(
     Ok(Json(DeviceDeleteResponse { deleted: true }))
 }
 
-/// `POST /devices/{id}/rotate-token` — rotate the bearer token for a device.
+/// `POST /devices/{id}/rotate-token` - rotate the bearer token for a device.
 ///
 /// Returns the updated device **including the new full token**.
 #[derive(Serialize)]
@@ -3658,7 +3658,7 @@ pub struct AgentListItem {
     pub system_prompt: Option<String>,
 }
 
-/// `GET /api/dashboard/usage` — aggregate token usage by day + model.
+/// `GET /api/dashboard/usage` - aggregate token usage by day + model.
 pub async fn get_dashboard_usage(
     State(state): State<AppState>,
 ) -> Result<Json<UsageSummaryResponse>, GatewayError> {
@@ -3729,7 +3729,7 @@ pub async fn get_dashboard_usage(
     }))
 }
 
-/// `GET /agents` — list configured agent profiles.
+/// `GET /agents` - list configured agent profiles.
 pub async fn list_agents(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AgentListItem>>, GatewayError> {
@@ -3769,7 +3769,7 @@ pub async fn list_agents(
 
 // ── Config Editor ───────────────────────────────────────────────────────────
 
-/// `GET /config` — return the current configuration with secrets redacted.
+/// `GET /config` - return the current configuration with secrets redacted.
 pub async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
     let config = state.config.read().await;
     let redacted = config.redacted();
@@ -3778,7 +3778,7 @@ pub async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, Ga
     Ok(Json(value))
 }
 
-/// `PUT /config` — replace the live configuration.
+/// `PUT /config` - replace the live configuration.
 pub async fn update_config(
     State(state): State<AppState>,
     Json(body): Json<Value>,
@@ -3819,7 +3819,7 @@ pub struct TurnResponse {
     pub ended_at: Option<String>,
 }
 
-/// `GET /api/turns` — list turns, optionally filtered by session_id.
+/// `GET /api/turns` - list turns, optionally filtered by session_id.
 pub async fn list_turns(
     State(state): State<AppState>,
     Query(query): Query<TurnsListQuery>,
@@ -3847,7 +3847,7 @@ pub async fn list_turns(
     Ok(Json(items))
 }
 
-/// `GET /api/turns/{id}` — get a single turn by ID.
+/// `GET /api/turns/{id}` - get a single turn by ID.
 pub async fn get_turn(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -3884,7 +3884,7 @@ pub struct ToolRegistryItem {
     pub category: String,
 }
 
-/// `GET /api/tools` — list registered tools from the skill registry.
+/// `GET /api/tools` - list registered tools from the skill registry.
 pub async fn list_tools(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ToolRegistryItem>>, GatewayError> {
@@ -3905,7 +3905,7 @@ pub async fn list_tools(
     Ok(Json(items))
 }
 
-/// `GET /api/tools/{id}` — get a tool execution by ID (stub).
+/// `GET /api/tools/{id}` - get a tool execution by ID (stub).
 pub async fn get_tool_execution(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -3941,7 +3941,7 @@ pub struct Ms365AuthStatusResponse {
     pub token_valid: bool,
 }
 
-/// `GET /ms365/auth/status` — return Microsoft 365 auth/config readiness.
+/// `GET /ms365/auth/status` - return Microsoft 365 auth/config readiness.
 pub async fn ms365_auth_status(
     State(state): State<AppState>,
 ) -> Result<Json<Ms365AuthStatusResponse>, GatewayError> {
@@ -3997,7 +3997,7 @@ pub struct Ms365UsersListResponse {
     pub total: u32,
 }
 
-/// `GET /ms365/files` — list files in a OneDrive folder path.
+/// `GET /ms365/files` - list files in a OneDrive folder path.
 pub async fn ms365_files_list(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -4022,7 +4022,7 @@ pub async fn ms365_files_list(
     }))
 }
 
-/// `GET /ms365/files/{id}` — read OneDrive file metadata by item ID.
+/// `GET /ms365/files/{id}` - read OneDrive file metadata by item ID.
 pub async fn ms365_files_read(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4036,7 +4036,7 @@ pub async fn ms365_files_read(
     Ok(Json(ms365_file_read_response(file)))
 }
 
-/// `GET /ms365/files/search` — search OneDrive files by name/content.
+/// `GET /ms365/files/search` - search OneDrive files by name/content.
 pub async fn ms365_files_search(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -4061,7 +4061,7 @@ pub async fn ms365_files_search(
     }))
 }
 
-/// `GET /ms365/files/{id}/content` — stream OneDrive file bytes by item ID.
+/// `GET /ms365/files/{id}/content` - stream OneDrive file bytes by item ID.
 pub async fn ms365_files_content(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4088,7 +4088,7 @@ pub async fn ms365_files_content(
         .into_response())
 }
 
-/// `GET /ms365/users/me` — return the authenticated user's profile.
+/// `GET /ms365/users/me` - return the authenticated user's profile.
 pub async fn ms365_users_me(
     State(state): State<AppState>,
 ) -> Result<Json<Ms365UsersReadResponse>, GatewayError> {
@@ -4101,7 +4101,7 @@ pub async fn ms365_users_me(
     Ok(Json(Ms365UsersReadResponse { user }))
 }
 
-/// `GET /ms365/users` — list users in the organization directory.
+/// `GET /ms365/users` - list users in the organization directory.
 pub async fn ms365_users_list(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -4124,7 +4124,7 @@ pub async fn ms365_users_list(
     }))
 }
 
-/// `GET /ms365/users/{id}` — read a single user's profile by ID or UPN.
+/// `GET /ms365/users/{id}` - read a single user's profile by ID or UPN.
 pub async fn ms365_users_read(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4150,7 +4150,7 @@ pub struct Ms365CalendarMutationResponse {
     pub message: String,
 }
 
-/// `POST /ms365/calendar/events` — create a Microsoft 365 calendar event.
+/// `POST /ms365/calendar/events` - create a Microsoft 365 calendar event.
 pub async fn ms365_calendar_create_event(
     State(state): State<AppState>,
     Json(request): Json<CreateCalendarEventRequest>,
@@ -4170,7 +4170,7 @@ pub async fn ms365_calendar_create_event(
     ))
 }
 
-/// `POST /ms365/calendar/events/{id}` — update a Microsoft 365 calendar event.
+/// `POST /ms365/calendar/events/{id}` - update a Microsoft 365 calendar event.
 pub async fn ms365_calendar_update_event(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4188,7 +4188,7 @@ pub async fn ms365_calendar_update_event(
     }))
 }
 
-/// `DELETE /ms365/calendar/events/{id}` — delete a Microsoft 365 calendar event.
+/// `DELETE /ms365/calendar/events/{id}` - delete a Microsoft 365 calendar event.
 pub async fn ms365_calendar_delete_event(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4205,7 +4205,7 @@ pub async fn ms365_calendar_delete_event(
     }))
 }
 
-/// `POST /ms365/calendar/events/{id}/delete` — compatibility alias for existing clients.
+/// `POST /ms365/calendar/events/{id}/delete` - compatibility alias for existing clients.
 pub async fn ms365_calendar_delete_event_compat(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4213,7 +4213,7 @@ pub async fn ms365_calendar_delete_event_compat(
     ms365_calendar_delete_event(State(state), Path(id)).await
 }
 
-/// `POST /ms365/calendar/events/{id}/respond` — respond to a Microsoft 365 calendar invitation.
+/// `POST /ms365/calendar/events/{id}/respond` - respond to a Microsoft 365 calendar invitation.
 pub async fn ms365_calendar_respond_event(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4231,7 +4231,7 @@ pub async fn ms365_calendar_respond_event(
     }))
 }
 
-/// `POST /ms365/mail/send` — send a Microsoft 365 mail message.
+/// `POST /ms365/mail/send` - send a Microsoft 365 mail message.
 pub async fn ms365_mail_send(
     State(state): State<AppState>,
     Json(request): Json<SendMailRequest>,
@@ -4248,7 +4248,7 @@ pub async fn ms365_mail_send(
     }))
 }
 
-/// `POST /ms365/mail/messages/{id}/reply` — reply to a Microsoft 365 mail message.
+/// `POST /ms365/mail/messages/{id}/reply` - reply to a Microsoft 365 mail message.
 pub async fn ms365_mail_reply(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4266,7 +4266,7 @@ pub async fn ms365_mail_reply(
     }))
 }
 
-/// `POST /ms365/mail/messages/{id}/forward` — forward a Microsoft 365 mail message.
+/// `POST /ms365/mail/messages/{id}/forward` - forward a Microsoft 365 mail message.
 pub async fn ms365_mail_forward(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4294,7 +4294,7 @@ pub struct Ms365TodoTaskMutationResponse {
     pub task: TodoTask,
 }
 
-/// `POST /ms365/planner/tasks` — create a Microsoft Planner task.
+/// `POST /ms365/planner/tasks` - create a Microsoft Planner task.
 pub async fn ms365_planner_create_task(
     State(state): State<AppState>,
     Json(request): Json<CreatePlannerTaskRequest>,
@@ -4311,7 +4311,7 @@ pub async fn ms365_planner_create_task(
     ))
 }
 
-/// `POST /ms365/planner/tasks/{id}` — update a Microsoft Planner task.
+/// `POST /ms365/planner/tasks/{id}` - update a Microsoft Planner task.
 pub async fn ms365_planner_update_task(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4326,7 +4326,7 @@ pub async fn ms365_planner_update_task(
     Ok(Json(Ms365PlannerTaskMutationResponse { task }))
 }
 
-/// `POST /ms365/planner/tasks/{id}/complete` — mark a Microsoft Planner task complete.
+/// `POST /ms365/planner/tasks/{id}/complete` - mark a Microsoft Planner task complete.
 pub async fn ms365_planner_complete_task(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4340,7 +4340,7 @@ pub async fn ms365_planner_complete_task(
     Ok(Json(Ms365PlannerTaskMutationResponse { task }))
 }
 
-/// `POST /ms365/todo/lists/{list_id}/tasks` — create a Microsoft To-Do task.
+/// `POST /ms365/todo/lists/{list_id}/tasks` - create a Microsoft To-Do task.
 pub async fn ms365_todo_create_task(
     State(state): State<AppState>,
     Path(list_id): Path<String>,
@@ -4358,7 +4358,7 @@ pub async fn ms365_todo_create_task(
     ))
 }
 
-/// `POST /ms365/todo/lists/{list_id}/tasks/{id}` — update a Microsoft To-Do task.
+/// `POST /ms365/todo/lists/{list_id}/tasks/{id}` - update a Microsoft To-Do task.
 pub async fn ms365_todo_update_task(
     State(state): State<AppState>,
     Path((list_id, id)): Path<(String, String)>,
@@ -4373,7 +4373,7 @@ pub async fn ms365_todo_update_task(
     Ok(Json(Ms365TodoTaskMutationResponse { task }))
 }
 
-/// `POST /ms365/todo/lists/{list_id}/tasks/{id}/complete` — mark a Microsoft To-Do task complete.
+/// `POST /ms365/todo/lists/{list_id}/tasks/{id}/complete` - mark a Microsoft To-Do task complete.
 pub async fn ms365_todo_complete_task(
     State(state): State<AppState>,
     Path((list_id, id)): Path<(String, String)>,
@@ -4481,7 +4481,7 @@ pub struct AuthTokenInfo {
     pub device_count: usize,
 }
 
-/// `GET /api/auth` — return token / auth status information.
+/// `GET /api/auth` - return token / auth status information.
 pub async fn auth_token_info(
     State(state): State<AppState>,
 ) -> Result<Json<AuthTokenInfo>, GatewayError> {
@@ -4517,7 +4517,7 @@ pub struct ChannelStatusResponse {
     pub active_sessions: usize,
 }
 
-/// `GET /api/channels` — list configured channel adapters.
+/// `GET /api/channels` - list configured channel adapters.
 pub async fn list_channels(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ChannelItem>>, GatewayError> {
@@ -4534,7 +4534,7 @@ pub async fn list_channels(
     Ok(Json(items))
 }
 
-/// `GET /api/channels/status` — channel subsystem status.
+/// `GET /api/channels/status` - channel subsystem status.
 pub async fn channels_status(
     State(state): State<AppState>,
 ) -> Result<Json<ChannelStatusResponse>, GatewayError> {
@@ -4606,7 +4606,7 @@ pub(crate) fn parse_memory_search_output(output: &str) -> Vec<Value> {
         .collect()
 }
 
-/// `GET /api/memory/status` — memory subsystem status.
+/// `GET /api/memory/status` - memory subsystem status.
 pub async fn memory_status(
     State(state): State<AppState>,
 ) -> Result<Json<MemoryStatusResponse>, GatewayError> {
@@ -4618,7 +4618,7 @@ pub async fn memory_status(
     }))
 }
 
-/// `GET /api/memory/search` — search memory (stub; backend integration pending).
+/// `GET /api/memory/search` - search memory (stub; backend integration pending).
 pub async fn memory_search(
     State(state): State<AppState>,
     Query(query): Query<MemorySearchQuery>,
@@ -4669,7 +4669,7 @@ pub async fn memory_search(
     }))
 }
 
-/// `GET /api/memory/graph` — knowledge graph of Mem0 memories.
+/// `GET /api/memory/graph` - knowledge graph of Mem0 memories.
 ///
 /// Returns nodes (memories) and edges (cosine similarity above threshold)
 /// for Obsidian-style visualization.
@@ -4710,7 +4710,7 @@ pub struct MemoryGraphQuery {
     pub neighbors: Option<usize>,
 }
 
-/// `DELETE /api/memory/:id` — delete a memory node.
+/// `DELETE /api/memory/:id` - delete a memory node.
 pub async fn memory_delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4727,7 +4727,192 @@ pub async fn memory_delete(
     Ok(Json(json!({"success": true, "id": id})))
 }
 
-// ── Logs ────────────────────────────────────────────────────────────────────
+// ── Shared Memory API (#294) ────────────────────────────────────────────────
+//
+// REST endpoints for cross-runtime memory access (OpenClaw, Claude Code, Codex).
+// All endpoints require mem0 to be enabled (pgvector backend).
+
+/// Request body for `POST /api/v1/memory/recall`.
+#[derive(Deserialize)]
+pub struct RecallRequest {
+    pub query: String,
+    #[serde(default = "default_top_k")]
+    pub top_k: usize,
+}
+
+fn default_top_k() -> usize { 10 }
+
+/// Request body for `POST /api/v1/memory/capture`.
+#[derive(Deserialize)]
+pub struct CaptureRequest {
+    pub user_message: String,
+    pub assistant_message: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+/// Request body for `POST /api/v1/memory/store`.
+#[derive(Deserialize)]
+pub struct StoreFactRequest {
+    pub fact: String,
+    #[serde(default = "default_category")]
+    pub category: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+fn default_category() -> String { "general".to_string() }
+
+/// `POST /api/v1/memory/recall` — semantic recall from shared memory.
+///
+/// External clients send a query string and get back semantically similar memories.
+pub async fn v1_memory_recall(
+    State(state): State<AppState>,
+    Json(body): Json<RecallRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    let memories = mem0.recall(&body.query).await;
+
+    Ok(Json(json!({
+        "query": body.query,
+        "count": memories.len(),
+        "memories": memories.iter().map(|m| json!({
+            "id": m.id.to_string(),
+            "fact": m.fact,
+            "category": m.category,
+            "session_id": m.source_session_id.map(|s| s.to_string()),
+            "created_at": m.created_at.to_rfc3339(),
+            "access_count": m.access_count,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// `POST /api/v1/memory/capture` — extract and store facts from a conversation.
+///
+/// External clients can feed conversation exchanges to build shared memory.
+pub async fn v1_memory_capture(
+    State(state): State<AppState>,
+    Json(body): Json<CaptureRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    let session_id = body
+        .session_id
+        .as_deref()
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .unwrap_or_else(uuid::Uuid::new_v4);
+
+    let stored = mem0
+        .capture(&body.user_message, &body.assistant_message, session_id)
+        .await;
+
+    Ok(Json(json!({
+        "captured": stored.len(),
+        "memories": stored.iter().map(|m| json!({
+            "id": m.id.to_string(),
+            "fact": m.fact,
+            "category": m.category,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// `POST /api/v1/memory/store` — directly store a fact without extraction.
+///
+/// For external clients that already have extracted facts.
+pub async fn v1_memory_store(
+    State(state): State<AppState>,
+    Json(body): Json<StoreFactRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    let session_id = body
+        .session_id
+        .as_deref()
+        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+    // Use capture with a synthetic exchange to go through the normal storage path
+    let user_msg = format!("Remember this fact: {}", body.fact);
+    let assistant_msg = format!("Noted. Category: {}. Fact: {}", body.category, body.fact);
+
+    let sid = session_id.unwrap_or_else(uuid::Uuid::new_v4);
+    let stored = mem0.capture(&user_msg, &assistant_msg, sid).await;
+
+    Ok(Json(json!({
+        "stored": !stored.is_empty(),
+        "memories": stored.iter().map(|m| json!({
+            "id": m.id.to_string(),
+            "fact": m.fact,
+            "category": m.category,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// `GET /api/v1/memory/list` — list all memories with optional pagination.
+pub async fn v1_memory_list(
+    State(state): State<AppState>,
+    Query(params): Query<MemoryListQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    let all = mem0.list_all().await;
+    let limit = params.limit.unwrap_or(100).min(500);
+    let offset = params.offset.unwrap_or(0);
+
+    let page: Vec<_> = all.into_iter().skip(offset).take(limit).collect();
+
+    Ok(Json(json!({
+        "count": page.len(),
+        "offset": offset,
+        "limit": limit,
+        "memories": page.iter().map(|m| json!({
+            "id": m.id.to_string(),
+            "fact": m.fact,
+            "category": m.category,
+            "session_id": m.source_session_id.map(|s| s.to_string()),
+            "created_at": m.created_at.to_rfc3339(),
+            "updated_at": m.updated_at.to_rfc3339(),
+            "access_count": m.access_count,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct MemoryListQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+/// `DELETE /api/v1/memory/{id}` — delete a memory by ID.
+pub async fn v1_memory_delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    mem0.delete_memory(&id)
+        .await
+        .map_err(|e| GatewayError::Internal(format!("failed to delete memory: {e}")))?;
+
+    Ok(Json(json!({"deleted": true, "id": id})))
+}
+
+// ── Logs ──────────────────────────────────────────────────────────────────── 
 
 #[derive(Deserialize)]
 pub struct LogsQuery {
@@ -4747,7 +4932,7 @@ pub struct LogsQueryResponse {
     pub message: String,
 }
 
-/// `GET /api/logs` — query structured logs from the in-memory ring buffer.
+/// `GET /api/logs` - query structured logs from the in-memory ring buffer.
 pub async fn query_logs(
     State(state): State<AppState>,
     Query(query): Query<LogsQuery>,
@@ -4959,7 +5144,7 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
                 name: name.to_string(),
                 status: if required_persistent { "warn" } else { "info" },
                 message: format!(
-                    "{} is missing — {}",
+                    "{} is missing - {}",
                     path.display(),
                     gateway_path_hint(path, &mode, true)
                 ),
@@ -4969,7 +5154,7 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
                 name: name.to_string(),
                 status: "fail",
                 message: format!(
-                    "{} exists but is not a directory — remove and recreate it as a directory",
+                    "{} exists but is not a directory - remove and recreate it as a directory",
                     path.display()
                 ),
             }
@@ -4988,7 +5173,7 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
                     )
                 } else {
                     format!(
-                        "{} is not writable (write probe failed) — {}",
+                        "{} is not writable (write probe failed) - {}",
                         path.display(),
                         gateway_path_hint(path, &mode, false)
                     )
@@ -5005,7 +5190,7 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     .collect()
 }
 
-/// `POST /api/doctor/run` — execute diagnostic checks.
+/// `POST /api/doctor/run` - execute diagnostic checks.
 pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorReport>, GatewayError> {
     let mut checks = Vec::new();
 
@@ -5116,7 +5301,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     }))
 }
 
-/// `GET /api/doctor/results` — return the most recent doctor report (stub).
+/// `GET /api/doctor/results` - return the most recent doctor report (stub).
 pub async fn doctor_results(
     State(state): State<AppState>,
 ) -> Result<Json<DoctorReport>, GatewayError> {
@@ -5266,7 +5451,7 @@ fn build_configure_items(
     items
 }
 
-/// `POST /configure` — inspect configuration and report operator-meaningful status.
+/// `POST /configure` - inspect configuration and report operator-meaningful status.
 pub async fn configure(
     State(state): State<AppState>,
 ) -> Result<Json<ConfigureGatewayResponse>, GatewayError> {
@@ -5294,14 +5479,14 @@ pub async fn configure(
     }))
 }
 
-/// `POST /setup` — alias for configure (first-run setup wizard surface).
+/// `POST /setup` - alias for configure (first-run setup wizard surface).
 pub async fn setup(
     State(state): State<AppState>,
 ) -> Result<Json<ConfigureGatewayResponse>, GatewayError> {
     configure(State(state)).await
 }
 
-/// `GET /update/check` — report the currently running version and whether a newer Git HEAD exists.
+/// `GET /update/check` - report the currently running version and whether a newer Git HEAD exists.
 pub async fn update_check() -> Result<Json<UpdateCheckResponse>, GatewayError> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let detail = if let Some((current, latest)) = git_update_versions() {
@@ -5330,7 +5515,7 @@ pub async fn update_check() -> Result<Json<UpdateCheckResponse>, GatewayError> {
     }))
 }
 
-/// `POST /update/apply` — guide operators to the supported source/self-update flows.
+/// `POST /update/apply` - guide operators to the supported source/self-update flows.
 pub async fn update_apply() -> Result<Json<UpdateApplyResponse>, GatewayError> {
     Ok(Json(UpdateApplyResponse {
         success: false,
@@ -5342,7 +5527,7 @@ pub async fn update_apply() -> Result<Json<UpdateApplyResponse>, GatewayError> {
     }))
 }
 
-/// `GET /update/status` — report the running build version and checkout/source status.
+/// `GET /update/status` - report the running build version and checkout/source status.
 pub async fn update_status() -> Result<Json<UpdateStatusResponse>, GatewayError> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let detail = if let Some((current, latest)) = git_update_versions() {
