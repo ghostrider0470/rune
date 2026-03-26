@@ -213,6 +213,30 @@
     history.replaceState(null, '', location.pathname + '?' + next.toString());
   }
 
+  function resetTranscript() {
+    transcript.innerHTML = '';
+  }
+
+  async function startFreshSession() {
+    sessionId = null;
+    window.sessionStorage.removeItem(sessionStorageKey);
+    const next = new URLSearchParams(location.search);
+    next.delete('session_id');
+    if (authToken) next.set('api_key', authToken);
+    if (sessionToken) next.set('session_token', sessionToken);
+    history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next.toString() : ''));
+    resetTranscript();
+    appendMsg('system', 'Starting a new session...');
+    setStatus(ws && ws.readyState === WebSocket.OPEN, ws && ws.readyState === WebSocket.OPEN ? 'Connected' : 'Reconnecting...');
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        await hydrateSession();
+      } catch (e) {
+        appendMsg('system', 'Failed to start new session: ' + (e.message || e));
+      }
+    }
+  }
+
   function rpc(method, params) {
     return new Promise((resolve, reject) => {
       const id = String(++reqCounter);
