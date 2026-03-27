@@ -13,7 +13,7 @@
 //! ## Usage
 //!
 //! ```bash
-//! rune mcp-memory-server --rune-url http://127.0.0.1:18790
+//! rune mcp-memory-server --rune-url http://127.0.0.1:8787
 //! ```
 //!
 //! Or in Claude Code's MCP config:
@@ -34,13 +34,19 @@ use tracing::{debug, error, info};
 
 use crate::protocol::{JsonRpcRequest, JsonRpcResponse, JsonRpcError, MCP_PROTOCOL_VERSION};
 
-/// Default Rune gateway URL for memory API.
-const DEFAULT_RUNE_URL: &str = "http://127.0.0.1:18790";
+/// Default Rune gateway URL for the memory API.
+///
+/// Keep this aligned with the CLI global `--gateway-url` default so the
+/// standalone MCP memory server works out of the box against a local Rune
+/// gateway without requiring an explicit override.
+const DEFAULT_RUNE_URL: &str = "http://127.0.0.1:8787";
 
 /// Run the MCP memory server over stdio.
 ///
-/// Reads JSON-RPC requests from stdin, dispatches to the memory API,
-/// and writes JSON-RPC responses to stdout.
+/// Reads newline-delimited JSON-RPC requests from stdin, dispatches them to
+/// Rune's gateway-backed memory API, and writes newline-delimited JSON-RPC
+/// responses to stdout. This is the transport expected by Claude Code and
+/// Codex MCP integrations.
 pub async fn run_stdio_server(rune_url: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let base_url = rune_url.unwrap_or_else(|| DEFAULT_RUNE_URL.to_string());
     let client = reqwest::Client::builder()

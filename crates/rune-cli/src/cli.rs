@@ -308,8 +308,8 @@ pub enum Command {
     },
     /// Run the MCP memory server (stdio transport) for Claude Code / Codex integration.
     McpMemoryServer {
-        /// Rune gateway URL (default: http://127.0.0.1:18790).
-        #[arg(long, default_value = "http://127.0.0.1:18790")]
+        /// Rune gateway URL (default: http://127.0.0.1:8787).
+        #[arg(long, default_value = "http://127.0.0.1:8787")]
         rune_url: String,
     },
     /// Agent Communication Protocol (ACP) bridge commands.
