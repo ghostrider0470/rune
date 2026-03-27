@@ -47,6 +47,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
+use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
 use rune_spells_rust_patterns::{
     RustPatternsToolExecutor, rust_patterns_tool_definition,
     rust_patterns_validate_tool_definition,
@@ -1689,6 +1690,11 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
+            "code_review" => {
+                CodeReviewToolExecutor::new(self.workspace_root.clone())
+                    .execute(call)
+                    .await
+            }
             "comms_send" => match &self.comms {
                 Some(comms) => comms.execute(call).await,
                 None => Err(ToolError::UnknownTool {
@@ -2025,6 +2031,7 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
     registry.register(security_audit_tool_definition());
     registry.register(rust_patterns_tool_definition());
     registry.register(rust_patterns_validate_tool_definition());
+    registry.register(code_review_tool_definition());
 }
 
 /// Build the model provider from config, falling back to echo if none configured.

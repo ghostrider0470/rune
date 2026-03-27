@@ -1,0 +1,20 @@
+[package]
+name = "rune-spells-code-review"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+rune-core = { path = "../../rune-core" }
+rune-tools = { path = "../../rune-tools" }
+syn = { version = "2.0", features = ["full", "visit"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
