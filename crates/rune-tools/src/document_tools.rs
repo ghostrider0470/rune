@@ -151,7 +151,7 @@ fn extract_text_from_wordprocessing_xml(xml: &str) -> String {
                 in_paragraph = true;
             }
             Ok(Event::Text(t)) if in_paragraph => {
-                if let Ok(text) = std::str::from_utf8(t.as_ref()) { out.push_str(&text); }
+                if let Ok(text) = std::str::from_utf8(t.as_ref()) { out.push_str(text); }
             }
             Ok(Event::Eof) => break,
             Ok(_) => {}
@@ -173,7 +173,7 @@ fn parse_shared_strings(xml: &str) -> Vec<String> {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) if e.name().as_ref() == b"t" => in_text = true,
             Ok(Event::End(e)) if e.name().as_ref() == b"si" => { out.push(current.clone()); current.clear(); },
-            Ok(Event::Text(t)) if in_text => if let Ok(text) = std::str::from_utf8(t.as_ref()) { current.push_str(&text); },
+            Ok(Event::Text(t)) if in_text => if let Ok(text) = std::str::from_utf8(t.as_ref()) { current.push_str(text); },
             Ok(Event::End(e)) if e.name().as_ref() == b"t" => in_text = false,
             Ok(Event::Eof) => break,
             Ok(_) => {},

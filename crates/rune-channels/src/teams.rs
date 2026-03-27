@@ -110,6 +110,9 @@ impl ChannelAdapter for TeamsAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use rune_core::ChannelId;
+    use crate::ChannelMessage;
 
     #[test]
     fn teams_adapter_constructs() {

@@ -52,9 +52,7 @@ impl CommandRegistry {
         let name = cmd.name.clone();
         let short = cmd.short_name().to_string();
         let mut aliases = self.aliases.write().await;
-        if !aliases.contains_key(&short) {
-            aliases.insert(short, name.clone());
-        }
+        aliases.entry(short).or_insert_with(|| name.clone());
         drop(aliases);
         self.inner.write().await.insert(name.clone(), cmd);
         debug!(command = %name, "command registered");
@@ -83,6 +81,10 @@ impl CommandRegistry {
 
     pub async fn len(&self) -> usize {
         self.inner.read().await.len()
+    }
+
+    pub async fn is_empty(&self) -> bool {
+        self.inner.read().await.is_empty()
     }
 }
 

@@ -651,9 +651,9 @@ pub fn parse_yaml_value(yaml: &str) -> serde_json::Value {
         }
 
         // Detect list item under current key (`  - value` or `- value`).
-        if line.starts_with("- ") {
+        if let Some(rest) = line.strip_prefix("- ") {
             if let Some(ref key) = current_list_key {
-                let item = line[2..].trim().to_string();
+                let item = rest.trim().to_string();
                 // Strip surrounding quotes.
                 let item = item
                     .strip_prefix('"')

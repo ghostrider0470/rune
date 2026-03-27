@@ -561,6 +561,14 @@ mod tests {
         async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
             Ok(Vec::new())
         }
+
+        async fn delete_chunk(&self, _file_path: &str, _chunk_index: i32) -> Result<bool, StoreError> {
+            unreachable!()
+        }
+
+        async fn delete_all(&self) -> Result<usize, StoreError> {
+            unreachable!()
+        }
     }
 
     struct StubEmbeddingProvider {

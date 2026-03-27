@@ -110,7 +110,7 @@ impl OpenAiProvider {
                 return Err(error);
             }
 
-            let wait_secs = delay_secs.or(retry_after_secs).unwrap_or(1).max(1).min(60);
+            let wait_secs = delay_secs.or(retry_after_secs).unwrap_or(1).clamp(1, 60);
 
             warn!(
                 provider = if self.use_azure_auth {

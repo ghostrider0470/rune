@@ -1435,10 +1435,8 @@ impl RpcDispatcher {
         let report = crate::routes::doctor_run(axum::extract::State(self.state.clone()))
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?;
-        Ok(
-            serde_json::to_value(report.0)
-                .map_err(|error| RpcError::internal(error.to_string()))?,
-        )
+        serde_json::to_value(report.0)
+                .map_err(|error| RpcError::internal(error.to_string()))
     }
 
     /// Latest doctor results parity payload.
