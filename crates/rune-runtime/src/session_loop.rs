@@ -125,32 +125,28 @@ impl SessionLoop {
         self
     }
 
+    pub(crate) async fn run_startup_restore(&self) -> Result<(), RuntimeError> {
+        let sessions = self.session_repo.list_active_channel_sessions().await?;
+        let mut index = self.sessions.lock().await;
+        let mut restored = self.restored_session_routes.lock().await;
+        for session in &sessions {
+            if let Some(ref channel_ref) = session.channel_ref {
+                index.insert(channel_ref.clone(), session.id);
+                restored.insert(channel_ref.clone(), session.last_activity_at.to_rfc3339());
+            }
+        }
+        if !sessions.is_empty() {
+            info!(count = sessions.len(), "restored active channel sessions from DB");
+        }
+        Ok(())
+    }
+
     /// Run the session loop forever, processing inbound events.
     pub async fn run(&self) -> Result<(), RuntimeError> {
         // Pre-populate the session index from DB so existing Channel
         // sessions resume after a gateway restart.
-        match self.session_repo.list_active_channel_sessions().await {
-            Ok(sessions) => {
-                let mut index = self.sessions.lock().await;
-                for session in &sessions {
-                    if let Some(ref channel_ref) = session.channel_ref {
-                        index.insert(channel_ref.clone(), session.id);
-                        self.restored_session_routes
-                            .lock()
-                            .await
-                            .insert(channel_ref.clone(), session.last_activity_at.to_rfc3339());
-                    }
-                }
-                if !sessions.is_empty() {
-                    info!(
-                        count = sessions.len(),
-                        "restored active channel sessions from DB"
-                    );
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "failed to restore channel sessions from DB, starting fresh");
-            }
+        if let Err(e) = self.run_startup_restore().await {
+            warn!(error = %e, "failed to restore channel sessions from DB, starting fresh");
         }
 
         info!("session loop started, waiting for inbound events");

@@ -2495,7 +2495,7 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
 async fn resumed_session_notice_only_for_restored_channel_sessions() {
     let h = TestHarness::new();
     let engine = Arc::new(h.session_engine());
-    let existing = engine
+    let created = engine
         .create_session_full(
             SessionKind::Channel,
             Some(h.workspace_root.to_string_lossy().to_string()),
@@ -2530,6 +2530,16 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
         timestamp: chrono::Utc::now(),
         provider_message_id: "msg-1".to_string(),
     };
+
+    let existing = h
+        .session_repo
+        .find_by_channel_ref("chat-1:user-1")
+        .await
+        .unwrap()
+        .expect("restored channel session");
+    assert_eq!(existing.id, created.id);
+
+    session_loop.run_startup_restore().await.unwrap();
 
     session_loop
         .maybe_send_resumed_session_notice(&msg, "chat-1:user-1", &existing)
