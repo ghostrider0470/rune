@@ -123,6 +123,7 @@ Implementation note (2026-03-19): the operator CLI now exposes the `models` comm
 - [ ] `agent` command
 - [ ] `agents` command family
 - [x] `acp` tool dispatch — `acp_dispatch` tool registered; dispatches to Claude Code CLI and Codex CLI as subprocesses
+  - 2026-03-27 parity slice: ACP operator surface is now wired end-to-end through gateway `/acp/send`, `/acp/inbox`, and `/acp/ack` plus CLI client/execution paths, so the remaining ACP gap is narrowed to streaming/background execution and richer agent config rather than missing route/CLI plumbing.
 - [ ] `acp` CLI command family (`rune acp send/inbox/ack`)
 - [ ] `skills` command family
 - [ ] `plugins` command family
