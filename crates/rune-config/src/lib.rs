@@ -94,10 +94,11 @@ impl AppConfig {
         out.channels.whatsapp_access_token = mask(&self.channels.whatsapp_access_token);
         out.channels.whatsapp_app_secret = mask(&self.channels.whatsapp_app_secret);
         out.channels.whatsapp_verify_token = mask(&self.channels.whatsapp_verify_token);
-        out.channels.google_chat_service_account =
-            mask(&self.channels.google_chat_service_account);
+        out.channels.google_chat_service_account = mask(&self.channels.google_chat_service_account);
         out.channels.google_chat_verification_token =
             mask(&self.channels.google_chat_verification_token);
+        out.channels.teams_app_id = mask(&self.channels.teams_app_id);
+        out.channels.teams_app_password = mask(&self.channels.teams_app_password);
         out.mem0.embedding_api_key = mask(&self.mem0.embedding_api_key);
         out.mem0.postgres_url = mask(&self.mem0.postgres_url);
         out
@@ -1076,6 +1077,18 @@ pub struct ChannelsConfig {
     /// Optional Google Chat verification token for inbound webhook validation.
     #[serde(default)]
     pub google_chat_verification_token: Option<String>,
+    /// Microsoft Teams / Azure Bot app id.
+    #[serde(default)]
+    pub teams_app_id: Option<String>,
+    /// Microsoft Teams / Azure Bot app password or client secret.
+    #[serde(default)]
+    pub teams_app_password: Option<String>,
+    /// Optional Azure AD tenant id for single-tenant bot auth.
+    #[serde(default)]
+    pub teams_tenant_id: Option<String>,
+    /// Local listener bind address for inbound Bot Framework activities.
+    #[serde(default)]
+    pub teams_listen_addr: Option<String>,
 }
 
 /// Memory indexing and retrieval settings.

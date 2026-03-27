@@ -3,6 +3,7 @@
 mod discord;
 mod signal;
 mod slack;
+mod teams;
 mod telegram;
 pub mod types;
 mod whatsapp;
@@ -10,6 +11,7 @@ mod whatsapp;
 pub use discord::DiscordAdapter;
 pub use signal::SignalAdapter;
 pub use slack::SlackAdapter;
+pub use teams::TeamsAdapter;
 pub use telegram::TelegramAdapter;
 pub use types::*;
 pub use whatsapp::WhatsAppAdapter;
@@ -131,6 +133,27 @@ pub fn create_adapter(
                 .as_deref()
                 .unwrap_or("http://localhost:8080");
             Ok(Box::new(SignalAdapter::new(number, api_url)))
+        }
+        "teams" => {
+            let app_id = config
+                .teams_app_id
+                .as_deref()
+                .ok_or_else(|| ChannelError::Provider {
+                    message: "teams_app_id is required for the Teams adapter".into(),
+                })?;
+            let app_password =
+                config
+                    .teams_app_password
+                    .as_deref()
+                    .ok_or_else(|| ChannelError::Provider {
+                        message: "teams_app_password is required for the Teams adapter".into(),
+                    })?;
+            Ok(Box::new(TeamsAdapter::new(
+                app_id,
+                app_password,
+                config.teams_tenant_id.as_deref(),
+                config.teams_listen_addr.clone(),
+            )))
         }
         other => Err(ChannelError::Provider {
             message: format!("unknown channel adapter kind: {other}"),
