@@ -2530,6 +2530,65 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
 }
 
 #[tokio::test]
+async fn resumed_session_notice_skips_direct_sessions_even_if_marked_restored() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let existing = engine
+        .create_session_full(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            None,
+            Some("chat-1:user-1".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = SharedSentChannelAdapter { sent: sent.clone() };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine.clone(),
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    {
+        let mut restored = session_loop.restored_session_routes.lock().await;
+        restored.insert(
+            "chat-1:user-1".to_string(),
+            existing.last_activity_at.to_rfc3339(),
+        );
+    }
+
+    let msg = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "user-1".to_string(),
+        content: "hello again".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-1".to_string(),
+    };
+
+    session_loop
+        .maybe_send_resumed_session_notice(&msg, "chat-1:user-1", &existing)
+        .await;
+
+    let sent = sent.lock().await.clone();
+    assert!(
+        sent.is_empty(),
+        "resumed-session notice must stay limited to restored channel sessions"
+    );
+}
+
+#[tokio::test]
 async fn create_session_full_persists_mode_in_metadata() {
     let h = TestHarness::new();
     let engine = h.session_engine();

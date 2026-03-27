@@ -659,6 +659,10 @@ impl SessionLoop {
         routing_key: &str,
         session: &SessionRow,
     ) {
+        if session.kind != "channel" {
+            return;
+        }
+
         let fingerprint = session.last_activity_at.to_rfc3339();
         let restored = {
             let restored = self.restored_session_routes.lock().await;
