@@ -251,6 +251,7 @@
   const sessionHintEl = document.getElementById('session-hint');
   const query = new URLSearchParams(location.search);
   const continuityMessage = '__RUNE_WEBCHAT_CONTINUITY_MESSAGE__';
+  const hasGatewayAuth = '__RUNE_WEBCHAT_HAS_GATEWAY_AUTH__' === 'true';
 
   let ws = null;
   const sessionStorageKey = 'rune.webchat.session_id';
@@ -667,7 +668,8 @@
       try {
         const transcriptToken = authTokenForSession(sessionId);
         const queryParts = [];
-        if (transcriptToken) queryParts.push('api_key=' + encodeURIComponent(transcriptToken));
+        if (hasGatewayAuth && transcriptToken) queryParts.push('api_key=' + encodeURIComponent(transcriptToken));
+        else if (!hasGatewayAuth && browserSessionToken) queryParts.push('session_token=' + encodeURIComponent(browserSessionToken));
         if (sessionPollCursor) queryParts.push('after=' + encodeURIComponent(sessionPollCursor));
         const response = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/transcript' + (queryParts.length ? ('?' + queryParts.join('&')) : ''));
         if (!response.ok) return;
