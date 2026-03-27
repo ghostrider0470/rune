@@ -140,6 +140,7 @@ pub struct UpdateCheckResponse {
     pub current_version: String,
     pub latest_version: Option<String>,
     pub detail: String,
+    pub source: String,
 }
 
 #[derive(Serialize)]
@@ -4737,10 +4738,13 @@ pub async fn memory_delete(
 pub struct RecallRequest {
     pub query: String,
     #[serde(default = "default_top_k")]
+    #[allow(dead_code)]
     pub top_k: usize,
 }
 
-fn default_top_k() -> usize { 10 }
+fn default_top_k() -> usize {
+    10
+}
 
 /// Request body for `POST /api/v1/memory/capture`.
 #[derive(Deserialize)]
@@ -4761,7 +4765,9 @@ pub struct StoreFactRequest {
     pub session_id: Option<String>,
 }
 
-fn default_category() -> String { "general".to_string() }
+fn default_category() -> String {
+    "general".to_string()
+}
 
 /// `POST /api/v1/memory/recall` — semantic recall from shared memory.
 ///
@@ -4912,7 +4918,7 @@ pub async fn v1_memory_delete(
     Ok(Json(json!({"deleted": true, "id": id})))
 }
 
-// ── Logs ──────────────────────────────────────────────────────────────────── 
+// ── Logs ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct LogsQuery {
@@ -5489,7 +5495,7 @@ pub async fn setup(
 /// `GET /update/check` - report the currently running version and whether a newer Git HEAD exists.
 pub async fn update_check() -> Result<Json<UpdateCheckResponse>, GatewayError> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
-    let detail = if let Some((current, latest)) = git_update_versions() {
+    if let Some((current, latest)) = git_update_versions() {
         let available = current != latest;
         let detail = if available {
             format!("local checkout is behind Git HEAD ({current} -> {latest})")
@@ -5501,18 +5507,68 @@ pub async fn update_check() -> Result<Json<UpdateCheckResponse>, GatewayError> {
             current_version: current,
             latest_version: Some(latest),
             detail,
+            source: "git".to_string(),
         }));
-    } else {
-        "gateway build is not running from a Git checkout; remote update availability unknown"
-            .to_string()
-    };
+    }
 
-    Ok(Json(UpdateCheckResponse {
-        available: false,
-        current_version,
-        latest_version: None,
-        detail,
-    }))
+    match latest_github_release_version("ghostrider0470/rune").await {
+        Ok(Some(latest)) => {
+            let available = latest != current_version;
+            let detail = if available {
+                format!("GitHub release {latest} is newer than running build {current_version}")
+            } else {
+                format!("running build matches latest GitHub release ({current_version})")
+            };
+            Ok(Json(UpdateCheckResponse {
+                available,
+                current_version,
+                latest_version: Some(latest),
+                detail,
+                source: "github-release".to_string(),
+            }))
+        }
+        Ok(None) => Ok(Json(UpdateCheckResponse {
+            available: false,
+            current_version,
+            latest_version: None,
+            detail: "GitHub release metadata did not include a tag name".to_string(),
+            source: "github-release".to_string(),
+        })),
+        Err(error) => Ok(Json(UpdateCheckResponse {
+            available: false,
+            current_version,
+            latest_version: None,
+            detail: format!(
+                "gateway build is not running from a Git checkout and GitHub release lookup failed: {error}"
+            ),
+            source: "unknown".to_string(),
+        })),
+    }
+}
+
+#[derive(Deserialize)]
+struct GitHubLatestRelease {
+    tag_name: Option<String>,
+}
+
+async fn latest_github_release_version(repo: &str) -> Result<Option<String>, String> {
+    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+    let response = reqwest::Client::new()
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, "rune-gateway")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP {} from {url}", response.status()));
+    }
+
+    response
+        .json::<GitHubLatestRelease>()
+        .await
+        .map(|payload| payload.tag_name.filter(|value| !value.trim().is_empty()))
+        .map_err(|error| error.to_string())
 }
 
 /// `POST /update/apply` - guide operators to the supported source/self-update flows.
@@ -5698,8 +5754,20 @@ mod tests {
         let base = tmp.path().to_path_buf();
         // Create all 9 subdirs
         for sub in &[
-            "db", "sessions", "memory", "media", "spells", "skills", "plugins", "logs", "backups",
-            "config", "secrets", "workspace", "cache", "data",
+            "db",
+            "sessions",
+            "memory",
+            "media",
+            "spells",
+            "skills",
+            "plugins",
+            "logs",
+            "backups",
+            "config",
+            "secrets",
+            "workspace",
+            "cache",
+            "data",
         ] {
             std::fs::create_dir(base.join(sub)).unwrap();
         }

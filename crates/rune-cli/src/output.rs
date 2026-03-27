@@ -2113,18 +2113,24 @@ pub struct UpdateCheckResponse {
     pub current_version: String,
     pub latest_version: Option<String>,
     pub detail: String,
+    pub source: String,
 }
 impl fmt::Display for UpdateCheckResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.available {
             write!(
                 f,
-                "Update available: {} → {}",
+                "Update available [{}]: {} → {}",
+                self.source,
                 self.current_version,
                 self.latest_version.as_deref().unwrap_or("?")
             )
         } else {
-            write!(f, "✓ Up to date ({})", self.current_version)
+            write!(
+                f,
+                "✓ Up to date [{}] ({})",
+                self.source, self.current_version
+            )
         }
     }
 }
