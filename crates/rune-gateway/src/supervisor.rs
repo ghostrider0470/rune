@@ -627,10 +627,7 @@ async fn run_heartbeat(
     deps: &SupervisorDeps,
     prompt: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let session = deps
-        .session_engine
-        .create_session(SessionKind::Scheduled, deps.workspace_root.clone())
-        .await?;
+    let session = get_or_create_heartbeat_session(deps).await?;
 
     deps.session_engine.mark_running(session.id).await?;
 
@@ -740,6 +737,33 @@ async fn run_reminder(
     }
 }
 
+async fn get_or_create_heartbeat_session(
+    deps: &SupervisorDeps,
+) -> Result<SessionRow, Box<dyn std::error::Error + Send + Sync>> {
+    const HEARTBEAT_CHANNEL_REF: &str = "system:heartbeat";
+
+    if let Some(session) = deps
+        .session_engine
+        .get_session_by_channel_ref(HEARTBEAT_CHANNEL_REF)
+        .await?
+    {
+        return Ok(session);
+    }
+
+    let session = deps
+        .session_engine
+        .create_session_full(
+            SessionKind::Scheduled,
+            deps.workspace_root.clone(),
+            None,
+            Some(HEARTBEAT_CHANNEL_REF.to_string()),
+            None,
+        )
+        .await?;
+
+    Ok(session)
+}
+
 async fn get_or_create_main_scheduled_session(
     deps: &SupervisorDeps,
 ) -> Result<SessionRow, Box<dyn std::error::Error + Send + Sync>> {
@@ -819,6 +843,34 @@ mod tests {
     use super::*;
     use rune_core::JobId;
     use rune_runtime::scheduler::{Job, JobPayload, JobRunStatus, Schedule, SessionTarget};
+    use rune_store::repos::InMemoryStore;
+
+    #[tokio::test]
+    async fn get_or_create_heartbeat_session_reuses_stable_channel_ref() {
+        let store = Arc::new(InMemoryStore::new());
+        let session_engine = Arc::new(SessionEngine::new(store.clone()));
+        let deps = SupervisorDeps {
+            heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+            scheduler: Arc::new(Scheduler::new(None)),
+            reminder_store: Arc::new(ReminderStore::default()),
+            session_engine,
+            turn_executor: Arc::new(TurnExecutor::new_noop()),
+            workspace_root: Some("/workspace".to_string()),
+            device_registry: Arc::new(DeviceRegistry::default()),
+            event_tx: broadcast::channel(1).0,
+            operator_delivery: None,
+            plugin_scanner: None,
+            plugin_scan_interval_ticks: 0,
+            comms: None,
+        };
+
+        let first = get_or_create_heartbeat_session(&deps).await.unwrap();
+        let second = get_or_create_heartbeat_session(&deps).await.unwrap();
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.channel_ref.as_deref(), Some("system:heartbeat"));
+    }
+
 
     #[tokio::test]
     async fn supervisor_starts_and_stops_cleanly() {
