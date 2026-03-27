@@ -2183,20 +2183,40 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
 }
 
 fn skill_to_response(skill: Skill) -> SkillResponse {
+    let Skill {
+        name,
+        description,
+        enabled,
+        source_dir,
+        binary_path,
+        namespace,
+        version,
+        author,
+        kind,
+        requires,
+        tags,
+        match_rules,
+        triggers,
+        ..
+    } = skill;
+
     SkillResponse {
-        name: skill.name,
-        description: skill.description,
-        enabled: skill.enabled,
-        source_dir: skill.source_dir.display().to_string(),
-        binary_path: skill.binary_path.map(|path| path.display().to_string()),
-        namespace: skill.namespace,
-        version: skill.version,
-        author: skill.author,
-        kind: format!("{:?}", skill.kind).to_lowercase(),
-        requires: skill.requires,
-        tags: skill.tags,
-        match_rules: skill.match_rules,
-        triggers: skill.triggers,
+        name,
+        description,
+        enabled,
+        source_dir: source_dir.display().to_string(),
+        binary_path: binary_path.map(|path| path.display().to_string()),
+        namespace,
+        version,
+        author,
+        kind: serde_json::to_value(&kind)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_else(|| format!("{:?}", kind).to_lowercase()),
+        requires,
+        tags,
+        match_rules,
+        triggers,
     }
 }
 
