@@ -1147,6 +1147,17 @@ The rewrite still needs an equivalent orchestration strategy if the surrounding 
 
 ---
 
+## 7.7 Native spell inventory
+
+| Spell | Kind | Operator-facing behavior | Status |
+| --- | --- | --- | --- |
+| `rust-patterns` | tool | Query Rust production patterns by topic, tags, or imports. | Shipped |
+| `security-audit` | tool | Run a baseline host security audit covering ports, sensitive permissions, SSH hardening, and firewall status. | Shipped |
+| `code-review` | tool | Perform structured code review on a file, diff, or PR. | Shipped |
+| `evolver` | workflow | Report local evolver scaffold status for the self-evolution workflow lane. | Scaffold |
+
+---
+
 ## 8. Approval, sandbox, and security parity inventory
 
 ## 8.1 Approval semantics
