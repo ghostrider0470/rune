@@ -1354,7 +1354,7 @@ pub struct SessionStatusResponse {
     pub session_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orchestration_status: Option<String>,
-        #[serde(default)]
+    #[serde(default)]
     pub delegation_roles: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegation_depth: Option<u32>,
@@ -1473,11 +1473,13 @@ pub async fn get_session_status(
         })
         .unwrap_or_default();
     let delegation_depth = if parent_session_id.is_some() {
-        Some(metadata
-            .get("delegation_depth")
-            .and_then(|value| value.as_u64())
-            .map(|value| value as u32)
-            .unwrap_or(1))
+        Some(
+            metadata
+                .get("delegation_depth")
+                .and_then(|value| value.as_u64())
+                .map(|value| value as u32)
+                .unwrap_or(1),
+        )
     } else {
         metadata
             .get("delegation_depth")
@@ -5276,11 +5278,20 @@ pub struct DoctorPathSummary {
     pub auto_create_missing: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DoctorTopologySummary {
+    pub deployment: &'static str,
+    pub database: &'static str,
+    pub models: &'static str,
+    pub search: &'static str,
+}
+
 #[derive(Serialize)]
 pub struct DoctorReport {
     pub overall: &'static str,
     pub checks: Vec<DoctorCheck>,
     pub paths: DoctorPathSummary,
+    pub topology: DoctorTopologySummary,
     pub run_at: String,
 }
 
@@ -5403,6 +5414,68 @@ fn readiness_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     checks
 }
 
+fn doctor_topology_summary(config: &rune_config::AppConfig) -> DoctorTopologySummary {
+    let resolved_mode = config.mode.resolve(config);
+    let deployment = match (resolved_mode, config.paths.profile()) {
+        (rune_config::RuntimeMode::Server, rune_config::PathsProfile::DockerDefault) => {
+            "docker-or-container"
+        }
+        (rune_config::RuntimeMode::Server, _) => "server",
+        (rune_config::RuntimeMode::Standalone, _) => "local",
+        (rune_config::RuntimeMode::Auto, _) => "auto",
+    };
+
+    let database = match config.database.backend {
+        rune_config::StorageBackend::Postgres => {
+            if config.database.database_url.is_some() {
+                "azure-or-external-postgres"
+            } else {
+                "embedded-postgres"
+            }
+        }
+        rune_config::StorageBackend::Sqlite => "sqlite-local",
+        rune_config::StorageBackend::Cosmos => "azure-cosmos",
+        rune_config::StorageBackend::Auto => {
+            if config.database.database_url.is_some() {
+                "azure-or-external-postgres"
+            } else {
+                "sqlite-local"
+            }
+        }
+    };
+
+    let models = if config.models.providers.is_empty() {
+        "zero-config-local"
+    } else if config.models.providers.iter().any(|provider| {
+        matches!(
+            provider.kind.as_str(),
+            "azure_openai" | "azure" | "azure-openai" | "azure_foundry"
+        )
+    }) {
+        "azure"
+    } else {
+        "custom"
+    };
+
+    let search = match config
+        .memory
+        .capability_mode(config.memory.semantic_search_enabled)
+    {
+        "semantic-hybrid" => "semantic-hybrid",
+        "semantic-keyword-fallback" => "keyword-fallback",
+        "keyword-local" => "keyword-local",
+        "file-local" => "file-local",
+        _ => "unknown",
+    };
+
+    DoctorTopologySummary {
+        deployment,
+        database,
+        models,
+        search,
+    }
+}
+
 fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     let mode = config.mode.resolve(config);
     let profile = config.paths.profile();
@@ -5486,6 +5559,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         mode: resolved_mode.as_str(),
         auto_create_missing: resolved_mode == rune_config::RuntimeMode::Standalone,
     };
+    let topology_summary = doctor_topology_summary(&config);
     let provider_ok = !config.models.providers.is_empty();
     checks.push(DoctorCheck {
         name: "model_providers".to_string(),
@@ -5582,6 +5656,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         overall,
         checks,
         paths: paths_summary,
+        topology: topology_summary,
         run_at: Utc::now().to_rfc3339(),
     }))
 }

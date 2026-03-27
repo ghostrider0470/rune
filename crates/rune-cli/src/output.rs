@@ -89,11 +89,30 @@ impl fmt::Display for DoctorCheck {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorPathSummary {
+    pub profile: String,
+    pub mode: String,
+    pub auto_create_missing: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorTopologySummary {
+    pub deployment: String,
+    pub database: String,
+    pub models: String,
+    pub search: String,
+}
+
 /// Full doctor report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub overall: String,
     pub checks: Vec<DoctorCheck>,
+    #[serde(default)]
+    pub paths: Option<DoctorPathSummary>,
+    #[serde(default)]
+    pub topology: Option<DoctorTopologySummary>,
     pub run_at: String,
 }
 
@@ -102,6 +121,20 @@ impl fmt::Display for DoctorReport {
         writeln!(f, "Doctor Report")?;
         writeln!(f, "─────────────")?;
         writeln!(f, "Overall: {}", self.overall)?;
+        if let Some(topology) = &self.topology {
+            writeln!(
+                f,
+                "Topology: deployment={}, database={}, models={}, search={}",
+                topology.deployment, topology.database, topology.models, topology.search
+            )?;
+        }
+        if let Some(paths) = &self.paths {
+            writeln!(
+                f,
+                "Paths:    profile={}, mode={}, auto_create_missing={}",
+                paths.profile, paths.mode, paths.auto_create_missing
+            )?;
+        }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
             writeln!(f, "{check}")?;
@@ -112,7 +145,11 @@ impl fmt::Display for DoctorReport {
             .filter(|check| check.status == "pass")
             .count();
         let total = self.checks.len();
-        write!(f, "\nChecks: {passed}/{total} passing")
+        write!(
+            f,
+            "
+Checks: {passed}/{total} passing"
+        )
     }
 }
 
@@ -765,7 +802,6 @@ impl fmt::Display for SkillSummary {
         )
     }
 }
-
 
 /// Response for `rune spells search`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5473,7 +5509,6 @@ mod tests {
         assert_eq!(parsed["mode"], "coder");
     }
 
-
     fn sample_skill(name: &str, description: &str, enabled: bool) -> SkillSummary {
         SkillSummary {
             name: name.into(),
@@ -5503,7 +5538,10 @@ mod tests {
         let response = SkillListResponse {
             skills: vec![
                 sample_skill("alpha", "First skill", true),
-                SkillSummary { binary_path: None, ..sample_skill("beta", "Second skill", false) },
+                SkillSummary {
+                    binary_path: None,
+                    ..sample_skill("beta", "Second skill", false)
+                },
             ],
         };
         let out = render(&response, OutputFormat::Human);
