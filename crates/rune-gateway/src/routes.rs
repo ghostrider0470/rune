@@ -4869,6 +4869,8 @@ pub async fn memory_graph(
         "nodes": graph.nodes.iter().map(|n| json!({
             "id": n.id.to_string(),
             "fact": n.fact,
+            "source_agent": n.source_agent,
+            "trigger": n.trigger,
             "category": n.category,
             "session_id": n.source_session_id.map(|s| s.to_string()),
             "created_at": n.created_at.to_rfc3339(),
@@ -4930,6 +4932,10 @@ pub struct CaptureRequest {
     pub assistant_message: String,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub source_agent: Option<String>,
+    #[serde(default)]
+    pub trigger: Option<String>,
 }
 
 /// Request body for `POST /api/v1/memory/store`.
@@ -4940,6 +4946,10 @@ pub struct StoreFactRequest {
     pub category: String,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub source_agent: Option<String>,
+    #[serde(default)]
+    pub trigger: Option<String>,
 }
 
 fn default_category() -> String {
@@ -4968,6 +4978,8 @@ pub async fn v1_memory_recall(
             "fact": m.fact,
             "category": m.category,
             "session_id": m.source_session_id.map(|s| s.to_string()),
+            "source_agent": m.source_agent,
+            "trigger": m.trigger,
             "created_at": m.created_at.to_rfc3339(),
             "access_count": m.access_count,
         })).collect::<Vec<_>>(),
@@ -4993,7 +5005,15 @@ pub async fn v1_memory_capture(
         .unwrap_or_else(uuid::Uuid::new_v4);
 
     let stored = mem0
-        .capture(&body.user_message, &body.assistant_message, session_id)
+        .capture_with_metadata(
+            &body.user_message,
+            &body.assistant_message,
+            session_id,
+            rune_runtime::mem0::MemoryCaptureMetadata {
+                source_agent: body.source_agent.clone(),
+                trigger: body.trigger.clone(),
+            },
+        )
         .await;
 
     Ok(Json(json!({
@@ -5002,6 +5022,9 @@ pub async fn v1_memory_capture(
             "id": m.id.to_string(),
             "fact": m.fact,
             "category": m.category,
+            "session_id": m.source_session_id.map(|s| s.to_string()),
+            "source_agent": m.source_agent,
+            "trigger": m.trigger,
         })).collect::<Vec<_>>(),
     })))
 }
@@ -5028,7 +5051,17 @@ pub async fn v1_memory_store(
     let assistant_msg = format!("Noted. Category: {}. Fact: {}", body.category, body.fact);
 
     let sid = session_id.unwrap_or_else(uuid::Uuid::new_v4);
-    let stored = mem0.capture(&user_msg, &assistant_msg, sid).await;
+    let stored = mem0
+        .capture_with_metadata(
+            &user_msg,
+            &assistant_msg,
+            sid,
+            rune_runtime::mem0::MemoryCaptureMetadata {
+                source_agent: body.source_agent.clone(),
+                trigger: body.trigger.clone(),
+            },
+        )
+        .await;
 
     Ok(Json(json!({
         "stored": !stored.is_empty(),
@@ -5036,6 +5069,9 @@ pub async fn v1_memory_store(
             "id": m.id.to_string(),
             "fact": m.fact,
             "category": m.category,
+            "session_id": m.source_session_id.map(|s| s.to_string()),
+            "source_agent": m.source_agent,
+            "trigger": m.trigger,
         })).collect::<Vec<_>>(),
     })))
 }
