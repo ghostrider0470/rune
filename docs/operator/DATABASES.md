@@ -36,7 +36,7 @@ Key points:
 - PostgreSQL FTS (tsvector/tsquery) for full-text search — more powerful than SQLite FTS5, with ranking and language support
 - pgvector for vector search — mature PostgreSQL extension, well-supported ecosystem
 - Remote embeddings only — no local embedding models in phase 1
-- Single database engine from day one eliminates the need for multi-backend abstractions
+- Single operational database remains the default, while the runtime preserves optional backends behind the StorageBackend factory when enterprise requirements justify them
 
 ---
 

@@ -2001,6 +2001,7 @@ pub struct TranscriptEntry {
 pub struct TranscriptQuery {
     pub after: Option<Uuid>,
     pub session_token: Option<String>,
+    pub api_key: Option<String>,
 }
 
 /// `GET /sessions/{id}/transcript` - full session transcript.
@@ -2015,12 +2016,14 @@ pub async fn get_transcript(
         .await
         .map_err(|e| GatewayError::SessionNotFound(e.to_string()))?;
 
-    if let Some(session_token) = query.session_token.as_deref() {
-        let expected_channel = format!("webchat:{session_token}");
-        if session.channel_ref.as_deref() != Some(expected_channel.as_str()) {
-            return Err(GatewayError::Unauthorized);
+    if query.api_key.is_none() {
+        if let Some(session_token) = query.session_token.as_deref() {
+            let expected_channel = format!("webchat:{session_token}");
+            if session.channel_ref.as_deref() != Some(expected_channel.as_str()) {
+                return Err(GatewayError::Unauthorized);
+            }
         }
-    };
+    }
 
     let items = state
         .transcript_repo
@@ -5438,6 +5441,8 @@ fn doctor_topology_summary(config: &rune_config::AppConfig) -> DoctorTopologySum
         rune_config::StorageBackend::Auto => {
             if config.database.database_url.is_some() {
                 "azure-or-external-postgres"
+            } else if config.database.cosmos_endpoint.is_some() {
+                "azure-cosmos"
             } else {
                 "sqlite-local"
             }
