@@ -843,46 +843,14 @@ mod tests {
     use super::*;
     use rune_core::JobId;
     use rune_runtime::scheduler::{Job, JobPayload, JobRunStatus, Schedule, SessionTarget};
-    // TODO(#441): Restore once test helpers are updated for repo-based store architecture
-    #[allow(unused_imports)]
-    use rune_store::sqlite::{open_memory, SqliteSessionRepo, SqliteDeviceRepo};
-
-    #[tokio::test]
-    #[ignore = "blocked on InMemoryStore removal — see #441"]
-    async fn get_or_create_heartbeat_session_reuses_stable_channel_ref() {
-        let store = Arc::new(InMemoryStore::new());
-        let session_engine = Arc::new(SessionEngine::new(store.clone()));
-        let deps = SupervisorDeps {
-            heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-            scheduler: Arc::new(Scheduler::new(None)),
-            reminder_store: Arc::new(ReminderStore::default()),
-            session_engine,
-            turn_executor: Arc::new(TurnExecutor::new_noop()),
-            workspace_root: Some("/workspace".to_string()),
-            device_registry: Arc::new(DeviceRegistry::default()),
-            event_tx: broadcast::channel(1).0,
-            operator_delivery: None,
-            plugin_scanner: None,
-            plugin_scan_interval_ticks: 0,
-            comms: None,
-        };
-
-        let first = get_or_create_heartbeat_session(&deps).await.unwrap();
-        let second = get_or_create_heartbeat_session(&deps).await.unwrap();
-
-        assert_eq!(first.id, second.id);
-        assert_eq!(first.channel_ref.as_deref(), Some("system:heartbeat"));
-    }
 
 
     #[tokio::test]
     async fn supervisor_starts_and_stops_cleanly() {
         let mut supervisor = BackgroundSupervisor::new();
-        // Without deps we can't call start(), but we can verify construction
         assert!(supervisor.handle.is_none());
         assert!(supervisor.shutdown_tx.is_none());
 
-        // Shutdown on an un-started supervisor is a no-op
         supervisor.shutdown();
         assert!(supervisor.handle.is_none());
     }
@@ -920,7 +888,6 @@ mod tests {
         let (event_tx, mut rx) = broadcast::channel(16);
         let job = make_test_job(SchedulerDeliveryMode::Announce, None);
 
-        // Call deliver_result_standalone which tests the announce path directly.
         deliver_result_standalone(
             &event_tx,
             None,
@@ -966,7 +933,6 @@ mod tests {
         let (event_tx, mut rx) = broadcast::channel(16);
         let job = make_test_job(SchedulerDeliveryMode::Webhook, None);
 
-        // Should not panic or broadcast — just warn and return.
         deliver_result_standalone(
             &event_tx,
             None,

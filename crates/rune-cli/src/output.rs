@@ -5277,6 +5277,20 @@ mod tests {
                     message: "unreachable".into(),
                 },
             ],
+            paths: crate::output::DoctorPathSummary {
+                workspace: "ok",
+                memory: "ok",
+                skills: "ok",
+                config: "ok",
+                models: "ok",
+                search: "ok",
+            },
+            topology: crate::output::DoctorTopologySummary {
+                mode: "single-process",
+                transport: "http",
+                session_storage: "memory",
+                message_bus: "local",
+            },
             run_at: "2026-03-20T09:30:00Z".into(),
         };
         let out = render(&r, OutputFormat::Human);
