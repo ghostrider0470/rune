@@ -9,7 +9,7 @@ use rune_core::{
     ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, SessionStatus, ToolCallId,
     TranscriptItem, TriggerKind, TurnId, TurnStatus,
 };
-use rune_models::{CompletionRequest, ModelProvider, StreamEvent};
+use rune_models::{CompletionRequest, ModelProvider, StreamEvent, Usage};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
@@ -18,6 +18,13 @@ use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
 use crate::compaction::CompactionStrategy;
 use crate::context::ContextAssembler;
+
+/// Callback type for recording model usage after completions.
+type UsageRecorderFn = Arc<
+    dyn Fn(String, String, Usage) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 use crate::error::RuntimeError;
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::lane_queue::{Lane, LaneQueue};
@@ -58,6 +65,7 @@ pub struct TurnExecutor {
     /// Global approval mode — "yolo" auto-approves all tool calls.
     approval_mode: String,
     agent_registry: Option<Arc<crate::agent_registry::AgentRegistry>>,
+    usage_recorder: Option<UsageRecorderFn>,
 }
 
 impl TurnExecutor {
@@ -118,6 +126,7 @@ impl TurnExecutor {
             mem0: None,
             approval_mode: "on-miss".to_string(),
             agent_registry: None,
+            usage_recorder: None,
         }
     }
 
@@ -129,6 +138,17 @@ impl TurnExecutor {
     }
 
     /// Set the default model name for completion requests.
+    pub fn with_usage_recorder<F, Fut>(mut self, recorder: F) -> Self
+    where
+        F: Fn(String, String, Usage) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.usage_recorder = Some(Arc::new(move |provider, model, usage| {
+            Box::pin(recorder(provider, model, usage))
+        }));
+        self
+    }
+
     pub fn with_default_model(mut self, model: impl Into<String>) -> Self {
         self.default_model = Some(model.into());
         self
@@ -347,7 +367,12 @@ impl TurnExecutor {
         let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn.id, prompt_tokens, completion_tokens, cached_prompt_tokens)
+            .update_usage(
+                turn.id,
+                prompt_tokens,
+                completion_tokens,
+                cached_prompt_tokens,
+            )
             .await?;
 
         // 5. Finalize turn status
@@ -671,7 +696,12 @@ impl TurnExecutor {
         let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn_uuid, prompt_tokens, completion_tokens, cached_prompt_tokens)
+            .update_usage(
+                turn_uuid,
+                prompt_tokens,
+                completion_tokens,
+                cached_prompt_tokens,
+            )
             .await?;
 
         let (final_status, ended_at, approval_status, approval_summary) = match &result {
@@ -852,16 +882,24 @@ impl TurnExecutor {
             // Azure automatic prefix caching.
             tool_defs.sort_by(|a, b| a.function.name.cmp(&b.function.name));
 
+            let stable_prefix_messages = if messages.is_empty() {
+                None
+            } else {
+                Some(messages[..messages.len().min(2)].to_vec())
+            };
+            let stable_prefix_tools = if tool_defs.is_empty() {
+                None
+            } else {
+                Some(tool_defs.clone())
+            };
             let request = CompletionRequest {
-                messages,
+                stable_prefix_messages,
+                stable_prefix_tools,
+                messages: messages.into_iter().skip(2).collect(),
                 model: model_ref.map(str::to_owned),
                 temperature: None,
                 max_tokens: None,
-                tools: if tool_defs.is_empty() {
-                    None
-                } else {
-                    Some(tool_defs)
-                },
+                tools: None,
             };
 
             // Call model — try streaming when a chunk sender is available,
@@ -901,6 +939,15 @@ impl TurnExecutor {
             };
 
             usage.add(&response.usage);
+            if let Some(recorder) = &self.usage_recorder {
+                let (provider, model) = provider_and_model_for_log(&request);
+                recorder(
+                    provider.to_string(),
+                    model.to_string(),
+                    response.usage.clone(),
+                )
+                .await;
+            }
 
             // If model returned tool calls → execute them and loop
             if !response.tool_calls.is_empty() {
@@ -1170,7 +1217,9 @@ impl TurnExecutor {
             match self.model_provider.complete(request).await {
                 Ok(r) => return Ok(r),
                 Err(e) => {
-                    if attempt < MAX_RETRIES && matches!(e, rune_models::ModelError::RateLimited { .. }) {
+                    if attempt < MAX_RETRIES
+                        && matches!(e, rune_models::ModelError::RateLimited { .. })
+                    {
                         let initial_delay = match &e {
                             rune_models::ModelError::RateLimited {
                                 retry_after_secs: Some(ra),
