@@ -236,6 +236,43 @@ pub struct CommsAckResponse {
     pub detail: String,
 }
 
+#[derive(Deserialize)]
+pub struct AcpSendRequest {
+    pub from: String,
+    pub to: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Serialize)]
+pub struct AcpSendResponse {
+    pub message_id: String,
+    pub delivered: bool,
+}
+
+#[derive(Deserialize)]
+pub struct AcpInboxQuery {
+    pub session: String,
+}
+
+#[derive(Serialize)]
+pub struct AcpInboxItem {
+    pub message_id: String,
+    pub from: String,
+    pub received_at: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+pub struct AcpAckRequest {
+    pub message_id: String,
+    pub session: String,
+}
+
+#[derive(Serialize)]
+pub struct AcpAckResponse {
+    pub acknowledged: bool,
+}
+
 /// Daemon status with useful runtime metadata.
 pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, GatewayError> {
     let sessions = state
@@ -365,6 +402,103 @@ pub async fn comms_ack(
         ack_id: Some(ack_id),
         detail: "message acknowledged and archived".to_string(),
     }))
+}
+
+
+
+pub async fn acp_send(
+    State(state): State<AppState>,
+    Json(body): Json<AcpSendRequest>,
+) -> Result<Json<AcpSendResponse>, GatewayError> {
+    let client = state
+        .comms_client
+        .clone()
+        .ok_or_else(|| GatewayError::BadRequest("native comms is not enabled".to_string()))?;
+
+    if client.agent_id() != body.from {
+        return Err(GatewayError::BadRequest(format!(
+            "ACP send source '{}' does not match configured agent '{}'",
+            body.from,
+            client.agent_id()
+        )));
+    }
+    if client.peer_id() != body.to {
+        return Err(GatewayError::BadRequest(format!(
+            "ACP send target '{}' does not match configured peer '{}'",
+            body.to,
+            client.peer_id()
+        )));
+    }
+
+    let message_id = client
+        .send("acp", "acp message", &body.payload.to_string(), "p1")
+        .await
+        .map_err(GatewayError::BadRequest)?;
+
+    Ok(Json(AcpSendResponse {
+        message_id,
+        delivered: true,
+    }))
+}
+
+pub async fn acp_inbox(
+    State(state): State<AppState>,
+    Query(query): Query<AcpInboxQuery>,
+) -> Result<Json<Vec<AcpInboxItem>>, GatewayError> {
+    let client = state
+        .comms_client
+        .clone()
+        .ok_or_else(|| GatewayError::BadRequest("native comms is not enabled".to_string()))?;
+
+    if client.agent_id() != query.session {
+        return Err(GatewayError::BadRequest(format!(
+            "ACP inbox session '{}' does not match configured agent '{}'",
+            query.session,
+            client.agent_id()
+        )));
+    }
+
+    let messages = client
+        .read_inbox()
+        .await
+        .into_iter()
+        .map(|(_, msg)| AcpInboxItem {
+            message_id: msg.id,
+            from: msg.from,
+            received_at: msg.created_at.unwrap_or_default(),
+            payload: serde_json::from_str(&msg.body).unwrap_or_else(|_| json!({ "raw": msg.body })),
+        })
+        .collect();
+
+    Ok(Json(messages))
+}
+
+pub async fn acp_ack(
+    State(state): State<AppState>,
+    Json(body): Json<AcpAckRequest>,
+) -> Result<Json<AcpAckResponse>, GatewayError> {
+    let client = state
+        .comms_client
+        .clone()
+        .ok_or_else(|| GatewayError::BadRequest("native comms is not enabled".to_string()))?;
+
+    if client.agent_id() != body.session {
+        return Err(GatewayError::BadRequest(format!(
+            "ACP ack session '{}' does not match configured agent '{}'",
+            body.session,
+            client.agent_id()
+        )));
+    }
+
+    let inbox = client.read_inbox().await;
+    let (path, _original) = inbox
+        .into_iter()
+        .find(|(_, msg)| msg.id == body.message_id)
+        .ok_or_else(|| GatewayError::BadRequest(format!("ACP message {} not found", body.message_id)))?;
+
+    client.archive(&path).await.map_err(GatewayError::BadRequest)?;
+
+    Ok(Json(AcpAckResponse { acknowledged: true }))
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
