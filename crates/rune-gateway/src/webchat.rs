@@ -51,6 +51,9 @@ pub async fn webchat_handler(Query(params): Query<HashMap<String, String>>) -> i
         "This browser will reopen the same thread automatically after a refresh or restart."
     };
     html = html.replace("__RUNE_WEBCHAT_CONTINUITY_MESSAGE__", continuity);
-    html = html.replace("__RUNE_WEBCHAT_HAS_GATEWAY_AUTH__", if has_auth { "true" } else { "false" });
+    html = html.replace(
+        "__RUNE_WEBCHAT_HAS_GATEWAY_AUTH__",
+        if has_auth { "true" } else { "false" },
+    );
     Html(html)
 }

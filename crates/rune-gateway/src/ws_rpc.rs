@@ -379,7 +379,13 @@ impl RpcDispatcher {
         let row = self
             .state
             .session_engine
-            .create_session_full(kind, workspace_root, requester_session_id, channel_ref, mode)
+            .create_session_full(
+                kind,
+                workspace_root,
+                requester_session_id,
+                channel_ref,
+                mode,
+            )
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
 

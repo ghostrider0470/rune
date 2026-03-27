@@ -110,14 +110,14 @@ impl OpenAiProvider {
                 return Err(error);
             }
 
-            let wait_secs = delay_secs
-                .or(retry_after_secs)
-                .unwrap_or(1)
-                .max(1)
-                .min(60);
+            let wait_secs = delay_secs.or(retry_after_secs).unwrap_or(1).max(1).min(60);
 
             warn!(
-                provider = if self.use_azure_auth { "azure-openai" } else { "openai" },
+                provider = if self.use_azure_auth {
+                    "azure-openai"
+                } else {
+                    "openai"
+                },
                 model = body.model.as_deref().unwrap_or("<unspecified>"),
                 wait_secs,
                 attempt = attempt + 1,
@@ -129,7 +129,6 @@ impl OpenAiProvider {
             attempt += 1;
         }
     }
-
 }
 
 /// Azure/newer OpenAI models use `max_completion_tokens` instead of `max_tokens`.

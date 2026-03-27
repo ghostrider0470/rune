@@ -45,10 +45,10 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
+use rune_gateway::state::TokenMetricsStore;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
-use rune_gateway::state::TokenMetricsStore;
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
@@ -6626,7 +6626,10 @@ async fn get_session_status_surfaces_orchestration_metadata() {
     assert_eq!(json["parent_session_id"], parent_id.to_string());
     assert_eq!(json["session_mode"], "architect");
     assert_eq!(json["orchestration_status"], "delegated");
-    assert_eq!(json["delegation_roles"], serde_json::json!(["architect", "coder"]));
+    assert_eq!(
+        json["delegation_roles"],
+        serde_json::json!(["architect", "coder"])
+    );
     assert_eq!(json["delegation_depth"], 2);
 }
 
@@ -11384,7 +11387,6 @@ async fn transcript_route_accepts_api_key_query_param() {
     assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
-
 #[tokio::test]
 async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
     let (app, _) = build_test_app_parts(AppConfig::default(), Some("secret".to_string()));
@@ -11401,7 +11403,10 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
         .await
         .unwrap();
     assert_eq!(create_response.status(), StatusCode::CREATED);
-    let session_id = body_json(create_response).await["id"].as_str().unwrap().to_string();
+    let session_id = body_json(create_response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let send_response = app
         .oneshot(
