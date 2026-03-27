@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MessageResponse, TranscriptEntry } from "../api/api-types";
 import { apiFetch } from "../api/client";
 import { getPayloadText, normalizeTranscriptKind } from "../lib/chat-utils";
+import { enqueueChatMessage, getQueuedMessageCount, getQueuedChatMessages, removeQueuedChatMessage } from "../lib/offline-queue";
 import { useSessionEvents } from "../lib/websocket";
 import type { ChatMessageItem } from "../components/chat/ChatFlatList";
 
@@ -14,11 +15,32 @@ function mapEntry(entry: TranscriptEntry): ChatMessageItem {
   };
 }
 
+async function postMessage(sessionId: string, content: string): Promise<MessageResponse> {
+  const response = await apiFetch(`/v1/sessions/${sessionId}/messages`, {
+    body: JSON.stringify({ content }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send message (${response.status})`);
+  }
+
+  return await response.json() as MessageResponse;
+}
+
 export function useChat(sessionId: string | null) {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { events } = useSessionEvents(sessionId ?? undefined, { enabled: !!sessionId });
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [queueDraining, setQueueDraining] = useState(false);
+  const { events, connected } = useSessionEvents(sessionId ?? undefined, { enabled: !!sessionId });
+
+  const refreshQueuedCount = useCallback(async () => {
+    const count = await getQueuedMessageCount(sessionId);
+    setQueuedCount(count);
+  }, [sessionId]);
 
   const loadTranscript = useCallback(async () => {
     if (!sessionId) {
@@ -44,9 +66,41 @@ export function useChat(sessionId: string | null) {
   }, [loadTranscript]);
 
   useEffect(() => {
+    void refreshQueuedCount();
+  }, [refreshQueuedCount]);
+
+  useEffect(() => {
     if (!sessionId || events.length === 0) return;
     void loadTranscript();
   }, [events, loadTranscript, sessionId]);
+
+  const drainQueuedMessages = useCallback(async () => {
+    if (!sessionId || queueDraining) return;
+
+    setQueueDraining(true);
+    try {
+      const queued = await getQueuedChatMessages();
+      const pending = queued.filter((item) => item.sessionId === sessionId);
+
+      for (const item of pending) {
+        try {
+          await postMessage(item.sessionId, item.content);
+          await removeQueuedChatMessage(item.id);
+        } catch {
+          break;
+        }
+      }
+    } finally {
+      setQueueDraining(false);
+      await refreshQueuedCount();
+      await loadTranscript();
+    }
+  }, [loadTranscript, queueDraining, refreshQueuedCount, sessionId]);
+
+  useEffect(() => {
+    if (!connected || !sessionId) return;
+    void drainQueuedMessages();
+  }, [connected, drainQueuedMessages, sessionId]);
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -56,30 +110,31 @@ export function useChat(sessionId: string | null) {
 
       setSending(true);
       try {
-        const response = await apiFetch(`/v1/sessions/${sessionId}/messages`, {
-          body: JSON.stringify({ content }),
-          headers: { "Content-Type": "application/json" },
-          method: "POST",
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to send message (${response.status})`);
+        try {
+          await postMessage(sessionId, content);
+          await loadTranscript();
+          await refreshQueuedCount();
+          return;
+        } catch {
+          await enqueueChatMessage(sessionId, content);
+          await refreshQueuedCount();
+          return;
         }
-
-        await response.json() as MessageResponse;
-        await loadTranscript();
       } finally {
         setSending(false);
       }
     },
-    [loadTranscript, sessionId],
+    [loadTranscript, refreshQueuedCount, sessionId],
   );
 
   const messages = useMemo(() => transcript.map(mapEntry), [transcript]);
 
   return {
+    connected,
     loading,
     messages,
+    queuedCount,
+    queueDraining,
     sendMessage,
     sending,
   };
