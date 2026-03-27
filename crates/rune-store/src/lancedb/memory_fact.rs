@@ -11,8 +11,8 @@ use crate::models::{MemoryFact, MemoryFactEdge};
 use crate::repos::MemoryFactRepo;
 
 use super::{
-    collect_batches, embedding_col, f64_col, fact_batch, facts_schema, i32_col,
-    parse_embedding_str, str_col, upsert_batch, LanceStore,
+    LanceStore, collect_batches, embedding_col, f64_value, fact_batch, facts_schema, i32_col,
+    parse_embedding_str, str_col, upsert_batch,
 };
 
 #[async_trait]
@@ -44,10 +44,8 @@ impl MemoryFactRepo for LanceStore {
             let created = str_col(batch, "created_at");
             let updated = str_col(batch, "updated_at");
             let access = i32_col(batch, "access_count");
-            let distances = f64_col(batch, "_distance");
-
             for i in 0..batch.num_rows() {
-                let similarity = 1.0 - distances.value(i);
+                let similarity = 1.0 - f64_value(batch, "_distance", i);
                 if similarity <= threshold {
                     continue;
                 }
@@ -124,7 +122,7 @@ impl MemoryFactRepo for LanceStore {
 
         if let Some(batch) = batches.first() {
             if batch.num_rows() > 0 {
-                let similarity = 1.0 - f64_col(batch, "_distance").value(0);
+                let similarity = 1.0 - f64_value(batch, "_distance", 0);
                 if similarity > threshold {
                     let fact_id = Uuid::parse_str(str_col(batch, "fact_id").value(0))
                         .map_err(|e| StoreError::Serialization(e.to_string()))?;
@@ -155,10 +153,7 @@ impl MemoryFactRepo for LanceStore {
             fact,
             category,
             &embedding,
-            source_session_id
-                .as_ref()
-                .map(|u| u.to_string())
-                .as_deref(),
+            source_session_id.as_ref().map(|u| u.to_string()).as_deref(),
             &now.to_rfc3339(),
             &now.to_rfc3339(),
             0,
@@ -193,11 +188,7 @@ impl MemoryFactRepo for LanceStore {
                 let ssid = if str_col(batch, "source_session_id").is_null(0) {
                     None
                 } else {
-                    Some(
-                        str_col(batch, "source_session_id")
-                            .value(0)
-                            .to_string(),
-                    )
+                    Some(str_col(batch, "source_session_id").value(0).to_string())
                 };
                 (
                     ssid,
@@ -323,8 +314,7 @@ impl MemoryFactRepo for LanceStore {
                     neighbors.push((*b_id, sim));
                 }
             }
-            neighbors
-                .sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+            neighbors.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
             for (target_id, sim) in neighbors.into_iter().take(neighbors_k as usize) {
                 edges.push(MemoryFactEdge {
                     source: *a_id,
@@ -346,9 +336,5 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
         nb += y * y;
     }
     let d = na.sqrt() * nb.sqrt();
-    if d == 0.0 {
-        0.0
-    } else {
-        dot / d
-    }
+    if d == 0.0 { 0.0 } else { dot / d }
 }

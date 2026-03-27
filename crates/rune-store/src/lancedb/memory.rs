@@ -9,8 +9,8 @@ use crate::models::{KeywordSearchRow, VectorSearchRow};
 use crate::repos::MemoryEmbeddingRepo;
 
 use super::{
-    collect_batches, embedding_batch, embeddings_schema, f64_col, str_col, upsert_batch,
-    LanceStore,
+    LanceStore, collect_batches, embedding_batch, embeddings_schema, f64_value, str_col,
+    upsert_batch,
 };
 
 /// Document ID for a memory embedding chunk.
@@ -52,10 +52,7 @@ impl MemoryEmbeddingRepo for LanceStore {
             .await
             .map_err(|e| StoreError::Database(format!("lancedb count: {e}")))?;
         table
-            .delete(&format!(
-                "file_path = '{}'",
-                file_path.replace('\'', "''")
-            ))
+            .delete(&format!("file_path = '{}'", file_path.replace('\'', "''")))
             .await
             .map_err(|e| StoreError::Database(format!("lancedb delete: {e}")))?;
         Ok(count_before)
@@ -68,10 +65,7 @@ impl MemoryEmbeddingRepo for LanceStore {
     ) -> Result<Vec<KeywordSearchRow>, StoreError> {
         let table = self.open_embeddings_table().await?;
         let escaped = query.replace('\'', "''").to_lowercase();
-        let filter = format!(
-            "lower(chunk_text) LIKE '%{}%'",
-            escaped.replace('%', "\\%")
-        );
+        let filter = format!("lower(chunk_text) LIKE '%{}%'", escaped.replace('%', "\\%"));
         let stream = table
             .query()
             .only_if(filter)
@@ -116,12 +110,11 @@ impl MemoryEmbeddingRepo for LanceStore {
         for batch in &batches {
             let paths = str_col(batch, "file_path");
             let texts = str_col(batch, "chunk_text");
-            let distances = f64_col(batch, "_distance");
             for i in 0..batch.num_rows() {
                 results.push(VectorSearchRow {
                     file_path: paths.value(i).to_string(),
                     chunk_text: texts.value(i).to_string(),
-                    score: 1.0 - distances.value(i),
+                    score: 1.0 - f64_value(batch, "_distance", i),
                 });
             }
         }
@@ -159,11 +152,7 @@ impl MemoryEmbeddingRepo for LanceStore {
         Ok(paths.into_iter().collect())
     }
 
-    async fn delete_chunk(
-        &self,
-        file_path: &str,
-        chunk_index: i32,
-    ) -> Result<bool, StoreError> {
+    async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
         let table = self.open_embeddings_table().await?;
         let id = chunk_id(file_path, chunk_index);
         let existed = table
