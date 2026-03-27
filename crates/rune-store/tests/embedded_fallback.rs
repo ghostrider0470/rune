@@ -23,18 +23,13 @@ async fn embedded_pg_bootstrap_runs_migrations_and_accepts_connections() {
     let pool = create_pool(embedded.database_url(), 2).expect("pool should be created");
 
     // Verifies migration runner works against embedded fallback.
-    run_migrations(&pool)
-        .await
-        .expect("migrations should run on embedded postgres");
+    run_migrations(&pool).await.expect("migrations should run on embedded postgres");
     // Idempotence check: second run should be a no-op and still succeed.
-    run_migrations(&pool)
-        .await
-        .expect("second migration run should be idempotent");
-    let client = pool.get().await.expect("connection should be acquired");
+    run_migrations(&pool).await.expect("second migration run should be idempotent");
+    let conn = pool.get().await.expect("connection should be acquired");
 
     // Ensure database is queryable after bootstrap + migrations.
-    client
-        .batch_execute("SELECT 1")
+    conn.batch_execute("SELECT 1")
         .await
         .expect("embedded postgres should accept queries");
 

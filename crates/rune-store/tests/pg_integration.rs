@@ -79,7 +79,7 @@ async fn setup() -> Option<(PgPool, PgVectorStatus)> {
 
     let pgvector_status = try_upgrade_pgvector(&pool).await;
 
-    let client = match pool.get().await {
+    let conn = match pool.get().await {
         Ok(conn) => conn,
         Err(err) => {
             eprintln!("skipping rune-store pg integration tests: failed to get connection: {err}");
@@ -87,13 +87,12 @@ async fn setup() -> Option<(PgPool, PgVectorStatus)> {
         }
     };
 
-    if let Err(err) = client
-        .batch_execute(
-            "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
-             tool_executions, channel_deliveries, paired_devices, pairing_requests, \
-             memory_embeddings CASCADE",
-        )
-        .await
+    if let Err(err) = conn.batch_execute(
+        "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
+         tool_executions, channel_deliveries, paired_devices, pairing_requests, \
+         memory_embeddings CASCADE",
+    )
+    .await
     {
         eprintln!("skipping rune-store pg integration tests: truncate failed: {err}");
         return None;
