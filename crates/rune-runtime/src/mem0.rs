@@ -205,11 +205,11 @@ impl Mem0Engine {
             return None;
         }
 
-        // HNSW index is limited to 2000 dims in pgvector < 0.8.  If our
-        // embeddings are larger (e.g. 3072), the index creation will fail.
-        // This is fine — queries still work via sequential scan, just slower.
+        // Older pgvector releases (like Cosmos DB's 0.8.0) cap HNSW indexes at
+        // 2000 dims, while pgvector >= 0.9.0 supports 3072-dim embeddings.
+        // If index creation fails, queries still work via sequential scan.
         if let Err(e) = client.batch_execute(ENSURE_INDEX_SQL).await {
-            info!(error = %e, "mem0: HNSW index not created (likely >2000 dims) — brute-force cosine search will be used");
+            info!(error = %e, "mem0: HNSW index not created (likely pgvector dimension limit/version mismatch) — brute-force cosine search will be used");
         }
 
         info!("mem0 engine connected and schema ensured");
@@ -432,7 +432,10 @@ impl Mem0Engine {
     pub async fn graph(&self, edge_threshold: f64, neighbors_k: i64) -> MemoryGraph {
         if let Err(e) = self.ensure_connected().await {
             warn!(error = %e, "mem0 graph: connection check failed");
-            return MemoryGraph { nodes: Vec::new(), edges: Vec::new() };
+            return MemoryGraph {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            };
         }
         let client = self.client.lock().await;
 
