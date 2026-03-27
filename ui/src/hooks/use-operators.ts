@@ -93,11 +93,15 @@ export function useReloadSkills() {
   });
 }
 
-export function useUsage(period?: string) {
-  const params = period ? `?period=${period}` : "";
+export function useUsage(params?: { period?: string; from?: string; to?: string }) {
+  const search = new URLSearchParams();
+  if (params?.period) search.set("period", params.period);
+  if (params?.from) search.set("from", params.from);
+  if (params?.to) search.set("to", params.to);
+  const qs = search.toString();
   return useQuery({
-    queryKey: ["usage", period],
-    queryFn: () => api.get<UsageSummary>(`/api/dashboard/usage${params}`),
+    queryKey: ["usage", qs],
+    queryFn: () => api.get<UsageSummary>(`/api/dashboard/usage${qs ? `?${qs}` : ""}`),
     refetchInterval: 60_000,
   });
 }

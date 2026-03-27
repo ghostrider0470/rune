@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { format } from "date-fns";
+import type { DateRange } from "react-day-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,23 +21,62 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { useUsage } from "@/hooks/use-usage";
-import { BarChart3, Download, Coins, Zap, Hash } from "lucide-react";
+import {
+  BarChart3,
+  Download,
+  Coins,
+  Zap,
+  Hash,
+  CalendarIcon,
+} from "lucide-react";
 
 export const Route = createFileRoute("/_admin/usage")({
   component: UsagePage,
 });
 
-const PERIODS = [
-  { value: "1d", label: "Last 24h" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "all", label: "All time" },
+const PRESETS = [
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+  { value: "90d", label: "90d" },
+  { value: "all", label: "All" },
+  { value: "custom", label: "Custom" },
 ] as const;
 
+type PresetValue = (typeof PRESETS)[number]["value"];
+
+function usePeriodParams(
+  preset: PresetValue,
+  dateRange: DateRange | undefined
+) {
+  if (preset === "custom" && dateRange?.from) {
+    return {
+      from: dateRange.from.toISOString(),
+      to: dateRange.to?.toISOString(),
+    };
+  }
+  if (preset === "all") return {};
+  const map: Record<string, string> = {
+    "24h": "1d",
+    "7d": "7d",
+    "30d": "30d",
+    "90d": "90d",
+  };
+  return { period: map[preset] };
+}
+
 function UsagePage() {
-  const [period, setPeriod] = useState("7d");
-  const { data: usage, isLoading } = useUsage(period === "all" ? undefined : period);
+  const [preset, setPreset] = useState<PresetValue>("7d");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  const params = usePeriodParams(preset, dateRange);
+  const { data: usage, isLoading } = useUsage(params);
   const [groupBy, setGroupBy] = useState<"model" | "date">("model");
 
   const exportCsv = () => {
@@ -102,6 +143,13 @@ function UsagePage() {
     >
   );
 
+  const rangeLabel =
+    dateRange?.from && preset === "custom"
+      ? dateRange.to
+        ? `${format(dateRange.from, "MMM d")} - ${format(dateRange.to, "MMM d")}`
+        : format(dateRange.from, "MMM d, yyyy")
+      : "Pick dates";
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -112,26 +160,56 @@ function UsagePage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PERIODS.map((p) => (
-                <SelectItem key={p.value} value={p.value}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Pill toggle bar */}
+          <div className="inline-flex items-center rounded-lg border bg-muted p-0.5">
+            {PRESETS.filter((p) => p.value !== "custom").map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPreset(p.value)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                  preset === p.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom date range */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant={preset === "custom" ? "default" : "outline"}
+                size="sm"
+                className="gap-2"
+              >
+                <CalendarIcon className="h-3.5 w-3.5" />
+                <span className="text-xs">{rangeLabel}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="range"
+                selected={dateRange}
+                onSelect={(range) => {
+                  setDateRange(range);
+                  if (range?.from) setPreset("custom");
+                }}
+                numberOfMonths={2}
+                disabled={{ after: new Date() }}
+              />
+            </PopoverContent>
+          </Popover>
+
           <Button
             variant="outline"
             size="sm"
             onClick={exportCsv}
             disabled={!usage?.entries.length}
           >
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
+            <Download className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
