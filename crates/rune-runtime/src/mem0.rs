@@ -372,7 +372,7 @@ impl Mem0Engine {
                 },
             ],
             stable_prefix_messages: None,
-        stable_prefix_tools: None,
+            stable_prefix_tools: None,
             model: Some(self.config.extraction_model.clone()),
             temperature: Some(0.0),
             max_tokens: Some(1024),
