@@ -39,7 +39,7 @@ use crate::ms365::{
 };
 use crate::pairing::DeviceRegistry;
 use crate::routes;
-use crate::state::{AppState, SessionEvent};
+use crate::state::{AppState, SessionEvent, TokenMetricsStore};
 use crate::supervisor::{BackgroundSupervisor, SupervisorDeps};
 use crate::webchat;
 use crate::ws;
@@ -279,6 +279,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         ms365_files_service: services.ms365_files_service,
         ms365_users_service: services.ms365_users_service,
         comms_client,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     // Build operator delivery for heartbeat/scheduled output to Telegram.

@@ -918,12 +918,8 @@ impl TurnExecutor {
 
             usage.add(&response.usage);
             if let Some(recorder) = &self.usage_recorder {
-                recorder(
-                    self.model_provider.name().to_string(),
-                    active_model.clone(),
-                    response.usage.clone(),
-                )
-                .await;
+                let (provider, model) = provider_and_model_for_log(&request);
+                recorder(provider.to_string(), model.to_string(), response.usage.clone()).await;
             }
 
             // If model returned tool calls → execute them and loop
