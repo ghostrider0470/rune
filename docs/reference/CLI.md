@@ -229,17 +229,17 @@ Operator surface for durable-state snapshot and recovery workflows.
 
 | Subcommand | Purpose | Status |
 |---|---|---|
-| `rune backup create [--output <path>]` | Snapshot all durable state domains into a restorable archive | Not yet shipped |
-| `rune backup restore <archive>` | Restore runtime state from a backup archive | Not yet shipped |
-| `rune backup list` | List available backup archives in the configured backups directory | Not yet shipped |
+| `rune backup create [--label <name>]` | Request a durable-state backup artifact from the gateway | Shipped gateway-backed surface |
+| `rune backup restore <id> --confirm` | Request restore of a specific backup identifier | Shipped gateway-backed surface |
+| `rune backup list` | List available backup archives in the configured backups directory | Shipped gateway-backed surface |
 
 ### Behavioral contract
 
 The `backup` family implements the workflow contract defined in [PROTOCOLS.md §15.4](../parity/PROTOCOLS.md#154-backup-and-restore-workflow-contract):
 
-- **Create** captures all 9 durable domains (db, sessions, memory, media, skills, logs, backups staging, config, secret references) into a self-contained archive at `/data/backups` (Docker) or `~/.rune/backups/` (local). Secret values are never included.
-- **Restore** requires the runtime to be stopped or quiesced. Restores into the expected path layout and emits post-restore verification steps (`rune doctor`, health/status, scheduler state, transcript inspectability).
-- **List** shows available archives with timestamp, size, and version compatibility.
+- **Create** requests a backup artifact that captures all 9 durable domains (db, sessions, memory, media, skills/spells, logs, backups staging, config, secret references) into the configured backups root: `/data/backups` (Docker) or `~/.rune/backups/` (local). Secret values are never included.
+- **Restore** requires explicit `--confirm`, targets a backup identifier rather than an arbitrary path, restores into the expected path layout, and should be followed by `rune doctor`, health/status checks, scheduler inspection, and transcript inspectability checks.
+- **List** returns known backup identifiers plus timestamp/label metadata so operators can choose the correct restore point.
 
 See [DEPLOYMENT.md §12](../operator/DEPLOYMENT.md#12-backup-and-restore-expectations) for deployment-mode-specific backup strategy guidance.
 

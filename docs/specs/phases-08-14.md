@@ -2664,6 +2664,7 @@ Returns the currently active `AppConfig` as JSON. Sensitive fields (API keys, to
     "sessions_dir": "/data/sessions",
     "memory_dir": "/data/memory",
     "media_dir": "/data/media",
+    "spells_dir": "/data/spells",
     "skills_dir": "/data/skills",
     "logs_dir": "/data/logs",
     "backups_dir": "/data/backups",
