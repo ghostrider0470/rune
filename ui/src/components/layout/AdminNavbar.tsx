@@ -170,6 +170,7 @@ export function AdminNavbar() {
             </Link>
 
             {/* Desktop Navigation */}
+            <div className="hidden lg:block h-6 w-px bg-border/60 mx-1" />
             <NavigationMenu viewport={false} className="hidden lg:flex">
               <NavigationMenuList>
                 {/* Primary direct links */}
@@ -184,8 +185,10 @@ export function AdminNavbar() {
                           search={item.href === "/chat" ? chatLinkSearch : undefined}
                           className={cn(
                             navigationMenuTriggerStyle(),
-                            "gap-2",
-                            active && "bg-accent/50 text-primary"
+                            "gap-2 bg-transparent",
+                            active
+                              ? "text-primary bg-primary/10"
+                              : "text-muted-foreground"
                           )}
                         >
                           <Icon className="size-4 shrink-0" />
@@ -198,7 +201,7 @@ export function AdminNavbar() {
 
                 {/* Operations dropdown */}
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="transition-colors data-[state=open]:bg-accent/60">
+                  <NavigationMenuTrigger className="bg-transparent text-muted-foreground transition-colors data-[state=open]:bg-accent/60 data-[state=open]:text-accent-foreground">
                     Operations
                   </NavigationMenuTrigger>
                   <NavigationMenuContent className="shadow-xl">
@@ -217,7 +220,7 @@ export function AdminNavbar() {
 
                 {/* Admin dropdown */}
                 <NavigationMenuItem>
-                  <NavigationMenuTrigger className="transition-colors data-[state=open]:bg-accent/60">
+                  <NavigationMenuTrigger className="bg-transparent text-muted-foreground transition-colors data-[state=open]:bg-accent/60 data-[state=open]:text-accent-foreground">
                     Admin
                   </NavigationMenuTrigger>
                   <NavigationMenuContent className="shadow-xl">
