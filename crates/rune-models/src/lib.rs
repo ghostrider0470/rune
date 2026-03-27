@@ -237,6 +237,24 @@ pub fn provider_from_config(
                 )))
             }
         }
+        "openrouter" => {
+            let api_key = resolve_api_key(cfg)?;
+            let base_url = if cfg.base_url.is_empty() {
+                "https://openrouter.ai/api/v1"
+            } else {
+                cfg.base_url.as_str()
+            };
+            Ok(Box::new(OpenAiProvider::new(base_url, &api_key)))
+        }
+        "perplexity" => {
+            let api_key = resolve_api_key(cfg)?;
+            let base_url = if cfg.base_url.is_empty() {
+                "https://api.perplexity.ai"
+            } else {
+                cfg.base_url.as_str()
+            };
+            Ok(Box::new(OpenAiProvider::new(base_url, &api_key)))
+        }
         "bedrock" | "aws-bedrock" | "aws_bedrock" => {
             let (access_key_id, secret_access_key) = resolve_aws_credentials(cfg)?;
             let region = cfg.deployment_name.as_deref().unwrap_or_default();
@@ -519,6 +537,14 @@ mod tests {
         let mistral = provider_from_config(&provider_cfg("mistral", "mistral"))
             .expect("mistral kind should construct mistral provider");
         assert!(format!("{mistral:?}").contains("MistralProvider"));
+
+        let openrouter = provider_from_config(&provider_cfg("openrouter", "openrouter"))
+            .expect("openrouter kind should construct openai-compatible provider");
+        assert!(format!("{openrouter:?}").contains("OpenAiProvider"));
+
+        let perplexity = provider_from_config(&provider_cfg("perplexity", "perplexity"))
+            .expect("perplexity kind should construct openai-compatible provider");
+        assert!(format!("{perplexity:?}").contains("OpenAiProvider"));
     }
 
     #[test]
