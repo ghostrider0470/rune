@@ -2681,3 +2681,47 @@ async fn request_stable_prefix_is_split_from_variable_messages() {
     assert_eq!(request.messages[0].role, Role::User);
     assert_eq!(request.messages[0].content.as_deref(), Some("hello"));
 }
+
+#[tokio::test]
+async fn request_stable_prefix_keeps_tools_out_of_variable_tail() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "zeta_tool".into(),
+        description: "zeta".into(),
+        parameters: serde_json::json!({"type":"object"}),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    });
+    registry.register(RtToolDefinition {
+        name: "alpha_tool".into(),
+        description: "alpha".into(),
+        parameters: serde_json::json!({"type":"object"}),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    });
+
+    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("ok")]));
+    let model_handle = model.clone();
+    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), registry);
+
+    executor.execute(session.id, "hello", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    let request = &requests[0];
+    let stable_tools = request.stable_prefix_tools.as_ref().unwrap();
+    assert_eq!(stable_tools.len(), 2);
+    assert_eq!(stable_tools[0].function.name, "alpha_tool");
+    assert_eq!(stable_tools[1].function.name, "zeta_tool");
+    assert!(request.tools.is_none());
+    assert_eq!(request.messages[0].role, Role::User);
+}

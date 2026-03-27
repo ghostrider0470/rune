@@ -61,6 +61,8 @@ pub struct FunctionDefinition {
 pub struct CompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stable_prefix_messages: Option<Vec<ChatMessage>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stable_prefix_tools: Option<Vec<ToolDefinition>>,
     pub messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
