@@ -267,6 +267,8 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
         rune_config::StorageBackend::Auto => {
             if using_external_postgres {
                 "postgres"
+            } else if config.database.cosmos_endpoint.is_some() {
+                "cosmos"
             } else {
                 "sqlite"
             }
@@ -282,7 +284,7 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             config.database.backend
         ),
         hint: if matches!(config.database.backend, rune_config::StorageBackend::Auto) {
-            Some("Auto resolves to PostgreSQL when database_url is set, otherwise SQLite".into())
+            Some("Auto resolves to PostgreSQL when database_url is set, otherwise Cosmos when cosmos_endpoint is set, otherwise SQLite".into())
         } else {
             None
         },

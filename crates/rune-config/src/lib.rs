@@ -508,7 +508,7 @@ fn runtime_server_signals_present() -> bool {
 /// Which storage backend to use.
 ///
 /// `Auto` (the default) resolves to Postgres when `database_url` is set,
-/// otherwise SQLite — so existing configs with no `backend` field keep working.
+/// otherwise Cosmos when `cosmos_endpoint` is set, then SQLite — so existing configs with no `backend` field keep working.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageBackend {
