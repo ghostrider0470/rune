@@ -1,0 +1,16 @@
+[meta]
+topic = "anti_patterns"
+tags = ["anti-pattern", "unwrap", "blocking", "clone"]
+relevance_signals = ["mutex", "sync-io", "unwrap", "clone"]
+
+[[patterns]]
+name = "common rust anti-patterns"
+when = "Reviewing code for maintainability and runtime safety"
+code = """
+// avoid: value.clone() just to satisfy the borrow checker
+// avoid: Arc<Mutex<T>> as the default architecture
+// avoid: .unwrap() in library code
+// avoid: std::fs inside async fn
+"""
+rationale = "Surfacing recurring mistakes early keeps code idiomatic and production-safe"
+anti_pattern = "Treating the borrow checker as an obstacle instead of a design signal"

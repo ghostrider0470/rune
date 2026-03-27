@@ -1,0 +1,15 @@
+[meta]
+topic = "axum_web"
+tags = ["axum", "router", "json", "state"]
+relevance_signals = ["route", "handler", "statuscode", "json"]
+
+[[patterns]]
+name = "axum router with state"
+when = "Building HTTP endpoints with shared application state"
+code = """
+let app = axum::Router::new()
+    .route("/users", axum::routing::post(create_user))
+    .with_state(std::sync::Arc::new(AppState { repo }));
+"""
+rationale = "Axum state injection keeps handlers lean and testable"
+anti_pattern = "Global mutable state instead of explicit shared state injection"

@@ -1,0 +1,20 @@
+[meta]
+topic = "pyo3"
+tags = ["pyo3", "python", "maturin"]
+relevance_signals = ["pymodule", "pyfunction", "python"]
+
+[[patterns]]
+name = "pyo3 module export"
+when = "Creating Python bindings for Rust functions"
+code = """
+#[pyo3::pyfunction]
+fn add(a: usize, b: usize) -> usize { a + b }
+
+#[pyo3::pymodule]
+fn my_module(m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> {
+    m.add_function(pyo3::wrap_pyfunction!(add, m)?)?;
+    Ok(())
+}
+"""
+rationale = "PyO3 macros provide a direct bridge from Rust functions into Python modules"
+anti_pattern = "Hand-writing unsafe Python FFI when PyO3 already covers the use case"

@@ -1,0 +1,25 @@
+[meta]
+topic = "database"
+tags = ["sqlx", "diesel", "seaorm", "database"]
+relevance_signals = ["query", "orm", "postgres", "fetch-all"]
+
+[[patterns]]
+name = "sqlx for checked raw SQL"
+when = "You want explicit SQL with async execution and strong checking"
+code = """
+let users = sqlx::query_as::<_, User>("SELECT id, email FROM users WHERE active = $1")
+    .bind(true)
+    .fetch_all(&pool)
+    .await?;
+"""
+rationale = "SQLx keeps SQL visible while providing compile-time verification in supported setups"
+anti_pattern = "String-concatenated SQL with unbound parameters"
+
+[[patterns]]
+name = "diesel for type-safe query builder"
+when = "You prefer schema-driven query composition in synchronous codebases"
+code = """
+let rows = users.filter(active.eq(true)).load::<User>(&mut conn)?;
+"""
+rationale = "Diesel gives strong compile-time query guarantees through the type system"
+anti_pattern = "Hand-written SQL spread everywhere without shared query patterns"

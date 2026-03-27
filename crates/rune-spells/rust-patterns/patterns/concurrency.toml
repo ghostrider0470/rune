@@ -1,0 +1,26 @@
+[meta]
+topic = "concurrency"
+tags = ["arc", "mutex", "rwlock", "rayon", "channel"]
+relevance_signals = ["parallel", "shared-state", "message-passing"]
+
+[[patterns]]
+name = "prefer channels over shared mutexes"
+when = "Coordinating ownership transfer between tasks"
+code = """
+let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+tx.send(job).await?;
+while let Some(job) = rx.recv().await {
+    handle(job).await;
+}
+"""
+rationale = "Message passing often removes lock contention and clarifies ownership"
+anti_pattern = "Defaulting to Arc<Mutex<T>> everywhere"
+
+[[patterns]]
+name = "rwlock for read-heavy state"
+when = "Shared state has frequent reads and rare writes"
+code = """
+let shared = std::sync::Arc::new(tokio::sync::RwLock::new(Config::default()));
+"""
+rationale = "RwLock allows concurrent readers while preserving exclusive writes"
+anti_pattern = "Using a Mutex when reads vastly outnumber writes"

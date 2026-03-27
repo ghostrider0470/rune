@@ -1,0 +1,36 @@
+[meta]
+topic = "error_handling"
+tags = ["thiserror", "anyhow", "result", "error"]
+relevance_signals = ["unwrap", "expect", "context", "thiserror", "anyhow"]
+
+[[patterns]]
+name = "thiserror for libraries"
+when = "Building a library crate where callers need matchable error variants"
+code = """
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum MyError {
+    #[error("file not found: {0}")]
+    FileNotFound(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+"""
+rationale = "thiserror keeps library errors structured and matchable while generating Display and Error implementations"
+anti_pattern = ".unwrap() in library code — return Result<T, E> instead"
+
+[[patterns]]
+name = "anyhow for applications"
+when = "Building a binary or service where rich context matters more than typed variants"
+code = """
+use anyhow::{Context, Result};
+
+fn run() -> Result<()> {
+    let config = std::fs::read_to_string("config.toml")
+        .context("failed to read config.toml")?;
+    Ok(())
+}
+"""
+rationale = "anyhow is ideal at the application edge where error context chains matter most"
+anti_pattern = "Dropping source context and returning generic string errors"
