@@ -1345,6 +1345,19 @@ pub struct SessionStatusResponse {
     pub session_id: String,
     pub runtime: String,
     pub status: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orchestration_status: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub delegation_roles: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegation_depth: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1445,6 +1458,32 @@ pub async fn get_session_status(
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
     let verbose = metadata_bool(metadata, "verbose").unwrap_or(false);
     let elevated = metadata_bool(metadata, "elevated").unwrap_or(false);
+    let parent_session_id = row.requester_session_id.map(|id| id.to_string());
+    let session_mode = metadata_string(metadata, "mode");
+    let orchestration_status = metadata_string(metadata, "orchestration_status")
+        .or_else(|| metadata_string(metadata, "subagent_lifecycle"));
+    let delegation_roles = metadata
+        .get("delegation_roles")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let delegation_depth = if parent_session_id.is_some() {
+        Some(metadata
+            .get("delegation_depth")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as u32)
+            .unwrap_or(1))
+    } else {
+        metadata
+            .get("delegation_depth")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as u32)
+    };
     let subagent_lifecycle = metadata_string(metadata, "subagent_lifecycle");
     let subagent_runtime_status = metadata_string(metadata, "subagent_runtime_status");
     let subagent_runtime_attached = metadata_bool(metadata, "subagent_runtime_attached");
@@ -1478,6 +1517,13 @@ pub async fn get_session_status(
             row.status
         ),
         status: row.status,
+        kind: row.kind,
+        channel_ref: row.channel_ref,
+        parent_session_id,
+        session_mode,
+        orchestration_status,
+        delegation_roles,
+        delegation_depth,
         current_model,
         model_override,
         prompt_tokens: aggregate.usage_prompt_tokens,
