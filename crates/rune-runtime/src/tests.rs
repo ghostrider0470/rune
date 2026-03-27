@@ -2558,7 +2558,11 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
         rune_channels::OutboundAction::Reply { content, .. } => {
             assert!(content.contains("Resumed session"));
             assert!(content.contains(&existing.id.to_string()));
-            assert!(content.contains("do not resume in place"));
+            assert_eq!(
+                content,
+                &crate::restart_continuity::RESUMED_SESSION_NOTICE_TEMPLATE
+                    .replace("{session_id}", &existing.id.to_string())
+            );
         }
         other => panic!("expected reply notice, got {other:?}"),
     }

@@ -677,10 +677,8 @@ impl SessionLoop {
             return;
         }
 
-        let text = format!(
-            "Resumed session `{}` after restart. Transcript history plus durable approval/session state were restored from the last saved activity. In-flight turns, live process handles, and typing/progress UI do not resume in place; send your next message to continue.",
-            session.id
-        );
+        let text = crate::restart_continuity::RESUMED_SESSION_NOTICE_TEMPLATE
+            .replace("{session_id}", &session.id.to_string());
 
         let ch = self.channel.lock().await;
         match ch

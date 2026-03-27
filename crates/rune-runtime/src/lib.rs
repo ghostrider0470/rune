@@ -24,6 +24,7 @@ pub mod plugin;
 pub mod plugin_manager;
 pub mod plugin_scanner;
 pub mod project;
+pub mod restart_continuity;
 pub mod scheduler;
 pub mod session_loop;
 mod session_metadata;
