@@ -3968,7 +3968,7 @@ fn estimate_cost(model: &str, prompt: u64, cached: u64, completion: u64) -> Opti
 
 fn format_cost(cost: f64) -> String {
     if cost < 0.01 {
-        format!("<$0.01")
+        "<$0.01".to_string()
     } else {
         format!("${:.2}", cost)
     }
@@ -4065,7 +4065,7 @@ pub async fn get_dashboard_usage(
             0, // per-entry cached breakdown not available yet
             entry.completion_tokens,
         )
-        .map(|c| format_cost(c));
+        .map(format_cost);
     }
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 

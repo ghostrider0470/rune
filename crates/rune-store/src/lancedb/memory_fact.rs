@@ -298,10 +298,10 @@ impl MemoryFactRepo for LanceStore {
         for batch in &batches {
             let ids = str_col(batch, "fact_id");
             let embeddings = embedding_col(batch, "embedding");
-            for i in 0..batch.num_rows() {
+            for (i, emb) in embeddings.iter().enumerate().take(batch.num_rows()) {
                 let fid = Uuid::parse_str(ids.value(i))
                     .map_err(|e| StoreError::Serialization(e.to_string()))?;
-                facts.push((fid, embeddings[i].clone()));
+                facts.push((fid, emb.clone()));
             }
         }
 

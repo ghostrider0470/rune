@@ -201,6 +201,7 @@ fn make_embedding_list(embedding: &[f32], dims: i32) -> Result<FixedSizeListArra
 }
 
 /// Build a single-row RecordBatch for a memory embedding.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn embedding_batch(
     schema: &Arc<Schema>,
     id: &str,
@@ -228,6 +229,7 @@ pub(crate) fn embedding_batch(
 }
 
 /// Build a single-row RecordBatch for a memory fact.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fact_batch(
     schema: &Arc<Schema>,
     id: &str,

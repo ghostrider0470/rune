@@ -10,11 +10,17 @@ pub struct InMemoryToolExecutionRepo {
     rows: Mutex<Vec<ToolExecutionRow>>,
 }
 
-impl InMemoryToolExecutionRepo {
-    pub fn new() -> Self {
+impl Default for InMemoryToolExecutionRepo {
+    fn default() -> Self {
         Self {
             rows: Mutex::new(Vec::new()),
         }
+    }
+}
+
+impl InMemoryToolExecutionRepo {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

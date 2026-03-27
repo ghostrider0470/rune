@@ -3079,6 +3079,7 @@ impl GatewayClient {
             bail!("HTTP {}", r.status());
         }
     }
+    #[allow(clippy::too_many_arguments)]
     pub async fn ms365_calendar_update(
         &self,
         id: &str,

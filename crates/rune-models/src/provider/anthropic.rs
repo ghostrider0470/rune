@@ -234,7 +234,7 @@ impl ModelProvider for AnthropicProvider {
                     cached_prompt_tokens: cached,
                     uncached_prompt_tokens: created
                         .or_else(|| cached.map(|c| input.saturating_sub(c))),
-                    ..Default::default()
+
                 }
             },
             finish_reason,

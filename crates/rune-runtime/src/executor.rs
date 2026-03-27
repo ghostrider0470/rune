@@ -18,6 +18,13 @@ use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
 use crate::compaction::CompactionStrategy;
 use crate::context::ContextAssembler;
+
+/// Callback type for recording model usage after completions.
+type UsageRecorderFn = Arc<
+    dyn Fn(String, String, Usage) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 use crate::error::RuntimeError;
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::lane_queue::{Lane, LaneQueue};
@@ -58,18 +65,7 @@ pub struct TurnExecutor {
     /// Global approval mode — "yolo" auto-approves all tool calls.
     approval_mode: String,
     agent_registry: Option<Arc<crate::agent_registry::AgentRegistry>>,
-    usage_recorder: Option<
-        Arc<
-            dyn Fn(
-                    String,
-                    String,
-                    Usage,
-                )
-                    -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
-                + Send
-                + Sync,
-        >,
-    >,
+    usage_recorder: Option<UsageRecorderFn>,
 }
 
 impl TurnExecutor {
@@ -142,7 +138,6 @@ impl TurnExecutor {
     }
 
     /// Set the default model name for completion requests.
-
     pub fn with_usage_recorder<F, Fut>(mut self, recorder: F) -> Self
     where
         F: Fn(String, String, Usage) -> Fut + Send + Sync + 'static,
