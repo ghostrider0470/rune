@@ -2386,3 +2386,92 @@ async fn allow_always_policy_does_not_affect_different_tool() {
     let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
     assert_eq!(session_row.status, "waiting_for_approval");
 }
+
+#[derive(Debug)]
+struct SharedSentChannelAdapter {
+    sent: Arc<Mutex<Vec<rune_channels::OutboundAction>>>,
+}
+
+#[async_trait]
+impl rune_channels::ChannelAdapter for SharedSentChannelAdapter {
+    async fn receive(
+        &mut self,
+    ) -> Result<rune_channels::InboundEvent, rune_channels::ChannelError> {
+        Err(rune_channels::ChannelError::ConnectionLost {
+            reason: "not used in this test".to_string(),
+        })
+    }
+
+    async fn send(
+        &self,
+        action: rune_channels::OutboundAction,
+    ) -> Result<rune_channels::DeliveryReceipt, rune_channels::ChannelError> {
+        self.sent.lock().await.push(action);
+        Ok(rune_channels::DeliveryReceipt {
+            provider_message_id: Uuid::now_v7().to_string(),
+            delivered_at: chrono::Utc::now(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn resumed_session_notice_only_for_restored_channel_sessions() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let existing = engine
+        .create_session_full(
+            SessionKind::Channel,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            None,
+            Some("chat-1:user-1".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = SharedSentChannelAdapter { sent: sent.clone() };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine.clone(),
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let msg = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "user-1".to_string(),
+        content: "hello again".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-1".to_string(),
+    };
+
+    session_loop
+        .maybe_send_resumed_session_notice(&msg, "chat-1:user-1", &existing)
+        .await;
+    session_loop
+        .maybe_send_resumed_session_notice(&msg, "chat-1:user-1", &existing)
+        .await;
+
+    let sent = sent.lock().await.clone();
+    assert_eq!(
+        sent.len(),
+        1,
+        "notice should be sent once per restored session state"
+    );
+    match &sent[0] {
+        rune_channels::OutboundAction::Reply { content, .. } => {
+            assert!(content.contains("Resumed session"));
+            assert!(content.contains(&existing.id.to_string()));
+            assert!(content.contains("do not resume in place"));
+        }
+        other => panic!("expected reply notice, got {other:?}"),
+    }
+}

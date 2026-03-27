@@ -646,8 +646,7 @@ impl SessionLoop {
         Ok(session)
     }
 
-
-    async fn maybe_send_resumed_session_notice(
+    pub(crate) async fn maybe_send_resumed_session_notice(
         &self,
         msg: &rune_channels::ChannelMessage,
         routing_key: &str,
