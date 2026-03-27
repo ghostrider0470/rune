@@ -38,8 +38,8 @@ use cli::{
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
     RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, ServiceTarget,
-    SessionsAction, SkillsAction, SystemAction, SystemEventAction, SystemHeartbeatAction,
-    UpdateAction,
+    SessionsAction, SkillsAction, SpellsAction, SystemAction, SystemEventAction,
+    SystemHeartbeatAction, UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -2198,6 +2198,28 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
             SkillsAction::Disable { name } => {
+                let result = client.skills_disable(&name).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::Spells { action } => match action {
+            SpellsAction::List => {
+                let result = client.skills_list().await?;
+                println!("{}", render(&result, format));
+            }
+            SpellsAction::Info { name } => {
+                let result = client.skills_info(&name).await?;
+                println!("{}", render(&result, format));
+            }
+            SpellsAction::Check => {
+                let result = client.skills_check().await?;
+                println!("{}", render(&result, format));
+            }
+            SpellsAction::Enable { name } => {
+                let result = client.skills_enable(&name).await?;
+                println!("{}", render(&result, format));
+            }
+            SpellsAction::Disable { name } => {
                 let result = client.skills_disable(&name).await?;
                 println!("{}", render(&result, format));
             }
