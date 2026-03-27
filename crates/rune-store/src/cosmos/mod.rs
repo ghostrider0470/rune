@@ -17,7 +17,9 @@ mod turn;
 
 use azure_core::credentials::Secret;
 use azure_data_cosmos::clients::ContainerClient;
-use azure_data_cosmos::models::{ContainerProperties, PartitionKeyDefinition};
+use azure_data_cosmos::models::{
+    ContainerProperties, IndexingPolicy, PartitionKeyDefinition, VectorEmbeddingPolicy,
+};
 use azure_data_cosmos::{CosmosAccountEndpoint, CosmosAccountReference, CosmosClient};
 use serde::de::DeserializeOwned;
 use tracing::info;
@@ -74,10 +76,35 @@ async fn ensure_database_and_container(client: &CosmosClient) -> Result<(), Stor
         Err(e) => return Err(StoreError::Database(format!("create database: {e}"))),
     }
 
-    // Create container with /pk partition key -- ignore 409.
+    // Create container with /pk partition key, 3072-dim vector policy, and indexing.
     let db_client = client.database_client("rune");
     let pk_def = PartitionKeyDefinition::new(vec!["/pk".to_string()]);
-    let props = ContainerProperties::new("rune", pk_def);
+
+    let vector_policy: VectorEmbeddingPolicy = serde_json::from_value(serde_json::json!({
+        "vectorEmbeddings": [{
+            "path": "/embedding",
+            "dataType": "float32",
+            "distanceFunction": "cosine",
+            "dimensions": 3072
+        }]
+    }))
+    .map_err(|e| StoreError::Serialization(e.to_string()))?;
+
+    let indexing_policy: IndexingPolicy = serde_json::from_value(serde_json::json!({
+        "indexingMode": "consistent",
+        "automatic": true,
+        "includedPaths": [{"path": "/*"}],
+        "excludedPaths": [
+            {"path": "/_etag/?"},
+            {"path": "/embedding/*"}
+        ],
+        "vectorIndexes": [{"path": "/embedding", "type": "quantizedFlat"}]
+    }))
+    .map_err(|e| StoreError::Serialization(e.to_string()))?;
+
+    let props = ContainerProperties::new("rune", pk_def)
+        .with_vector_embedding_policy(vector_policy)
+        .with_indexing_policy(indexing_policy);
 
     match db_client.create_container(props, None).await {
         Ok(_) => info!("created cosmos container 'rune'"),
