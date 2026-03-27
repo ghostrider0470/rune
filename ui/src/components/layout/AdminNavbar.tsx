@@ -104,14 +104,14 @@ export function AdminNavbar() {
       {/* Subtle gradient accent */}
       <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 pointer-events-none z-0" />
 
-      <div className="relative z-10 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between sm:h-18">
+      <div className="relative z-10 mx-auto w-full max-w-7xl px-3 sm:px-6 lg:px-8">
+        <div className="flex min-h-16 items-center justify-between gap-3 py-2 sm:min-h-[4.5rem]">
           {/* Left: Logo + Admin badge + nav links */}
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <Link
               to="/chat"
               search={chatLinkSearch}
-              className="flex items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="flex min-w-0 items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <img
                 src="/assets/rune-logo-icon.svg"
@@ -173,13 +173,13 @@ export function AdminNavbar() {
           </div>
 
           {/* Right: actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <ThemeToggle />
 
             {/* Mobile menu trigger */}
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild className="lg:hidden">
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" className="h-11 w-11">
                   <Menu className="h-5 w-5" />
                   <span className="sr-only">Open admin menu</span>
                 </Button>

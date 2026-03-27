@@ -12,6 +12,27 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+.admin-shell {
+  overflow-x: clip;
+}
+
 /* Typography scale and section rhythm */
 :root {
   --font-size-xs: clamp(0.75rem, 0.71rem + 0.18vw, 0.8125rem);
