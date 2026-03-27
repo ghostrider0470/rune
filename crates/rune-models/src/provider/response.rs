@@ -30,6 +30,17 @@ pub(crate) struct ApiUsage {
     pub prompt_tokens: Option<u32>,
     pub completion_tokens: Option<u32>,
     pub total_tokens: Option<u32>,
+    pub prompt_tokens_details: Option<ApiPromptTokensDetails>,
+    pub input_tokens_details: Option<ApiPromptTokensDetails>,
+    pub cache_creation_input_tokens: Option<u32>,
+    pub cache_read_input_tokens: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ApiPromptTokensDetails {
+    pub cached_tokens: Option<u32>,
+    pub cache_read_input_tokens: Option<u32>,
+    pub cache_creation_input_tokens: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -119,11 +130,15 @@ pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, Mod
 
     let usage = api
         .usage
-        .map(|u| Usage {
-            prompt_tokens: u.prompt_tokens.unwrap_or(0),
-            completion_tokens: u.completion_tokens.unwrap_or(0),
-            total_tokens: u.total_tokens.unwrap_or(0),
-            cached_prompt_tokens: 0,
+        .map(|u| {
+            let (cached_prompt_tokens, uncached_prompt_tokens) = extract_cached_usage(&u);
+            Usage {
+                prompt_tokens: u.prompt_tokens.unwrap_or(0),
+                completion_tokens: u.completion_tokens.unwrap_or(0),
+                total_tokens: u.total_tokens.unwrap_or(0),
+                cached_prompt_tokens,
+                uncached_prompt_tokens,
+            }
         })
         .unwrap_or_default();
 
@@ -133,6 +148,43 @@ pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, Mod
         finish_reason,
         tool_calls: message.tool_calls.unwrap_or_default(),
     })
+}
+
+/// Extract cached/uncached prompt token counts from an [`ApiUsage`].
+///
+/// Handles multiple provider formats:
+/// - OpenAI: `prompt_tokens_details.cached_tokens`
+/// - Azure/Anthropic-via-OpenAI: `input_tokens_details.cache_read_input_tokens`
+/// - Anthropic native: top-level `cache_read_input_tokens` / `cache_creation_input_tokens`
+///
+/// Returns `(cached_prompt_tokens, uncached_prompt_tokens)`.
+pub(crate) fn extract_cached_usage(u: &ApiUsage) -> (Option<u32>, Option<u32>) {
+    let prompt_tokens = u.prompt_tokens.unwrap_or(0);
+
+    let cached_prompt_tokens = u
+        .prompt_tokens_details
+        .as_ref()
+        .and_then(|d| d.cached_tokens.or(d.cache_read_input_tokens))
+        .or_else(|| {
+            u.input_tokens_details
+                .as_ref()
+                .and_then(|d| d.cached_tokens.or(d.cache_read_input_tokens))
+        })
+        .or(u.cache_read_input_tokens);
+
+    let uncached_prompt_tokens = u
+        .prompt_tokens_details
+        .as_ref()
+        .and_then(|d| d.cache_creation_input_tokens)
+        .or_else(|| {
+            u.input_tokens_details
+                .as_ref()
+                .and_then(|d| d.cache_creation_input_tokens)
+        })
+        .or(u.cache_creation_input_tokens)
+        .or_else(|| cached_prompt_tokens.map(|cached| prompt_tokens.saturating_sub(cached)));
+
+    (cached_prompt_tokens, uncached_prompt_tokens)
 }
 
 // ── SSE streaming types (OpenAI-compatible) ─────────────────────────

@@ -147,7 +147,7 @@ impl AzureFoundryProvider {
                 completion_tokens: anthropic_resp.usage.output_tokens,
                 total_tokens: anthropic_resp.usage.input_tokens
                     + anthropic_resp.usage.output_tokens,
-                cached_prompt_tokens: anthropic_resp.usage.cache_read_input_tokens.unwrap_or(0),
+                ..Default::default()
             },
             tool_calls: vec![],
         })
@@ -244,8 +244,6 @@ struct ContentBlock {
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
-    #[serde(default)]
-    cache_read_input_tokens: Option<u32>,
 }
 
 // ── OpenAI types ─────────────────────────────────────────────────────

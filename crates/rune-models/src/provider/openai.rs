@@ -248,11 +248,13 @@ async fn parse_sse_stream(
 
             // Extract usage from the final chunk (when stream_options.include_usage is set).
             if let Some(ref u) = chunk_resp.usage {
+                let (cached, uncached) = super::response::extract_cached_usage(u);
                 usage = Usage {
                     prompt_tokens: u.prompt_tokens.unwrap_or(0),
                     completion_tokens: u.completion_tokens.unwrap_or(0),
                     total_tokens: u.total_tokens.unwrap_or(0),
-                    cached_prompt_tokens: 0,
+                    cached_prompt_tokens: cached,
+                    uncached_prompt_tokens: uncached,
                 };
             }
 

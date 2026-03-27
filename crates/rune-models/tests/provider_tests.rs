@@ -599,6 +599,44 @@ async fn parses_tool_calls() {
     assert_eq!(resp.tool_calls[0].function.name, "read_file");
 }
 
+// --- Cached prompt token extraction ---
+
+#[tokio::test]
+async fn openai_response_extracts_cached_prompt_tokens() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+                "prompt_tokens_details": {"cached_tokens": 80}
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = OpenAiProvider::new(&server.uri(), "k");
+    let resp = p.complete(&simple_request()).await.unwrap();
+    assert_eq!(resp.usage.cached_prompt_tokens, Some(80));
+    assert_eq!(resp.usage.uncached_prompt_tokens, Some(20));
+}
+
+#[tokio::test]
+async fn openai_response_no_cached_details_returns_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = OpenAiProvider::new(&server.uri(), "k");
+    let resp = p.complete(&simple_request()).await.unwrap();
+    assert_eq!(resp.usage.cached_prompt_tokens, None);
+    assert_eq!(resp.usage.uncached_prompt_tokens, None);
+}
+
 // --- Provider selection from config ---
 
 #[test]

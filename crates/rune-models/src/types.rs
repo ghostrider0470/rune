@@ -86,9 +86,10 @@ pub struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
-    /// Prompt tokens served from cache (e.g. Anthropic prompt caching).
-    #[serde(default)]
-    pub cached_prompt_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_prompt_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uncached_prompt_tokens: Option<u32>,
 }
 
 /// Response from a model provider.
