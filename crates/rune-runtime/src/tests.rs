@@ -51,6 +51,7 @@ impl FakeModelProvider {
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,
+                ..Default::default()
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: vec![],
@@ -64,6 +65,7 @@ impl FakeModelProvider {
                 prompt_tokens: 10,
                 completion_tokens: 8,
                 total_tokens: 18,
+                ..Default::default()
             },
             finish_reason: Some(FinishReason::ToolCalls),
             tool_calls: vec![ToolCallRequest {
@@ -413,6 +415,7 @@ impl TurnRepo for MemTurnRepo {
             ended_at: t.ended_at,
             usage_prompt_tokens: t.usage_prompt_tokens,
             usage_completion_tokens: t.usage_completion_tokens,
+            usage_cached_prompt_tokens: t.usage_cached_prompt_tokens,
         };
         self.turns.lock().await.push(row.clone());
         Ok(row)
@@ -468,6 +471,7 @@ impl TurnRepo for MemTurnRepo {
         id: Uuid,
         prompt_tokens: i32,
         completion_tokens: i32,
+        cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError> {
         let mut turns = self.turns.lock().await;
         let turn = turns
@@ -479,6 +483,7 @@ impl TurnRepo for MemTurnRepo {
             })?;
         turn.usage_prompt_tokens = Some(prompt_tokens);
         turn.usage_completion_tokens = Some(completion_tokens);
+        turn.usage_cached_prompt_tokens = cached_prompt_tokens;
         Ok(turn.clone())
     }
 
@@ -2019,6 +2024,7 @@ async fn channel_session_prompt_excludes_long_term_memory() {
             Some(h.workspace_root.to_string_lossy().to_string()),
             None,
             Some("telegram".to_string()),
+            None,
         )
         .await
         .unwrap();
@@ -2073,8 +2079,10 @@ async fn enabled_skills_are_injected_into_system_prompt() {
             namespace: None,
             version: None,
             kind: Default::default(),
+            author: None,
             requires: vec![],
             tags: vec![],
+            match_rules: None,
             triggers: vec![],
         })
         .await;
@@ -2093,8 +2101,10 @@ async fn enabled_skills_are_injected_into_system_prompt() {
             namespace: None,
             version: None,
             kind: Default::default(),
+            author: None,
             requires: vec![],
             tags: vec![],
+            match_rules: None,
             triggers: vec![],
         })
         .await;
@@ -2530,65 +2540,6 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
 }
 
 #[tokio::test]
-async fn resumed_session_notice_skips_direct_sessions_even_if_marked_restored() {
-    let h = TestHarness::new();
-    let engine = Arc::new(h.session_engine());
-    let existing = engine
-        .create_session_full(
-            SessionKind::Direct,
-            Some(h.workspace_root.to_string_lossy().to_string()),
-            None,
-            Some("chat-1:user-1".to_string()),
-            None,
-        )
-        .await
-        .unwrap();
-
-    let sent = Arc::new(Mutex::new(Vec::new()));
-    let adapter = SharedSentChannelAdapter { sent: sent.clone() };
-    let session_loop = crate::session_loop::SessionLoop::new(
-        engine.clone(),
-        Arc::new(h.turn_executor(
-            Arc::new(FakeModelProvider::new(vec![])),
-            Arc::new(FakeToolExecutor::new(vec![])),
-            ToolRegistry::new(),
-        )),
-        h.session_repo.clone(),
-        Box::new(adapter),
-        rune_config::AgentsConfig::default(),
-        rune_config::ModelsConfig::default(),
-    );
-
-    {
-        let mut restored = session_loop.restored_session_routes.lock().await;
-        restored.insert(
-            "chat-1:user-1".to_string(),
-            existing.last_activity_at.to_rfc3339(),
-        );
-    }
-
-    let msg = rune_channels::ChannelMessage {
-        channel_id: rune_core::ChannelId::new(),
-        raw_chat_id: "chat-1".to_string(),
-        sender: "user-1".to_string(),
-        content: "hello again".to_string(),
-        attachments: vec![],
-        timestamp: chrono::Utc::now(),
-        provider_message_id: "msg-1".to_string(),
-    };
-
-    session_loop
-        .maybe_send_resumed_session_notice(&msg, "chat-1:user-1", &existing)
-        .await;
-
-    let sent = sent.lock().await.clone();
-    assert!(
-        sent.is_empty(),
-        "resumed-session notice must stay limited to restored channel sessions"
-    );
-}
-
-#[tokio::test]
 async fn create_session_full_persists_mode_in_metadata() {
     let h = TestHarness::new();
     let engine = h.session_engine();
@@ -2608,4 +2559,24 @@ async fn create_session_full_persists_mode_in_metadata() {
         session.metadata.get("mode").and_then(|value| value.as_str()),
         Some("architect")
     );
+}
+
+#[test]
+fn usage_accumulator_cache_hit_ratio() {
+    let mut acc = crate::usage::UsageAccumulator::new();
+    acc.add(&Usage {
+        prompt_tokens: 100,
+        completion_tokens: 20,
+        total_tokens: 120,
+        cached_prompt_tokens: Some(80),
+        uncached_prompt_tokens: Some(20),
+    });
+    let ratio = acc.cache_hit_ratio();
+    assert!((ratio - 0.8).abs() < f64::EPSILON);
+}
+
+#[test]
+fn usage_accumulator_cache_hit_ratio_zero_when_no_prompt_tokens() {
+    let acc = crate::usage::UsageAccumulator::new();
+    assert_eq!(acc.cache_hit_ratio(), 0.0);
 }

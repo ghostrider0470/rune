@@ -142,11 +142,19 @@ impl AzureFoundryProvider {
                 Some("tool_use") => FinishReason::ToolCalls,
                 _ => FinishReason::Stop,
             }),
-            usage: Usage {
-                prompt_tokens: anthropic_resp.usage.input_tokens,
-                completion_tokens: anthropic_resp.usage.output_tokens,
-                total_tokens: anthropic_resp.usage.input_tokens
-                    + anthropic_resp.usage.output_tokens,
+            usage: {
+                let cached = anthropic_resp.usage.cache_read_input_tokens;
+                let created = anthropic_resp.usage.cache_creation_input_tokens;
+                let input = anthropic_resp.usage.input_tokens;
+                Usage {
+                    prompt_tokens: input,
+                    completion_tokens: anthropic_resp.usage.output_tokens,
+                    total_tokens: input + anthropic_resp.usage.output_tokens,
+                    cached_prompt_tokens: cached,
+                    uncached_prompt_tokens: created
+                        .or_else(|| cached.map(|c| input.saturating_sub(c))),
+                    ..Default::default()
+                }
             },
             tool_calls: vec![],
         })
@@ -243,6 +251,10 @@ struct ContentBlock {
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
 }
 
 // ── OpenAI types ─────────────────────────────────────────────────────

@@ -303,6 +303,11 @@ CREATE INDEX IF NOT EXISTS idx_rune_memory_facts_created_at
     ON rune_memory_facts (created_at DESC);
 "#,
     },
+    Migration {
+        version: 9,
+        name: "add_cached_prompt_tokens",
+        sql: "ALTER TABLE turns ADD COLUMN usage_cached_prompt_tokens INTEGER;",
+    },
 ];
 
 /// Run all pending migrations on the given connection.

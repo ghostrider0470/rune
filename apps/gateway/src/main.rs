@@ -2067,6 +2067,7 @@ struct TurnAggregate {
     latest_model: Option<String>,
     usage_prompt_tokens: u64,
     usage_completion_tokens: u64,
+    usage_cached_prompt_tokens: u64,
     last_turn_started_at: Option<String>,
     last_turn_ended_at: Option<String>,
 }
@@ -2081,6 +2082,8 @@ fn aggregate_turns(turns: &[TurnRow]) -> TurnAggregate {
         aggregate.usage_prompt_tokens += turn.usage_prompt_tokens.unwrap_or_default().max(0) as u64;
         aggregate.usage_completion_tokens +=
             turn.usage_completion_tokens.unwrap_or_default().max(0) as u64;
+        aggregate.usage_cached_prompt_tokens +=
+            turn.usage_cached_prompt_tokens.unwrap_or_default().max(0) as u64;
         aggregate.last_turn_started_at = Some(turn.started_at.to_rfc3339());
         aggregate.last_turn_ended_at = turn.ended_at.map(|ended| ended.to_rfc3339());
     }
@@ -2111,6 +2114,10 @@ fn serialize_session_summary(row: &SessionRow, aggregate: &TurnAggregate) -> ser
         "latest_model": aggregate.latest_model,
         "usage_prompt_tokens": aggregate.usage_prompt_tokens,
         "usage_completion_tokens": aggregate.usage_completion_tokens,
+        "usage_cached_prompt_tokens": aggregate.usage_cached_prompt_tokens,
+        "cache_hit_ratio": if aggregate.usage_prompt_tokens > 0 {
+            aggregate.usage_cached_prompt_tokens as f64 / aggregate.usage_prompt_tokens as f64
+        } else { 0.0 },
         "last_turn_started_at": aggregate.last_turn_started_at,
         "last_turn_ended_at": aggregate.last_turn_ended_at,
     })
@@ -2171,7 +2178,11 @@ fn render_session_status_card(
         "model_override": model_override,
         "prompt_tokens": aggregate.usage_prompt_tokens,
         "completion_tokens": aggregate.usage_completion_tokens,
+        "cached_prompt_tokens": aggregate.usage_cached_prompt_tokens,
         "total_tokens": aggregate.usage_prompt_tokens + aggregate.usage_completion_tokens,
+        "cache_hit_ratio": if aggregate.usage_prompt_tokens > 0 {
+            aggregate.usage_cached_prompt_tokens as f64 / aggregate.usage_prompt_tokens as f64
+        } else { 0.0 },
         "estimated_cost": "not available",
         "turn_count": aggregate.turn_count,
         "uptime_seconds": started_at.elapsed().as_secs(),
@@ -3874,6 +3885,7 @@ impl ModelProvider for EchoModelProvider {
                 prompt_tokens: latest_user.len() as u32,
                 completion_tokens: (latest_user.len() as u32) + 6,
                 total_tokens: (latest_user.len() as u32) * 2 + 6,
+                ..Default::default()
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: Vec::new(),

@@ -42,6 +42,7 @@ fn row_to_turn(row: &tokio_postgres::Row) -> TurnRow {
         ended_at: row.get("ended_at"),
         usage_prompt_tokens: row.get("usage_prompt_tokens"),
         usage_completion_tokens: row.get("usage_completion_tokens"),
+        usage_cached_prompt_tokens: row.get("usage_cached_prompt_tokens"),
     }
 }
 
@@ -402,12 +403,14 @@ impl TurnRepo for PgTurnRepo {
             .query_one(
                 "INSERT INTO turns (
                     id, session_id, trigger_kind, status, model_ref,
-                    started_at, ended_at, usage_prompt_tokens, usage_completion_tokens
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                    started_at, ended_at, usage_prompt_tokens, usage_completion_tokens,
+                    usage_cached_prompt_tokens
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                 RETURNING *",
                 &[
                     &t.id, &t.session_id, &t.trigger_kind, &t.status, &t.model_ref,
                     &t.started_at, &t.ended_at, &t.usage_prompt_tokens, &t.usage_completion_tokens,
+                    &t.usage_cached_prompt_tokens,
                 ],
             )
             .await
@@ -480,13 +483,15 @@ impl TurnRepo for PgTurnRepo {
         id: Uuid,
         prompt_tokens: i32,
         completion_tokens: i32,
+        cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError> {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         let row = client
             .query_opt(
-                "UPDATE turns SET usage_prompt_tokens = $1, usage_completion_tokens = $2 \
-                 WHERE id = $3 RETURNING *",
-                &[&prompt_tokens, &completion_tokens, &id],
+                "UPDATE turns SET usage_prompt_tokens = $1, usage_completion_tokens = $2, \
+                 usage_cached_prompt_tokens = $3 \
+                 WHERE id = $4 RETURNING *",
+                &[&prompt_tokens, &completion_tokens, &cached_prompt_tokens, &id],
             )
             .await
             .map_err(StoreError::from)?

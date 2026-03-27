@@ -46,6 +46,7 @@ fn new_turn(session_id: Uuid) -> NewTurn {
         ended_at: None,
         usage_prompt_tokens: None,
         usage_completion_tokens: None,
+        usage_cached_prompt_tokens: None,
     }
 }
 
@@ -242,9 +243,10 @@ async fn test_turn_crud(session_repo: &dyn SessionRepo, turn_repo: &dyn TurnRepo
     assert_eq!(updated.status, "completed");
     assert!(updated.ended_at.is_some());
 
-    let updated = turn_repo.update_usage(tid, 100, 50).await.unwrap();
+    let updated = turn_repo.update_usage(tid, 100, 50, Some(25)).await.unwrap();
     assert_eq!(updated.usage_prompt_tokens, Some(100));
     assert_eq!(updated.usage_completion_tokens, Some(50));
+    assert_eq!(updated.usage_cached_prompt_tokens, Some(25));
 }
 
 async fn test_turn_invalid_transition_rejected(

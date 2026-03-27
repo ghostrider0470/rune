@@ -316,6 +316,7 @@ impl TurnExecutor {
                 ended_at: None,
                 usage_prompt_tokens: None,
                 usage_completion_tokens: None,
+                usage_cached_prompt_tokens: None,
             })
             .await?;
 
@@ -343,9 +344,10 @@ impl TurnExecutor {
         // Persist usage totals even on failed turns so operator surfaces remain durable.
         let prompt_tokens = i32::try_from(usage.prompt_tokens).unwrap_or(i32::MAX);
         let completion_tokens = i32::try_from(usage.completion_tokens).unwrap_or(i32::MAX);
+        let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn.id, prompt_tokens, completion_tokens)
+            .update_usage(turn.id, prompt_tokens, completion_tokens, cached_prompt_tokens)
             .await?;
 
         // 5. Finalize turn status
@@ -666,9 +668,10 @@ impl TurnExecutor {
 
         let prompt_tokens = i32::try_from(usage.prompt_tokens).unwrap_or(i32::MAX);
         let completion_tokens = i32::try_from(usage.completion_tokens).unwrap_or(i32::MAX);
+        let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn_uuid, prompt_tokens, completion_tokens)
+            .update_usage(turn_uuid, prompt_tokens, completion_tokens, cached_prompt_tokens)
             .await?;
 
         let (final_status, ended_at, approval_status, approval_summary) = match &result {
@@ -831,7 +834,7 @@ impl TurnExecutor {
             );
 
             // Build tool definitions for the request
-            let tool_defs: Vec<rune_models::ToolDefinition> = self
+            let mut tool_defs: Vec<rune_models::ToolDefinition> = self
                 .tool_registry
                 .list()
                 .iter()
@@ -844,6 +847,10 @@ impl TurnExecutor {
                     },
                 })
                 .collect();
+            // Sort tool definitions by name for deterministic serialization — this
+            // maximizes the shared prefix across consecutive LLM calls, enabling
+            // Azure automatic prefix caching.
+            tool_defs.sort_by(|a, b| a.function.name.cmp(&b.function.name));
 
             let request = CompletionRequest {
                 messages,
@@ -1148,13 +1155,16 @@ impl TurnExecutor {
         }
     }
 
-    /// Non-streaming model call with transient-error retries and exponential backoff.
+    /// Non-streaming model call with transient-error retries, exponential
+    /// backoff, `Retry-After` header respect, and jitter to avoid thundering
+    /// herd retries.
     async fn complete_with_retries(
         &self,
         request: &CompletionRequest,
     ) -> Result<rune_models::CompletionResponse, RuntimeError> {
         const MAX_RETRIES: u32 = 3;
         const BACKOFF_SECS: [u64; 3] = [1, 3, 10];
+        const MAX_BACKOFF_SECS: u64 = 60;
         let mut last_err = None;
 
         for attempt in 0..=MAX_RETRIES {
@@ -1162,15 +1172,28 @@ impl TurnExecutor {
                 Ok(r) => return Ok(r),
                 Err(e) => {
                     if attempt < MAX_RETRIES && e.is_retriable() {
-                        let delay = BACKOFF_SECS[attempt as usize];
+                        let base_delay = BACKOFF_SECS[attempt as usize];
+                        let delay = match &e {
+                            rune_models::ModelError::RateLimited {
+                                retry_after_secs: Some(ra),
+                                ..
+                            } => (*ra).min(MAX_BACKOFF_SECS).max(base_delay),
+                            _ => base_delay,
+                        };
+                        let jitter_ms = rand_jitter_ms();
                         warn!(
                             error = %e,
                             attempt = attempt + 1,
                             max_retries = MAX_RETRIES,
                             backoff_secs = delay,
+                            jitter_ms,
                             "transient model error, retrying"
                         );
-                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                        tokio::time::sleep(
+                            std::time::Duration::from_secs(delay)
+                                + std::time::Duration::from_millis(jitter_ms),
+                        )
+                        .await;
                         last_err = Some(e);
                     } else {
                         error!(error = %e, "model call failed");
@@ -1376,4 +1399,14 @@ fn parse_approval_decision(raw: &str) -> Result<ApprovalDecision, RuntimeError> 
             "unsupported approval decision: {other}"
         ))),
     }
+}
+
+/// Generate a random jitter between 0 and 500ms to spread out retries.
+fn rand_jitter_ms() -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    std::time::Instant::now().hash(&mut hasher);
+    std::thread::current().id().hash(&mut hasher);
+    hasher.finish() % 500
 }

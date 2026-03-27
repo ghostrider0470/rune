@@ -394,8 +394,10 @@ triggers: ["on:schedule:daily"]
                 namespace: None,
                 version: None,
                 kind: SpellKind::default(),
+                author: None,
                 requires: vec![],
                 tags: vec![],
+                match_rules: None,
                 triggers: vec![],
             })
             .await;
@@ -413,8 +415,10 @@ triggers: ["on:schedule:daily"]
                 namespace: None,
                 version: None,
                 kind: SpellKind::default(),
+                author: None,
                 requires: vec![],
                 tags: vec![],
+                match_rules: None,
                 triggers: vec![],
             })
             .await;
@@ -447,8 +451,10 @@ triggers: ["on:schedule:daily"]
             namespace: None,
             version: None,
             kind: SpellKind::default(),
+            author: None,
             requires: vec![],
             tags: vec![],
+            match_rules: None,
             triggers: vec![],
         };
 

@@ -59,6 +59,7 @@ pub struct TurnRow {
     pub ended_at: Option<DateTime<Utc>>,
     pub usage_prompt_tokens: Option<i32>,
     pub usage_completion_tokens: Option<i32>,
+    pub usage_cached_prompt_tokens: Option<i32>,
 }
 
 /// Insert payload for a new turn.
@@ -73,6 +74,7 @@ pub struct NewTurn {
     pub ended_at: Option<DateTime<Utc>>,
     pub usage_prompt_tokens: Option<i32>,
     pub usage_completion_tokens: Option<i32>,
+    pub usage_cached_prompt_tokens: Option<i32>,
 }
 
 // -- Transcript items --

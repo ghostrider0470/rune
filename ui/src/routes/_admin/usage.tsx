@@ -115,7 +115,7 @@ function UsagePage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -173,6 +173,25 @@ function UsagePage() {
               ) : (
                 usage?.total_estimated_cost ?? "—"
               )}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Zap className="h-4 w-4" />
+              Cache Hit Ratio
+            </div>
+            <p className="mt-1 text-2xl font-bold">
+              {isLoading ? (
+                <Skeleton className="h-8 w-24" />
+              ) : (
+                `${((usage?.cache_hit_ratio ?? 0) * 100).toFixed(1)}%`
+              )}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {(usage?.usage_cached_prompt_tokens ?? 0).toLocaleString()} cached of{" "}
+              {(usage?.total_prompt_tokens ?? 0).toLocaleString()} prompt tokens
             </p>
           </CardContent>
         </Card>

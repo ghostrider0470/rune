@@ -317,6 +317,7 @@ async fn turn_create_find_list_update() {
             ended_at: None,
             usage_prompt_tokens: None,
             usage_completion_tokens: None,
+            usage_cached_prompt_tokens: None,
         })
         .await
         .unwrap();
@@ -337,9 +338,10 @@ async fn turn_create_find_list_update() {
     assert_eq!(updated.status, "model_calling");
     assert!(updated.ended_at.is_none());
 
-    let usage_updated = turn_repo.update_usage(turn_id, 42, 17).await.unwrap();
+    let usage_updated = turn_repo.update_usage(turn_id, 42, 17, Some(10)).await.unwrap();
     assert_eq!(usage_updated.usage_prompt_tokens, Some(42));
     assert_eq!(usage_updated.usage_completion_tokens, Some(17));
+    assert_eq!(usage_updated.usage_cached_prompt_tokens, Some(10));
 
     // Complete with ended_at
     let completed = turn_repo
@@ -745,6 +747,7 @@ async fn turn_repo_rejects_invalid_status_transition() {
             ended_at: None,
             usage_prompt_tokens: None,
             usage_completion_tokens: None,
+            usage_cached_prompt_tokens: None,
         })
         .await
         .unwrap();
