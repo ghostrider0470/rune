@@ -3,6 +3,7 @@
 pub mod acp_tool;
 pub mod approval;
 pub mod comms_tool;
+pub mod context_budget_tool;
 pub mod cron_tool;
 mod definition;
 mod error;

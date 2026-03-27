@@ -94,7 +94,7 @@ fn register_builtin_stubs_populates_expected_tools() {
     let mut reg = ToolRegistry::new();
     register_builtin_stubs(&mut reg);
 
-    assert_eq!(reg.len(), 13);
+    assert_eq!(reg.len(), 16);
 
     let expected = [
         "read_file",
@@ -109,6 +109,9 @@ fn register_builtin_stubs_populates_expected_tools() {
         "web_fetch",
         "git",
         "image_generation",
+        "context_budget",
+        "context_checkpoint",
+        "context_gc",
     ];
     for name in expected {
         assert!(reg.lookup(name).is_ok(), "missing builtin: {name}");
@@ -232,4 +235,14 @@ fn tool_definition_roundtrips_through_serde() {
 
     let restored: ToolDefinition = serde_json::from_value(json).unwrap();
     assert_eq!(restored.name, "read_file");
+}
+
+#[test]
+fn context_budget_tool_definitions_are_registered() {
+    let mut reg = ToolRegistry::new();
+    register_builtin_stubs(&mut reg);
+
+    assert!(reg.lookup("context_budget").is_ok());
+    assert!(reg.lookup("context_checkpoint").is_ok());
+    assert!(reg.lookup("context_gc").is_ok());
 }
