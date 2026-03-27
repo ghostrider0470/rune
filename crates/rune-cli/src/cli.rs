@@ -448,6 +448,7 @@ pub enum Command {
         action: BackupAction,
     },
     /// Manage gateway updates.
+    #[command(alias = "self-update")]
     Update {
         #[command(subcommand)]
         action: UpdateAction,
@@ -6308,4 +6309,15 @@ fn parse_service_install_no_bootstrap() {
         } => assert!(no_bootstrap),
         other => panic!("unexpected command: {other:?}"),
     }
+}
+
+#[test]
+fn parse_update_self_update_alias() {
+    let cli = Cli::try_parse_from(["rune", "self-update", "check"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Command::Update {
+            action: UpdateAction::Check
+        }
+    ));
 }
