@@ -342,6 +342,7 @@ impl ModelProvider for BedrockProvider {
                 prompt_tokens: u.input_tokens,
                 completion_tokens: u.output_tokens,
                 total_tokens: u.total_tokens.unwrap_or(u.input_tokens + u.output_tokens),
+                cached_prompt_tokens: 0,
             })
             .unwrap_or_default();
 

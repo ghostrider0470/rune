@@ -136,6 +136,7 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnRow> {
         ended_at: parse_dt_opt(row.get(6)?),
         usage_prompt_tokens: row.get(7)?,
         usage_completion_tokens: row.get(8)?,
+        usage_cached_prompt_tokens: row.get(9)?,
     })
 }
 
@@ -263,7 +264,7 @@ fn row_to_pairing_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PairingRe
 // ══════════════════════════════════════════════════════════════════════
 
 const SESSION_COLS: &str = "id, kind, status, workspace_root, channel_ref, requester_session_id, latest_turn_id, runtime_profile, policy_profile, metadata, created_at, updated_at, last_activity_at";
-const TURN_COLS: &str = "id, session_id, trigger_kind, status, model_ref, started_at, ended_at, usage_prompt_tokens, usage_completion_tokens";
+const TURN_COLS: &str = "id, session_id, trigger_kind, status, model_ref, started_at, ended_at, usage_prompt_tokens, usage_completion_tokens, usage_cached_prompt_tokens";
 const TRANSCRIPT_COLS: &str = "id, session_id, turn_id, seq, kind, payload, created_at";
 const JOB_COLS: &str = "id, job_type, schedule, due_at, enabled, last_run_at, next_run_at, payload_kind, delivery_mode, payload, created_at, updated_at, claimed_at";
 const JOB_RUN_COLS: &str =
@@ -501,7 +502,7 @@ impl TurnRepo for SqliteTurnRepo {
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    &format!("INSERT INTO turns ({TURN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+                    &format!("INSERT INTO turns ({TURN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
                     rusqlite::params![
                         t.id.to_string(),
                         t.session_id.to_string(),
@@ -512,6 +513,7 @@ impl TurnRepo for SqliteTurnRepo {
                         t.ended_at.as_ref().map(to_rfc3339),
                         t.usage_prompt_tokens,
                         t.usage_completion_tokens,
+                        t.usage_cached_prompt_tokens,
                     ],
                 )?;
                 conn.prepare(&format!("SELECT {TURN_COLS} FROM turns WHERE id = ?1"))?
@@ -583,12 +585,13 @@ impl TurnRepo for SqliteTurnRepo {
         id: Uuid,
         prompt_tokens: i32,
         completion_tokens: i32,
+        cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError> {
         let id_s = id.to_string();
         self.conn.call(move |conn| {
             require_affected(conn.execute(
-                "UPDATE turns SET usage_prompt_tokens = ?1, usage_completion_tokens = ?2 WHERE id = ?3",
-                rusqlite::params![prompt_tokens, completion_tokens, &id_s],
+                "UPDATE turns SET usage_prompt_tokens = ?1, usage_completion_tokens = ?2, usage_cached_prompt_tokens = ?3 WHERE id = ?4",
+                rusqlite::params![prompt_tokens, completion_tokens, cached_prompt_tokens, &id_s],
             )?)?;
             conn.prepare(&format!("SELECT {TURN_COLS} FROM turns WHERE id = ?1"))?
                 .query_row([&id_s], row_to_turn)

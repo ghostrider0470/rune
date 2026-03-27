@@ -316,6 +316,7 @@ impl TurnExecutor {
                 ended_at: None,
                 usage_prompt_tokens: None,
                 usage_completion_tokens: None,
+                usage_cached_prompt_tokens: None,
             })
             .await?;
 
@@ -343,9 +344,10 @@ impl TurnExecutor {
         // Persist usage totals even on failed turns so operator surfaces remain durable.
         let prompt_tokens = i32::try_from(usage.prompt_tokens).unwrap_or(i32::MAX);
         let completion_tokens = i32::try_from(usage.completion_tokens).unwrap_or(i32::MAX);
+        let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn.id, prompt_tokens, completion_tokens)
+            .update_usage(turn.id, prompt_tokens, completion_tokens, cached_prompt_tokens)
             .await?;
 
         // 5. Finalize turn status
@@ -666,9 +668,10 @@ impl TurnExecutor {
 
         let prompt_tokens = i32::try_from(usage.prompt_tokens).unwrap_or(i32::MAX);
         let completion_tokens = i32::try_from(usage.completion_tokens).unwrap_or(i32::MAX);
+        let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn_uuid, prompt_tokens, completion_tokens)
+            .update_usage(turn_uuid, prompt_tokens, completion_tokens, cached_prompt_tokens)
             .await?;
 
         let (final_status, ended_at, approval_status, approval_summary) = match &result {

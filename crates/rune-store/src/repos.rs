@@ -95,6 +95,7 @@ pub trait TurnRepo: Send + Sync {
         id: Uuid,
         prompt_tokens: i32,
         completion_tokens: i32,
+        cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError>;
 
     /// Mark turns stuck in non-terminal status (started, model_calling, tool_executing)

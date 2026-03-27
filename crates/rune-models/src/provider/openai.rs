@@ -252,6 +252,7 @@ async fn parse_sse_stream(
                     prompt_tokens: u.prompt_tokens.unwrap_or(0),
                     completion_tokens: u.completion_tokens.unwrap_or(0),
                     total_tokens: u.total_tokens.unwrap_or(0),
+                    cached_prompt_tokens: 0,
                 };
             }
 

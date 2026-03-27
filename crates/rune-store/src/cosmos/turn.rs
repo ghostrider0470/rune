@@ -26,6 +26,7 @@ struct TurnDoc {
     ended_at: Option<DateTime<Utc>>,
     usage_prompt_tokens: Option<i32>,
     usage_completion_tokens: Option<i32>,
+    usage_cached_prompt_tokens: Option<i32>,
 }
 
 impl From<TurnDoc> for TurnRow {
@@ -40,6 +41,7 @@ impl From<TurnDoc> for TurnRow {
             ended_at: d.ended_at,
             usage_prompt_tokens: d.usage_prompt_tokens,
             usage_completion_tokens: d.usage_completion_tokens,
+            usage_cached_prompt_tokens: d.usage_cached_prompt_tokens,
         }
     }
 }
@@ -59,6 +61,7 @@ impl TurnDoc {
             ended_at: t.ended_at,
             usage_prompt_tokens: t.usage_prompt_tokens,
             usage_completion_tokens: t.usage_completion_tokens,
+            usage_cached_prompt_tokens: t.usage_cached_prompt_tokens,
         }
     }
 }
@@ -77,6 +80,7 @@ fn turn_row_to_doc(row: &TurnRow) -> TurnDoc {
         ended_at: row.ended_at,
         usage_prompt_tokens: row.usage_prompt_tokens,
         usage_completion_tokens: row.usage_completion_tokens,
+        usage_cached_prompt_tokens: row.usage_cached_prompt_tokens,
     }
 }
 
@@ -142,11 +146,13 @@ impl TurnRepo for CosmosStore {
         id: Uuid,
         prompt_tokens: i32,
         completion_tokens: i32,
+        cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError> {
         let doc = read_turn(self, id).await?;
         let mut row = TurnRow::from(doc);
         row.usage_prompt_tokens = Some(prompt_tokens);
         row.usage_completion_tokens = Some(completion_tokens);
+        row.usage_cached_prompt_tokens = cached_prompt_tokens;
 
         let updated = turn_row_to_doc(&row);
         self.container()

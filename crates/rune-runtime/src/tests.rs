@@ -51,6 +51,7 @@ impl FakeModelProvider {
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,
+                cached_prompt_tokens: 0,
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: vec![],
@@ -64,6 +65,7 @@ impl FakeModelProvider {
                 prompt_tokens: 10,
                 completion_tokens: 8,
                 total_tokens: 18,
+                cached_prompt_tokens: 0,
             },
             finish_reason: Some(FinishReason::ToolCalls),
             tool_calls: vec![ToolCallRequest {
@@ -413,6 +415,7 @@ impl TurnRepo for MemTurnRepo {
             ended_at: t.ended_at,
             usage_prompt_tokens: t.usage_prompt_tokens,
             usage_completion_tokens: t.usage_completion_tokens,
+            usage_cached_prompt_tokens: t.usage_cached_prompt_tokens,
         };
         self.turns.lock().await.push(row.clone());
         Ok(row)
@@ -468,6 +471,7 @@ impl TurnRepo for MemTurnRepo {
         id: Uuid,
         prompt_tokens: i32,
         completion_tokens: i32,
+        cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError> {
         let mut turns = self.turns.lock().await;
         let turn = turns
@@ -479,6 +483,7 @@ impl TurnRepo for MemTurnRepo {
             })?;
         turn.usage_prompt_tokens = Some(prompt_tokens);
         turn.usage_completion_tokens = Some(completion_tokens);
+        turn.usage_cached_prompt_tokens = cached_prompt_tokens;
         Ok(turn.clone())
     }
 

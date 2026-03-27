@@ -123,6 +123,7 @@ pub(crate) fn parse_response(api: ApiResponse) -> Result<CompletionResponse, Mod
             prompt_tokens: u.prompt_tokens.unwrap_or(0),
             completion_tokens: u.completion_tokens.unwrap_or(0),
             total_tokens: u.total_tokens.unwrap_or(0),
+            cached_prompt_tokens: 0,
         })
         .unwrap_or_default();
 

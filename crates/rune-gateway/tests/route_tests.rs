@@ -255,6 +255,7 @@ impl TurnRepo for MemTurnRepo {
             ended_at: t.ended_at,
             usage_prompt_tokens: t.usage_prompt_tokens,
             usage_completion_tokens: t.usage_completion_tokens,
+            usage_cached_prompt_tokens: t.usage_cached_prompt_tokens,
         };
         self.turns.lock().await.push(row.clone());
         Ok(row)
@@ -310,6 +311,7 @@ impl TurnRepo for MemTurnRepo {
         id: Uuid,
         prompt_tokens: i32,
         completion_tokens: i32,
+        cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError> {
         let mut turns = self.turns.lock().await;
         let turn = turns
@@ -321,6 +323,7 @@ impl TurnRepo for MemTurnRepo {
             })?;
         turn.usage_prompt_tokens = Some(prompt_tokens);
         turn.usage_completion_tokens = Some(completion_tokens);
+        turn.usage_cached_prompt_tokens = cached_prompt_tokens;
         Ok(turn.clone())
     }
 
@@ -2488,6 +2491,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
             ended_at: Some(now),
             usage_prompt_tokens: Some(12),
             usage_completion_tokens: Some(7),
+            usage_cached_prompt_tokens: None,
         })
         .await
         .unwrap();
@@ -2644,6 +2648,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
             ended_at: Some(now),
             usage_prompt_tokens: Some(3),
             usage_completion_tokens: Some(4),
+            usage_cached_prompt_tokens: None,
         })
         .await
         .unwrap();
@@ -2906,6 +2911,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
             ended_at: Some(started_at),
             usage_prompt_tokens: Some(10),
             usage_completion_tokens: Some(5),
+            usage_cached_prompt_tokens: None,
         })
         .await
         .unwrap();
@@ -2920,6 +2926,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
             ended_at: None,
             usage_prompt_tokens: None,
             usage_completion_tokens: None,
+            usage_cached_prompt_tokens: None,
         })
         .await
         .unwrap();
