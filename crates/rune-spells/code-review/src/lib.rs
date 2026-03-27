@@ -110,19 +110,6 @@ impl CodeReviewToolExecutor {
             workspace_root: workspace_root.into(),
         }
     }
-
-    fn resolve_path(&self, raw: &str) -> Result<PathBuf, ToolError> {
-        let candidate = Path::new(raw);
-        if candidate.is_absolute() {
-            return Err(ToolError::InvalidArguments {
-                tool: "code_review".to_string(),
-                reason: "absolute paths are not allowed".into(),
-            });
-        }
-
-        let joined = self.workspace_root.join(candidate);
-        joined.canonicalize().map_err(|e| ToolError::ExecutionFailed(format!("path resolution failed: {e}")))
-    }
 }
 
 #[async_trait]
@@ -135,30 +122,7 @@ impl ToolExecutor for CodeReviewToolExecutor {
                 reason: "missing required target".into(),
             })?;
 
-        let target = if target_str.ends_with(".rs") {
-            ReviewTarget::File(self.resolve_path(target_str)?)
-        } else if target_str.contains("#") {
-            let parts: Vec<&str> = target_str.split("/").collect();
-            if parts.len() >= 2 {
-                let owner = parts[..parts.len()-1].join("/");
-                let repo_num = parts[parts.len()-1];
-                let repo = repo_num.split("#").next().unwrap_or(repo_num).to_string();
-                let number_str = repo_num.split("#").nth(1).unwrap_or("1");
-                let number = number_str.parse().map_err(|_| ToolError::InvalidArguments {
-                    tool: call.tool_name.clone(),
-                    reason: "invalid PR number".into(),
-                })?;
-                ReviewTarget::PullRequest {
-                    owner,
-                    repo,
-                    number,
-                }
-            } else {
-                ReviewTarget::Diff(target_str.to_string())
-            }
-        } else {
-            ReviewTarget::Diff(target_str.to_string())
-        };
+        let target = parse_review_target(target_str, &self.workspace_root)?;
 
         let dimensions = call.arguments.get("dimensions")
             .and_then(|v| v.as_array())
@@ -194,6 +158,42 @@ impl ToolExecutor for CodeReviewToolExecutor {
     }
 }
 
+fn parse_review_target(target_str: &str, workspace_root: &Path) -> Result<ReviewTarget, ToolError> {
+    if let Some((owner, repo, number)) = parse_pr_target(target_str) {
+        return Ok(ReviewTarget::PullRequest { owner, repo, number });
+    }
+
+    if target_str.ends_with(".rs") {
+        let candidate = Path::new(target_str);
+        if candidate.is_absolute() {
+            return Err(ToolError::InvalidArguments {
+                tool: "code_review".to_string(),
+                reason: "absolute paths are not allowed".into(),
+            });
+        }
+        let joined = workspace_root.join(candidate);
+        let resolved = joined.canonicalize().map_err(|e| ToolError::ExecutionFailed(format!("path resolution failed: {e}")))?;
+        return Ok(ReviewTarget::File(resolved));
+    }
+
+    Ok(ReviewTarget::Diff(target_str.to_string()))
+}
+
+fn parse_pr_target(raw: &str) -> Option<(String, String, u64)> {
+    let (repo_path, number_str) = raw.rsplit_once('#')?;
+    if repo_path.is_empty() || number_str.is_empty() {
+        return None;
+    }
+
+    let number = number_str.parse().ok()?;
+    let (owner, repo) = repo_path.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return None;
+    }
+
+    Some((owner.to_string(), repo.to_string(), number))
+}
+
 async fn code_review(target: &ReviewTarget, config: &ReviewConfig) -> Result<ReviewReport, CodeReviewError> {
     let mut findings = Vec::new();
     let mut summary = ReviewSummary::default();
@@ -206,7 +206,6 @@ async fn code_review(target: &ReviewTarget, config: &ReviewConfig) -> Result<Rev
                 mechanical_review(&content, &config.dimensions, &mut findings, &mut summary);
             }
             if config.enable_semantic {
-                // Stub: semantic review would call LLM here
                 info!("Semantic review stub: would call LLM on file {}", path.display());
                 findings.push(Finding {
                     dimension: "semantic".to_string(),
@@ -221,27 +220,25 @@ async fn code_review(target: &ReviewTarget, config: &ReviewConfig) -> Result<Rev
             }
         }
         ReviewTarget::Diff(diff) => {
-            // Stub for diff review
             findings.push(Finding {
                 dimension: "diff".to_string(),
                 severity: Severity::Nit,
                 file: None,
                 line: None,
                 title: "Diff review stub".to_string(),
-                explanation: format!("Reviewed diff of length {}", diff.len()).to_string(),
+                explanation: format!("Reviewed diff of length {}", diff.len()),
                 suggestion: None,
             });
             summary.nit += 1;
         }
         ReviewTarget::PullRequest { owner, repo, number } => {
-            // Stub for PR review
             findings.push(Finding {
                 dimension: "pr".to_string(),
                 severity: Severity::Nit,
                 file: None,
                 line: None,
                 title: "PR review stub".to_string(),
-                explanation: format!("Reviewed PR #{number} in {owner}/{repo}").to_string(),
+                explanation: format!("Reviewed PR #{number} in {owner}/{repo}"),
                 suggestion: None,
             });
             summary.nit += 1;
@@ -260,8 +257,7 @@ async fn code_review(target: &ReviewTarget, config: &ReviewConfig) -> Result<Rev
 
 fn mechanical_review(content: &str, dimensions: &[String], findings: &mut Vec<Finding>, summary: &mut ReviewSummary) {
     if parse_file(content).is_ok() {
-        // Basic mechanical check: count unsafe blocks
-        let unsafe_count = content.lines().filter(|line| line.trim().starts_with("unsafe")).count();
+        let unsafe_count = content.matches("unsafe").count();
         if unsafe_count > 0 && dimensions.contains(&"security".to_string()) {
             findings.push(Finding {
                 dimension: "security".to_string(),
@@ -269,13 +265,12 @@ fn mechanical_review(content: &str, dimensions: &[String], findings: &mut Vec<Fi
                 file: None,
                 line: None,
                 title: "Unsafe blocks detected".to_string(),
-                explanation: format!("Found {unsafe_count} unsafe blocks; review for necessity and safety.").to_string(),
+                explanation: format!("Found {unsafe_count} unsafe blocks; review for necessity and safety."),
                 suggestion: Some("Minimize unsafe usage or add justifications and tests.".to_string()),
             });
             summary.major += 1;
         }
 
-        // Check for unwrap in non-test code
         if !content.contains("mod tests") && content.contains(".unwrap()") && dimensions.contains(&"correctness".to_string()) {
             let lines = content.lines().enumerate()
                 .filter(|(_, line)| line.contains(".unwrap()"))
@@ -295,8 +290,6 @@ fn mechanical_review(content: &str, dimensions: &[String], findings: &mut Vec<Fi
             }
             summary.major += count;
         }
-
-        // Add more checks as needed
     } else {
         findings.push(Finding {
             dimension: "maintainability".to_string(),
@@ -316,6 +309,28 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    #[test]
+    fn parses_pr_target_with_owner_repo_number() {
+        let target = parse_review_target("ghostrider0470/rune#123", Path::new("."))
+            .expect("should parse");
+
+        match target {
+            ReviewTarget::PullRequest { owner, repo, number } => {
+                assert_eq!(owner, "ghostrider0470");
+                assert_eq!(repo, "rune");
+                assert_eq!(number, 123);
+            }
+            other => panic!("expected PR target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_pr_target_as_pr() {
+        assert!(parse_pr_target("org/team/repo#12").is_none());
+        assert!(parse_pr_target("repo-only#12").is_none());
+        assert!(parse_pr_target("owner/repo#not-a-number").is_none());
+    }
+
     #[tokio::test]
     async fn test_basic_file_review() {
         let dir = tempdir().unwrap();
@@ -330,7 +345,7 @@ mod tests {
         };
 
         let report = code_review(&target, &config).await.unwrap();
-        assert!(report.summary.major >= 2);  // unwrap and unsafe
+        assert!(report.summary.major >= 2);
         assert!(report.blocks_merge);
     }
 }
