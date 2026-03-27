@@ -453,3 +453,62 @@ pub trait ProcessHandleRepo: Send + Sync {
         tool_execution_id: Uuid,
     ) -> Result<Vec<ProcessHandleRow>, StoreError>;
 }
+
+// ── Memory fact repository (Mem0) ─────────────────────────────────────
+
+/// Persistence contract for Mem0's semantic fact store.
+#[async_trait]
+pub trait MemoryFactRepo: Send + Sync {
+    /// Semantic recall: find facts whose embedding is within `threshold` cosine similarity.
+    async fn recall(
+        &self,
+        embedding_str: &str,
+        threshold: f64,
+        limit: i64,
+    ) -> Result<Vec<MemoryFact>, StoreError>;
+
+    /// Increment access_count for a set of fact IDs.
+    async fn increment_access(&self, ids: &[uuid::Uuid]) -> Result<(), StoreError>;
+
+    /// Find the closest existing fact for dedup. Returns (id, fact, similarity) if any.
+    async fn dedup_check(
+        &self,
+        embedding_str: &str,
+        threshold: f64,
+    ) -> Result<Option<(uuid::Uuid, String, f64)>, StoreError>;
+
+    /// Insert a new memory fact row.
+    async fn insert(
+        &self,
+        id: uuid::Uuid,
+        fact: &str,
+        category: &str,
+        embedding_str: &str,
+        source_session_id: Option<uuid::Uuid>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError>;
+
+    /// Update an existing memory fact row.
+    async fn update(
+        &self,
+        id: uuid::Uuid,
+        fact: &str,
+        category: &str,
+        embedding_str: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError>;
+
+    /// Delete a fact by string UUID.
+    async fn delete(&self, id: &str) -> Result<(), StoreError>;
+
+    /// List all facts ordered by created_at descending.
+    async fn list_all(&self) -> Result<Vec<MemoryFact>, StoreError>;
+
+    /// Build a similarity graph: edges where cosine similarity exceeds `threshold`,
+    /// limited to `neighbors_k` nearest neighbours per node.
+    async fn graph_edges(
+        &self,
+        threshold: f64,
+        neighbors_k: i64,
+    ) -> Result<Vec<MemoryFactEdge>, StoreError>;
+}

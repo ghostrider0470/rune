@@ -335,6 +335,28 @@ pub struct MemoryEmbeddingByNameRow {
     pub created_at: DateTime<Utc>,
 }
 
+// -- Memory facts (Mem0) --
+
+/// A persisted semantic memory fact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryFact {
+    pub id: Uuid,
+    pub fact: String,
+    pub category: String,
+    pub source_session_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub access_count: i32,
+}
+
+/// An edge in the memory fact similarity graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryFactEdge {
+    pub source: Uuid,
+    pub target: Uuid,
+    pub similarity: f64,
+}
+
 // -- Channel deliveries --
 
 /// A channel delivery row.
