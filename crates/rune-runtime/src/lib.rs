@@ -8,6 +8,7 @@ pub mod claude_plugin;
 pub mod command_registry;
 mod compaction;
 mod context;
+pub mod context_budget;
 pub mod dispatcher;
 mod engine;
 mod error;
@@ -26,10 +27,10 @@ pub mod project;
 pub mod scheduler;
 pub mod session_loop;
 mod session_metadata;
-pub mod spell;
-pub mod spell_loader;
 pub mod skill;
 pub mod skill_loader;
+pub mod spell;
+pub mod spell_loader;
 mod usage;
 pub mod workspace;
 
@@ -37,6 +38,10 @@ pub use agent_registry::AgentRegistry;
 pub use command_registry::CommandRegistry;
 pub use compaction::{CompactionStrategy, NoOpCompaction, TokenBudgetCompaction};
 pub use context::ContextAssembler;
+pub use context_budget::{
+    BudgetItem, BudgetReport, Checkpoint, GcResult, Partition, PartitionBudget, PartitionReport,
+    TokenBudget, heartbeat_gc,
+};
 pub use dispatcher::{DispatchDecision, MessageDispatcher, OrchestratorRegistry};
 pub use engine::SessionEngine;
 pub use error::RuntimeError;
