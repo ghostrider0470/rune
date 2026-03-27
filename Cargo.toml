@@ -18,6 +18,7 @@ members = [
   "crates/rune-spells/security-audit",
   "crates/rune-spells/rust-patterns",
   "crates/rune-spells/code-review",
+  "crates/rune-spells/evolver",
   "apps/gateway",
   "apps/cli",
 ]
