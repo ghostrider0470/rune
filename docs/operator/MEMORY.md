@@ -26,7 +26,7 @@ postgres_url = "postgres://user:pass@host:5432/dbname?sslmode=require"
 embedding_endpoint = "https://your-resource.openai.azure.com/openai/deployments/text-embedding-3-large/embeddings"
 embedding_api_key = "your-key"
 embedding_model = "text-embedding-3-large"
-embedding_dims = 2000
+embedding_dims = 3072
 api_version = "2024-02-01"
 top_k = 10
 similarity_threshold = 0.3
