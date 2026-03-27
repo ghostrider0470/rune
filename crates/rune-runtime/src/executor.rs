@@ -1163,7 +1163,6 @@ impl TurnExecutor {
         request: &CompletionRequest,
     ) -> Result<rune_models::CompletionResponse, RuntimeError> {
         const MAX_RETRIES: u32 = 3;
-        const BACKOFF_SECS: [u64; 3] = [1, 3, 10];
         const MAX_BACKOFF_SECS: u64 = 60;
         let mut last_err = None;
 
@@ -1171,23 +1170,28 @@ impl TurnExecutor {
             match self.model_provider.complete(request).await {
                 Ok(r) => return Ok(r),
                 Err(e) => {
-                    if attempt < MAX_RETRIES && e.is_retriable() {
-                        let base_delay = BACKOFF_SECS[attempt as usize];
-                        let delay = match &e {
+                    if attempt < MAX_RETRIES && matches!(e, rune_models::ModelError::RateLimited { .. }) {
+                        let initial_delay = match &e {
                             rune_models::ModelError::RateLimited {
                                 retry_after_secs: Some(ra),
                                 ..
-                            } => (*ra).min(MAX_BACKOFF_SECS).max(base_delay),
-                            _ => base_delay,
+                            } => *ra,
+                            _ => 1,
                         };
+                        let delay = initial_delay
+                            .saturating_mul(1u64 << attempt)
+                            .min(MAX_BACKOFF_SECS);
                         let jitter_ms = rand_jitter_ms();
+                        let (provider, model) = provider_and_model_for_log(request);
                         warn!(
                             error = %e,
+                            provider = provider,
+                            model = model,
                             attempt = attempt + 1,
                             max_retries = MAX_RETRIES,
                             backoff_secs = delay,
                             jitter_ms,
-                            "transient model error, retrying"
+                            "rate limited by model provider, retrying"
                         );
                         tokio::time::sleep(
                             std::time::Duration::from_secs(delay)
@@ -1402,6 +1406,20 @@ fn parse_approval_decision(raw: &str) -> Result<ApprovalDecision, RuntimeError> 
 }
 
 /// Generate a random jitter between 0 and 500ms to spread out retries.
+fn provider_and_model_for_log(request: &CompletionRequest) -> (&'static str, &str) {
+    let model = request.model.as_deref().unwrap_or("default");
+    let provider = if model.starts_with("azure/") || model.starts_with("openai/") {
+        "openai-compatible"
+    } else if model.starts_with("anthropic/") {
+        "anthropic"
+    } else if model.starts_with("bedrock/") {
+        "bedrock"
+    } else {
+        "configured-provider"
+    };
+    (provider, model)
+}
+
 fn rand_jitter_ms() -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};

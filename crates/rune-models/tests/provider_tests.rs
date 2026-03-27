@@ -2416,3 +2416,30 @@ async fn foundry_error_format_contrast_openai_vs_anthropic() {
         "Anthropic path should map to Auth, got {anthropic_err:?}"
     );
 }
+
+#[tokio::test]
+async fn azure_maps_retry_after_http_date() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "Wed, 21 Oct 2099 07:28:00 GMT")
+                .set_body_json(serde_json::json!({
+                    "error": {
+                        "message": "Rate limited",
+                        "code": "429"
+                    }
+                })),
+        )
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "dep", "2024-06-01", "k");
+    let err = p.complete(&simple_request()).await.unwrap_err();
+    match err {
+        ModelError::RateLimited { retry_after_secs, .. } => {
+            assert!(retry_after_secs.is_some());
+        }
+        other => panic!("expected RateLimited, got {other:?}"),
+    }
+}
