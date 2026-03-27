@@ -217,15 +217,21 @@ impl SpellRegistry {
             return None;
         }
 
-        let mut fragment = String::from("\n\n## Available Spells\n\n");
+        let mut fragment = String::from(
+            "\n\n## Available Spells\n\n| Spell | Description | Binary |\n| --- | --- | --- |\n",
+        );
         for spell in &enabled {
-            fragment.push_str(&format!("### {}\n", spell.name));
-            fragment.push_str(&format!("{}\n", spell.description));
-            if let Some(binary) = &spell.binary_path {
-                fragment.push_str(&format!("Binary: {}\n", binary.display()));
-            }
-            fragment.push('\n');
+            let binary = spell
+                .binary_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "—".to_string());
+            fragment.push_str(&format!(
+                "| `{}` | {} | `{}` |\n",
+                spell.name, spell.description, binary
+            ));
         }
+        fragment.push('\n');
         Some(fragment)
     }
 }
