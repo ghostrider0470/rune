@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { GatewayProvider, useGateway } from "../src/providers/GatewayProvider";
+import { configureNotifications } from "../src/lib/notifications";
 
 function AuthGate() {
   const router = useRouter();
@@ -13,6 +14,10 @@ function AuthGate() {
       router.replace("/(auth)/connect");
     }
   }, [authenticated, router, segments]);
+
+  useEffect(() => {
+    void configureNotifications();
+  }, []);
 
   return <Slot />;
 }

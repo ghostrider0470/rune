@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalRequestResponse } from "../api/api-types";
 import { apiFetch } from "../api/client";
+import { notifyPendingApprovalsIncreased } from "../lib/notifications";
 import { useSessionEvents } from "../lib/websocket";
 
 export interface UseApprovalsResult {
@@ -20,6 +21,7 @@ export function useApprovals(): UseApprovalsResult {
   const [loading, setLoading] = useState(true);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const { events } = useSessionEvents(undefined, { enabled: true, clearOnSessionChange: false });
+  const previousCountRef = useRef(0);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -29,7 +31,11 @@ export function useApprovals(): UseApprovalsResult {
         throw new Error(`Failed to load approvals (${response.status})`);
       }
       const data = (await response.json()) as ApprovalRequestResponse[];
-      setApprovals(sortApprovals(data));
+      const sorted = sortApprovals(data);
+      const previousCount = previousCountRef.current;
+      previousCountRef.current = sorted.length;
+      setApprovals(sorted);
+      await notifyPendingApprovalsIncreased(previousCount, sorted.length);
     } finally {
       setLoading(false);
     }
@@ -48,7 +54,11 @@ export function useApprovals(): UseApprovalsResult {
         throw new Error(`Failed to submit approval decision (${response.status})`);
       }
 
-      setApprovals((current) => current.filter((approval) => approval.id !== id));
+      setApprovals((current) => {
+        const next = current.filter((approval) => approval.id !== id);
+        previousCountRef.current = next.length;
+        return next;
+      });
     } finally {
       setDecidingId(null);
     }
