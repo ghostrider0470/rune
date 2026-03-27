@@ -45,7 +45,7 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
-use rune_gateway::state::TokenMetricsStore;
+use rune_gateway::TokenMetricsStore;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
@@ -326,18 +326,6 @@ impl TurnRepo for MemTurnRepo {
         turn.usage_completion_tokens = Some(completion_tokens);
         turn.usage_cached_prompt_tokens = cached_prompt_tokens;
         Ok(turn.clone())
-    }
-
-    async fn list_usage(
-        &self,
-        _from: Option<chrono::DateTime<chrono::Utc>>,
-        _to: Option<chrono::DateTime<chrono::Utc>>,
-        limit: u32,
-    ) -> Result<Vec<TurnRow>, StoreError> {
-        let mut turns = self.turns.lock().await.clone();
-        turns.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-        turns.truncate(limit as usize);
-        Ok(turns)
     }
 
     async fn list_usage(
@@ -11285,6 +11273,7 @@ async fn native_comms_send_inbox_and_ack_flow() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: Some(client.clone()),
+        token_metrics: TokenMetricsStore::new(),
     };
     let app = build_router(app_state, None);
 
@@ -11409,6 +11398,7 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
         .to_string();
 
     let send_response = app
+        .clone()
         .oneshot(
             Request::post(format!("/sessions/{session_id}/messages"))
                 .header(header::AUTHORIZATION, "Bearer secret")
@@ -11434,10 +11424,10 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
     let json = body_json(metrics_response).await;
     assert_eq!(json["entries"].as_array().unwrap().len(), 1);
     let entry = &json["entries"][0];
-    assert_eq!(entry["provider"], "fake");
+    assert_eq!(entry["provider"], "configured-provider");
     assert_eq!(entry["model"], "fake-model");
-    assert_eq!(entry["total_input_tokens"], 100);
+    assert_eq!(entry["total_input_tokens"], 10);
     assert_eq!(entry["cached_tokens"], 0);
-    assert_eq!(entry["uncached_tokens"], 100);
+    assert_eq!(entry["uncached_tokens"], 10);
     assert_eq!(entry["cache_hit_ratio_percent"], 0.0);
 }
