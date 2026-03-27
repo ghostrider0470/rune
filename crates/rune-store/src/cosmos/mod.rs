@@ -8,6 +8,7 @@ mod device;
 mod job;
 mod job_run;
 mod memory;
+mod memory_fact;
 mod process;
 mod session;
 mod tool_exec;
