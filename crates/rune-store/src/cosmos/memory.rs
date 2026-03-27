@@ -8,7 +8,6 @@ use crate::cosmos::{collect_query, pk, CosmosStore};
 use crate::error::StoreError;
 use crate::models::{KeywordSearchRow, VectorSearchRow};
 use crate::repos::MemoryEmbeddingRepo;
-use azure_data_cosmos::PartitionKey;
 
 /// Cosmos document representation for a memory embedding chunk.
 #[derive(Debug, Serialize, Deserialize)]
@@ -113,11 +112,7 @@ impl MemoryEmbeddingRepo for CosmosStore {
              AND CONTAINS(LOWER(c.chunk_text), '{}')",
             limit, escaped
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&sql, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let results: Vec<KeywordSearchResult> = collect_query(stream).await?;
+        let results: Vec<KeywordSearchResult> = self.query_cross_partition(&sql).await?;
         Ok(results
             .into_iter()
             .map(|r| KeywordSearchRow {
@@ -133,7 +128,6 @@ impl MemoryEmbeddingRepo for CosmosStore {
         embedding: &[f32],
         limit: i64,
     ) -> Result<Vec<VectorSearchRow>, StoreError> {
-        // Build the vector as a JSON array literal inline.
         let vec_str: String = format!(
             "[{}]",
             embedding
@@ -149,11 +143,7 @@ impl MemoryEmbeddingRepo for CosmosStore {
              ORDER BY VectorDistance(c.embedding, {})",
             limit, vec_str, vec_str
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&sql, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let results: Vec<VectorSearchResult> = collect_query(stream).await?;
+        let results: Vec<VectorSearchResult> = self.query_cross_partition(&sql).await?;
         Ok(results
             .into_iter()
             .map(|r| VectorSearchRow {
@@ -166,12 +156,7 @@ impl MemoryEmbeddingRepo for CosmosStore {
 
     async fn count(&self) -> Result<i64, StoreError> {
         let query = "SELECT VALUE COUNT(1) FROM c WHERE c.type = 'memory_embedding'";
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let results: Vec<serde_json::Value> = collect_query(stream).await?;
-        // VALUE COUNT returns a single scalar.
+        let results: Vec<serde_json::Value> = self.query_cross_partition(query).await?;
         if let Some(val) = results.into_iter().next() {
             Ok(val.as_i64().unwrap_or(0))
         } else {
@@ -182,11 +167,7 @@ impl MemoryEmbeddingRepo for CosmosStore {
     async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
         let query =
             "SELECT DISTINCT c.file_path FROM c WHERE c.type = 'memory_embedding'";
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let results: Vec<FilePathResult> = collect_query(stream).await?;
+        let results: Vec<FilePathResult> = self.query_cross_partition(query).await?;
         Ok(results.into_iter().map(|r| r.file_path).collect())
     }
 
@@ -213,11 +194,7 @@ impl MemoryEmbeddingRepo for CosmosStore {
     async fn delete_all(&self) -> Result<usize, StoreError> {
         let query =
             "SELECT c.id, c.pk FROM c WHERE c.type = 'memory_embedding'";
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let items: Vec<serde_json::Value> = collect_query(stream).await?;
+        let items: Vec<serde_json::Value> = self.query_cross_partition(query).await?;
         let mut count = 0usize;
         for val in &items {
             if let (Some(doc_id), Some(doc_pk)) = (

@@ -21,7 +21,10 @@ use azure_data_cosmos::models::{
     ContainerProperties, IndexingPolicy, PartitionKeyDefinition, VectorEmbeddingPolicy,
 };
 use azure_data_cosmos::{CosmosAccountEndpoint, CosmosAccountReference, CosmosClient};
+use base64::Engine;
+use hmac::{Hmac, Mac};
 use serde::de::DeserializeOwned;
+use sha2::Sha256;
 use tracing::info;
 
 use crate::error::StoreError;
@@ -30,6 +33,8 @@ use crate::error::StoreError;
 #[derive(Clone)]
 pub struct CosmosStore {
     container: ContainerClient,
+    endpoint: String,
+    key: String,
 }
 
 impl CosmosStore {
@@ -55,6 +60,8 @@ impl CosmosStore {
         info!("cosmos store connected to {endpoint}");
         Ok(Self {
             container: container_client,
+            endpoint: endpoint.trim_end_matches('/').to_string(),
+            key: key.to_string(),
         })
     }
 
@@ -62,6 +69,132 @@ impl CosmosStore {
     pub fn container(&self) -> &ContainerClient {
         &self.container
     }
+
+    /// Execute a cross-partition SQL query via the Cosmos REST API.
+    ///
+    /// The azure_data_cosmos SDK v0.31 does not support cross-partition queries
+    /// (`PartitionKey::EMPTY` returns 400), so we call the REST endpoint directly
+    /// with HMAC-SHA256 authentication and pagination.
+    pub async fn query_cross_partition<T: DeserializeOwned>(
+        &self,
+        sql: &str,
+    ) -> Result<Vec<T>, StoreError> {
+        let client = reqwest::Client::new();
+        let resource_link = "dbs/rune/colls/rune";
+        let url = format!("{}/{}/docs", self.endpoint, resource_link);
+
+        let mut all_results: Vec<T> = Vec::new();
+        let mut continuation: Option<String> = None;
+
+        loop {
+            // Generate date in RFC 7231 format.
+            let date = chrono::Utc::now()
+                .format("%a, %d %b %Y %H:%M:%S GMT")
+                .to_string();
+
+            // Build HMAC-SHA256 auth token.
+            let auth_token = generate_auth_token(&self.key, "post", "docs", resource_link, &date)?;
+
+            let mut req = client
+                .post(&url)
+                .header("Authorization", &auth_token)
+                .header("x-ms-date", &date)
+                .header("x-ms-version", "2020-07-15")
+                .header("Content-Type", "application/query+json")
+                .header("x-ms-documentdb-isquery", "true")
+                .header("x-ms-documentdb-query-enablecrosspartition", "true");
+
+            if let Some(ref token) = continuation {
+                req = req.header("x-ms-continuation", token);
+            }
+
+            let body = serde_json::json!({ "query": sql });
+            let resp = req
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| StoreError::Database(format!("cosmos REST request failed: {e}")))?;
+
+            let status = resp.status();
+            let next_continuation = resp
+                .headers()
+                .get("x-ms-continuation")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+
+            let resp_body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| StoreError::Database(format!("cosmos REST response parse failed: {e}")))?;
+
+            if !status.is_success() {
+                let msg = resp_body
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                return Err(StoreError::Database(format!(
+                    "cosmos REST query failed ({}): {}",
+                    status, msg
+                )));
+            }
+
+            if let Some(docs_arr) = resp_body.get("Documents").and_then(|v| v.as_array()) {
+                for doc in docs_arr {
+                    let item: T = serde_json::from_value(doc.clone())
+                        .map_err(|e| StoreError::Serialization(e.to_string()))?;
+                    all_results.push(item);
+                }
+            }
+
+            match next_continuation {
+                Some(token) if !token.is_empty() => continuation = Some(token),
+                _ => break,
+            }
+        }
+
+        Ok(all_results)
+    }
+}
+
+/// Generate a Cosmos DB HMAC-SHA256 authorization token for REST API calls.
+fn generate_auth_token(
+    key: &str,
+    verb: &str,
+    resource_type: &str,
+    resource_link: &str,
+    date: &str,
+) -> Result<String, StoreError> {
+    let decoded_key = base64::engine::general_purpose::STANDARD
+        .decode(key)
+        .map_err(|e| StoreError::Database(format!("invalid cosmos key: {e}")))?;
+
+    let payload = format!(
+        "{}\n{}\n{}\n{}\n\n",
+        verb.to_lowercase(),
+        resource_type.to_lowercase(),
+        resource_link,
+        date.to_lowercase(),
+    );
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(&decoded_key)
+        .map_err(|e| StoreError::Database(format!("hmac init failed: {e}")))?;
+    mac.update(payload.as_bytes());
+    let signature = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+
+    let token = format!("type=master&ver=1.0&sig={}", signature);
+    // Percent-encode the token for the Authorization header.
+    let mut encoded = String::with_capacity(token.len() * 2);
+    for byte in token.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                encoded.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    Ok(encoded)
 }
 
 /// Create the `rune` database and `rune` container if they do not already exist.

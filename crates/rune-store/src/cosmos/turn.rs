@@ -9,7 +9,6 @@ use crate::cosmos::{collect_query, pk, CosmosStore};
 use crate::error::StoreError;
 use crate::models::{NewTurn, TurnRow};
 use crate::repos::TurnRepo;
-use azure_data_cosmos::PartitionKey;
 
 /// Cosmos document representation for a turn.
 #[derive(Debug, Serialize, Deserialize)]
@@ -87,11 +86,7 @@ async fn read_turn(store: &CosmosStore, id: Uuid) -> Result<TurnDoc, StoreError>
         "SELECT * FROM c WHERE c.type = 'turn' AND c.turn_id = '{}'",
         id
     );
-    let stream = store
-        .container()
-        .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-        .map_err(|e| StoreError::Database(e.to_string()))?;
-    let docs: Vec<TurnDoc> = collect_query(stream).await?;
+    let docs: Vec<TurnDoc> = store.query_cross_partition(&query).await?;
     docs.into_iter().next().ok_or(StoreError::NotFound {
         entity: "turn",
         id: id.to_string(),
@@ -169,11 +164,7 @@ impl TurnRepo for CosmosStore {
              AND c.started_at < '{}'",
             cutoff_str
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<TurnDoc> = collect_query(stream).await?;
+        let docs: Vec<TurnDoc> = self.query_cross_partition(&query).await?;
         let count = docs.len() as u64;
         let now = Utc::now();
         for doc in docs {

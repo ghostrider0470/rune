@@ -9,7 +9,6 @@ use crate::cosmos::{collect_query, pk, CosmosStore};
 use crate::error::StoreError;
 use crate::models::{NewProcessHandle, ProcessHandleRow};
 use crate::repos::ProcessHandleRepo;
-use azure_data_cosmos::PartitionKey;
 
 /// Cosmos document representation for a process handle.
 #[derive(Debug, Serialize, Deserialize)]
@@ -95,11 +94,7 @@ async fn read_process(store: &CosmosStore, process_id: Uuid) -> Result<ProcessHa
         "SELECT * FROM c WHERE c.type = 'process_handle' AND c.process_id = '{}'",
         process_id
     );
-    let stream = store
-        .container()
-        .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-        .map_err(|e| StoreError::Database(e.to_string()))?;
-    let docs: Vec<ProcessHandleDoc> = collect_query(stream).await?;
+    let docs: Vec<ProcessHandleDoc> = store.query_cross_partition(&query).await?;
     docs.into_iter().next().ok_or(StoreError::NotFound {
         entity: "process_handle",
         id: process_id.to_string(),
@@ -160,11 +155,7 @@ impl ProcessHandleRepo for CosmosStore {
         let query =
             "SELECT * FROM c WHERE c.type = 'process_handle' \
              AND c.status IN ('running', 'backgrounded')";
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<ProcessHandleDoc> = collect_query(stream).await?;
+        let docs: Vec<ProcessHandleDoc> = self.query_cross_partition(query).await?;
         Ok(docs.into_iter().map(ProcessHandleRow::from).collect())
     }
 
@@ -176,11 +167,7 @@ impl ProcessHandleRepo for CosmosStore {
             "SELECT * FROM c WHERE c.type = 'process_handle' AND c.tool_call_id = '{}'",
             tool_call_id
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<ProcessHandleDoc> = collect_query(stream).await?;
+        let docs: Vec<ProcessHandleDoc> = self.query_cross_partition(&query).await?;
         Ok(docs.into_iter().next().map(ProcessHandleRow::from))
     }
 
@@ -192,11 +179,7 @@ impl ProcessHandleRepo for CosmosStore {
             "SELECT * FROM c WHERE c.type = 'process_handle' AND c.tool_execution_id = '{}'",
             tool_execution_id
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<ProcessHandleDoc> = collect_query(stream).await?;
+        let docs: Vec<ProcessHandleDoc> = self.query_cross_partition(&query).await?;
         Ok(docs.into_iter().map(ProcessHandleRow::from).collect())
     }
 }

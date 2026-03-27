@@ -9,7 +9,6 @@ use crate::cosmos::{collect_query, pk, CosmosStore};
 use crate::error::StoreError;
 use crate::models::{JobRunRow, NewJobRun};
 use crate::repos::JobRunRepo;
-use azure_data_cosmos::PartitionKey;
 
 /// Cosmos document representation for a job run.
 #[derive(Debug, Serialize, Deserialize)]
@@ -84,11 +83,7 @@ async fn read_job_run(store: &CosmosStore, id: Uuid) -> Result<JobRunDoc, StoreE
         "SELECT * FROM c WHERE c.type = 'job_run' AND c.run_id = '{}'",
         id
     );
-    let stream = store
-        .container()
-        .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-        .map_err(|e| StoreError::Database(e.to_string()))?;
-    let docs: Vec<JobRunDoc> = collect_query(stream).await?;
+    let docs: Vec<JobRunDoc> = store.query_cross_partition(&query).await?;
     docs.into_iter().next().ok_or(StoreError::NotFound {
         entity: "job_run",
         id: id.to_string(),

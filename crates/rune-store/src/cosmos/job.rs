@@ -5,11 +5,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, parse_doc, pk, CosmosStore};
+use crate::cosmos::{parse_doc, pk, CosmosStore};
 use crate::error::StoreError;
 use crate::models::{JobRow, NewJob};
 use crate::repos::JobRepo;
-use azure_data_cosmos::PartitionKey;
 
 /// Cosmos document representation for a job.
 #[derive(Debug, Serialize, Deserialize)]
@@ -135,11 +134,7 @@ impl JobRepo for CosmosStore {
 
     async fn list_enabled(&self) -> Result<Vec<JobRow>, StoreError> {
         let query = "SELECT * FROM c WHERE c.type = 'job' AND c.enabled = true";
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<JobDoc> = collect_query(stream).await?;
+        let docs: Vec<JobDoc> = self.query_cross_partition(query).await?;
         Ok(docs.into_iter().map(JobRow::from).collect())
     }
 
@@ -159,11 +154,7 @@ impl JobRepo for CosmosStore {
                 job_type.replace('\'', "''")
             )
         };
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<JobDoc> = collect_query(stream).await?;
+        let docs: Vec<JobDoc> = self.query_cross_partition(&query).await?;
         Ok(docs.into_iter().map(JobRow::from).collect())
     }
 
@@ -256,11 +247,7 @@ impl JobRepo for CosmosStore {
             now_str,
             stale_str
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<JobDoc> = collect_query(stream).await?;
+        let docs: Vec<JobDoc> = self.query_cross_partition(&query).await?;
 
         let mut claimed = Vec::new();
         for doc in docs.into_iter().take(limit as usize) {

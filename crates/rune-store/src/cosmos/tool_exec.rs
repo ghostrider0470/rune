@@ -5,11 +5,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, pk, CosmosStore};
+use crate::cosmos::{pk, CosmosStore};
 use crate::error::StoreError;
 use crate::models::{NewToolExecution, ToolExecutionRow};
 use crate::repos::ToolExecutionRepo;
-use azure_data_cosmos::PartitionKey;
 
 /// Cosmos document representation for a tool execution.
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,11 +102,7 @@ async fn read_tool_execution(store: &CosmosStore, id: Uuid) -> Result<ToolExecut
         "SELECT * FROM c WHERE c.type = 'tool_execution' AND c.execution_id = '{}'",
         id
     );
-    let stream = store
-        .container()
-        .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-        .map_err(|e| StoreError::Database(e.to_string()))?;
-    let docs: Vec<ToolExecutionDoc> = collect_query(stream).await?;
+    let docs: Vec<ToolExecutionDoc> = store.query_cross_partition(&query).await?;
     docs.into_iter().next().ok_or(StoreError::NotFound {
         entity: "tool_execution",
         id: id.to_string(),
@@ -135,11 +130,7 @@ impl ToolExecutionRepo for CosmosStore {
              ORDER BY c.started_at DESC",
             limit
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<ToolExecutionDoc> = collect_query(stream).await?;
+        let docs: Vec<ToolExecutionDoc> = self.query_cross_partition(&query).await?;
         Ok(docs.into_iter().map(ToolExecutionRow::from).collect())
     }
 

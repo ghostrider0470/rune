@@ -5,11 +5,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, parse_doc, pk, CosmosStore};
+use crate::cosmos::{parse_doc, pk, CosmosStore};
 use crate::error::StoreError;
 use crate::models::{NewSession, SessionRow};
 use crate::repos::SessionRepo;
-use azure_data_cosmos::PartitionKey;
 
 /// Cosmos document representation for a session.
 #[derive(Debug, Serialize, Deserialize)]
@@ -137,11 +136,7 @@ impl SessionRepo for CosmosStore {
             "SELECT TOP {} * FROM c WHERE c.type = 'session' ORDER BY c.created_at DESC",
             capped
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<SessionDoc> = collect_query(stream).await?;
+        let docs: Vec<SessionDoc> = self.query_cross_partition(&query).await?;
         Ok(docs.into_iter().map(SessionRow::from).collect())
     }
 
@@ -155,11 +150,7 @@ impl SessionRepo for CosmosStore {
              ORDER BY c.created_at DESC",
             channel_ref.replace('\'', "''")
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<SessionDoc> = collect_query(stream).await?;
+        let docs: Vec<SessionDoc> = self.query_cross_partition(&query).await?;
         Ok(docs.into_iter().next().map(SessionRow::from))
     }
 
@@ -257,11 +248,7 @@ impl SessionRepo for CosmosStore {
             "SELECT * FROM c WHERE c.type = 'session' AND IS_DEFINED(c.channel_ref) \
              AND c.channel_ref != null \
              AND c.status NOT IN ('completed', 'failed', 'cancelled')";
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<SessionDoc> = collect_query(stream).await?;
+        let docs: Vec<SessionDoc> = self.query_cross_partition(query).await?;
         Ok(docs.into_iter().map(SessionRow::from).collect())
     }
 
@@ -273,11 +260,7 @@ impl SessionRepo for CosmosStore {
              AND c.last_activity_at < '{}'",
             cutoff_str
         );
-        let stream = self
-            .container()
-            .query_items::<serde_json::Value>(&query, PartitionKey::EMPTY, None)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
-        let docs: Vec<SessionDoc> = collect_query(stream).await?;
+        let docs: Vec<SessionDoc> = self.query_cross_partition(&query).await?;
         let count = docs.len() as u64;
         let now = Utc::now();
         for doc in docs {

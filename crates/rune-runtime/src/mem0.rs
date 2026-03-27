@@ -444,7 +444,7 @@ impl Mem0Engine {
         let client = self.client.lock().await;
         let rows = match client
             .query(
-                "SELECT id, fact, category, source_session_id, created_at, updated_at, access_count FROM rune_memories ORDER BY created_at DESC",
+                "SELECT id, fact, category, source_agent, trigger, source_session_id, created_at, updated_at, access_count FROM rune_memories ORDER BY created_at DESC",
                 &[],
             )
             .await
@@ -488,7 +488,7 @@ impl Mem0Engine {
         // Get all memories
         let rows = match client
             .query(
-                "SELECT id, fact, category, source_session_id, created_at, updated_at, access_count FROM rune_memories ORDER BY created_at DESC",
+                "SELECT id, fact, category, source_agent, trigger, source_session_id, created_at, updated_at, access_count FROM rune_memories ORDER BY created_at DESC",
                 &[],
             )
             .await
