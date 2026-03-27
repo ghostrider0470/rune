@@ -24,7 +24,8 @@ use crate::output::{
     ScannedModelDetail, SecretsApplyResponse, SecretsAuditResponse, SecretsConfigureResponse,
     SecretsReloadResponse, SecurityAuditResponse, SessionDetailResponse, SessionListResponse,
     SessionStatusCard, SessionSummary, SessionTreeNode, SessionTreeResponse, SkillCheckResponse,
-    SkillInfoResponse, SkillListResponse, SkillSummary, StatusResponse, SystemEventListResponse,
+    SkillInfoResponse, SkillListResponse, SkillSummary, SpellSearchResponse, StatusResponse,
+    SystemEventListResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -351,6 +352,41 @@ impl GatewayClient {
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
+    }
+
+    /// Search installed spells using the existing `/skills` inventory.
+    pub async fn spells_search(&self, query: &str) -> Result<SpellSearchResponse> {
+        let skills = self.skills_list().await?;
+        let query_lower = query.to_lowercase();
+        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut spells: Vec<SkillSummary> = skills
+            .skills
+            .into_iter()
+            .filter(|skill| {
+                let namespace = skill.namespace.as_deref().unwrap_or_default();
+                let haystack = [
+                    skill.name.as_str(),
+                    skill.description.as_str(),
+                    namespace,
+                    skill.kind.as_str(),
+                    &skill.tags.join(" "),
+                    &skill.triggers.join(" "),
+                ]
+                .join(" ")
+                .to_lowercase();
+
+                query_words.iter().all(|word| haystack.contains(*word))
+            })
+            .collect();
+
+        spells.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Ok(SpellSearchResponse {
+            query: query.to_string(),
+            total: spells.len(),
+            spells,
+        })
     }
 
     /// `GET /skills`

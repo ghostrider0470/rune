@@ -51,7 +51,7 @@ use output::{
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
     ModelFallbackChainDetail, ModelFallbacksResponse, ModelListResponse, ModelProviderDetail,
     ModelScanResponse, ModelSetImageResponse, ModelSetResponse, ModelStatusResponse, OutputFormat,
-    TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
+    SpellSearchResponse, TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
 };
 use service::{ServiceInstallOptions, install_service_definition, print_service_definition};
 
@@ -2203,6 +2203,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         },
         Command::Spells { action } => match action {
+            SpellsAction::Search { query } => {
+                let result: SpellSearchResponse = client.spells_search(&query).await?;
+                println!("{}", render(&result, format));
+            }
             SpellsAction::List => {
                 let result = client.skills_list().await?;
                 println!("{}", render(&result, format));
