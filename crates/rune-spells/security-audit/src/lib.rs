@@ -38,6 +38,24 @@ pub struct AuditSummary {
     pub critical: usize,
 }
 
+pub fn security_audit_tool_definition() -> rune_tools::ToolDefinition {
+    rune_tools::ToolDefinition {
+        name: "security_audit".into(),
+        description: "Run a baseline host security audit covering listening ports, sensitive file permissions, SSH hardening, and firewall status.".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Directory path to inspect for sensitive file permissions"
+                }
+            }
+        }),
+        category: rune_core::ToolCategory::ProcessExec,
+        requires_approval: false,
+    }
+}
+
 pub fn run_security_audit(target: Option<&Path>) -> AuditReport {
     let target = target.unwrap_or_else(|| Path::new("."));
     let mut findings = Vec::new();
@@ -78,10 +96,7 @@ fn scan_open_ports() -> Vec<AuditFinding> {
                 .map(|s| s.trim().to_string())
                 .collect();
 
-            let severity = if ports
-                .iter()
-                .any(|line| line.contains(":22 ") || line.ends_with(":22"))
-            {
+            let severity = if ports.iter().any(|line| line.contains(":22 ") || line.ends_with(":22")) {
                 Severity::Warning
             } else {
                 Severity::Info
@@ -127,6 +142,7 @@ fn scan_file_permissions(target: &Path) -> Vec<AuditFinding> {
         }];
     }
 
+    let checked_count = candidates.len();
     let mut risky = Vec::new();
     for path in candidates {
         if let Ok(meta) = fs::metadata(&path) {
@@ -155,7 +171,7 @@ fn scan_file_permissions(target: &Path) -> Vec<AuditFinding> {
             "Sensitive file permissions look reasonable".to_string(),
             format!(
                 "Checked {} sensitive files under {}",
-                collect_sensitive_files(target).len(),
+                checked_count,
                 target.display()
             ),
         )
@@ -373,6 +389,12 @@ fn run_first_available(commands: &[&[&str]]) -> Option<(String, String)> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn tool_definition_is_registered_as_security_audit() {
+        let def = security_audit_tool_definition();
+        assert_eq!(def.name, "security_audit");
+    }
 
     #[test]
     fn audit_report_contains_expected_checks() {

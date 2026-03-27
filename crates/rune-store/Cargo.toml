@@ -9,7 +9,7 @@ license.workspace = true
 default = ["postgres", "sqlite", "cosmos"]
 postgres = ["dep:tokio-postgres", "dep:deadpool-postgres", "dep:postgres-native-tls", "dep:native-tls", "dep:postgresql_embedded"]
 sqlite = ["dep:rusqlite", "dep:tokio-rusqlite"]
-cosmos = ["dep:azure_data_cosmos", "dep:azure_core", "dep:futures"]
+cosmos = ["dep:azure_data_cosmos", "dep:azure_core", "dep:futures", "dep:reqwest", "dep:hmac", "dep:sha2", "dep:base64"]
 
 [dependencies]
 rune-core = { path = "../rune-core" }
@@ -32,6 +32,10 @@ tokio-rusqlite = { workspace = true, optional = true }
 azure_data_cosmos = { workspace = true, optional = true }
 azure_core = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true

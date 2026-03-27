@@ -28,6 +28,7 @@ use rune_config::{
     AppConfig, MemoryLevel, ModelBootstrap, PathsProfile, RuntimeMode, StorageBackend,
 };
 use rune_core::ToolCategory;
+use rune_spells_security_audit::security_audit_tool_definition;
 use rune_gateway::ms365::{
     GraphMs365CalendarService, GraphMs365FilesService, GraphMs365MailService,
     GraphMs365PlannerService, GraphMs365TodoService, GraphMs365UsersService,
@@ -1945,6 +1946,8 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
     if browse_enabled {
         registry.register(browse_tool_definition());
     }
+
+    registry.register(security_audit_tool_definition());
 }
 
 /// Build the model provider from config, falling back to echo if none configured.
@@ -3108,6 +3111,18 @@ mod tests {
             let before = existing.len();
             existing.retain(|path| path != file_path);
             Ok(before.saturating_sub(existing.len()))
+        }
+
+        async fn delete_chunk(&self, file_path: &str, _chunk_index: i32) -> Result<bool, StoreError> {
+            self.deleted_files.lock().await.push(file_path.to_string());
+            Ok(true)
+        }
+
+        async fn delete_all(&self) -> Result<usize, StoreError> {
+            let mut existing = self.existing_files.lock().await;
+            let count = existing.len();
+            existing.clear();
+            Ok(count)
         }
 
         async fn keyword_search(

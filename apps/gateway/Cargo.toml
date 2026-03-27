@@ -21,6 +21,7 @@ rune-runtime = { path = "../../crates/rune-runtime" }
 rune-stt = { path = "../../crates/rune-stt" }
 rune-store = { path = "../../crates/rune-store" }
 rune-tools = { path = "../../crates/rune-tools" }
+rune-spells-security-audit = { path = "../../crates/rune-spells/security-audit" }
 
 anyhow.workspace = true
 async-trait.workspace = true
