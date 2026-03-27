@@ -888,17 +888,19 @@ impl TurnExecutor {
             tool_defs.sort_by(|a, b| a.function.name.cmp(&b.function.name));
 
             let stable_prefix_messages = messages.first().cloned().map(|message| vec![message]);
+            let stable_prefix_tools = if tool_defs.is_empty() {
+                None
+            } else {
+                Some(tool_defs.clone())
+            };
             let request = CompletionRequest {
                 stable_prefix_messages,
+                stable_prefix_tools,
                 messages: messages.into_iter().skip(1).collect(),
                 model: model_ref.map(str::to_owned),
                 temperature: None,
                 max_tokens: None,
-                tools: if tool_defs.is_empty() {
-                    None
-                } else {
-                    Some(tool_defs)
-                },
+                tools: None,
             };
 
             // Call model — try streaming when a chunk sender is available,

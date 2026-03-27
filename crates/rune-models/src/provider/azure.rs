@@ -81,7 +81,7 @@ impl ModelProvider for AzureOpenAiProvider {
                 .collect(),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
-            tools: &request.tools,
+            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
         };
 
         debug!(url = %self.url, msg_count = body.messages.len(), "Azure OpenAI completion request");
