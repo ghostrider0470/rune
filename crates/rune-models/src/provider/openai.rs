@@ -1,7 +1,10 @@
 //! Standard OpenAI-compatible provider (works with Azure OpenAI too).
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use reqwest::Client;
+use tokio::time::sleep;
 use tracing::{debug, warn};
 
 use super::ModelProvider;
@@ -74,6 +77,59 @@ impl OpenAiProvider {
 
         req
     }
+
+    async fn send_with_rate_limit_retry(
+        &self,
+        body: &OpenAiRequest<'_>,
+        streaming: bool,
+    ) -> Result<reqwest::Response, ModelError> {
+        let mut attempt = 0;
+        let mut delay_secs = None;
+
+        loop {
+            let mut req = self.build_request().json(body);
+            if streaming {
+                req = req.timeout(Duration::from_secs(600));
+            }
+
+            let resp = req.send().await?;
+
+            if resp.status().as_u16() != 429 {
+                return Ok(resp);
+            }
+
+            let error = map_error_response(resp).await;
+            let retry_after_secs = match &error {
+                ModelError::RateLimited {
+                    retry_after_secs, ..
+                } => *retry_after_secs,
+                _ => return Err(error),
+            };
+
+            if attempt >= 3 {
+                return Err(error);
+            }
+
+            let wait_secs = delay_secs
+                .or(retry_after_secs)
+                .unwrap_or(1)
+                .max(1)
+                .min(60);
+
+            warn!(
+                provider = if self.use_azure_auth { "azure-openai" } else { "openai" },
+                model = body.model.as_deref().unwrap_or("<unspecified>"),
+                wait_secs,
+                attempt = attempt + 1,
+                "rate limited by model provider; retrying after backoff"
+            );
+
+            sleep(Duration::from_secs(wait_secs)).await;
+            delay_secs = Some((wait_secs.saturating_mul(2)).min(60));
+            attempt += 1;
+        }
+    }
+
 }
 
 /// Azure/newer OpenAI models use `max_completion_tokens` instead of `max_tokens`.
@@ -135,7 +191,7 @@ impl ModelProvider for OpenAiProvider {
             "OpenAI completion request"
         );
 
-        let resp = self.build_request().json(&body).send().await?;
+        let resp = self.send_with_rate_limit_retry(&body, false).await?;
 
         if !resp.status().is_success() {
             return Err(map_error_response(resp).await);
@@ -175,13 +231,7 @@ impl ModelProvider for OpenAiProvider {
             "OpenAI streaming completion request"
         );
 
-        let resp = self
-            .build_request()
-            .json(&body)
-            // Override timeout for streaming — responses may take several minutes.
-            .timeout(std::time::Duration::from_secs(600))
-            .send()
-            .await?;
+        let resp = self.send_with_rate_limit_retry(&body, true).await?;
 
         if !resp.status().is_success() {
             return Err(map_error_response(resp).await);
