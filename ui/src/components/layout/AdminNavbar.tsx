@@ -113,12 +113,17 @@ export function AdminNavbar() {
               search={chatLinkSearch}
               className="flex min-w-0 items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
-              <img
-                src="/assets/core_rune_transparent_white.svg"
-                alt="Rune"
+              <svg
+                viewBox="0 0 240 320"
                 className="h-10 w-auto py-0.5 sm:h-12"
-                decoding="async"
-              />
+                aria-label="Rune"
+              >
+                <path
+                  fill="currentColor"
+                  fillRule="evenodd"
+                  d="M105,26 L119,40 L119,129 L157,91 L157,111 L119,149 L119,173 L172,226 L105,293 L105,179 L67,141 L67,121 L105,159 L105,119 L67,81 L67,61 L105,99 Z M119,193 L119,259 L152,226 Z"
+                />
+              </svg>
               <Badge
                 variant="outline"
                 className="hidden sm:inline-flex shrink-0 border-primary/30 bg-primary/10 text-primary text-[10px]"
