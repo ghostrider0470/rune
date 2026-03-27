@@ -3487,6 +3487,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::McpMemoryServer { rune_url } => {
+            rune_mcp::memory_server::run_stdio_server(Some(rune_url))
+                .await
+                .map_err(|e| anyhow::anyhow!("MCP memory server error: {e}"))?;
+        }
         Command::Configure => {
             run_init_wizard(InitWizardOptions {
                 path: ".",

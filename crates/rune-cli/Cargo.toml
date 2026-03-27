@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
+rune-mcp = { path = "../rune-mcp" }
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
