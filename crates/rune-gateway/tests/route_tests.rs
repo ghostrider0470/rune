@@ -48,6 +48,7 @@ use rune_gateway::ms365::{
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
+use rune_gateway::state::TokenMetricsStore;
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
@@ -325,6 +326,18 @@ impl TurnRepo for MemTurnRepo {
         turn.usage_completion_tokens = Some(completion_tokens);
         turn.usage_cached_prompt_tokens = cached_prompt_tokens;
         Ok(turn.clone())
+    }
+
+    async fn list_usage(
+        &self,
+        _from: Option<chrono::DateTime<chrono::Utc>>,
+        _to: Option<chrono::DateTime<chrono::Utc>>,
+        limit: u32,
+    ) -> Result<Vec<TurnRow>, StoreError> {
+        let mut turns = self.turns.lock().await.clone();
+        turns.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        turns.truncate(limit as usize);
+        Ok(turns)
     }
 
     async fn mark_stale_failed(&self, _stale_secs: i64) -> Result<u64, StoreError> {
@@ -1509,6 +1522,7 @@ fn build_test_app_parts_with_ms365_services(
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
+    let token_metrics = TokenMetricsStore::new();
 
     let turn_executor = Arc::new(
         TurnExecutor::new(
@@ -1522,6 +1536,23 @@ fn build_test_app_parts_with_ms365_services(
             context_assembler,
             compaction,
         )
+        .with_usage_recorder({
+            let token_metrics = token_metrics.clone();
+            move |provider, model, usage| {
+                let token_metrics = token_metrics.clone();
+                async move {
+                    token_metrics
+                        .record(
+                            provider,
+                            model,
+                            usage.prompt_tokens,
+                            usage.cached_prompt_tokens,
+                            usage.uncached_prompt_tokens,
+                        )
+                        .await;
+                }
+            }
+        })
         .with_default_model("fake-model"),
     );
 
@@ -1575,6 +1606,7 @@ fn build_test_app_parts_with_ms365_services(
         ms365_files_service,
         ms365_users_service,
         comms_client: None,
+        token_metrics,
     };
 
     (build_router(state, auth_token), device_repo)
@@ -1790,6 +1822,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1907,6 +1940,7 @@ enabled: true
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2033,6 +2067,7 @@ async fn status_reports_configured_lane_capacities() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -2138,6 +2173,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -2281,6 +2317,7 @@ async fn ws_rpc_health_reports_session_count() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2399,6 +2436,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2539,6 +2577,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2696,6 +2735,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2797,6 +2837,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2894,6 +2935,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let session_id = Uuid::new_v4();
@@ -3084,6 +3126,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3200,6 +3243,7 @@ async fn approvals_list_route_includes_durable_resume_refs() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let approval_id = Uuid::now_v7();
@@ -3324,6 +3368,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3482,6 +3527,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3636,6 +3682,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3755,6 +3802,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -6144,6 +6192,7 @@ async fn send_message_and_transcript_with_shared_state() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -6389,6 +6438,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -6545,6 +6595,7 @@ async fn get_session_status_surfaces_orchestration_metadata() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -7581,6 +7632,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -7841,6 +7893,7 @@ async fn reminders_list_includes_outcome_fields() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -7952,6 +8005,7 @@ async fn reminders_cancel_returns_success() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -8080,6 +8134,7 @@ async fn agent_steer_success() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -8241,6 +8296,7 @@ async fn agent_kill_success() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -8402,6 +8458,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9132,6 +9189,7 @@ async fn transcript_route_filters_entries_after_cursor() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -9585,6 +9643,7 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_browser_tokens_across_se
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9720,6 +9779,7 @@ async fn ws_rpc_session_send_rate_limits_shared_webchat_browser_token_across_ses
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9840,6 +9900,7 @@ async fn ws_rpc_processes_log_surfaces_output() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -9948,6 +10009,7 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10068,6 +10130,7 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10313,6 +10376,7 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10476,6 +10540,7 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10596,6 +10661,7 @@ async fn ws_rpc_session_resolve_merges_metadata_for_existing_channel_session() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -10705,6 +10771,7 @@ async fn api_tool_execution_route_returns_persisted_execution() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let app = build_router(state, None);
@@ -10898,6 +10965,7 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
         ms365_files_service: test_ms365_files_service(),
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
     };
 
     let session_id = Uuid::now_v7();
@@ -11302,4 +11370,57 @@ async fn transcript_route_accepts_api_key_query_param() {
         .unwrap();
 
     assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+
+#[tokio::test]
+async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("secret".to_string()));
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::AUTHORIZATION, "Bearer secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let session_id = body_json(create_response).await["id"].as_str().unwrap().to_string();
+
+    let send_response = app
+        .oneshot(
+            Request::post(format!("/sessions/{session_id}/messages"))
+                .header(header::AUTHORIZATION, "Bearer secret")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"content":"hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(send_response.status(), StatusCode::OK);
+
+    let metrics_response = app
+        .oneshot(
+            Request::get("/admin/token-metrics")
+                .header(header::AUTHORIZATION, "Bearer secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(metrics_response.status(), StatusCode::OK);
+
+    let json = body_json(metrics_response).await;
+    assert_eq!(json["entries"].as_array().unwrap().len(), 1);
+    let entry = &json["entries"][0];
+    assert_eq!(entry["provider"], "fake");
+    assert_eq!(entry["model"], "fake-model");
+    assert_eq!(entry["total_input_tokens"], 100);
+    assert_eq!(entry["cached_tokens"], 0);
+    assert_eq!(entry["uncached_tokens"], 100);
+    assert_eq!(entry["cache_hit_ratio_percent"], 0.0);
 }

@@ -40,7 +40,7 @@ use crate::ms365::{
     UpdateTodoTaskRequest, UserProfile, UserSummary,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
-use crate::state::{AppState, SessionEvent};
+use crate::state::{AppState, SessionEvent, TokenMetricsSnapshot};
 use crate::ws::active_ws_connections;
 use crate::{SupervisorDeps, run_job_lifecycle};
 
@@ -58,6 +58,11 @@ pub struct HealthResponse {
     pub ws_connections: usize,
     pub mode: &'static str,
     pub storage_backend: String,
+}
+
+#[derive(Serialize)]
+pub struct TokenMetricsResponse {
+    pub entries: Vec<TokenMetricsSnapshot>,
 }
 
 #[derive(Serialize)]
@@ -88,6 +93,15 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         ws_connections: active_ws_connections(),
         mode: state.capabilities.mode.as_str(),
         storage_backend: state.capabilities.storage_backend.clone(),
+    }))
+}
+
+/// Prompt cache token metrics grouped by provider/model.
+pub async fn token_metrics(
+    State(state): State<AppState>,
+) -> Result<Json<TokenMetricsResponse>, GatewayError> {
+    Ok(Json(TokenMetricsResponse {
+        entries: state.token_metrics.snapshot().await,
     }))
 }
 

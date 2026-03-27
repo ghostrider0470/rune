@@ -1,5 +1,27 @@
 use std::collections::HashSet;
 
+const STABLE_PREFIX_PADDING: &str = concat!(
+    "## Prompt Cache Padding\n\n",
+    "This stable prefix padding exists to help upstream providers like Azure OpenAI\n",
+    "cross the automatic prompt-prefix caching threshold. Keep this text deterministic\n",
+    "for a given runtime build so repeated turns share the same cached prefix.\n\n",
+    "Cache padding block 01. Cache padding block 02. Cache padding block 03. Cache padding block 04.\n",
+    "Cache padding block 05. Cache padding block 06. Cache padding block 07. Cache padding block 08.\n",
+    "Cache padding block 09. Cache padding block 10. Cache padding block 11. Cache padding block 12.\n",
+    "Cache padding block 13. Cache padding block 14. Cache padding block 15. Cache padding block 16.\n",
+    "Cache padding block 17. Cache padding block 18. Cache padding block 19. Cache padding block 20.\n",
+    "Cache padding block 21. Cache padding block 22. Cache padding block 23. Cache padding block 24.\n",
+    "Cache padding block 25. Cache padding block 26. Cache padding block 27. Cache padding block 28.\n",
+    "Cache padding block 29. Cache padding block 30. Cache padding block 31. Cache padding block 32.\n",
+    "Cache padding block 33. Cache padding block 34. Cache padding block 35. Cache padding block 36.\n",
+    "Cache padding block 37. Cache padding block 38. Cache padding block 39. Cache padding block 40.\n",
+    "Cache padding block 41. Cache padding block 42. Cache padding block 43. Cache padding block 44.\n",
+    "Cache padding block 45. Cache padding block 46. Cache padding block 47. Cache padding block 48.\n",
+    "Cache padding block 49. Cache padding block 50. Cache padding block 51. Cache padding block 52.\n",
+    "Cache padding block 53. Cache padding block 54. Cache padding block 55. Cache padding block 56.\n",
+    "Cache padding block 57. Cache padding block 58. Cache padding block 59. Cache padding block 60.\n"
+);
+
 use rune_core::TranscriptItem;
 use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
@@ -59,6 +81,8 @@ impl ContextAssembler {
                 .filter(|section| !section.trim().is_empty())
                 .cloned(),
         );
+
+        sections.push(STABLE_PREFIX_PADDING.to_string());
 
         let system_content = sections.join("\n\n");
 

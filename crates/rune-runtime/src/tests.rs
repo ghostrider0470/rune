@@ -2580,3 +2580,39 @@ fn usage_accumulator_cache_hit_ratio_zero_when_no_prompt_tokens() {
     let acc = crate::usage::UsageAccumulator::new();
     assert_eq!(acc.cache_hit_ratio(), 0.0);
 }
+
+#[tokio::test]
+async fn prompt_prefix_is_stable_across_consecutive_turns() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("First"),
+        FakeModelProvider::text_response("Second"),
+    ]));
+    let model_handle = model.clone();
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
+
+    executor.execute(session.id, "hello", None).await.unwrap();
+    executor.execute(session.id, "follow-up", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    assert!(requests.len() >= 2);
+
+    let first_system = requests[0].messages[0].content.clone().unwrap();
+    let second_system = requests[1].messages[0].content.clone().unwrap();
+    assert_eq!(first_system, second_system);
+    assert!(first_system.contains("## Prompt Cache Padding"));
+}
