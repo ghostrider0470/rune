@@ -6246,6 +6246,13 @@ async fn get_session_status_returns_parity_card_fields() {
     assert_eq!(json["session_id"], session_id);
     // Session transitions: created → ready (auto) → running (on message).
     assert_eq!(json["status"], "running");
+    assert_eq!(json["kind"], "direct");
+    assert_eq!(json["channel_ref"], Value::Null);
+    assert_eq!(json["parent_session_id"], Value::Null);
+    assert_eq!(json["session_mode"], Value::Null);
+    assert_eq!(json["orchestration_status"], Value::Null);
+    assert_eq!(json["delegation_roles"], serde_json::json!([]));
+    assert_eq!(json["delegation_depth"], Value::Null);
     assert_eq!(json["current_model"], "fake-model");
     assert_eq!(json["prompt_tokens"], 10);
     assert_eq!(json["completion_tokens"], 5);
@@ -6384,6 +6391,16 @@ async fn get_session_status_surfaces_subagent_metadata() {
         "kind=subagent | channel=local | status=running"
     );
     assert_eq!(json["status"], "running");
+    assert_eq!(json["kind"], "subagent");
+    assert_eq!(json["channel_ref"], Value::Null);
+    assert_eq!(
+        json["parent_session_id"],
+        "33333333-3333-3333-3333-333333333333"
+    );
+    assert_eq!(json["session_mode"], Value::Null);
+    assert_eq!(json["orchestration_status"], "steered");
+    assert_eq!(json["delegation_roles"], serde_json::json!([]));
+    assert_eq!(json["delegation_depth"], 1);
     assert_eq!(json["current_model"], "gpt-5.4");
     assert_eq!(json["model_override"], "gpt-5.4");
     assert_eq!(json["estimated_cost"], "not available");
@@ -6403,6 +6420,134 @@ async fn get_session_status_surfaces_subagent_metadata() {
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("host/node/sandbox parity and PTY fidelity are not yet parity-complete")));
     assert!(unresolved.iter().any(|item| item.as_str() == Some("subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete")));
+}
+
+#[tokio::test]
+async fn get_session_status_surfaces_orchestration_metadata() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let parent_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let session_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let now = chrono::Utc::now();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: Some("telegram:ops".into()),
+            requester_session_id: Some(parent_id),
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "mode": "architect",
+                "orchestration_status": "delegated",
+                "delegation_roles": ["architect", "coder"],
+                "delegation_depth": 2,
+                "selected_model": "gpt-5.4"
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["kind"], "subagent");
+    assert_eq!(json["channel_ref"], "telegram:ops");
+    assert_eq!(json["parent_session_id"], parent_id.to_string());
+    assert_eq!(json["session_mode"], "architect");
+    assert_eq!(json["orchestration_status"], "delegated");
+    assert_eq!(json["delegation_roles"], serde_json::json!(["architect", "coder"]));
+    assert_eq!(json["delegation_depth"], 2);
 }
 
 #[tokio::test]

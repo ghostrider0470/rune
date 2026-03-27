@@ -562,6 +562,34 @@ impl RpcDispatcher {
             .get("elevated")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let parent_session_id = row.requester_session_id.map(|id| id.to_string());
+        let session_mode = metadata_str(metadata, "mode");
+        let orchestration_status = metadata_str(metadata, "orchestration_status")
+            .or_else(|| metadata_str(metadata, "subagent_lifecycle"));
+        let delegation_roles = metadata
+            .get("delegation_roles")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let delegation_depth = if parent_session_id.is_some() {
+            Some(
+                metadata
+                    .get("delegation_depth")
+                    .and_then(Value::as_u64)
+                    .map(|value| value as u32)
+                    .unwrap_or(1),
+            )
+        } else {
+            metadata
+                .get("delegation_depth")
+                .and_then(Value::as_u64)
+                .map(|value| value as u32)
+        };
         let subagent_lifecycle = metadata_str(metadata, "subagent_lifecycle");
         let subagent_runtime_status = metadata_str(metadata, "subagent_runtime_status");
         let subagent_runtime_attached = metadata
@@ -599,6 +627,11 @@ impl RpcDispatcher {
             "status": row.status,
             "kind": row.kind,
             "channel_ref": row.channel_ref,
+            "parent_session_id": parent_session_id,
+            "session_mode": session_mode,
+            "orchestration_status": orchestration_status,
+            "delegation_roles": delegation_roles,
+            "delegation_depth": delegation_depth,
             "current_model": current_model,
             "model_override": model_override,
             "turn_count": turn_count,
