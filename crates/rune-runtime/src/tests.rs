@@ -2415,6 +2415,53 @@ impl rune_channels::ChannelAdapter for SharedSentChannelAdapter {
 }
 
 #[tokio::test]
+async fn resumed_session_notice_skips_non_restored_sessions() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let existing = engine
+        .create_session_full(
+            SessionKind::Channel,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            None,
+            Some("chat-2:user-2".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = SharedSentChannelAdapter { sent: sent.clone() };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine.clone(),
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let msg = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-2".to_string(),
+        sender: "user-2".to_string(),
+        content: "hello".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-2".to_string(),
+    };
+
+    session_loop
+        .maybe_send_resumed_session_notice(&msg, "chat-2:user-2", &existing)
+        .await;
+
+    let sent = sent.lock().await.clone();
+    assert!(sent.is_empty(), "notice should not be sent for sessions that were not restored during startup");
+}
+
+#[tokio::test]
 async fn resumed_session_notice_only_for_restored_channel_sessions() {
     let h = TestHarness::new();
     let engine = Arc::new(h.session_engine());

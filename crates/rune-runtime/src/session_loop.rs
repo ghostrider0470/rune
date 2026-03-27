@@ -51,6 +51,7 @@ pub struct SessionLoop {
     channel: Arc<Mutex<Box<dyn ChannelAdapter>>>,
     sessions: Mutex<SessionIndex>,
     resumed_session_notifications: Mutex<HashMap<String, String>>,
+    restored_session_routes: Mutex<HashMap<String, String>>,
     agents: AgentsConfig,
     models: ModelsConfig,
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
@@ -94,6 +95,7 @@ impl SessionLoop {
             channel: Arc::new(Mutex::new(channel)),
             sessions: Mutex::new(HashMap::new()),
             resumed_session_notifications: Mutex::new(HashMap::new()),
+            restored_session_routes: Mutex::new(HashMap::new()),
             agents,
             models,
             stt_engine: None,
@@ -133,6 +135,10 @@ impl SessionLoop {
                 for session in &sessions {
                     if let Some(ref channel_ref) = session.channel_ref {
                         index.insert(channel_ref.clone(), session.id);
+                        self.restored_session_routes
+                            .lock()
+                            .await
+                            .insert(channel_ref.clone(), session.last_activity_at.to_rfc3339());
                     }
                 }
                 if !sessions.is_empty() {
@@ -652,12 +658,20 @@ impl SessionLoop {
         routing_key: &str,
         session: &SessionRow,
     ) {
+        let fingerprint = session.last_activity_at.to_rfc3339();
+        let restored = {
+            let restored = self.restored_session_routes.lock().await;
+            restored.get(routing_key).cloned()
+        };
+        if restored.as_deref() != Some(fingerprint.as_str()) {
+            return;
+        }
+
         let last_notified = {
             let notices = self.resumed_session_notifications.lock().await;
             notices.get(routing_key).cloned()
         };
 
-        let fingerprint = session.last_activity_at.to_rfc3339();
         if last_notified.as_deref() == Some(fingerprint.as_str()) {
             return;
         }
