@@ -1371,6 +1371,31 @@ impl CommsOps for CommsClientOps {
     ) -> Result<String, String> {
         self.client.send(msg_type, subject, body, priority).await
     }
+
+    async fn read_inbox(
+        &self,
+        mark_read: bool,
+    ) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
+        let messages = self.client.read_inbox().await;
+        let mut summaries = Vec::with_capacity(messages.len());
+
+        for (path, msg) in messages {
+            summaries.push(rune_tools::comms_tool::CommsMessageSummary {
+                id: msg.id.clone(),
+                from: msg.from.clone(),
+                subject: msg.subject.clone(),
+                body: msg.body.clone(),
+                priority: msg.priority.clone(),
+                created_at: msg.created_at.clone(),
+            });
+
+            if mark_read {
+                self.client.archive(&path).await?;
+            }
+        }
+
+        Ok(summaries)
+    }
 }
 
 struct AppToolExecutor {
@@ -3874,6 +3899,8 @@ impl ModelProvider for EchoModelProvider {
                 prompt_tokens: latest_user.len() as u32,
                 completion_tokens: (latest_user.len() as u32) + 6,
                 total_tokens: (latest_user.len() as u32) * 2 + 6,
+                cached_prompt_tokens: None,
+                uncached_prompt_tokens: None,
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: Vec::new(),
