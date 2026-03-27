@@ -846,6 +846,7 @@ impl TurnExecutor {
                 Some(&memory_context),
                 &extra_system_sections,
             );
+            let stable_prefix_messages = messages.first().cloned().map(|message| vec![message]);
 
             // Build tool definitions for the request
             let mut tool_defs: Vec<rune_models::ToolDefinition> = self
@@ -868,6 +869,7 @@ impl TurnExecutor {
 
             let request = CompletionRequest {
                 messages,
+                stable_prefix_messages,
                 model: model_ref.map(str::to_owned),
                 temperature: None,
                 max_tokens: None,

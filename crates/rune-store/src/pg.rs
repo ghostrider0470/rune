@@ -502,6 +502,43 @@ impl TurnRepo for PgTurnRepo {
         Ok(row_to_turn(&row))
     }
 
+    async fn list_usage(
+        &self,
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        to: Option<chrono::DateTime<chrono::Utc>>,
+        limit: u32,
+    ) -> Result<Vec<TurnRow>, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let lim = limit as i64;
+        let rows = match (from, to) {
+            (Some(f), Some(t)) => {
+                client.query(
+                    "SELECT * FROM turns WHERE started_at >= $1 AND started_at <= $2 ORDER BY started_at DESC LIMIT $3",
+                    &[&f, &t, &lim],
+                ).await
+            }
+            (Some(f), None) => {
+                client.query(
+                    "SELECT * FROM turns WHERE started_at >= $1 ORDER BY started_at DESC LIMIT $2",
+                    &[&f, &lim],
+                ).await
+            }
+            (None, Some(t)) => {
+                client.query(
+                    "SELECT * FROM turns WHERE started_at <= $1 ORDER BY started_at DESC LIMIT $2",
+                    &[&t, &lim],
+                ).await
+            }
+            (None, None) => {
+                client.query(
+                    "SELECT * FROM turns ORDER BY started_at DESC LIMIT $1",
+                    &[&lim],
+                ).await
+            }
+        }.map_err(StoreError::from)?;
+        Ok(rows.iter().map(row_to_turn).collect())
+    }
+
     async fn mark_stale_failed(&self, stale_secs: i64) -> Result<u64, StoreError> {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         let cutoff = Utc::now() - chrono::Duration::seconds(stale_secs);

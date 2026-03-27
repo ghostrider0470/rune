@@ -26,6 +26,7 @@ fn simple_request() -> CompletionRequest {
             tool_call_id: None,
             tool_calls: None,
         }],
+        stable_prefix_messages: None,
         model: Some("gpt-4o".into()),
         temperature: None,
         max_tokens: None,
@@ -259,6 +260,13 @@ async fn azure_request_golden_shape_full() {
                 tool_calls: None,
             },
         ],
+        stable_prefix_messages: Some(vec![ChatMessage {
+            role: Role::System,
+            content: Some("You are helpful.".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }]),
         model: Some("gpt-4o".into()), // should NOT appear in Azure body
         temperature: Some(0.7),
         max_tokens: Some(1024),
@@ -2442,4 +2450,88 @@ async fn azure_maps_retry_after_http_date() {
         }
         other => panic!("expected RateLimited, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn azure_request_prepends_stable_prefix_messages() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Hello".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: Some(vec![ChatMessage {
+            role: Role::System,
+            content: Some("Stable prefix".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }]),
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs[0]["role"], "system");
+    assert_eq!(msgs[0]["content"], "Stable prefix");
+    assert_eq!(msgs[1]["role"], "user");
+}
+
+#[tokio::test]
+async fn openai_request_prepends_stable_prefix_messages() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = OpenAiProvider::new(&server.uri(), "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Hello".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: Some(vec![ChatMessage {
+            role: Role::System,
+            content: Some("Stable prefix".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }]),
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs[0]["role"], "system");
+    assert_eq!(msgs[0]["content"], "Stable prefix");
+    assert_eq!(msgs[1]["role"], "user");
 }

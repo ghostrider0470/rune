@@ -371,6 +371,7 @@ impl Mem0Engine {
                     tool_calls: None,
                 },
             ],
+            stable_prefix_messages: None,
             model: Some(self.config.extraction_model.clone()),
             temperature: Some(0.0),
             max_tokens: Some(1024),

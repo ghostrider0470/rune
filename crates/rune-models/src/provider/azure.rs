@@ -56,7 +56,7 @@ impl AzureOpenAiProvider {
 /// Uses `max_tokens` which is the field name Azure OpenAI expects.
 #[derive(Debug, Serialize)]
 struct AzureOpenAiRequest<'a> {
-    messages: &'a [ChatMessage],
+    messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,7 +72,13 @@ impl ModelProvider for AzureOpenAiProvider {
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
         let body = AzureOpenAiRequest {
-            messages: &request.messages,
+            messages: request
+                .stable_prefix_messages
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .chain(request.messages.iter().cloned())
+                .collect(),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             tools: &request.tools,

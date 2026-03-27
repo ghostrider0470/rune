@@ -79,7 +79,7 @@ impl OpenAiProvider {
 /// Azure/newer OpenAI models use `max_completion_tokens` instead of `max_tokens`.
 #[derive(Debug, serde::Serialize)]
 struct OpenAiRequest<'a> {
-    messages: &'a [crate::types::ChatMessage],
+    messages: Vec<crate::types::ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: &'a Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,7 +110,13 @@ impl ModelProvider for OpenAiProvider {
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
         let body = OpenAiRequest {
-            messages: &request.messages,
+            messages: request
+                .stable_prefix_messages
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .chain(request.messages.iter().cloned())
+                .collect(),
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
@@ -144,7 +150,13 @@ impl ModelProvider for OpenAiProvider {
         request: &CompletionRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ModelError> {
         let body = OpenAiRequest {
-            messages: &request.messages,
+            messages: request
+                .stable_prefix_messages
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .chain(request.messages.iter().cloned())
+                .collect(),
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
