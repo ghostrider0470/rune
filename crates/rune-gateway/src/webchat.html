@@ -250,6 +250,7 @@
   const authBadgeEl = document.getElementById('auth-badge');
   const sessionHintEl = document.getElementById('session-hint');
   const query = new URLSearchParams(location.search);
+  const continuityMessage = '__RUNE_WEBCHAT_CONTINUITY_MESSAGE__';
 
   let ws = null;
   const sessionStorageKey = 'rune.webchat.session_id';
