@@ -114,7 +114,7 @@ export function AdminNavbar() {
               className="flex min-w-0 items-center gap-2 rounded-md px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <img
-                src="/assets/rune-logo-icon.svg"
+                src="/assets/core_rune_transparent_white.svg"
                 alt="Rune"
                 className="h-10 w-auto py-0.5 sm:h-12"
                 decoding="async"

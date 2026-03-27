@@ -648,26 +648,33 @@ fn file_response(path: std::path::PathBuf, request_path: &str) -> Response {
 
 pub async fn branded_asset(Path(path): Path<String>) -> Result<Response, GatewayError> {
     let (content_type, bytes): (&'static str, &'static [u8]) = match path.as_str() {
+        // Core Rune logos
+        "core_rune_midnight.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/core_rune_midnight.svg"),
+        ),
+        "core_rune_light.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/core_rune_light.svg"),
+        ),
+        "core_rune_transparent_white.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/core_rune_transparent_white.svg"),
+        ),
+        "core_rune_transparent_indigo.svg" => (
+            "image/svg+xml",
+            include_bytes!("../../../assets/core_rune_transparent_indigo.svg"),
+        ),
+        // Legacy aliases
         "hero.png" => ("image/png", include_bytes!("../../../assets/hero.png")),
-        "rune-logo-favicon.svg" => (
+        "rune-logo-favicon.svg" | "rune-logo-icon.svg" | "rune-logo-wordmark.svg"
+        | "rune-logo-wordmark-dark.svg" => (
             "image/svg+xml",
-            include_bytes!("../../../assets/rune-logo-favicon.svg"),
-        ),
-        "rune-logo-icon.svg" => (
-            "image/svg+xml",
-            include_bytes!("../../../assets/rune-logo-icon.svg"),
-        ),
-        "rune-logo-wordmark-dark.svg" => (
-            "image/svg+xml",
-            include_bytes!("../../../assets/rune-logo-wordmark-dark.svg"),
+            include_bytes!("../../../assets/core_rune_midnight.svg"),
         ),
         "rune-logo-wordmark-light.svg" => (
             "image/svg+xml",
-            include_bytes!("../../../assets/rune-logo-wordmark-light.svg"),
-        ),
-        "rune-logo-wordmark.svg" => (
-            "image/svg+xml",
-            include_bytes!("../../../assets/rune-logo-wordmark.svg"),
+            include_bytes!("../../../assets/core_rune_light.svg"),
         ),
         _ => {
             // Try serving from embedded UI dist (Vite-built assets)

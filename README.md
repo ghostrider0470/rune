@@ -1,12 +1,8 @@
 <p align="center">
-  <img src="assets/hero.png" alt="Rune Hero" width="800" />
+  <img src="assets/core_rune_midnight.svg" alt="Rune" width="120" />
 </p>
 
 # Rune
-
-<p align="left">
-  <img src="assets/rune-logo-wordmark-dark.svg" alt="Rune Logo" height="48" />
-</p>
 
 A Rust-based personal AI runtime designed as a high-performance OpenClaw-style gateway with strong Azure-oriented provider support, durable state, and standalone-first operation.
 
