@@ -89,6 +89,29 @@ fn signal_adapter_requires_number() {
 }
 
 #[test]
+fn teams_adapter_requires_app_id() {
+    let config = ChannelsConfig::default();
+    let err = match create_adapter("teams", &config) {
+        Ok(_) => panic!("teams should require app id"),
+        Err(err) => err,
+    };
+    assert_provider_error(err, "teams_app_id is required");
+}
+
+#[test]
+fn teams_adapter_requires_app_password() {
+    let config = ChannelsConfig {
+        teams_app_id: Some("app-id".into()),
+        ..ChannelsConfig::default()
+    };
+    let err = match create_adapter("teams", &config) {
+        Ok(_) => panic!("teams should require app password"),
+        Err(err) => err,
+    };
+    assert_provider_error(err, "teams_app_password is required");
+}
+
+#[test]
 fn unknown_adapter_kind_returns_provider_error() {
     let config = ChannelsConfig::default();
     let err = match create_adapter("matrix", &config) {
@@ -150,6 +173,18 @@ async fn configured_adapter_kinds_construct_successfully() {
         },
     );
     assert!(signal.is_ok());
+
+    let teams = create_adapter(
+        "teams",
+        &ChannelsConfig {
+            teams_app_id: Some("app-id".into()),
+            teams_app_password: Some("app-password".into()),
+            teams_tenant_id: Some("tenant-id".into()),
+            teams_listen_addr: Some("127.0.0.1:3400".into()),
+            ..ChannelsConfig::default()
+        },
+    );
+    assert!(teams.is_ok());
 }
 
 #[tokio::test(flavor = "current_thread")]
