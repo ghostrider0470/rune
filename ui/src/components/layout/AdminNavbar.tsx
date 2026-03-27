@@ -19,7 +19,6 @@ import {
   Wrench,
   Settings2,
   BrainCircuit,
-  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -31,44 +30,48 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  NavigationMenu,
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+  NavigationMenuTrigger,
+  navigationMenuTriggerStyle,
+} from "@/components/ui/navigation-menu";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
+  description: string;
   match?: "exact" | "prefix";
 }
 
 const primaryItems: NavItem[] = [
-  { label: "Chat", href: "/chat", icon: MessagesSquare, match: "prefix" },
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, match: "exact" },
-  { label: "Sessions", href: "/sessions", icon: MessageSquare, match: "prefix" },
-  { label: "Models", href: "/models", icon: Cpu, match: "prefix" },
+  { label: "Chat", href: "/chat", icon: MessagesSquare, description: "Conversational interface", match: "prefix" },
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, description: "System overview", match: "exact" },
+  { label: "Sessions", href: "/sessions", icon: MessageSquare, description: "Active conversations", match: "prefix" },
 ];
 
 const opsItems: NavItem[] = [
-  { label: "Cron", href: "/cron", icon: Clock, match: "prefix" },
-  { label: "Memory", href: "/memory", icon: BrainCircuit, match: "prefix" },
-  { label: "Approvals", href: "/approvals", icon: ShieldCheck, match: "prefix" },
-  { label: "Diagnostics", href: "/diagnostics", icon: AlertTriangle, match: "prefix" },
+  { label: "Models", href: "/models", icon: Cpu, description: "Provider routing and config", match: "prefix" },
+  { label: "Cron", href: "/cron", icon: Clock, description: "Scheduled jobs", match: "prefix" },
+  { label: "Memory", href: "/memory", icon: BrainCircuit, description: "Knowledge graph", match: "prefix" },
+  { label: "Approvals", href: "/approvals", icon: ShieldCheck, description: "Pending tool authorizations", match: "prefix" },
+  { label: "Diagnostics", href: "/diagnostics", icon: AlertTriangle, description: "Health checks and alerts", match: "prefix" },
 ];
 
 const adminItems: NavItem[] = [
-  { label: "Agents", href: "/agents", icon: Bot, match: "prefix" },
-  { label: "Skills", href: "/skills", icon: Wrench, match: "prefix" },
-  { label: "Usage", href: "/usage", icon: BarChart3, match: "prefix" },
-  { label: "Logs", href: "/logs", icon: ScrollText, match: "prefix" },
-  { label: "Config", href: "/config", icon: Settings2, match: "prefix" },
-  { label: "Reminders", href: "/reminders", icon: Bell, match: "prefix" },
-  { label: "Channels", href: "/channels", icon: Radio, match: "prefix" },
-  { label: "Debug", href: "/debug", icon: Bug, match: "prefix" },
-  { label: "Settings", href: "/settings", icon: Settings, match: "prefix" },
+  { label: "Agents", href: "/agents", icon: Bot, description: "Agent registry", match: "prefix" },
+  { label: "Skills", href: "/skills", icon: Wrench, description: "Skill plugins", match: "prefix" },
+  { label: "Usage", href: "/usage", icon: BarChart3, description: "Token usage and costs", match: "prefix" },
+  { label: "Logs", href: "/logs", icon: ScrollText, description: "System log viewer", match: "prefix" },
+  { label: "Config", href: "/config", icon: Settings2, description: "Runtime configuration", match: "prefix" },
+  { label: "Reminders", href: "/reminders", icon: Bell, description: "Scheduled notifications", match: "prefix" },
+  { label: "Channels", href: "/channels", icon: Radio, description: "Messaging integrations", match: "prefix" },
+  { label: "Debug", href: "/debug", icon: Bug, description: "Developer tools", match: "prefix" },
+  { label: "Settings", href: "/settings", icon: Settings, description: "Global preferences", match: "prefix" },
 ];
 
 const allItems: NavItem[] = [...primaryItems, ...opsItems, ...adminItems];
@@ -87,59 +90,40 @@ function isActive(pathname: string, item: NavItem): boolean {
     : pathname.startsWith(item.href);
 }
 
-function anyActive(pathname: string, items: NavItem[]): boolean {
-  return items.some((item) => isActive(pathname, item));
-}
-
-function NavDropdown({
-  label,
-  items,
+function NavDropdownItem({
+  item,
   pathname,
   chatLinkSearch,
 }: {
-  label: string;
-  items: NavItem[];
+  item: NavItem;
   pathname: string;
   chatLinkSearch: { session: string | undefined };
 }) {
-  const groupActive = anyActive(pathname, items);
+  const Icon = item.icon;
+  const active = isActive(pathname, item);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className={cn(
-            "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            groupActive
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          )}
-        >
-          {label}
-          <ChevronDown className="size-3.5" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[180px]">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(pathname, item);
-          return (
-            <DropdownMenuItem key={item.href} asChild>
-              <Link
-                to={item.href}
-                search={item.href === "/chat" ? chatLinkSearch : undefined}
-                className={cn(
-                  "flex items-center gap-2.5 px-2.5 py-2 text-sm cursor-pointer",
-                  active && "bg-primary/10 text-primary"
-                )}
-              >
-                <Icon className="size-4 shrink-0" />
-                {item.label}
-              </Link>
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <li>
+      <Link to={item.href} search={item.href === "/chat" ? chatLinkSearch : undefined}>
+        <NavigationMenuLink asChild>
+          <div
+            className={cn(
+              "block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none group",
+              "transition-all hover:bg-primary/10 focus:bg-primary/10",
+              "hover:shadow-sm border border-transparent hover:border-primary/30",
+              active && "bg-primary/10 border-primary/40"
+            )}
+          >
+            <div className="flex items-center gap-2 text-sm font-medium leading-none group-hover:text-foreground">
+              <Icon className="size-4 shrink-0 text-muted-foreground group-hover:text-primary" />
+              {item.label}
+            </div>
+            <p className="line-clamp-1 text-xs leading-snug text-muted-foreground group-hover:text-foreground/70">
+              {item.description}
+            </p>
+          </div>
+        </NavigationMenuLink>
+      </Link>
+    </li>
   );
 }
 
@@ -161,9 +145,9 @@ export function AdminNavbar() {
       <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 pointer-events-none z-0" />
 
       <div className="relative z-10 mx-auto w-full max-w-7xl px-3 sm:px-6 lg:px-8">
-        <div className="flex min-h-16 items-center justify-between gap-4 py-2 sm:min-h-[4.5rem]">
+        <div className="flex h-16 items-center justify-between">
           {/* Left: Logo + nav */}
-          <div className="flex min-w-0 items-center gap-4">
+          <div className="flex items-center gap-3 md:gap-5">
             <Link
               to="/chat"
               search={chatLinkSearch}
@@ -171,7 +155,7 @@ export function AdminNavbar() {
             >
               <svg
                 viewBox="0 0 240 320"
-                className="h-9 w-auto sm:h-10"
+                className="h-8 w-auto sm:h-9"
                 aria-label="Rune"
               >
                 <path
@@ -180,57 +164,87 @@ export function AdminNavbar() {
                   d="M105,26 L119,40 L119,129 L157,91 L157,111 L119,149 L119,173 L172,226 L105,293 L105,179 L67,141 L67,121 L105,159 L105,119 L67,81 L67,61 L105,99 Z M119,193 L119,259 L152,226 Z"
                 />
               </svg>
-              <span className="hidden sm:inline text-lg font-semibold tracking-tight">
+              <span className="hidden sm:block text-base font-semibold leading-tight tracking-tight">
                 Rune
               </span>
             </Link>
 
-            {/* Desktop nav */}
-            <div className="hidden lg:flex items-center gap-1">
-              {primaryItems.map((item) => {
-                const active = isActive(pathname, item);
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    to={item.href}
-                    search={item.href === "/chat" ? chatLinkSearch : undefined}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                      active
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                    )}
-                  >
-                    <Icon className="size-4 shrink-0" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
+            {/* Desktop Navigation */}
+            <NavigationMenu viewport={false} className="hidden lg:flex">
+              <NavigationMenuList>
+                {/* Primary direct links */}
+                {primaryItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(pathname, item);
+                  return (
+                    <NavigationMenuItem key={item.href}>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          to={item.href}
+                          search={item.href === "/chat" ? chatLinkSearch : undefined}
+                          className={cn(
+                            navigationMenuTriggerStyle(),
+                            "gap-2",
+                            active && "bg-accent/50 text-primary"
+                          )}
+                        >
+                          <Icon className="size-4 shrink-0" />
+                          {item.label}
+                        </Link>
+                      </NavigationMenuLink>
+                    </NavigationMenuItem>
+                  );
+                })}
 
-              <NavDropdown
-                label="Operations"
-                items={opsItems}
-                pathname={pathname}
-                chatLinkSearch={chatLinkSearch}
-              />
-              <NavDropdown
-                label="Admin"
-                items={adminItems}
-                pathname={pathname}
-                chatLinkSearch={chatLinkSearch}
-              />
-            </div>
+                {/* Operations dropdown */}
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className="transition-colors data-[state=open]:bg-accent/60">
+                    Operations
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent className="shadow-xl">
+                    <ul className="grid w-[420px] gap-2 p-3 md:grid-cols-2">
+                      {opsItems.map((item) => (
+                        <NavDropdownItem
+                          key={item.href}
+                          item={item}
+                          pathname={pathname}
+                          chatLinkSearch={chatLinkSearch}
+                        />
+                      ))}
+                    </ul>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+
+                {/* Admin dropdown */}
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className="transition-colors data-[state=open]:bg-accent/60">
+                    Admin
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent className="shadow-xl">
+                    <ul className="grid w-[500px] gap-2 p-3 md:grid-cols-3">
+                      {adminItems.map((item) => (
+                        <NavDropdownItem
+                          key={item.href}
+                          item={item}
+                          pathname={pathname}
+                          chatLinkSearch={chatLinkSearch}
+                        />
+                      ))}
+                    </ul>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+              </NavigationMenuList>
+            </NavigationMenu>
           </div>
 
           {/* Right: actions */}
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <ThemeToggle />
 
             {/* Mobile menu */}
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild className="lg:hidden">
-                <Button variant="ghost" size="icon" className="h-11 w-11">
+                <Button variant="ghost" size="icon" className="h-9 w-9">
                   <Menu className="h-5 w-5" />
                   <span className="sr-only">Open admin menu</span>
                 </Button>
