@@ -123,12 +123,16 @@ function UsagePage() {
           completion_tokens: 0,
           total_tokens: 0,
           request_count: 0,
+          estimated_cost: 0,
         };
       }
       acc[key].prompt_tokens += entry.prompt_tokens;
       acc[key].completion_tokens += entry.completion_tokens;
       acc[key].total_tokens += entry.total_tokens;
       acc[key].request_count += entry.request_count;
+      // Sum cost (parse "$1.23" or "<$0.01" -> 0)
+      const raw = entry.estimated_cost?.replace(/[<$]/g, "");
+      acc[key].estimated_cost += raw ? parseFloat(raw) || 0 : 0;
       return acc;
     },
     {} as Record<
@@ -139,6 +143,7 @@ function UsagePage() {
         completion_tokens: number;
         total_tokens: number;
         request_count: number;
+        estimated_cost: number;
       }
     >
   );
@@ -341,6 +346,7 @@ function UsagePage() {
                   <TableHead className="py-3.5 text-right">Completion</TableHead>
                   <TableHead className="py-3.5 text-right">Total</TableHead>
                   <TableHead className="py-3.5 text-right">Requests</TableHead>
+                  <TableHead className="py-3.5 text-right">Est. Cost</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -364,6 +370,13 @@ function UsagePage() {
                       </TableCell>
                       <TableCell className="py-3 text-right font-mono text-sm">
                         {row.request_count.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="py-3 text-right font-mono text-sm text-emerald-600 dark:text-emerald-400">
+                        {row.estimated_cost > 0
+                          ? row.estimated_cost < 0.01
+                            ? "<$0.01"
+                            : `$${row.estimated_cost.toFixed(2)}`
+                          : "—"}
                       </TableCell>
                     </TableRow>
                   ))}
