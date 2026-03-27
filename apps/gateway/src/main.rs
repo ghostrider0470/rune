@@ -2376,6 +2376,7 @@ impl SessionSpawner for LiveSessionSpawner {
                 Some(self.workspace_root.display().to_string()),
                 requester_session_id,
                 None,
+                None,
             )
             .await
             .map_err(|e| e.to_string())?;

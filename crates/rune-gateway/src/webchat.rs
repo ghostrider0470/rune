@@ -44,11 +44,13 @@ pub async fn legacy_chat_redirect(
 pub async fn webchat_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     let mut html = CHAT_HTML.to_string();
     let resumed = params.contains_key("session_id");
+    let has_auth = params.contains_key("api_key") || params.contains_key("auth");
     let continuity = if resumed {
         "This thread was reopened from a saved session link after a refresh or restart."
     } else {
         "This browser will reopen the same thread automatically after a refresh or restart."
     };
     html = html.replace("__RUNE_WEBCHAT_CONTINUITY_MESSAGE__", continuity);
+    html = html.replace("__RUNE_WEBCHAT_HAS_GATEWAY_AUTH__", if has_auth { "true" } else { "false" });
     Html(html)
 }

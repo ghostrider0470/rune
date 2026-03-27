@@ -316,6 +316,7 @@ impl RpcDispatcher {
                 workspace_root,
                 requester_session_id,
                 Some(channel_ref.to_string()),
+                None,
             )
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -370,11 +371,15 @@ impl RpcDispatcher {
             .get("channel_ref")
             .and_then(|v| v.as_str())
             .map(String::from);
+        let mode = params
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         let row = self
             .state
             .session_engine
-            .create_session_full(kind, workspace_root, requester_session_id, channel_ref)
+            .create_session_full(kind, workspace_root, requester_session_id, channel_ref, mode)
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
 

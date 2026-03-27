@@ -1912,6 +1912,7 @@ async fn session_parent_linkage() {
             Some("/workspace".to_string()),
             Some(parent.id),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1926,6 +1927,7 @@ async fn session_parent_linkage() {
             None,
             None,
             Some("telegram".to_string()),
+            None,
         )
         .await
         .unwrap();
@@ -1940,6 +1942,7 @@ async fn session_parent_linkage() {
             Some("/workspace".to_string()),
             None,
             Some("system:scheduled-main".to_string()),
+            None,
         )
         .await
         .unwrap();
@@ -1949,6 +1952,7 @@ async fn session_parent_linkage() {
             SessionKind::Subagent,
             Some("/workspace".to_string()),
             Some(scheduled_main.id),
+            None,
             None,
         )
         .await
@@ -2424,6 +2428,7 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
             Some(h.workspace_root.to_string_lossy().to_string()),
             None,
             Some("chat-2:user-2".to_string()),
+            None,
         )
         .await
         .unwrap();
@@ -2471,6 +2476,7 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
             Some(h.workspace_root.to_string_lossy().to_string()),
             None,
             Some("chat-1:user-1".to_string()),
+            None,
         )
         .await
         .unwrap();
@@ -2521,4 +2527,26 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
         }
         other => panic!("expected reply notice, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn create_session_full_persists_mode_in_metadata() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session_full(
+            SessionKind::Direct,
+            Some("/workspace".to_string()),
+            None,
+            None,
+            Some("architect".to_string()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        session.metadata.get("mode").and_then(|value| value.as_str()),
+        Some("architect")
+    );
 }

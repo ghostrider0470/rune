@@ -534,6 +534,8 @@ pub struct DashboardSessionItem {
     pub id: String,
     pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     pub channel_ref: Option<String>,
     pub routing_ref: Option<String>,
     pub created_at: String,
@@ -1165,6 +1167,8 @@ pub struct CreateSessionRequest {
     pub requester_session_id: Option<Uuid>,
     /// Optional channel reference (e.g. `telegram`, `discord`).
     pub channel_ref: Option<String>,
+    /// Optional agent mode hint stored in session metadata.
+    pub mode: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -1177,6 +1181,8 @@ pub struct SessionResponse {
     pub id: Uuid,
     pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requester_session_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1200,6 +1206,8 @@ pub struct SessionListItem {
     pub id: String,
     pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requester_session_id: Option<String>,
     pub channel: Option<String>,
@@ -1264,6 +1272,7 @@ pub async fn list_sessions(
             id: row.id.to_string(),
             kind: row.kind,
             status: row.status,
+            mode: metadata_string(&row.metadata, "mode"),
             requester_session_id: row.requester_session_id.map(|id| id.to_string()),
             channel: row.channel_ref,
             created_at: row.created_at.to_rfc3339(),
@@ -1291,6 +1300,7 @@ pub async fn create_session(
             body.workspace_root,
             body.requester_session_id,
             body.channel_ref,
+            body.mode,
         )
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
@@ -1314,6 +1324,7 @@ pub async fn create_session(
             id: row.id,
             kind: row.kind,
             status: row.status,
+            mode: metadata_string(&row.metadata, "mode"),
             requester_session_id: row.requester_session_id,
             channel_ref: row.channel_ref,
             created_at: row.created_at.to_rfc3339(),
@@ -1389,6 +1400,7 @@ pub async fn get_session(
         id: row.id,
         kind: row.kind,
         status: row.status,
+        mode: metadata_string(&row.metadata, "mode"),
         requester_session_id: row.requester_session_id,
         channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),
@@ -1497,6 +1509,8 @@ pub struct SessionTreeNode {
     pub kind: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
     pub created_at: String,
     pub turn_count: u32,
@@ -1574,6 +1588,7 @@ pub async fn get_session_tree(
             id: row.id.to_string(),
             kind: row.kind.clone(),
             status: row.status.clone(),
+            mode: metadata_string(&row.metadata, "mode"),
             channel: row.channel_ref.clone(),
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
@@ -1625,6 +1640,7 @@ pub async fn patch_session(
         id: row.id,
         kind: row.kind,
         status: row.status,
+        mode: metadata_string(&row.metadata, "mode"),
         requester_session_id: row.requester_session_id,
         channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),
@@ -2164,6 +2180,7 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
         id: row.id.to_string(),
         kind: row.kind,
         status: row.status,
+        mode: metadata_string(&row.metadata, "mode"),
         routing_ref: row.channel_ref.clone(),
         channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),
@@ -3007,6 +3024,7 @@ pub async fn telegram_webhook(
                     workspace,
                     None,
                     Some(routing_key.clone()),
+                    None,
                 )
                 .await
                 .map_err(|e| GatewayError::Internal(e.to_string()))?
