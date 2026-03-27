@@ -129,7 +129,8 @@ The runtime should expose a stable logical directory layout:
 - `/data/sessions`
 - `/data/memory`
 - `/data/media`
-- `/data/skills`
+- `/data/spells`
+- `/data/skills` (legacy compatibility alias)
 - `/data/logs`
 - `/data/backups`
 - `/config`
@@ -154,7 +155,8 @@ Local-first mode uses `~/.rune/` as the data root. Docker mode uses `/data/` (pl
 | Sessions | `~/.rune/sessions/` | `/data/sessions` | Transcripts, exports, session artifacts |
 | Memory | `~/.rune/memory/` | `/data/memory` | Daily notes, long-term memory, workspace knowledge |
 | Media | `~/.rune/media/` | `/data/media` | Attachments, audio, images, TTS outputs |
-| Skills | `~/.rune/skills/` | `/data/skills` | Installed skills, plugin bundles |
+| Spells | `~/.rune/spells/` | `/data/spells` | Installed Rune-native spells |
+| Skills (legacy) | `~/.rune/skills/` | `/data/skills` | Compatibility path for legacy skill bundles |
 | Logs | `~/.rune/logs/` | `/data/logs` | Structured logs, debug bundles, diagnostic dumps |
 | Backups | `~/.rune/backups/` | `/data/backups` | Export archives, snapshot bundles |
 | Config | `~/.rune/config/` | `/config` | Config overlays, provider/channel config |
@@ -587,7 +589,7 @@ Operators should follow one explicit workflow regardless of whether the capture 
 2. **Quiesce or coordinate writes** before capture.
    - For embedded PostgreSQL or filesystem snapshots, stop the runtime or otherwise guarantee a consistent checkpoint/snapshot boundary.
 3. **Capture every required durable domain**.
-   - Include DB state, sessions, memory, media when retained, skills, logs/exports as policy requires, config overlays, and `/data/backups` when prior archives are part of the recovery posture.
+   - Include DB state, sessions, memory, media when retained, spells plus any legacy skills content, logs/exports as policy requires, config overlays, and `/data/backups` when prior archives are part of the recovery posture.
    - Preserve secret references/config needed to reconnect after restore, but never secret values.
 4. **Record what the artifact contains and excludes**.
    - Operators need a manifest or equivalent notes naming capture time, Rune version, included domains, and excluded domains with reason.
@@ -614,7 +616,7 @@ Run these checks after every restore:
 3. scheduler/reminder inspection to confirm jobs, run history, and next-run derivation look sane
 4. session/transcript inspection to confirm recent history is readable
 5. approval/audit inspection to confirm pending approvals and durable audit trails remain visible
-6. memory/skills/media spot checks for the deployment-specific domains that were restored
+6. memory/spells/media spot checks for the deployment-specific domains that were restored
 
 ## 12.7 Recovery expectations and limits
 

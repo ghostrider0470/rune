@@ -136,7 +136,7 @@ Implement:
 - `GatewayConfig`: `host`, `port`, `auth_token` (optional)
 - `DatabaseConfig`: `database_url` (optional — triggers embedded PG when absent), `max_connections`, `run_migrations`
 - `ModelsConfig`: vec of `ModelProviderConfig` (provider name, endpoint, deployment_name, api_version, api_key_env, model_alias)
-- `PathsConfig` with defaults: `db_dir` → `/data/db`, `sessions_dir` → `/data/sessions`, `memory_dir` → `/data/memory`, `media_dir` → `/data/media`, `skills_dir` → `/data/skills`, `logs_dir` → `/data/logs`, `backups_dir` → `/data/backups`, `config_dir` → `/config`, `secrets_dir` → `/secrets`
+- `PathsConfig` with defaults: `db_dir` → `/data/db`, `sessions_dir` → `/data/sessions`, `memory_dir` → `/data/memory`, `media_dir` → `/data/media`, `spells_dir` → `/data/spells`, legacy `skills_dir` → `/data/skills`, `logs_dir` → `/data/logs`, `backups_dir` → `/data/backups`, `config_dir` → `/config`, `secrets_dir` → `/secrets`
 - Layered loading: defaults → config file (TOML) → env vars → CLI overrides
 - Use `figment` for layered defaults → config file (TOML) → env vars → CLI overrides to match the confirmed stack
 - `ConfigError` type
