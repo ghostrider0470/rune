@@ -50,6 +50,8 @@ export interface UsageSummary {
   total_tokens: number;
   total_requests: number;
   total_estimated_cost: string | null;
+  usage_cached_prompt_tokens: number;
+  cache_hit_ratio: number;
 }
 
 export function useAgents() {
