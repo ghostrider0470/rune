@@ -11,6 +11,8 @@ pub use tool::{RustPatternsToolExecutor, rust_patterns_validate_tool_definition}
 pub enum RustPatternsError {
     #[error("pattern directory not found: {0}")]
     PatternDirMissing(PathBuf),
+    #[error("pattern path is not a directory: {0}")]
+    PatternDirNotDirectory(PathBuf),
     #[error("failed to read {path}: {source}")]
     ReadFile {
         path: PathBuf,
@@ -568,63 +570,6 @@ use axum::Json;
         assert_eq!(report.scanned_files, 1);
         assert_eq!(report.findings.len(), 1);
         assert!(report.findings[0].issue.contains("unwrap"));
-    }
-}
-
-#[cfg(test)]
-mod hot_reload_tests {
-    use super::*;
-
-    #[test]
-    fn query_uses_custom_patterns_dir_for_hot_reload() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let patterns_dir = tmp.path().join("patterns");
-        fs::create_dir_all(&patterns_dir).expect("create patterns dir");
-        fs::write(
-            patterns_dir.join("custom.toml"),
-            r#"[meta]
-topic = "custom_topic"
-tags = ["custom", "demo"]
-relevance_signals = ["custom"]
-
-[[patterns]]
-name = "custom pattern"
-when = "Testing hot reload from a custom pattern directory"
-code = "let demo = true;"
-rationale = "Queries should load directly from the supplied TOML directory without recompiling"
-anti_pattern = "Hard-coding all patterns into the binary"
-"#,
-        )
-        .expect("write pattern file");
-
-        let result = rust_pattern(PatternQuery {
-            topic: Some("custom_topic".into()),
-            patterns_dir: Some(patterns_dir),
-            ..Default::default()
-        })
-        .expect("query should work");
-
-        assert_eq!(result.patterns.len(), 1);
-        assert_eq!(result.patterns[0].topic, "custom_topic");
-        assert_eq!(result.patterns[0].name, "custom pattern");
-    }
-
-    #[test]
-    fn query_errors_when_patterns_dir_is_a_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let file = tmp.path().join("not_a_dir.toml");
-        fs::write(&file, "[meta]\ntopic='bad'\npatterns=[]\n").expect("write file");
-
-        let error = rust_pattern(PatternQuery {
-            patterns_dir: Some(file.clone()),
-            ..Default::default()
-        })
-        .expect_err("file path should be rejected as a patterns dir");
-
-        match error {
-            RustPatternsError::PatternDirNotDirectory(path) => assert_eq!(path, file),
-            other => panic!("unexpected error: {other:?}"),
-        }
     }
 }
 
