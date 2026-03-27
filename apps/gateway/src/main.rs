@@ -28,7 +28,6 @@ use rune_config::{
     AppConfig, MemoryLevel, ModelBootstrap, PathsProfile, RuntimeMode, StorageBackend,
 };
 use rune_core::ToolCategory;
-use rune_spells_security_audit::security_audit_tool_definition;
 use rune_gateway::ms365::{
     GraphMs365CalendarService, GraphMs365FilesService, GraphMs365MailService,
     GraphMs365PlannerService, GraphMs365TodoService, GraphMs365UsersService,
@@ -48,6 +47,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
+use rune_spells_security_audit::security_audit_tool_definition;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
@@ -328,6 +328,8 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
         "starting rune gateway"
     );
 
+    emit_update_hint();
+
     if config.models.bootstrap() == ModelBootstrap::ZeroConfigOllama {
         if let Some(model) = config.models.default_model.as_deref() {
             info!(
@@ -360,6 +362,70 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
             warn!(warning = %warning, "trusted-environment bypass active — NOT YET ACKNOWLEDGED");
         }
     }
+}
+
+fn emit_update_hint() {
+    let current_version = env!("CARGO_PKG_VERSION");
+    if let Some((current, latest)) = git_update_versions() {
+        if current != latest {
+            info!(current = %current, latest = %latest, "update available for running checkout");
+        }
+        return;
+    }
+
+    if let Ok(Some(latest)) = latest_github_release_version() {
+        if latest != current_version {
+            info!(current_version, latest = %latest, "update available for packaged build");
+        }
+    }
+}
+
+fn git_update_versions() -> Option<(String, String)> {
+    use std::process::Command;
+
+    let current = Command::new("git")
+        .args(["rev-parse", "--short=12", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())?;
+
+    let latest = Command::new("git")
+        .args(["rev-parse", "--short=12", "@{upstream}"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| current.clone());
+
+    Some((current, latest))
+}
+
+fn latest_github_release_version() -> Result<Option<String>, String> {
+    let response = reqwest::blocking::Client::builder()
+        .user_agent("rune-gateway")
+        .build()
+        .map_err(|error| error.to_string())?
+        .get("https://api.github.com/repos/ghostrider0470/rune/releases/latest")
+        .send()
+        .map_err(|error| error.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "HTTP {} from GitHub releases API",
+            response.status()
+        ));
+    }
+
+    let payload: serde_json::Value = response.json().map_err(|error| error.to_string())?;
+    Ok(payload
+        .get("tag_name")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned))
 }
 
 fn trimmed_env_var(name: &str) -> Option<String> {
@@ -3113,7 +3179,11 @@ mod tests {
             Ok(before.saturating_sub(existing.len()))
         }
 
-        async fn delete_chunk(&self, file_path: &str, _chunk_index: i32) -> Result<bool, StoreError> {
+        async fn delete_chunk(
+            &self,
+            file_path: &str,
+            _chunk_index: i32,
+        ) -> Result<bool, StoreError> {
             self.deleted_files.lock().await.push(file_path.to_string());
             Ok(true)
         }
