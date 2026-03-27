@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use clap::CommandFactory;
 use clap_complete::{Shell, generate};
 use reqwest::blocking::Client as BlockingHttpClient;
+use rune_runtime::ProjectRegistry;
 use sha2::{Digest, Sha256};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -37,9 +38,9 @@ use cli::{
     MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
-    RemindersAction, SandboxAction, SecretsAction, SecurityAction, ServiceAction, ServiceTarget,
-    SessionsAction, SkillsAction, SpellsAction, SystemAction, SystemEventAction,
-    SystemHeartbeatAction, UpdateAction,
+    ProjectAddArgs, ProjectsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction,
+    ServiceAction, ServiceTarget, SessionsAction, SkillsAction, SpellsAction, SystemAction,
+    SystemEventAction, SystemHeartbeatAction, UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -266,6 +267,119 @@ fn resolve_workspace_path(input: &str) -> Result<PathBuf> {
     }
 
     Ok(PathBuf::from(input))
+}
+
+fn infer_project_name(path: &Path) -> Result<String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(|name| name.to_string())
+        .ok_or_else(|| anyhow::anyhow!("failed to infer project name from {}", path.display()))
+}
+
+fn detect_git_remote_url(repo_path: &Path) -> Option<String> {
+    let output = StdCommand::new("git")
+        .args([
+            "-C",
+            &repo_path.display().to_string(),
+            "remote",
+            "get-url",
+            "origin",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() { None } else { Some(value) }
+}
+
+fn handle_projects_add(args: ProjectAddArgs) -> Result<()> {
+    let workspace = default_workspace_root()?;
+    let repo_path = resolve_workspace_path(&args.path)?;
+    let repo_path = repo_path
+        .canonicalize()
+        .with_context(|| format!("failed to resolve project path {}", repo_path.display()))?;
+
+    if !repo_path.exists() || !repo_path.is_dir() {
+        anyhow::bail!("project path {} is not a directory", repo_path.display());
+    }
+
+    let project_name = match args.name {
+        Some(name) => name,
+        None => infer_project_name(&repo_path)?,
+    };
+    let repo_url = match args.repo_url {
+        Some(url) => url,
+        None => {
+            detect_git_remote_url(&repo_path).unwrap_or_else(|| repo_path.display().to_string())
+        }
+    };
+
+    let mut registry = ProjectRegistry::load(&workspace)?;
+    let config = registry.onboard(
+        &project_name,
+        &repo_url,
+        repo_path.clone(),
+        &workspace,
+        Some(&args.default_branch),
+        args.default_model.clone(),
+    )?;
+
+    println!(
+        "registered project '{}' at {}",
+        config.name,
+        config.repo_path.display()
+    );
+    if let Some(model) = config.default_model.as_deref() {
+        println!("default model: {model}");
+    }
+    println!("default branch: {}", config.default_branch);
+    println!(
+        "active: {}",
+        registry.active_project() == Some(config.name.as_str())
+    );
+    Ok(())
+}
+
+fn handle_projects_list() -> Result<()> {
+    let workspace = default_workspace_root()?;
+    let registry = ProjectRegistry::load(&workspace)?;
+
+    if registry.is_empty() {
+        println!("no projects registered");
+        return Ok(());
+    }
+
+    for project in registry.list() {
+        let marker = if registry.active_project() == Some(project.name.as_str()) {
+            "*"
+        } else {
+            " "
+        };
+        let model = project.default_model.as_deref().unwrap_or("-");
+        println!(
+            "{} {}	{}	branch={}	model={}	registered_at={}",
+            marker,
+            project.name,
+            project.repo_path.display(),
+            project.default_branch,
+            model,
+            project.registered_at
+        );
+    }
+
+    Ok(())
+}
+
+fn handle_projects_switch(name: String) -> Result<()> {
+    let workspace = default_workspace_root()?;
+    let mut registry = ProjectRegistry::load(&workspace)?;
+    registry.switch_active(&name)?;
+    registry.save(&workspace)?;
+    println!("active project: {name}");
+    Ok(())
 }
 
 fn open_config_instructions(workspace: &Path, config_path: &Path) {
@@ -3815,6 +3929,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", render(&result, format));
             }
         },
+        Command::Projects { action } => match action {
+            ProjectsAction::Add(args) => handle_projects_add(args)?,
+            ProjectsAction::List => handle_projects_list()?,
+            ProjectsAction::Switch { name } => handle_projects_switch(name)?,
+        },
         Command::Reset { confirm } => {
             if !confirm {
                 anyhow::bail!("--confirm is required to reset the workspace");
@@ -3926,6 +4045,7 @@ mod tests {
         .expect("setup flags should parse");
 
         match cli.command {
+            Command::Projects { .. } => {}
             Command::Setup {
                 start,
                 no_start,

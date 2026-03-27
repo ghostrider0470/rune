@@ -19,57 +19,53 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/// File name for the persisted project registry.
 const REGISTRY_FILE: &str = ".project-registry.json";
-
-/// Subdirectory under the workspace where per-orchestrator dirs are created.
 const AGENTS_DIR: &str = "agents";
 
-// ---------------------------------------------------------------------------
-// Project configuration
-// ---------------------------------------------------------------------------
-
-/// Build/test/lint configuration for a project.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ProjectConfig {
-    /// Short identifier used as the registry key and directory name.
     pub name: String,
-    /// Remote URL (e.g. `https://github.com/org/repo.git`).
     pub repo_url: String,
-    /// Absolute path to the project's repo on disk (external to the workspace).
     pub repo_path: PathBuf,
     pub default_branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default = "registered_at_now")]
+    pub registered_at: u64,
     pub build_command: String,
     pub test_command: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lint_command: Option<String>,
 }
 
-/// Summary of a project's current status (for the Main Agent's aggregated view).
+fn registered_at_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProjectStatusSummary {
     pub name: String,
     pub repo_path: PathBuf,
     pub agent_dir: PathBuf,
     pub orchestrator_active: bool,
+    pub is_active: bool,
+    pub default_branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    pub registered_at: u64,
 }
 
-// ---------------------------------------------------------------------------
-// Project registry — persisted to {workspace}/.project-registry.json
-// ---------------------------------------------------------------------------
-
-/// Manages multiple projects.  Persisted as JSON under the Main Agent's
-/// workspace so it survives restarts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectRegistry {
     projects: HashMap<String, ProjectConfig>,
+    active_project: Option<String>,
 }
 
 impl Default for ProjectRegistry {
@@ -82,25 +78,18 @@ impl ProjectRegistry {
     pub fn new() -> Self {
         Self {
             projects: HashMap::new(),
+            active_project: None,
         }
     }
 
-    // -------------------------------------------------------------------
-    // Persistence
-    // -------------------------------------------------------------------
-
-    /// Path to the registry file within a workspace.
     pub fn registry_path(workspace: &Path) -> PathBuf {
         workspace.join(REGISTRY_FILE)
     }
 
-    /// Path to a project's orchestrator agent directory within a workspace.
     pub fn agent_dir(workspace: &Path, project_name: &str) -> PathBuf {
         workspace.join(AGENTS_DIR).join(project_name)
     }
 
-    /// Load the registry from `{workspace}/.project-registry.json`.
-    /// Returns an empty registry if the file does not exist.
     pub fn load(workspace: &Path) -> Result<Self, io::Error> {
         let path = Self::registry_path(workspace);
         if !path.exists() {
@@ -110,7 +99,6 @@ impl ProjectRegistry {
         serde_json::from_str(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
-    /// Write the registry to `{workspace}/.project-registry.json`.
     pub fn save(&self, workspace: &Path) -> Result<(), io::Error> {
         let path = Self::registry_path(workspace);
         if let Some(parent) = path.parent() {
@@ -121,28 +109,41 @@ impl ProjectRegistry {
         std::fs::write(&path, data)
     }
 
-    // -------------------------------------------------------------------
-    // CRUD
-    // -------------------------------------------------------------------
-
-    /// Register a project. Replaces any existing entry with the same name.
     pub fn register(&mut self, config: ProjectConfig) {
         self.projects.insert(config.name.clone(), config);
     }
 
-    /// Look up a project by name.
     pub fn get(&self, name: &str) -> Option<&ProjectConfig> {
         self.projects.get(name)
     }
 
-    /// List all registered projects.
     pub fn list(&self) -> Vec<&ProjectConfig> {
-        self.projects.values().collect()
+        let mut projects: Vec<_> = self.projects.values().collect();
+        projects.sort_by(|a, b| a.name.cmp(&b.name));
+        projects
     }
 
-    /// Remove a project from the registry.
+    pub fn active_project(&self) -> Option<&str> {
+        self.active_project.as_deref()
+    }
+
+    pub fn switch_active(&mut self, name: &str) -> Result<(), io::Error> {
+        if !self.projects.contains_key(name) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("project '{name}' is not registered"),
+            ));
+        }
+        self.active_project = Some(name.to_string());
+        Ok(())
+    }
+
     pub fn remove(&mut self, name: &str) -> Option<ProjectConfig> {
-        self.projects.remove(name)
+        let removed = self.projects.remove(name);
+        if self.active_project.as_deref() == Some(name) {
+            self.active_project = None;
+        }
+        removed
     }
 
     pub fn len(&self) -> usize {
@@ -153,51 +154,39 @@ impl ProjectRegistry {
         self.projects.is_empty()
     }
 
-    // -------------------------------------------------------------------
-    // Onboarding
-    // -------------------------------------------------------------------
-
-    /// Onboard a new project: register it with sensible defaults and create
-    /// the orchestrator agent directory at `{workspace}/agents/{name}/`.
-    ///
-    /// The caller is responsible for cloning the repo to `repo_path`.
-    /// Build-system discovery and README parsing are left to the orchestrator's
-    /// first turn.
     pub fn onboard(
         &mut self,
         name: &str,
         repo_url: &str,
         repo_path: PathBuf,
         workspace: &Path,
+        default_branch: Option<&str>,
+        default_model: Option<String>,
     ) -> Result<ProjectConfig, io::Error> {
         let config = ProjectConfig {
             name: name.to_string(),
             repo_url: repo_url.to_string(),
             repo_path,
-            default_branch: "main".to_string(),
+            default_branch: default_branch.unwrap_or("main").to_string(),
+            default_model,
+            registered_at: registered_at_now(),
             build_command: "cargo build".to_string(),
             test_command: "cargo test".to_string(),
             lint_command: None,
         };
 
-        // Create orchestrator agent directory.
         let agent_dir = Self::agent_dir(workspace, name);
         std::fs::create_dir_all(&agent_dir)?;
 
         self.register(config.clone());
+        if self.active_project.is_none() {
+            self.active_project = Some(name.to_string());
+        }
         self.save(workspace)?;
 
         Ok(config)
     }
 
-    // -------------------------------------------------------------------
-    // Reporting
-    // -------------------------------------------------------------------
-
-    /// Aggregated status for the Main Agent — shows every project with a flag
-    /// indicating whether its orchestrator is active.
-    ///
-    /// `active_projects` comes from `OrchestratorRegistry`.
     pub fn all_status(
         &self,
         workspace: &Path,
@@ -210,14 +199,14 @@ impl ProjectRegistry {
                 repo_path: cfg.repo_path.clone(),
                 agent_dir: Self::agent_dir(workspace, &cfg.name),
                 orchestrator_active: active_projects.contains(&cfg.name.as_str()),
+                is_active: self.active_project.as_deref() == Some(cfg.name.as_str()),
+                default_branch: cfg.default_branch.clone(),
+                default_model: cfg.default_model.clone(),
+                registered_at: cfg.registered_at,
             })
             .collect()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -229,6 +218,8 @@ mod tests {
             repo_url: format!("https://github.com/org/{name}.git"),
             repo_path: PathBuf::from(format!("/home/user/dev/{name}")),
             default_branch: "main".to_string(),
+            default_model: Some("gpt-5.4".to_string()),
+            registered_at: 1_700_000_000,
             build_command: "cargo build".to_string(),
             test_command: "cargo test".to_string(),
             lint_command: Some("cargo clippy".to_string()),
@@ -264,19 +255,23 @@ mod tests {
     #[test]
     fn list_returns_all() {
         let mut reg = ProjectRegistry::new();
-        reg.register(sample_config("a"));
         reg.register(sample_config("b"));
+        reg.register(sample_config("a"));
 
         let all = reg.list();
         assert_eq!(all.len(), 2);
+        assert_eq!(all[0].name, "a");
+        assert_eq!(all[1].name, "b");
     }
 
     #[test]
     fn remove_project() {
         let mut reg = ProjectRegistry::new();
         reg.register(sample_config("x"));
+        reg.switch_active("x").unwrap();
         assert!(reg.remove("x").is_some());
         assert!(reg.is_empty());
+        assert_eq!(reg.active_project(), None);
         assert!(reg.remove("x").is_none());
     }
 
@@ -288,12 +283,14 @@ mod tests {
         let mut reg = ProjectRegistry::new();
         reg.register(sample_config("alpha"));
         reg.register(sample_config("beta"));
+        reg.switch_active("beta").unwrap();
         reg.save(ws).unwrap();
 
         let loaded = ProjectRegistry::load(ws).unwrap();
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded.get("alpha"), reg.get("alpha"));
         assert_eq!(loaded.get("beta"), reg.get("beta"));
+        assert_eq!(loaded.active_project(), Some("beta"));
     }
 
     #[test]
@@ -315,21 +312,23 @@ mod tests {
                 "https://github.com/org/rune.git",
                 PathBuf::from("/home/user/dev/rune"),
                 ws,
+                None,
+                None,
             )
             .unwrap();
 
         assert_eq!(cfg.name, "rune");
         assert_eq!(cfg.default_branch, "main");
+        assert_eq!(reg.active_project(), Some("rune"));
 
-        // Agent directory created.
         let agent_dir = ProjectRegistry::agent_dir(ws, "rune");
         assert!(agent_dir.exists());
         assert!(agent_dir.is_dir());
 
-        // Registry persisted.
         let loaded = ProjectRegistry::load(ws).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded.get("rune").unwrap().name, "rune");
+        assert_eq!(loaded.active_project(), Some("rune"));
     }
 
     #[test]
@@ -359,6 +358,7 @@ mod tests {
         reg.register(sample_config("a"));
         reg.register(sample_config("b"));
         reg.register(sample_config("c"));
+        reg.switch_active("b").unwrap();
 
         let summaries = reg.all_status(ws, &["a", "c"]);
         assert_eq!(summaries.len(), 3);
@@ -373,8 +373,19 @@ mod tests {
         assert!(active_names.contains(&"c"));
         assert!(!active_names.contains(&"b"));
 
-        // agent_dir paths are correct.
+        let selected = summaries.iter().find(|s| s.is_active).unwrap();
+        assert_eq!(selected.name, "b");
+
         let a_summary = summaries.iter().find(|s| s.name == "a").unwrap();
         assert_eq!(a_summary.agent_dir, ws.join("agents/a"));
+    }
+
+    #[test]
+    fn switch_active_project_requires_registered_name() {
+        let mut reg = ProjectRegistry::new();
+        reg.register(sample_config("a"));
+        reg.switch_active("a").unwrap();
+        assert_eq!(reg.active_project(), Some("a"));
+        assert!(reg.switch_active("missing").is_err());
     }
 }

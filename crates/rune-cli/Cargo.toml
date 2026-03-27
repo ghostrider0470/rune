@@ -9,6 +9,7 @@ license.workspace = true
 rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
 rune-mcp = { path = "../rune-mcp" }
+rune-runtime = { path = "../rune-runtime" }
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
