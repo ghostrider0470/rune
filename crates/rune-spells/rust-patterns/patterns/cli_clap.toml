@@ -17,3 +17,19 @@ struct Cli {
 """
 rationale = "Clap derive keeps CLI definitions declarative and discoverable"
 anti_pattern = "Manual argv parsing with ad-hoc validation"
+
+[[patterns]]
+name = "clap subcommand enum"
+when = "Modeling multiple command entrypoints with strongly typed arguments"
+code = """
+#[derive(clap::Subcommand)]
+enum Command {
+    Serve {
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+    },
+    Check,
+}
+"""
+rationale = "Subcommand enums keep command routing explicit and self-documenting"
+anti_pattern = "Using stringly-typed command switches scattered through main()"

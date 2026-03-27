@@ -14,3 +14,14 @@ let m = &mut data; // exclusive mutable borrow
 """
 rationale = "Treat ownership like title transfer: moves invalidate the source, immutable borrows allow many readers, mutable borrow allows one exclusive writer"
 anti_pattern = "Over-cloning to bypass the borrow checker instead of restructuring code around references"
+
+[[patterns]]
+name = "borrow instead of cloning"
+when = "A helper only needs to read data and ownership transfer would force extra cloning"
+code = """
+fn render(user: &User) -> String {
+    format!("{} <{}>", user.name, user.email)
+}
+"""
+rationale = "Borrowing preserves ownership for the caller and avoids unnecessary allocations"
+anti_pattern = "Cloning large structs just to pass them into read-only helper functions"
