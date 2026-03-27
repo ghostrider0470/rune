@@ -114,6 +114,16 @@ Rune sits between messaging channels and model providers. It manages:
 - **Provider layer** — Azure AI Foundry, Azure OpenAI, OpenAI, and Anthropic provider paths are part of the active runtime shape
 - **Docs + execution discipline** — ADR trail, source-of-truth boundaries, and Project 2 execution model are now explicit
 
+## Native spells shipped today
+
+Rune also ships a growing set of Rust-native spells:
+- `rust-patterns` — query production Rust patterns by topic, tags, imports, or validation scan
+- `security-audit` — run a baseline host security audit for ports, sensitive permissions, SSH hardening, and firewall status
+- `code-review` — perform structured multi-dimensional review on a file, diff, or PR target
+- `evolver` — current local scaffold for the self-evolution workflow lane
+
+The canonical inventory lives in [`docs/parity/PARITY-INVENTORY.md#77-native-spell-inventory`](docs/parity/PARITY-INVENTORY.md#77-native-spell-inventory).
+
 ## Standalone vs server runtime modes
 
 Rune is **standalone-first** by default:
