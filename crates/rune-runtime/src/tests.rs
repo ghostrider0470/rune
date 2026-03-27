@@ -7,6 +7,36 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use rune_core::{SessionKind, SessionStatus, ToolCategory};
+
+
+use rune_channels::{ChannelAdapter, ChannelError, DeliveryReceipt, InboundEvent, OutboundAction};
+use rune_config::{AgentsConfig, ModelsConfig};
+
+#[derive(Debug)]
+struct FakeChannelAdapter {
+    sent: Arc<Mutex<Vec<OutboundAction>>>,
+}
+
+impl FakeChannelAdapter {
+    fn new(sent: Arc<Mutex<Vec<OutboundAction>>>) -> Self {
+        Self { sent }
+    }
+}
+
+#[async_trait]
+impl ChannelAdapter for FakeChannelAdapter {
+    async fn receive(&mut self) -> Result<InboundEvent, ChannelError> {
+        Err(ChannelError::NotImplemented)
+    }
+
+    async fn send(&self, action: OutboundAction) -> Result<DeliveryReceipt, ChannelError> {
+        self.sent.lock().await.push(action);
+        Ok(DeliveryReceipt {
+            provider_message_id: "fake-provider-message".to_string(),
+            delivered_at: chrono::Utc::now(),
+        })
+    }
+}
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, FunctionCall, ModelError, ModelProvider,
     ToolCallRequest, Usage,
@@ -2385,4 +2415,67 @@ async fn allow_always_policy_does_not_affect_different_tool() {
 
     let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
     assert_eq!(session_row.status, "waiting_for_approval");
+}
+
+
+#[tokio::test]
+async fn resumed_channel_session_sends_notice_once_with_explicit_restart_semantics() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let channel_ref = "chat-1:user-1".to_string();
+    let session = engine
+        .create_session_full(
+            SessionKind::Channel,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            None,
+            Some(channel_ref.clone()),
+        )
+        .await
+        .unwrap();
+
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let loop_under_test = crate::session_loop::SessionLoop::new(
+        Arc::new(engine),
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(FakeChannelAdapter::new(sent.clone())),
+        AgentsConfig::default(),
+        ModelsConfig::default(),
+    );
+
+    let msg = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "user-1".to_string(),
+        content: "continue".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "provider-msg-1".to_string(),
+    };
+
+    loop_under_test
+        .maybe_send_resumed_session_notice(&msg, &channel_ref, &session)
+        .await;
+    loop_under_test
+        .maybe_send_resumed_session_notice(&msg, &channel_ref, &session)
+        .await;
+
+    let sent_actions = sent.lock().await.clone();
+    let replies: Vec<_> = sent_actions
+        .into_iter()
+        .filter_map(|action| match action {
+            OutboundAction::Reply { content, .. } => Some(content),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(replies.len(), 1);
+    let notice = &replies[0];
+    assert!(notice.contains("Resumed session `"));
+    assert!(notice.contains("Transcript history and durable approval/session state were restored"));
+    assert!(notice.contains("In-flight turns, live process handles, and typing/progress UI do not resume in place"));
 }
