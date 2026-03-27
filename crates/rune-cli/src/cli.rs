@@ -149,6 +149,11 @@ pub enum Command {
         #[command(subcommand)]
         action: RemindersAction,
     },
+    /// Manage registered project workspaces.
+    Projects {
+        #[command(subcommand)]
+        action: ProjectsAction,
+    },
     /// Send and manage messages across channel adapters.
     Message {
         #[command(subcommand)]
@@ -1163,6 +1168,37 @@ pub struct LogsArgs {
     /// Lower-bound timestamp or relative cursor understood by the gateway.
     #[arg(long)]
     pub since: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProjectAddArgs {
+    /// Filesystem path to the project repository/workspace.
+    pub path: String,
+    /// Override the inferred project name.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Override the detected remote URL.
+    #[arg(long)]
+    pub repo_url: Option<String>,
+    /// Default branch to record for the project.
+    #[arg(long, default_value = "main")]
+    pub default_branch: String,
+    /// Default model override for this project.
+    #[arg(long)]
+    pub default_model: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectsAction {
+    /// Register a project workspace.
+    Add(ProjectAddArgs),
+    /// List all registered projects.
+    List,
+    /// Switch the active foreground project.
+    Switch {
+        /// Registered project name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -5687,6 +5723,63 @@ mod subagent_cli_tests {
         let cli = Cli::try_parse_from(["rune", "onboard", "--path", "~/.rune"]).unwrap();
         match cli.command {
             Command::Onboard { path, .. } => assert_eq!(path, "~/.rune"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_projects_add() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "projects",
+            "add",
+            "~/Development/phoenix-iot",
+            "--name",
+            "phoenix-iot",
+            "--default-branch",
+            "develop",
+            "--default-model",
+            "gpt-5.4",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Projects {
+                action:
+                    ProjectsAction::Add(ProjectAddArgs {
+                        path,
+                        name,
+                        default_branch,
+                        default_model,
+                        ..
+                    }),
+            } => {
+                assert_eq!(path, "~/Development/phoenix-iot");
+                assert_eq!(name.as_deref(), Some("phoenix-iot"));
+                assert_eq!(default_branch, "develop");
+                assert_eq!(default_model.as_deref(), Some("gpt-5.4"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_projects_list() {
+        let cli = Cli::try_parse_from(["rune", "projects", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Projects {
+                action: ProjectsAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_projects_switch() {
+        let cli = Cli::try_parse_from(["rune", "projects", "switch", "phoenix-iot"]).unwrap();
+        match cli.command {
+            Command::Projects {
+                action: ProjectsAction::Switch { name },
+            } => assert_eq!(name, "phoenix-iot"),
             other => panic!("unexpected: {other:?}"),
         }
     }
