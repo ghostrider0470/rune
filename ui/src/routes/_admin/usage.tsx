@@ -26,8 +26,16 @@ export const Route = createFileRoute("/_admin/usage")({
   component: UsagePage,
 });
 
+const PERIODS = [
+  { value: "1d", label: "Last 24h" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "all", label: "All time" },
+] as const;
+
 function UsagePage() {
-  const { data: usage, isLoading } = useUsage();
+  const [period, setPeriod] = useState("7d");
+  const { data: usage, isLoading } = useUsage(period === "all" ? undefined : period);
   const [groupBy, setGroupBy] = useState<"model" | "date">("model");
 
   const exportCsv = () => {
@@ -103,15 +111,29 @@ function UsagePage() {
             Token usage and cost analytics
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={exportCsv}
-          disabled={!usage?.entries.length}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Export CSV
-        </Button>
+        <div className="flex items-center gap-3">
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIODS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportCsv}
+            disabled={!usage?.entries.length}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
       </div>
 
       {/* Summary cards */}

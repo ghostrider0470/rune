@@ -93,10 +93,11 @@ export function useReloadSkills() {
   });
 }
 
-export function useUsage() {
+export function useUsage(period?: string) {
+  const params = period ? `?period=${period}` : "";
   return useQuery({
-    queryKey: ["usage"],
-    queryFn: () => api.get<UsageSummary>("/api/dashboard/usage"),
+    queryKey: ["usage", period],
+    queryFn: () => api.get<UsageSummary>(`/api/dashboard/usage${params}`),
     refetchInterval: 60_000,
   });
 }
