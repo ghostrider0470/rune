@@ -47,12 +47,10 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
-use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
-use rune_spells_rust_patterns::{
-    RustPatternsToolExecutor, rust_patterns_tool_definition,
-    rust_patterns_validate_tool_definition,
+use rune_spells_rust_patterns::rust_patterns_tool_definition;
+use rune_spells_security_audit::{
+    SecurityAuditToolExecutor, security_audit_tool_definition,
 };
-use rune_spells_security_audit::security_audit_tool_definition;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
@@ -304,8 +302,6 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
         StorageBackend::Auto => {
             if config.database.database_url.is_some() {
                 "postgres (external)"
-            } else if config.database.cosmos_endpoint.is_some() {
-                "cosmos"
             } else {
                 "sqlite"
             }
@@ -736,7 +732,7 @@ async fn build_services(
 
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
+        match Mem0Engine::try_connect(&config.mem0, model_provider.clone()).await {
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");
@@ -1371,31 +1367,6 @@ impl CommsOps for CommsClientOps {
     ) -> Result<String, String> {
         self.client.send(msg_type, subject, body, priority).await
     }
-
-    async fn read_inbox(
-        &self,
-        mark_read: bool,
-    ) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
-        let messages = self.client.read_inbox().await;
-        let mut summaries = Vec::with_capacity(messages.len());
-
-        for (path, msg) in messages {
-            summaries.push(rune_tools::comms_tool::CommsMessageSummary {
-                id: msg.id.clone(),
-                from: msg.from.clone(),
-                subject: msg.subject.clone(),
-                body: msg.body.clone(),
-                priority: msg.priority.clone(),
-                created_at: msg.created_at.clone(),
-            });
-
-            if mark_read {
-                self.client.archive(&path).await?;
-            }
-        }
-
-        Ok(summaries)
-    }
 }
 
 struct AppToolExecutor {
@@ -1712,13 +1683,8 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "rust_pattern" | "rust_pattern_validate" => {
-                RustPatternsToolExecutor::new(self.workspace_root.clone())
-                    .execute(call)
-                    .await
-            }
-            "code_review" => {
-                CodeReviewToolExecutor::new(self.workspace_root.clone())
+            "security_audit" => {
+                SecurityAuditToolExecutor::new(self.workspace_root.clone())
                     .execute(call)
                     .await
             }
@@ -2057,8 +2023,6 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
 
     registry.register(security_audit_tool_definition());
     registry.register(rust_patterns_tool_definition());
-    registry.register(rust_patterns_validate_tool_definition());
-    registry.register(code_review_tool_definition());
 }
 
 /// Build the model provider from config, falling back to echo if none configured.
@@ -2418,7 +2382,6 @@ impl SessionSpawner for LiveSessionSpawner {
                 rune_core::SessionKind::Subagent,
                 Some(self.workspace_root.display().to_string()),
                 requester_session_id,
-                None,
                 None,
             )
             .await
@@ -3899,8 +3862,6 @@ impl ModelProvider for EchoModelProvider {
                 prompt_tokens: latest_user.len() as u32,
                 completion_tokens: (latest_user.len() as u32) + 6,
                 total_tokens: (latest_user.len() as u32) * 2 + 6,
-                cached_prompt_tokens: None,
-                uncached_prompt_tokens: None,
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: Vec::new(),
