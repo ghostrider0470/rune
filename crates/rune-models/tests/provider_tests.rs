@@ -26,8 +26,6 @@ fn simple_request() -> CompletionRequest {
             tool_call_id: None,
             tool_calls: None,
         }],
-        stable_prefix_messages: None,
-        stable_prefix_tools: None,
         model: Some("gpt-4o".into()),
         temperature: None,
         max_tokens: None,
@@ -261,14 +259,6 @@ async fn azure_request_golden_shape_full() {
                 tool_calls: None,
             },
         ],
-        stable_prefix_tools: None,
-        stable_prefix_messages: Some(vec![ChatMessage {
-            role: Role::System,
-            content: Some("You are helpful.".into()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-        }]),
         model: Some("gpt-4o".into()), // should NOT appear in Azure body
         temperature: Some(0.7),
         max_tokens: Some(1024),
@@ -1735,8 +1725,6 @@ async fn foundry_openai_request_golden_shape() {
 
     let p = AzureFoundryProvider::with_api_version(&server.uri(), "my-foundry-key", "2024-05-01");
     let request = CompletionRequest {
-        stable_prefix_messages: None,
-        stable_prefix_tools: None,
         messages: vec![
             ChatMessage {
                 role: Role::System,
@@ -1854,8 +1842,6 @@ async fn foundry_anthropic_extracts_system_message() {
 
     let p = AzureFoundryProvider::new(&server.uri(), "key");
     let request = CompletionRequest {
-        stable_prefix_messages: None,
-        stable_prefix_tools: None,
         messages: vec![
             ChatMessage {
                 role: Role::System,
@@ -1968,8 +1954,6 @@ async fn foundry_anthropic_request_golden_shape() {
 
     let p = AzureFoundryProvider::with_api_version(&server.uri(), "my-foundry-key", "2023-06-01");
     let request = CompletionRequest {
-        stable_prefix_messages: None,
-        stable_prefix_tools: None,
         messages: vec![
             ChatMessage {
                 role: Role::System,
@@ -2152,8 +2136,6 @@ fn anthropic_error_body(error_type: &str, message: &str) -> serde_json::Value {
 
 fn claude_request() -> CompletionRequest {
     CompletionRequest {
-        stable_prefix_messages: None,
-        stable_prefix_tools: None,
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
@@ -2455,97 +2437,9 @@ async fn azure_maps_retry_after_http_date() {
     let p = AzureOpenAiProvider::new(&server.uri(), "dep", "2024-06-01", "k");
     let err = p.complete(&simple_request()).await.unwrap_err();
     match err {
-        ModelError::RateLimited {
-            retry_after_secs, ..
-        } => {
+        ModelError::RateLimited { retry_after_secs, .. } => {
             assert!(retry_after_secs.is_some());
         }
         other => panic!("expected RateLimited, got {other:?}"),
     }
-}
-
-#[tokio::test]
-async fn azure_request_prepends_stable_prefix_messages() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
-    let request = CompletionRequest {
-        messages: vec![ChatMessage {
-            role: Role::User,
-            content: Some("Hello".into()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-        }],
-        stable_prefix_tools: None,
-        stable_prefix_messages: Some(vec![ChatMessage {
-            role: Role::System,
-            content: Some("Stable prefix".into()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-        }]),
-        model: Some("gpt-4o".into()),
-        temperature: None,
-        max_tokens: None,
-        tools: None,
-    };
-
-    let _ = p.complete(&request).await.unwrap();
-
-    let requests = server.received_requests().await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    let msgs = body["messages"].as_array().unwrap();
-    assert_eq!(msgs[0]["role"], "system");
-    assert_eq!(msgs[0]["content"], "Stable prefix");
-    assert_eq!(msgs[1]["role"], "user");
-}
-
-#[tokio::test]
-async fn openai_request_prepends_stable_prefix_messages() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let p = OpenAiProvider::new(&server.uri(), "k");
-    let request = CompletionRequest {
-        messages: vec![ChatMessage {
-            role: Role::User,
-            content: Some("Hello".into()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-        }],
-        stable_prefix_tools: None,
-        stable_prefix_messages: Some(vec![ChatMessage {
-            role: Role::System,
-            content: Some("Stable prefix".into()),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-        }]),
-        model: Some("gpt-4o".into()),
-        temperature: None,
-        max_tokens: None,
-        tools: None,
-    };
-
-    let _ = p.complete(&request).await.unwrap();
-
-    let requests = server.received_requests().await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    let msgs = body["messages"].as_array().unwrap();
-    assert_eq!(msgs[0]["role"], "system");
-    assert_eq!(msgs[0]["content"], "Stable prefix");
-    assert_eq!(msgs[1]["role"], "user");
 }
