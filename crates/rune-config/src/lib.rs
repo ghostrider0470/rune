@@ -94,6 +94,10 @@ impl AppConfig {
         out.channels.whatsapp_access_token = mask(&self.channels.whatsapp_access_token);
         out.channels.whatsapp_app_secret = mask(&self.channels.whatsapp_app_secret);
         out.channels.whatsapp_verify_token = mask(&self.channels.whatsapp_verify_token);
+        out.channels.google_chat_service_account =
+            mask(&self.channels.google_chat_service_account);
+        out.channels.google_chat_verification_token =
+            mask(&self.channels.google_chat_verification_token);
         out.mem0.embedding_api_key = mask(&self.mem0.embedding_api_key);
         out.mem0.postgres_url = mask(&self.mem0.postgres_url);
         out
@@ -1063,6 +1067,15 @@ pub struct ChannelsConfig {
     /// Base URL of the signal-cli REST API daemon.
     #[serde(default)]
     pub signal_api_url: Option<String>,
+    /// Google Chat service account credentials JSON path or inline JSON.
+    #[serde(default)]
+    pub google_chat_service_account: Option<String>,
+    /// Google Chat webhook/listener bind address for inbound events.
+    #[serde(default)]
+    pub google_chat_listen_addr: Option<String>,
+    /// Optional Google Chat verification token for inbound webhook validation.
+    #[serde(default)]
+    pub google_chat_verification_token: Option<String>,
 }
 
 /// Memory indexing and retrieval settings.

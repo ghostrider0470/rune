@@ -8,6 +8,9 @@ run_migrations = true
 
 [channels]
 # telegram_token = "YOUR_BOT_TOKEN"
+# google_chat_service_account = "/path/to/google-chat-service-account.json"
+# google_chat_listen_addr = "0.0.0.0:3300"
+# google_chat_verification_token = "shared-secret"
 
 [ms365]
 # tenant_id = "00000000-0000-0000-0000-000000000000"
