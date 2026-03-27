@@ -81,6 +81,7 @@ pub struct Spell {
     pub tags: Vec<String>,
     /// Optional context-matching rules for auto-activation.
     #[serde(default)]
+    #[serde(alias = "match")]
     pub match_rules: Option<serde_json::Value>,
     /// Trigger patterns that activate this spell.
     #[serde(default)]
@@ -113,6 +114,7 @@ pub struct SpellFrontmatter {
     pub requires: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(alias = "match")]
     pub match_rules: Option<serde_json::Value>,
     #[serde(default)]
     pub triggers: Vec<String>,

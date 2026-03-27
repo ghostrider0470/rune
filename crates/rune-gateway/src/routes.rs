@@ -1354,7 +1354,7 @@ pub struct SessionStatusResponse {
     pub session_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orchestration_status: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        #[serde(default)]
     pub delegation_roles: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegation_depth: Option<u32>,
@@ -5314,6 +5314,7 @@ fn standalone_root_owned_startup_path(name: &str) -> bool {
     matches!(
         name,
         "paths.spells_dir"
+            | "paths.skills_dir"
             | "paths.plugins_dir"
             | "paths.backups_dir"
             | "paths.config_dir"
@@ -5411,6 +5412,7 @@ fn storage_path_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
         ("paths.memory_dir", &config.paths.memory_dir, true),
         ("paths.media_dir", &config.paths.media_dir, true),
         ("paths.spells_dir", &config.paths.spells_dir, true),
+        ("paths.skills_dir", &config.paths.skills_dir, true),
         ("paths.plugins_dir", &config.paths.plugins_dir, true),
         ("paths.logs_dir", &config.paths.logs_dir, true),
         ("paths.backups_dir", &config.paths.backups_dir, true),

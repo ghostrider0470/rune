@@ -1850,6 +1850,7 @@ async fn ws_rpc_skills_reload_and_toggle_round_trip() {
         skills_dir.join("rpc-skill/SKILL.md"),
         r#"---
 name: rpc-skill
+version: 0.1.0
 description: RPC managed skill
 enabled: true
 ---
@@ -3009,6 +3010,14 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
             model: None,
             allowed_tools: None,
             user_invocable: false,
+            namespace: None,
+            version: None,
+            author: None,
+            kind: rune_runtime::spell::SpellKind::Assistant,
+            requires: vec![],
+            tags: vec![],
+            match_rules: None,
+            triggers: vec![],
         })
         .await;
 
@@ -10981,12 +10990,16 @@ async fn ready_returns_200_for_standalone_defaults_even_without_explicit_model_p
         sessions_dir: home.path().join("sessions"),
         memory_dir: home.path().join("memory"),
         media_dir: home.path().join("media"),
+        spells_dir: home.path().join("spells"),
         skills_dir: home.path().join("skills"),
         plugins_dir: home.path().join("plugins"),
         logs_dir: home.path().join("logs"),
         backups_dir: home.path().join("backups"),
         config_dir: home.path().join("config"),
         secrets_dir: home.path().join("secrets"),
+        workspace_dir: home.path().join("workspace"),
+        cache_dir: home.path().join("cache"),
+        data_dir: home.path().join("data"),
     };
     config.ensure_dirs().unwrap();
     let app = build_test_app_with_config(config, None);
@@ -11012,12 +11025,16 @@ async fn api_ready_returns_200_for_standalone_defaults_even_without_explicit_mod
         sessions_dir: home.path().join("sessions"),
         memory_dir: home.path().join("memory"),
         media_dir: home.path().join("media"),
+        spells_dir: home.path().join("spells"),
         skills_dir: home.path().join("skills"),
         plugins_dir: home.path().join("plugins"),
         logs_dir: home.path().join("logs"),
         backups_dir: home.path().join("backups"),
         config_dir: home.path().join("config"),
         secrets_dir: home.path().join("secrets"),
+        workspace_dir: home.path().join("workspace"),
+        cache_dir: home.path().join("cache"),
+        data_dir: home.path().join("data"),
     };
     config.ensure_dirs().unwrap();
     let app = build_test_app_with_config(config, None);
@@ -11072,12 +11089,16 @@ fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_sta
         sessions_dir: root.path().join("sessions"),
         memory_dir: root.path().join("memory"),
         media_dir: root.path().join("media"),
+        spells_dir: std::path::PathBuf::from("/proc"),
         skills_dir: std::path::PathBuf::from("/proc"),
         plugins_dir: std::path::PathBuf::from("/sys"),
         logs_dir: root.path().join("logs"),
         backups_dir: std::path::PathBuf::from("/etc"),
         config_dir: std::path::PathBuf::from("/bin"),
         secrets_dir: std::path::PathBuf::from("/sbin"),
+        workspace_dir: root.path().join("workspace"),
+        cache_dir: root.path().join("cache"),
+        data_dir: root.path().join("data"),
     };
     config.ensure_dirs().unwrap();
     config.paths = rune_config::PathsConfig::default();
