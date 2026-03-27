@@ -716,6 +716,14 @@ pub struct SkillSummary {
     pub enabled: bool,
     pub source_dir: String,
     pub binary_path: Option<String>,
+    pub namespace: Option<String>,
+    pub version: Option<String>,
+    pub author: Option<String>,
+    pub kind: String,
+    pub requires: Vec<String>,
+    pub tags: Vec<String>,
+    pub match_rules: Option<serde_json::Value>,
+    pub triggers: Vec<String>,
 }
 
 impl fmt::Display for SkillSummary {
@@ -727,6 +735,28 @@ impl fmt::Display for SkillSummary {
             if self.enabled { "enabled" } else { "disabled" }
         )?;
         writeln!(f, "  Description: {}", self.description)?;
+        if let Some(version) = &self.version {
+            writeln!(f, "  Version: {}", version)?;
+        }
+        if let Some(namespace) = &self.namespace {
+            writeln!(f, "  Namespace: {}", namespace)?;
+        }
+        if let Some(author) = &self.author {
+            writeln!(f, "  Author: {}", author)?;
+        }
+        writeln!(f, "  Kind: {}", self.kind)?;
+        if !self.requires.is_empty() {
+            writeln!(f, "  Requires: {}", self.requires.join(", "))?;
+        }
+        if !self.tags.is_empty() {
+            writeln!(f, "  Tags: {}", self.tags.join(", "))?;
+        }
+        if let Some(match_rules) = &self.match_rules {
+            writeln!(f, "  Match: {}", match_rules)?;
+        }
+        if !self.triggers.is_empty() {
+            writeln!(f, "  Triggers: {}", self.triggers.join(", "))?;
+        }
         writeln!(f, "  Source: {}", self.source_dir)?;
         write!(
             f,
@@ -772,6 +802,28 @@ impl fmt::Display for SkillInfoResponse {
         writeln!(f, "Skill: {}", self.skill.name)?;
         writeln!(f, "  Enabled: {}", self.skill.enabled)?;
         writeln!(f, "  Description: {}", self.skill.description)?;
+        if let Some(version) = &self.skill.version {
+            writeln!(f, "  Version: {}", version)?;
+        }
+        if let Some(namespace) = &self.skill.namespace {
+            writeln!(f, "  Namespace: {}", namespace)?;
+        }
+        if let Some(author) = &self.skill.author {
+            writeln!(f, "  Author: {}", author)?;
+        }
+        writeln!(f, "  Kind: {}", self.skill.kind)?;
+        if !self.skill.requires.is_empty() {
+            writeln!(f, "  Requires: {}", self.skill.requires.join(", "))?;
+        }
+        if !self.skill.tags.is_empty() {
+            writeln!(f, "  Tags: {}", self.skill.tags.join(", "))?;
+        }
+        if let Some(match_rules) = &self.skill.match_rules {
+            writeln!(f, "  Match: {}", match_rules)?;
+        }
+        if !self.skill.triggers.is_empty() {
+            writeln!(f, "  Triggers: {}", self.skill.triggers.join(", "))?;
+        }
         writeln!(f, "  Source: {}", self.skill.source_dir)?;
         write!(
             f,

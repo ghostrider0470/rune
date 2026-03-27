@@ -309,9 +309,11 @@ impl PluginScanner {
                 user_invocable: cs.user_invocable,
                 namespace: None,
                 version: None,
+                author: None,
                 kind: Default::default(),
                 requires: vec![],
                 tags: vec![],
+                match_rules: None,
                 triggers: vec![],
             };
             self.skill_registry.register(skill).await;

@@ -271,6 +271,10 @@ async fn load_spell_from_path(path: &Path, dir_namespace: Option<&str>) -> Resul
         .description
         .unwrap_or_else(|| format!("Spell: {name}"));
 
+    if frontmatter.version.as_deref().is_none_or(str::is_empty) {
+        return Err("missing required field: version".to_string());
+    }
+
     let binary_path = frontmatter.binary.map(|b| {
         let bp = PathBuf::from(&b);
         if bp.is_relative() {
@@ -300,9 +304,11 @@ async fn load_spell_from_path(path: &Path, dir_namespace: Option<&str>) -> Resul
         user_invocable: false,
         namespace,
         version: frontmatter.version,
+        author: frontmatter.author,
         kind: frontmatter.kind.unwrap_or_default(),
         requires: frontmatter.requires,
         tags: frontmatter.tags,
+        match_rules: frontmatter.match_rules,
         triggers: frontmatter.triggers,
     })
 }
@@ -324,6 +330,7 @@ mod tests {
             spell_dir.join("SPELL.md"),
             r#"---
 name: my-spell
+version: 0.1.0
 description: A test spell
 ---
 
@@ -358,6 +365,7 @@ description: A test spell
             spell_dir.join("SKILL.md"),
             r#"---
 name: legacy-skill
+version: 0.1.0
 description: Uses old SKILL.md filename
 ---
 "#,
@@ -420,6 +428,7 @@ version: 0.1.0
             alpha_dir.join("SPELL.md"),
             r#"---
 name: alpha
+version: 0.1.0
 description: Alpha spell
 ---
 "#,
@@ -454,6 +463,7 @@ description: Alpha spell
             valid_dir.join("SPELL.md"),
             r#"---
 name: valid
+version: 0.1.0
 description: Valid spell
 binary: ./run.sh
 parameters: {"type":"object","properties":{"path":{"type":"string"}}}
@@ -496,6 +506,7 @@ enabled: true
             spell_dir.join("SPELL.md"),
             r#"---
 name: sticky-spell
+version: 0.1.0
 description: Sticky spell
 enabled: true
 ---
@@ -514,6 +525,34 @@ enabled: true
         let second = loader.scan_summary().await;
         assert_eq!(second.loaded, 1);
         assert!(!registry.get("sticky-spell").await.unwrap().enabled);
+    }
+
+
+    #[tokio::test]
+    async fn scan_rejects_spell_missing_required_version() {
+        let tmp = TempDir::new().unwrap();
+
+        let spell_dir = tmp.path().join("missing-version");
+        fs::create_dir_all(&spell_dir).await.unwrap();
+        fs::write(
+            spell_dir.join("SPELL.md"),
+            r#"---
+name: missing-version
+description: Missing version should fail
+---
+"#,
+        )
+        .await
+        .unwrap();
+
+        let registry = Arc::new(SpellRegistry::new());
+        let loader = SpellLoader::new(tmp.path(), registry.clone());
+
+        let summary = loader.scan_summary().await;
+        assert_eq!(summary.discovered, 1);
+        assert_eq!(summary.loaded, 0);
+        assert_eq!(summary.removed, 0);
+        assert!(registry.get("missing-version").await.is_none());
     }
 
     #[test]

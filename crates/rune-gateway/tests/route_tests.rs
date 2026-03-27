@@ -7058,8 +7058,16 @@ async fn skills_routes_list_reload_and_toggle() {
         skills_dir.join("alpha/SKILL.md"),
         r#"---
 name: alpha
+version: 1.2.3
+namespace: horizon
+author: Horizon Tech d.o.o.
+kind: tool
 description: Alpha skill
 binary: ./run-alpha.sh
+requires: ["network"]
+tags: ["alpha", "tool"]
+match: {"channel":"telegram"}
+triggers: ["on:demand"]
 enabled: true
 ---
 
@@ -7085,6 +7093,7 @@ enabled: true
         skills_dir.join("beta/SKILL.md"),
         r#"---
 name: beta
+version: 0.1.0
 description: Beta skill
 enabled: false
 ---
@@ -7124,6 +7133,17 @@ enabled: false
             .unwrap()
             .contains("run-alpha.sh")
     );
+    assert_eq!(alpha["version"], "1.2.3");
+    assert_eq!(alpha["namespace"], "horizon");
+    assert_eq!(alpha["author"], "Horizon Tech d.o.o.");
+    assert_eq!(alpha["kind"], "tool");
+    assert_eq!(alpha["requires"], serde_json::json!(["network"]));
+    assert_eq!(alpha["tags"], serde_json::json!(["alpha", "tool"]));
+    assert_eq!(
+        alpha["match_rules"],
+        serde_json::json!({"channel":"telegram"})
+    );
+    assert_eq!(alpha["triggers"], serde_json::json!(["on:demand"]));
 
     let response = app
         .clone()
@@ -7208,8 +7228,16 @@ async fn skills_detail_route_returns_skill_and_missing_error() {
         skills_dir.join("alpha/SKILL.md"),
         r#"---
 name: alpha
+version: 1.2.3
+namespace: horizon
+author: Horizon Tech d.o.o.
+kind: tool
 description: Alpha skill
 binary: ./run-alpha.sh
+requires: ["network"]
+tags: ["alpha", "tool"]
+match: {"channel":"telegram"}
+triggers: ["on:demand"]
 enabled: true
 ---
 
@@ -7248,6 +7276,17 @@ enabled: true
             .unwrap()
             .contains("run-alpha.sh")
     );
+    assert_eq!(json["version"], "1.2.3");
+    assert_eq!(json["namespace"], "horizon");
+    assert_eq!(json["author"], "Horizon Tech d.o.o.");
+    assert_eq!(json["kind"], "tool");
+    assert_eq!(json["requires"], serde_json::json!(["network"]));
+    assert_eq!(json["tags"], serde_json::json!(["alpha", "tool"]));
+    assert_eq!(
+        json["match_rules"],
+        serde_json::json!({"channel":"telegram"})
+    );
+    assert_eq!(json["triggers"], serde_json::json!(["on:demand"]));
 
     let response = app
         .oneshot(Request::get("/skills/missing").body(Body::empty()).unwrap())

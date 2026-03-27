@@ -67,6 +67,9 @@ pub struct Spell {
     /// Semantic version string, e.g. `"0.1.0"`.
     #[serde(default)]
     pub version: Option<String>,
+    /// Optional spell author / org.
+    #[serde(default)]
+    pub author: Option<String>,
     /// Spell kind (assistant / tool / workflow / sensor).
     #[serde(default)]
     pub kind: SpellKind,
@@ -76,6 +79,9 @@ pub struct Spell {
     /// Free-form tags for search/filtering.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Optional context-matching rules for auto-activation.
+    #[serde(default)]
+    pub match_rules: Option<serde_json::Value>,
     /// Trigger patterns that activate this spell.
     #[serde(default)]
     pub triggers: Vec<String>,
@@ -102,10 +108,12 @@ pub struct SpellFrontmatter {
     pub namespace: Option<String>,
     pub version: Option<String>,
     pub kind: Option<SpellKind>,
+    pub author: Option<String>,
     #[serde(default)]
     pub requires: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    pub match_rules: Option<serde_json::Value>,
     #[serde(default)]
     pub triggers: Vec<String>,
 }
