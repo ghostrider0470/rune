@@ -225,6 +225,11 @@ fn embedded_migrations() -> Vec<(String, String)> {
             "2026-03-23-000012".into(),
             include_str!("../migrations/2026-03-23-000012_session_profile_fields/up.sql").into(),
         ),
+        (
+            "2026-03-27-000013".into(),
+            include_str!("../migrations/2026-03-27-000013_add_usage_cached_prompt_tokens/up.sql")
+                .into(),
+        ),
     ]
 }
 
