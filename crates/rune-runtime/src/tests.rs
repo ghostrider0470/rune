@@ -2683,6 +2683,62 @@ async fn request_stable_prefix_is_split_from_variable_messages() {
 }
 
 #[tokio::test]
+async fn request_stable_prefix_excludes_tool_results_from_cached_prefix() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("echo_tool", r#"{\"value\":\"hi\"}"#),
+        FakeModelProvider::text_response("done"),
+    ]));
+    let model_handle = model.clone();
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "echo_tool".into(),
+        description: "echo".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"]
+        }),
+        category: ToolCategory::FileRead,
+        requires_approval: false,
+    });
+
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec!["tool output".into()])),
+        registry,
+    );
+
+    executor.execute(session.id, "hello", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    assert_eq!(requests.len(), 2);
+
+    let follow_up = &requests[1];
+    let stable = follow_up.stable_prefix_messages.as_ref().unwrap();
+    assert_eq!(stable.len(), 2);
+    assert_eq!(stable[0].role, Role::System);
+    assert_eq!(stable[1].role, Role::User);
+    assert_eq!(stable[1].content.as_deref(), Some("hello"));
+
+    assert_eq!(follow_up.messages.len(), 2);
+    assert_eq!(follow_up.messages[0].role, Role::Assistant);
+    assert!(follow_up.messages[0].tool_calls.is_some());
+    assert_eq!(follow_up.messages[1].role, Role::Tool);
+    assert_eq!(follow_up.messages[1].content.as_deref(), Some("tool output"));
+}
+
+#[tokio::test]
 async fn request_stable_prefix_keeps_tools_out_of_variable_tail() {
     let h = TestHarness::new();
     let engine = h.session_engine();
