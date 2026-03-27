@@ -94,7 +94,7 @@ fn register_builtin_stubs_populates_expected_tools() {
     let mut reg = ToolRegistry::new();
     register_builtin_stubs(&mut reg);
 
-    assert_eq!(reg.len(), 10);
+    assert_eq!(reg.len(), 11);
 
     let expected = [
         "read_file",
@@ -107,6 +107,7 @@ fn register_builtin_stubs_populates_expected_tools() {
         "get_session_status",
         "web_fetch",
         "git",
+        "image_generation",
     ];
     for name in expected {
         assert!(reg.lookup(name).is_ok(), "missing builtin: {name}");
