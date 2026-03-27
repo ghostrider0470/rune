@@ -175,26 +175,22 @@ export function AdminNavbar() {
               <NavigationMenuList>
                 {/* Primary direct links */}
                 {primaryItems.map((item) => {
-                  const Icon = item.icon;
                   const active = isActive(pathname, item);
                   return (
                     <NavigationMenuItem key={item.href}>
-                      <NavigationMenuLink asChild>
-                        <Link
-                          to={item.href}
-                          search={item.href === "/chat" ? chatLinkSearch : undefined}
-                          className={cn(
-                            navigationMenuTriggerStyle(),
-                            "gap-2 bg-transparent",
-                            active
-                              ? "text-primary bg-primary/10"
-                              : "text-muted-foreground"
-                          )}
-                        >
-                          <Icon className="size-4 shrink-0" />
-                          {item.label}
-                        </Link>
-                      </NavigationMenuLink>
+                      <Link
+                        to={item.href}
+                        search={item.href === "/chat" ? chatLinkSearch : undefined}
+                        className={cn(
+                          navigationMenuTriggerStyle(),
+                          "bg-transparent",
+                          active
+                            ? "text-primary bg-primary/10"
+                            : "text-muted-foreground"
+                        )}
+                      >
+                        {item.label}
+                      </Link>
                     </NavigationMenuItem>
                   );
                 })}
