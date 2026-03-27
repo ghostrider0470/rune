@@ -1,0 +1,14 @@
+[meta]
+topic = "wasm"
+tags = ["wasm", "wasm-bindgen", "webassembly"]
+relevance_signals = ["browser", "wasm32", "bindgen"]
+
+[[patterns]]
+name = "guard platform-specific wasm code"
+when = "Exposing Rust functions to browser runtimes"
+code = """
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+"""
+rationale = "cfg-gating keeps host builds clean while enabling wasm-specific exports"
+anti_pattern = "Mixing wasm-only APIs into native builds without conditional compilation"

@@ -1,0 +1,16 @@
+[meta]
+topic = "ownership"
+tags = ["ownership", "borrow", "move", "reference"]
+relevance_signals = ["borrow", "borrow-checker", "move", "clone"]
+
+[[patterns]]
+name = "ownership mental model"
+when = "Reasoning about moves and borrows in core Rust code"
+code = """
+let y = x;      // move
+let r1 = &data; // immutable borrow
+let r2 = &data; // another immutable borrow
+let m = &mut data; // exclusive mutable borrow
+"""
+rationale = "Treat ownership like title transfer: moves invalidate the source, immutable borrows allow many readers, mutable borrow allows one exclusive writer"
+anti_pattern = "Over-cloning to bypass the borrow checker instead of restructuring code around references"

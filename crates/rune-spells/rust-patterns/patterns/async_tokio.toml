@@ -1,0 +1,27 @@
+[meta]
+topic = "async_tokio"
+tags = ["tokio", "async", "select", "spawn-blocking"]
+relevance_signals = ["timeout", "tokio", "await", "blocking"]
+
+[[patterns]]
+name = "tokio select with timeout"
+when = "Racing a task against shutdown or timeout conditions"
+code = """
+tokio::select! {
+    result = worker() => result?,
+    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+        anyhow::bail!("worker timed out");
+    }
+}
+"""
+rationale = "tokio::select! expresses cancellation and timeout behavior without manual polling"
+anti_pattern = "Busy waiting or manual timeout bookkeeping around futures"
+
+[[patterns]]
+name = "spawn blocking for sync work"
+when = "Calling blocking CPU-heavy or synchronous APIs from async code"
+code = """
+let value = tokio::task::spawn_blocking(move || expensive_sync_call()).await?;
+"""
+rationale = "spawn_blocking prevents sync work from starving async executors"
+anti_pattern = "Using std::fs or long blocking calls directly inside async fn"

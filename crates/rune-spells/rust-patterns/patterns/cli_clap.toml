@@ -1,0 +1,19 @@
+[meta]
+topic = "cli_clap"
+tags = ["clap", "cli", "parser", "subcommand"]
+relevance_signals = ["arg", "derive", "subcommand"]
+
+[[patterns]]
+name = "clap derive api"
+when = "Building a typed CLI with subcommands and env-backed args"
+code = """
+#[derive(clap::Parser)]
+struct Cli {
+    #[arg(short, long)]
+    verbose: bool,
+    #[command(subcommand)]
+    command: Command,
+}
+"""
+rationale = "Clap derive keeps CLI definitions declarative and discoverable"
+anti_pattern = "Manual argv parsing with ad-hoc validation"

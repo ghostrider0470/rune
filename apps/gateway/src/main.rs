@@ -47,6 +47,7 @@ use rune_runtime::{
     scheduler::{ReminderStore, Scheduler},
     session_loop::SessionLoop,
 };
+use rune_spells_rust_patterns::rust_patterns_tool_definition;
 use rune_spells_security_audit::security_audit_tool_definition;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
@@ -2014,6 +2015,7 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
     }
 
     registry.register(security_audit_tool_definition());
+    registry.register(rust_patterns_tool_definition());
 }
 
 /// Build the model provider from config, falling back to echo if none configured.
