@@ -1,0 +1,1 @@
+//! LanceDB implementation of [`MemoryEmbeddingRepo`].
