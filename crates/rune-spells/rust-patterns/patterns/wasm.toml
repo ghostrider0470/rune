@@ -12,3 +12,16 @@ use wasm_bindgen::prelude::*;
 """
 rationale = "cfg-gating keeps host builds clean while enabling wasm-specific exports"
 anti_pattern = "Mixing wasm-only APIs into native builds without conditional compilation"
+
+[[patterns]]
+name = "wasm bindgen export"
+when = "Publishing a Rust function for JavaScript callers in the browser"
+code = """
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn greet(name: &str) -> String {
+    format!("hello, {name}")
+}
+"""
+rationale = "wasm-bindgen provides the standard bridge for JS-facing exports from Rust"
+anti_pattern = "Expecting plain pub fn symbols to be callable from JavaScript without bindgen glue"

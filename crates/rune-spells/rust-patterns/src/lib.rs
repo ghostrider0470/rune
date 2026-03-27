@@ -161,21 +161,27 @@ pub fn rust_pattern(query: PatternQuery) -> Result<QueryResult, RustPatternsErro
         }
         for tag in &requested_tags {
             if topic_tags.iter().any(|candidate| candidate == tag)
-                || topic_signals.iter().any(|candidate| candidate.contains(tag) || tag.contains(candidate))
+                || topic_signals
+                    .iter()
+                    .any(|candidate| candidate.contains(tag) || tag.contains(candidate))
             {
                 score += 20;
             }
         }
         for signal in &import_signals {
             if topic_tags.iter().any(|candidate| candidate == signal)
-                || topic_signals.iter().any(|candidate| candidate.contains(signal) || signal.contains(candidate))
+                || topic_signals
+                    .iter()
+                    .any(|candidate| candidate.contains(signal) || signal.contains(candidate))
             {
                 score += 15;
             }
         }
         for term in task_terms.iter().chain(error_terms.iter()) {
             if topic_tags.iter().any(|candidate| candidate == term)
-                || topic_signals.iter().any(|candidate| candidate.contains(term) || term.contains(candidate))
+                || topic_signals
+                    .iter()
+                    .any(|candidate| candidate.contains(term) || term.contains(candidate))
                 || topic_norm.contains(term)
             {
                 score += 5;
@@ -322,6 +328,7 @@ fn load_pattern_library(dir: PathBuf) -> Result<Vec<LoadedTopic>, RustPatternsEr
         });
     }
 
+    topics.sort_by(|a, b| a.topic.cmp(&b.topic));
     Ok(topics)
 }
 
@@ -375,9 +382,22 @@ mod tests {
     #[test]
     fn loads_all_seed_topics() {
         let topics = load_pattern_library(default_patterns_dir()).expect("seed patterns should load");
+        assert!(topics.iter().any(|topic| topic.topic == "ownership"));
         assert!(topics.iter().any(|topic| topic.topic == "error_handling"));
         assert!(topics.iter().any(|topic| topic.topic == "async_tokio"));
+        assert!(topics.iter().any(|topic| topic.topic == "axum_web"));
+        assert!(topics.iter().any(|topic| topic.topic == "concurrency"));
+        assert!(topics.iter().any(|topic| topic.topic == "database"));
+        assert!(topics.iter().any(|topic| topic.topic == "cli_clap"));
+        assert!(topics.iter().any(|topic| topic.topic == "wasm"));
+        assert!(topics.iter().any(|topic| topic.topic == "pyo3"));
         assert!(topics.iter().any(|topic| topic.topic == "anti_patterns"));
+    }
+
+    #[test]
+    fn every_seed_topic_has_at_least_one_pattern() {
+        let topics = load_pattern_library(default_patterns_dir()).expect("seed patterns should load");
+        assert!(topics.iter().all(|topic| !topic.patterns.is_empty()));
     }
 
     #[test]
@@ -406,10 +426,30 @@ mod tests {
     }
 
     #[test]
+    fn query_by_imports_prefers_axum_patterns() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("handler.rs");
+        fs::write(
+            &file,
+            "use axum::Json;\nuse axum::extract::State;\nasync fn handler() {}\n",
+        )
+        .expect("write file");
+
+        let result = rust_pattern(PatternQuery {
+            context_file: Some(file),
+            ..Default::default()
+        })
+        .expect("query should work");
+
+        assert!(!result.patterns.is_empty());
+        assert_eq!(result.patterns[0].topic, "axum_web");
+    }
+
+    #[test]
     fn validation_flags_unwrap_in_non_test_code() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir");
         let file = tmp.path().join("sample.rs");
-        fs::write(&file, "fn demo() { let _ = Some(1).unwrap(); }\n").unwrap();
+        fs::write(&file, "fn demo() { let _ = Some(1).unwrap(); }\n").expect("write file");
 
         let report = validate_rune_codebase(tmp.path());
         assert_eq!(report.findings.len(), 1);

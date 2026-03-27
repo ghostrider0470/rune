@@ -13,3 +13,18 @@ let app = axum::Router::new()
 """
 rationale = "Axum state injection keeps handlers lean and testable"
 anti_pattern = "Global mutable state instead of explicit shared state injection"
+
+[[patterns]]
+name = "json extractor with status code"
+when = "Receiving and validating JSON payloads in an Axum handler"
+code = """
+async fn create_user(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<AppState>>,
+    axum::Json(input): axum::Json<CreateUserRequest>,
+) -> Result<(axum::http::StatusCode, axum::Json<User>), AppError> {
+    let user = state.repo.create(input).await?;
+    Ok((axum::http::StatusCode::CREATED, axum::Json(user)))
+}
+"""
+rationale = "Typed extractors and explicit status codes keep request handling precise and ergonomic"
+anti_pattern = "Manual body parsing and ad-hoc JSON decoding inside handlers"
