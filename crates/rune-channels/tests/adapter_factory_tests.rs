@@ -316,3 +316,12 @@ async fn create_adapter_uses_configured_optional_listener_and_channel_fields() {
     assert!(create_adapter("whatsapp", &config).is_ok());
     assert!(create_adapter("signal", &config).is_ok());
 }
+
+#[test]
+fn channels_config_defaults_google_chat_fields_safely() {
+    let config = ChannelsConfig::default();
+
+    assert_eq!(config.google_chat_service_account, None);
+    assert_eq!(config.google_chat_listen_addr, None);
+    assert_eq!(config.google_chat_verification_token, None);
+}
