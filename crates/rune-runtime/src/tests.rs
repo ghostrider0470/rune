@@ -2557,3 +2557,23 @@ async fn create_session_full_persists_mode_in_metadata() {
         Some("architect")
     );
 }
+
+#[test]
+fn usage_accumulator_cache_hit_ratio() {
+    let mut acc = crate::usage::UsageAccumulator::new();
+    acc.add(&Usage {
+        prompt_tokens: 100,
+        completion_tokens: 20,
+        total_tokens: 120,
+        cached_prompt_tokens: Some(80),
+        uncached_prompt_tokens: Some(20),
+    });
+    let ratio = acc.cache_hit_ratio();
+    assert!((ratio - 0.8).abs() < f64::EPSILON);
+}
+
+#[test]
+fn usage_accumulator_cache_hit_ratio_zero_when_no_prompt_tokens() {
+    let acc = crate::usage::UsageAccumulator::new();
+    assert_eq!(acc.cache_hit_ratio(), 0.0);
+}

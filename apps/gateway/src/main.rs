@@ -3885,7 +3885,7 @@ impl ModelProvider for EchoModelProvider {
                 prompt_tokens: latest_user.len() as u32,
                 completion_tokens: (latest_user.len() as u32) + 6,
                 total_tokens: (latest_user.len() as u32) * 2 + 6,
-                cached_prompt_tokens: 0,
+                ..Default::default()
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: Vec::new(),
