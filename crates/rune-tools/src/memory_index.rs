@@ -1315,6 +1315,15 @@ Delta echo foxtrot.
         async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
             Ok(Vec::new())
         }
+
+        async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
+            self.deleted_files.lock().unwrap().push(format!("{}:{}", file_path, chunk_index));
+            Ok(true)
+        }
+
+        async fn delete_all(&self) -> Result<usize, StoreError> {
+            Ok(0)
+        }
     }
 
     #[async_trait::async_trait]
