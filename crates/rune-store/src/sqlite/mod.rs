@@ -3,7 +3,10 @@
 //! Uses `tokio-rusqlite` to run synchronous rusqlite operations on a
 //! dedicated thread, keeping the async runtime non-blocking.
 
+pub mod memory_fact;
 pub mod migrations;
+
+pub use memory_fact::SqliteMemoryFactRepo;
 
 use std::sync::Arc;
 
