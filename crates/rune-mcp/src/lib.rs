@@ -2,6 +2,7 @@
 
 pub mod discovery;
 pub mod error;
+pub mod memory_server;
 pub mod protocol;
 pub mod transport_http;
 pub mod transport_stdio;
