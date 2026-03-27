@@ -766,6 +766,32 @@ impl fmt::Display for SkillSummary {
     }
 }
 
+
+/// Response for `rune spells search`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpellSearchResponse {
+    pub query: String,
+    pub total: usize,
+    pub spells: Vec<SkillSummary>,
+}
+
+impl fmt::Display for SpellSearchResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.spells.is_empty() {
+            return write!(f, "No spells matched \"{}\".", self.query);
+        }
+
+        writeln!(f, "Matched {} spell(s) for \"{}\":", self.total, self.query)?;
+        for (idx, spell) in self.spells.iter().enumerate() {
+            if idx > 0 {
+                writeln!(f)?;
+                writeln!(f)?;
+            }
+            write!(f, "{spell}")?;
+        }
+        Ok(())
+    }
+}
 /// Response for `rune skills list`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillListResponse {
@@ -5447,6 +5473,25 @@ mod tests {
         assert_eq!(parsed["mode"], "coder");
     }
 
+
+    fn sample_skill(name: &str, description: &str, enabled: bool) -> SkillSummary {
+        SkillSummary {
+            name: name.into(),
+            description: description.into(),
+            enabled,
+            source_dir: format!("/data/skills/{name}"),
+            binary_path: Some(format!("/data/skills/{name}/run.sh")),
+            namespace: Some("core".into()),
+            version: Some("1.0.0".into()),
+            author: Some("Rune".into()),
+            kind: "workflow".into(),
+            requires: vec!["fs".into()],
+            tags: vec!["automation".into()],
+            match_rules: None,
+            triggers: vec!["manual".into()],
+        }
+    }
+
     #[test]
     fn render_skill_list_empty() {
         let response = SkillListResponse { skills: vec![] };
@@ -5457,20 +5502,8 @@ mod tests {
     fn render_skill_list_human() {
         let response = SkillListResponse {
             skills: vec![
-                SkillSummary {
-                    name: "alpha".into(),
-                    description: "First skill".into(),
-                    enabled: true,
-                    source_dir: "/data/skills/alpha".into(),
-                    binary_path: Some("/data/skills/alpha/run.sh".into()),
-                },
-                SkillSummary {
-                    name: "beta".into(),
-                    description: "Second skill".into(),
-                    enabled: false,
-                    source_dir: "/data/skills/beta".into(),
-                    binary_path: None,
-                },
+                sample_skill("alpha", "First skill", true),
+                SkillSummary { binary_path: None, ..sample_skill("beta", "Second skill", false) },
             ],
         };
         let out = render(&response, OutputFormat::Human);
@@ -5485,13 +5518,7 @@ mod tests {
     #[test]
     fn render_skill_list_json() {
         let response = SkillListResponse {
-            skills: vec![SkillSummary {
-                name: "alpha".into(),
-                description: "First skill".into(),
-                enabled: true,
-                source_dir: "/data/skills/alpha".into(),
-                binary_path: Some("/data/skills/alpha/run.sh".into()),
-            }],
+            skills: vec![sample_skill("alpha", "First skill", true)],
         };
         let out = render(&response, OutputFormat::Json);
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -5506,13 +5533,7 @@ mod tests {
     #[test]
     fn render_skill_info_human() {
         let response = SkillInfoResponse {
-            skill: SkillSummary {
-                name: "alpha".into(),
-                description: "First skill".into(),
-                enabled: true,
-                source_dir: "/data/skills/alpha".into(),
-                binary_path: Some("/data/skills/alpha/run.sh".into()),
-            },
+            skill: sample_skill("alpha", "First skill", true),
         };
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Skill: alpha"));
@@ -5525,13 +5546,7 @@ mod tests {
     #[test]
     fn render_skill_info_json() {
         let response = SkillInfoResponse {
-            skill: SkillSummary {
-                name: "alpha".into(),
-                description: "First skill".into(),
-                enabled: true,
-                source_dir: "/data/skills/alpha".into(),
-                binary_path: Some("/data/skills/alpha/run.sh".into()),
-            },
+            skill: sample_skill("alpha", "First skill", true),
         };
         let out = render(&response, OutputFormat::Json);
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();

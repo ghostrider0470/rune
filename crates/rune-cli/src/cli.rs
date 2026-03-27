@@ -1640,6 +1640,11 @@ pub enum SkillsAction {
 
 #[derive(Debug, Subcommand)]
 pub enum SpellsAction {
+    /// Search installed spells by name, description, tag, trigger, or namespace.
+    Search {
+        /// Query text to match against installed spell metadata.
+        query: String,
+    },
     /// List installed spells discovered by the gateway.
     List,
     /// Show details for a single installed spell.
