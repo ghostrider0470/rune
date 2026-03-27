@@ -161,6 +161,28 @@ impl TurnRepo for CosmosStore {
         Ok(row)
     }
 
+    async fn list_usage(
+        &self,
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        to: Option<chrono::DateTime<chrono::Utc>>,
+        limit: u32,
+    ) -> Result<Vec<TurnRow>, StoreError> {
+        let mut filters = vec!["c.type = 'turn'".to_string()];
+        if let Some(f) = from {
+            filters.push(format!("c.started_at >= '{}'", f.to_rfc3339()));
+        }
+        if let Some(t) = to {
+            filters.push(format!("c.started_at <= '{}'", t.to_rfc3339()));
+        }
+        let query = format!(
+            "SELECT * FROM c WHERE {} ORDER BY c.started_at DESC OFFSET 0 LIMIT {}",
+            filters.join(" AND "),
+            limit
+        );
+        let docs: Vec<TurnDoc> = self.query_cross_partition(&query).await?;
+        Ok(docs.into_iter().map(TurnRow::from).collect())
+    }
+
     async fn mark_stale_failed(&self, stale_secs: i64) -> Result<u64, StoreError> {
         let cutoff = Utc::now() - chrono::Duration::seconds(stale_secs);
         let cutoff_str = cutoff.to_rfc3339();

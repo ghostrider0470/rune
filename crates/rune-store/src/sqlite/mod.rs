@@ -598,6 +598,46 @@ impl TurnRepo for SqliteTurnRepo {
         }).await.map_err(|e| map_err(e, "turn", &id.to_string()))
     }
 
+    async fn list_usage(
+        &self,
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        to: Option<chrono::DateTime<chrono::Utc>>,
+        limit: u32,
+    ) -> Result<Vec<TurnRow>, StoreError> {
+        self.conn
+            .call(move |conn| {
+                let mut clauses = Vec::new();
+                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+                let mut idx = 1;
+                if let Some(f) = from {
+                    clauses.push(format!("started_at >= ?{idx}"));
+                    params.push(Box::new(f.to_rfc3339()));
+                    idx += 1;
+                }
+                if let Some(t) = to {
+                    clauses.push(format!("started_at <= ?{idx}"));
+                    params.push(Box::new(t.to_rfc3339()));
+                    idx += 1;
+                }
+                let where_clause = if clauses.is_empty() {
+                    String::new()
+                } else {
+                    format!(" WHERE {}", clauses.join(" AND "))
+                };
+                let sql = format!(
+                    "SELECT {TURN_COLS} FROM turns{where_clause} ORDER BY started_at DESC LIMIT ?{idx}"
+                );
+                params.push(Box::new(limit));
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    params.iter().map(|p| p.as_ref()).collect();
+                conn.prepare(&sql)?
+                    .query_map(param_refs.as_slice(), row_to_turn)?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(StoreError::from)
+    }
+
     async fn mark_stale_failed(&self, stale_secs: i64) -> Result<u64, StoreError> {
         self.conn
             .call(move |conn| {

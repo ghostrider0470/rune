@@ -98,6 +98,14 @@ pub trait TurnRepo: Send + Sync {
         cached_prompt_tokens: Option<i32>,
     ) -> Result<TurnRow, StoreError>;
 
+    /// List turns across all sessions within an optional time range, ordered by started_at DESC.
+    async fn list_usage(
+        &self,
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        to: Option<chrono::DateTime<chrono::Utc>>,
+        limit: u32,
+    ) -> Result<Vec<TurnRow>, StoreError>;
+
     /// Mark turns stuck in non-terminal status (started, model_calling, tool_executing)
     /// for longer than `stale_secs` as failed. Returns the count of affected rows.
     async fn mark_stale_failed(&self, stale_secs: i64) -> Result<u64, StoreError>;
