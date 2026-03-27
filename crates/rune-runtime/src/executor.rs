@@ -887,7 +887,11 @@ impl TurnExecutor {
             // Azure automatic prefix caching.
             tool_defs.sort_by(|a, b| a.function.name.cmp(&b.function.name));
 
-            let stable_prefix_messages = messages.first().cloned().map(|message| vec![message]);
+            let stable_prefix_messages = if messages.is_empty() {
+                None
+            } else {
+                Some(messages[..messages.len().min(2)].to_vec())
+            };
             let stable_prefix_tools = if tool_defs.is_empty() {
                 None
             } else {
@@ -896,7 +900,7 @@ impl TurnExecutor {
             let request = CompletionRequest {
                 stable_prefix_messages,
                 stable_prefix_tools,
-                messages: messages.into_iter().skip(1).collect(),
+                messages: messages.into_iter().skip(2).collect(),
                 model: model_ref.map(str::to_owned),
                 temperature: None,
                 max_tokens: None,

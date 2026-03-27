@@ -2667,7 +2667,7 @@ async fn request_stable_prefix_is_split_from_variable_messages() {
     let request = &requests[0];
 
     let stable = request.stable_prefix_messages.as_ref().unwrap();
-    assert_eq!(stable.len(), 1);
+    assert_eq!(stable.len(), 2);
     assert_eq!(stable[0].role, Role::System);
     assert!(
         stable[0]
@@ -2676,10 +2676,10 @@ async fn request_stable_prefix_is_split_from_variable_messages() {
             .unwrap()
             .contains("## Prompt Cache Padding")
     );
+    assert_eq!(stable[1].role, Role::User);
+    assert_eq!(stable[1].content.as_deref(), Some("hello"));
 
-    assert!(!request.messages.is_empty());
-    assert_eq!(request.messages[0].role, Role::User);
-    assert_eq!(request.messages[0].content.as_deref(), Some("hello"));
+    assert!(request.messages.is_empty());
 }
 
 #[tokio::test]
@@ -2723,5 +2723,5 @@ async fn request_stable_prefix_keeps_tools_out_of_variable_tail() {
     assert_eq!(stable_tools[0].function.name, "alpha_tool");
     assert_eq!(stable_tools[1].function.name, "zeta_tool");
     assert!(request.tools.is_none());
-    assert_eq!(request.messages[0].role, Role::User);
+    assert!(request.messages.is_empty());
 }
