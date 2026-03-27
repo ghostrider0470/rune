@@ -9,7 +9,7 @@ mod memory_fact;
 use std::sync::Arc;
 
 use arrow_array::{
-    Array, Float32Array, Float64Array, FixedSizeListArray, Int32Array, RecordBatch,
+    Array, FixedSizeListArray, Float32Array, Float64Array, Int32Array, RecordBatch,
     RecordBatchIterator, StringArray,
 };
 use arrow_schema::{DataType, Field, Schema};
@@ -92,10 +92,7 @@ impl LanceStore {
 fn embedding_field(dims: i32) -> Field {
     Field::new(
         "embedding",
-        DataType::FixedSizeList(
-            Arc::new(Field::new("item", DataType::Float32, true)),
-            dims,
-        ),
+        DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dims),
         false,
     )
 }
@@ -158,14 +155,19 @@ pub(crate) fn i32_col<'a>(batch: &'a RecordBatch, name: &str) -> &'a Int32Array 
         .expect("not an i32 column")
 }
 
-/// Extract a Float64 column (used for _distance scores).
-pub(crate) fn f64_col<'a>(batch: &'a RecordBatch, name: &str) -> &'a Float64Array {
-    batch
-        .column_by_name(name)
-        .expect("missing column")
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("not an f64 column")
+/// Extract a floating-point value from a column, accepting Float64 or Float32.
+pub(crate) fn f64_value(batch: &RecordBatch, name: &str, row: usize) -> f64 {
+    let column = batch.column_by_name(name).expect("missing column");
+
+    if let Some(values) = column.as_any().downcast_ref::<Float64Array>() {
+        return values.value(row);
+    }
+
+    if let Some(values) = column.as_any().downcast_ref::<Float32Array>() {
+        return values.value(row) as f64;
+    }
+
+    panic!("column '{name}' is not a Float64 or Float32 column");
 }
 
 /// Extract the embedding FixedSizeList column and return each row as Vec<f32>.
