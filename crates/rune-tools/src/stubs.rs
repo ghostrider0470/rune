@@ -169,6 +169,8 @@ pub fn register_builtin_stubs(registry: &mut ToolRegistry) {
     registry.register(crate::context_budget_tool::context_budget_tool_definition());
     registry.register(crate::context_budget_tool::context_checkpoint_tool_definition());
     registry.register(crate::context_budget_tool::context_gc_tool_definition());
+    registry.register(crate::comms_tool::comms_send_tool_definition());
+    registry.register(crate::comms_tool::comms_read_tool_definition());
 }
 
 /// Validate that a tool call's arguments satisfy the `required` fields in the tool schema.

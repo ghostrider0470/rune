@@ -1374,6 +1374,33 @@ impl CommsOps for CommsClientOps {
     ) -> Result<String, String> {
         self.client.send(msg_type, subject, body, priority).await
     }
+
+    async fn read_inbox(
+        &self,
+        mark_read: bool,
+    ) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
+        let messages = self.client.read_inbox().await;
+        let mut summaries = Vec::with_capacity(messages.len());
+
+        for (path, msg) in &messages {
+            summaries.push(rune_tools::comms_tool::CommsMessageSummary {
+                id: msg.id.clone(),
+                from: msg.from.clone(),
+                subject: msg.subject.clone(),
+                body: msg.body.clone(),
+                priority: msg.priority.clone(),
+                created_at: msg.created_at.clone(),
+            });
+
+            if mark_read {
+                if let Err(e) = self.client.archive(path).await {
+                    tracing::warn!(error = %e, "failed to archive comms message after read");
+                }
+            }
+        }
+
+        Ok(summaries)
+    }
 }
 
 struct AppToolExecutor {
@@ -1700,10 +1727,10 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "comms_send" => match &self.comms {
+            "comms_send" | "comms_read" => match &self.comms {
                 Some(comms) => comms.execute(call).await,
                 None => Err(ToolError::UnknownTool {
-                    name: "comms_send".to_string(),
+                    name: call.tool_name.clone(),
                 }),
             },
             other if other.contains("__") => match &self.mcp {
