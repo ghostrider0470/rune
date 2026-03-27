@@ -17,6 +17,7 @@ members = [
   "crates/rune-testkit",
   "crates/rune-spells/security-audit",
   "crates/rune-spells/rust-patterns",
+  "crates/rune-spells/code-review",
   "apps/gateway",
   "apps/cli",
 ]

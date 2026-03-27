@@ -23,6 +23,7 @@ rune-store = { path = "../../crates/rune-store" }
 rune-tools = { path = "../../crates/rune-tools" }
 rune-spells-security-audit = { path = "../../crates/rune-spells/security-audit" }
 rune-spells-rust-patterns = { path = "../../crates/rune-spells/rust-patterns" }
+rune-spells-code-review = { path = "../../crates/rune-spells/code-review" }
 
 anyhow.workspace = true
 async-trait.workspace = true
