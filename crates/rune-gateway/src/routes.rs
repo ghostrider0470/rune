@@ -4052,13 +4052,14 @@ pub async fn get_dashboard_usage(
     let mut entries: Vec<_> = grouped.into_values().collect();
     // Compute per-entry cost estimates
     for entry in &mut entries {
-        entry.estimated_cost = estimate_cost(
+        let cost = estimate_cost(
             &entry.model,
             entry.prompt_tokens,
             0, // per-entry cached breakdown not available yet
             entry.completion_tokens,
-        )
-        .map(|c| format_cost(c));
+        );
+        tracing::debug!(model = %entry.model, prompt = entry.prompt_tokens, completion = entry.completion_tokens, cost = ?cost, "usage cost estimate");
+        entry.estimated_cost = cost.map(|c| format_cost(c));
     }
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 
