@@ -1733,6 +1733,7 @@ async fn foundry_openai_request_golden_shape() {
 
     let p = AzureFoundryProvider::with_api_version(&server.uri(), "my-foundry-key", "2024-05-01");
     let request = CompletionRequest {
+        stable_prefix_messages: None,
         messages: vec![
             ChatMessage {
                 role: Role::System,
@@ -1850,6 +1851,7 @@ async fn foundry_anthropic_extracts_system_message() {
 
     let p = AzureFoundryProvider::new(&server.uri(), "key");
     let request = CompletionRequest {
+        stable_prefix_messages: None,
         messages: vec![
             ChatMessage {
                 role: Role::System,
@@ -1962,6 +1964,7 @@ async fn foundry_anthropic_request_golden_shape() {
 
     let p = AzureFoundryProvider::with_api_version(&server.uri(), "my-foundry-key", "2023-06-01");
     let request = CompletionRequest {
+        stable_prefix_messages: None,
         messages: vec![
             ChatMessage {
                 role: Role::System,
@@ -2144,6 +2147,7 @@ fn anthropic_error_body(error_type: &str, message: &str) -> serde_json::Value {
 
 fn claude_request() -> CompletionRequest {
     CompletionRequest {
+        stable_prefix_messages: None,
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
@@ -2445,7 +2449,9 @@ async fn azure_maps_retry_after_http_date() {
     let p = AzureOpenAiProvider::new(&server.uri(), "dep", "2024-06-01", "k");
     let err = p.complete(&simple_request()).await.unwrap_err();
     match err {
-        ModelError::RateLimited { retry_after_secs, .. } => {
+        ModelError::RateLimited {
+            retry_after_secs, ..
+        } => {
             assert!(retry_after_secs.is_some());
         }
         other => panic!("expected RateLimited, got {other:?}"),

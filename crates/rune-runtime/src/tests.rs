@@ -9,7 +9,7 @@ use uuid::Uuid;
 use rune_core::{SessionKind, SessionStatus, ToolCategory};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, FunctionCall, ModelError, ModelProvider,
-    ToolCallRequest, Usage,
+    Role, ToolCallRequest, Usage,
 };
 use rune_store::StoreError;
 use rune_store::models::*;
@@ -2485,7 +2485,10 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
         .await;
 
     let sent = sent.lock().await.clone();
-    assert!(sent.is_empty(), "notice should not be sent for sessions that were not restored during startup");
+    assert!(
+        sent.is_empty(),
+        "notice should not be sent for sessions that were not restored during startup"
+    );
 }
 
 #[tokio::test]
@@ -2568,7 +2571,10 @@ async fn create_session_full_persists_mode_in_metadata() {
         .unwrap();
 
     assert_eq!(
-        session.metadata.get("mode").and_then(|value| value.as_str()),
+        session
+            .metadata
+            .get("mode")
+            .and_then(|value| value.as_str()),
         Some("architect")
     );
 }
@@ -2618,7 +2624,10 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     );
 
     executor.execute(session.id, "hello", None).await.unwrap();
-    executor.execute(session.id, "follow-up", None).await.unwrap();
+    executor
+        .execute(session.id, "follow-up", None)
+        .await
+        .unwrap();
 
     let requests = model_handle.requests().await;
     assert!(requests.len() >= 2);
@@ -2627,4 +2636,48 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     let second_system = requests[1].messages[0].content.clone().unwrap();
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
+}
+
+#[tokio::test]
+async fn request_stable_prefix_is_split_from_variable_messages() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("ok"),
+    ]));
+    let model_handle = model.clone();
+    let executor = h.turn_executor(
+        model,
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
+
+    executor.execute(session.id, "hello", None).await.unwrap();
+
+    let requests = model_handle.requests().await;
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+
+    let stable = request.stable_prefix_messages.as_ref().unwrap();
+    assert_eq!(stable.len(), 1);
+    assert_eq!(stable[0].role, Role::System);
+    assert!(
+        stable[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("## Prompt Cache Padding")
+    );
+
+    assert!(!request.messages.is_empty());
+    assert_eq!(request.messages[0].role, Role::User);
+    assert_eq!(request.messages[0].content.as_deref(), Some("hello"));
 }

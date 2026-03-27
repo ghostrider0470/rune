@@ -58,7 +58,18 @@ pub struct TurnExecutor {
     /// Global approval mode — "yolo" auto-approves all tool calls.
     approval_mode: String,
     agent_registry: Option<Arc<crate::agent_registry::AgentRegistry>>,
-    usage_recorder: Option<Arc<dyn Fn(String, String, Usage) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>>,
+    usage_recorder: Option<
+        Arc<
+            dyn Fn(
+                    String,
+                    String,
+                    Usage,
+                )
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 impl TurnExecutor {
@@ -361,7 +372,12 @@ impl TurnExecutor {
         let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn.id, prompt_tokens, completion_tokens, cached_prompt_tokens)
+            .update_usage(
+                turn.id,
+                prompt_tokens,
+                completion_tokens,
+                cached_prompt_tokens,
+            )
             .await?;
 
         // 5. Finalize turn status
@@ -685,7 +701,12 @@ impl TurnExecutor {
         let cached_prompt_tokens = i32::try_from(usage.cached_prompt_tokens).ok();
         let _ = self
             .turn_repo
-            .update_usage(turn_uuid, prompt_tokens, completion_tokens, cached_prompt_tokens)
+            .update_usage(
+                turn_uuid,
+                prompt_tokens,
+                completion_tokens,
+                cached_prompt_tokens,
+            )
             .await?;
 
         let (final_status, ended_at, approval_status, approval_summary) = match &result {
@@ -846,7 +867,6 @@ impl TurnExecutor {
                 Some(&memory_context),
                 &extra_system_sections,
             );
-            let stable_prefix_messages = messages.first().cloned().map(|message| vec![message]);
 
             // Build tool definitions for the request
             let mut tool_defs: Vec<rune_models::ToolDefinition> = self
@@ -867,9 +887,10 @@ impl TurnExecutor {
             // Azure automatic prefix caching.
             tool_defs.sort_by(|a, b| a.function.name.cmp(&b.function.name));
 
+            let stable_prefix_messages = messages.first().cloned().map(|message| vec![message]);
             let request = CompletionRequest {
-                messages,
                 stable_prefix_messages,
+                messages: messages.into_iter().skip(1).collect(),
                 model: model_ref.map(str::to_owned),
                 temperature: None,
                 max_tokens: None,
@@ -919,7 +940,12 @@ impl TurnExecutor {
             usage.add(&response.usage);
             if let Some(recorder) = &self.usage_recorder {
                 let (provider, model) = provider_and_model_for_log(&request);
-                recorder(provider.to_string(), model.to_string(), response.usage.clone()).await;
+                recorder(
+                    provider.to_string(),
+                    model.to_string(),
+                    response.usage.clone(),
+                )
+                .await;
             }
 
             // If model returned tool calls → execute them and loop
@@ -1190,7 +1216,9 @@ impl TurnExecutor {
             match self.model_provider.complete(request).await {
                 Ok(r) => return Ok(r),
                 Err(e) => {
-                    if attempt < MAX_RETRIES && matches!(e, rune_models::ModelError::RateLimited { .. }) {
+                    if attempt < MAX_RETRIES
+                        && matches!(e, rune_models::ModelError::RateLimited { .. })
+                    {
                         let initial_delay = match &e {
                             rune_models::ModelError::RateLimited {
                                 retry_after_secs: Some(ra),
