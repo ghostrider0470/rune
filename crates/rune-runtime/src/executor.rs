@@ -834,7 +834,7 @@ impl TurnExecutor {
             );
 
             // Build tool definitions for the request
-            let tool_defs: Vec<rune_models::ToolDefinition> = self
+            let mut tool_defs: Vec<rune_models::ToolDefinition> = self
                 .tool_registry
                 .list()
                 .iter()
@@ -847,6 +847,10 @@ impl TurnExecutor {
                     },
                 })
                 .collect();
+            // Sort tool definitions by name for deterministic serialization — this
+            // maximizes the shared prefix across consecutive LLM calls, enabling
+            // Azure automatic prefix caching.
+            tool_defs.sort_by(|a, b| a.function.name.cmp(&b.function.name));
 
             let request = CompletionRequest {
                 messages,
