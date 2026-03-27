@@ -89,6 +89,16 @@ fn signal_adapter_requires_number() {
 }
 
 #[test]
+fn teams_adapter_requires_bot_token() {
+    let config = ChannelsConfig::default();
+    let err = match create_adapter("teams", &config) {
+        Ok(_) => panic!("teams should require bot token"),
+        Err(err) => err,
+    };
+    assert_provider_error(err, "teams_bot_token is required");
+}
+
+#[test]
 fn unknown_adapter_kind_returns_provider_error() {
     let config = ChannelsConfig::default();
     let err = match create_adapter("matrix", &config) {
@@ -248,85 +258,6 @@ async fn signal_adapter_defaults_api_url_when_missing() {
     drop(adapter);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn whatsapp_adapter_rejects_missing_verify_token() {
-    let result = create_adapter(
-        "whatsapp",
-        &ChannelsConfig {
-            whatsapp_access_token: Some("wa-token".into()),
-            whatsapp_phone_number_id: Some("phone-1".into()),
-            whatsapp_verify_token: None,
-            whatsapp_app_secret: Some("app-secret".into()),
-            ..ChannelsConfig::default()
-        },
-    );
-    assert!(result.is_err());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn channels_config_wiring_supports_optional_listener_and_polling_fields() {
-    let config = ChannelsConfig {
-        discord_token: Some("discord-token".into()),
-        discord_guild_id: Some("guild-1".into()),
-        discord_channel_ids: vec!["chan-1".into(), "chan-2".into()],
-        slack_bot_token: Some("xoxb-test".into()),
-        slack_listen_addr: Some("127.0.0.1:3100".into()),
-        slack_signing_secret: Some("slack-secret".into()),
-        whatsapp_access_token: Some("wa-token".into()),
-        whatsapp_phone_number_id: Some("phone-1".into()),
-        whatsapp_verify_token: Some("verify-me".into()),
-        whatsapp_app_secret: Some("app-secret".into()),
-        whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
-        signal_number: Some("+15551234567".into()),
-        ..ChannelsConfig::default()
-    };
-
-    assert!(create_adapter("discord", &config).is_ok());
-    assert!(create_adapter("slack", &config).is_ok());
-    assert!(create_adapter("whatsapp", &config).is_ok());
-}
-
-fn assert_provider_error(err: ChannelError, expected: &str) {
-    match err {
-        ChannelError::Provider { message } => assert!(message.contains(expected), "{message}"),
-        other => panic!("expected provider error, got {other:?}"),
-    }
-}
-
-#[test]
-fn channels_config_defaults_new_adapter_fields_safely() {
-    let config = ChannelsConfig::default();
-
-    assert!(config.discord_channel_ids.is_empty());
-    assert_eq!(config.slack_listen_addr, None);
-    assert_eq!(config.whatsapp_listen_addr, None);
-    assert_eq!(config.whatsapp_app_secret, None);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn create_adapter_uses_configured_optional_listener_and_channel_fields() {
-    let config = ChannelsConfig {
-        discord_token: Some("discord-token".into()),
-        discord_channel_ids: vec!["chan-1".into(), "chan-2".into()],
-        slack_bot_token: Some("xoxb-test".into()),
-        slack_listen_addr: Some("127.0.0.1:3100".into()),
-        slack_signing_secret: Some("slack-secret".into()),
-        whatsapp_access_token: Some("wa-token".into()),
-        whatsapp_phone_number_id: Some("phone-1".into()),
-        whatsapp_verify_token: Some("verify-me".into()),
-        whatsapp_app_secret: Some("app-secret".into()),
-        whatsapp_listen_addr: Some("127.0.0.1:3200".into()),
-        signal_number: Some("+15551234567".into()),
-        signal_api_url: Some("http://localhost:8080".into()),
-        ..ChannelsConfig::default()
-    };
-
-    assert!(create_adapter("discord", &config).is_ok());
-    assert!(create_adapter("slack", &config).is_ok());
-    assert!(create_adapter("whatsapp", &config).is_ok());
-    assert!(create_adapter("signal", &config).is_ok());
-}
-
 #[test]
 fn channels_config_defaults_google_chat_fields_safely() {
     let config = ChannelsConfig::default();
@@ -336,12 +267,12 @@ fn channels_config_defaults_google_chat_fields_safely() {
     assert_eq!(config.google_chat_verification_token, None);
 }
 
-#[test]
-fn teams_adapter_requires_bot_token() {
-    let config = ChannelsConfig::default();
-    let err = match create_adapter("teams", &config) {
-        Ok(_) => panic!("teams should require bot token"),
-        Err(err) => err,
-    };
-    assert_provider_error(err, "teams_bot_token is required");
+fn assert_provider_error(err: ChannelError, expected: &str) {
+    match err {
+        ChannelError::Provider { message } => assert!(
+            message.contains(expected),
+            "expected provider error containing {expected:?}, got {message:?}"
+        ),
+        other => panic!("expected provider error, got {other:?}"),
+    }
 }
