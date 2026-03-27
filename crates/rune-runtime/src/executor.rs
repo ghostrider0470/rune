@@ -1151,13 +1151,16 @@ impl TurnExecutor {
         }
     }
 
-    /// Non-streaming model call with transient-error retries and exponential backoff.
+    /// Non-streaming model call with transient-error retries, exponential
+    /// backoff, `Retry-After` header respect, and jitter to avoid thundering
+    /// herd retries.
     async fn complete_with_retries(
         &self,
         request: &CompletionRequest,
     ) -> Result<rune_models::CompletionResponse, RuntimeError> {
         const MAX_RETRIES: u32 = 3;
         const BACKOFF_SECS: [u64; 3] = [1, 3, 10];
+        const MAX_BACKOFF_SECS: u64 = 60;
         let mut last_err = None;
 
         for attempt in 0..=MAX_RETRIES {
@@ -1165,15 +1168,28 @@ impl TurnExecutor {
                 Ok(r) => return Ok(r),
                 Err(e) => {
                     if attempt < MAX_RETRIES && e.is_retriable() {
-                        let delay = BACKOFF_SECS[attempt as usize];
+                        let base_delay = BACKOFF_SECS[attempt as usize];
+                        let delay = match &e {
+                            rune_models::ModelError::RateLimited {
+                                retry_after_secs: Some(ra),
+                                ..
+                            } => (*ra).min(MAX_BACKOFF_SECS).max(base_delay),
+                            _ => base_delay,
+                        };
+                        let jitter_ms = rand_jitter_ms();
                         warn!(
                             error = %e,
                             attempt = attempt + 1,
                             max_retries = MAX_RETRIES,
                             backoff_secs = delay,
+                            jitter_ms,
                             "transient model error, retrying"
                         );
-                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                        tokio::time::sleep(
+                            std::time::Duration::from_secs(delay)
+                                + std::time::Duration::from_millis(jitter_ms),
+                        )
+                        .await;
                         last_err = Some(e);
                     } else {
                         error!(error = %e, "model call failed");
@@ -1379,4 +1395,14 @@ fn parse_approval_decision(raw: &str) -> Result<ApprovalDecision, RuntimeError> 
             "unsupported approval decision: {other}"
         ))),
     }
+}
+
+/// Generate a random jitter between 0 and 500ms to spread out retries.
+fn rand_jitter_ms() -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    std::time::Instant::now().hash(&mut hasher);
+    std::thread::current().id().hash(&mut hasher);
+    hasher.finish() % 500
 }
