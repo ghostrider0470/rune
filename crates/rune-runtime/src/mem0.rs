@@ -25,9 +25,17 @@ pub struct Memory {
     pub fact: String,
     pub category: String,
     pub source_session_id: Option<Uuid>,
+    pub source_agent: Option<String>,
+    pub trigger: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub access_count: i32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MemoryCaptureMetadata {
+    pub source_agent: Option<String>,
+    pub trigger: Option<String>,
 }
 
 /// A graph of memories: nodes + similarity edges for visualization.
@@ -73,6 +81,8 @@ fn ensure_table_sql(dims: usize) -> String {
     category TEXT NOT NULL DEFAULT 'general',
     embedding vector({dims}),
     source_session_id UUID,
+    source_agent TEXT,
+    trigger TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     access_count INTEGER NOT NULL DEFAULT 0
@@ -89,7 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_rune_memories_embedding
 "#;
 
 const RECALL_SQL: &str = r#"
-SELECT id, fact, category, source_session_id, created_at, updated_at, access_count
+SELECT id, fact, category, source_session_id, source_agent, trigger, created_at, updated_at, access_count
 FROM rune_memories
 WHERE 1 - (embedding <=> $1::vector) > $2
 ORDER BY embedding <=> $1::vector
@@ -101,7 +111,7 @@ UPDATE rune_memories SET access_count = access_count + 1 WHERE id = ANY($1)
 "#;
 
 const DEDUP_CHECK_SQL: &str = r#"
-SELECT id, fact, 1 - (embedding <=> $1::vector) AS similarity
+SELECT id, fact, source_agent, trigger, 1 - (embedding <=> $1::vector) AS similarity
 FROM rune_memories
 WHERE 1 - (embedding <=> $1::vector) > $2
 ORDER BY embedding <=> $1::vector
@@ -109,13 +119,13 @@ LIMIT 1
 "#;
 
 const INSERT_MEMORY_SQL: &str = r#"
-INSERT INTO rune_memories (id, fact, category, embedding, source_session_id, created_at, updated_at)
-VALUES ($1, $2, $3, $4::vector, $5, $6, $7)
+INSERT INTO rune_memories (id, fact, category, embedding, source_session_id, source_agent, trigger, created_at, updated_at)
+VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8, $9)
 "#;
 
 const UPDATE_MEMORY_SQL: &str = r#"
 UPDATE rune_memories
-SET fact = $2, category = $3, embedding = $4::vector, updated_at = $5
+SET fact = $2, category = $3, embedding = $4::vector, source_agent = $5, trigger = $6, updated_at = $7
 WHERE id = $1
 "#;
 
@@ -203,6 +213,15 @@ impl Mem0Engine {
         if let Err(e) = client.batch_execute(&table_sql).await {
             error!(error = %e, "mem0: failed to create rune_memories table — disabling");
             return None;
+        }
+
+        if let Err(e) = client
+            .batch_execute(
+                "ALTER TABLE rune_memories ADD COLUMN IF NOT EXISTS source_agent TEXT;\n                 ALTER TABLE rune_memories ADD COLUMN IF NOT EXISTS trigger TEXT;",
+            )
+            .await
+        {
+            warn!(error = %e, "mem0: failed to ensure metadata columns");
         }
 
         // pgvector 0.9.0+ supports HNSW indexes up to 4000 dimensions, which
@@ -324,6 +343,8 @@ impl Mem0Engine {
                 fact: row.get("fact"),
                 category: row.get("category"),
                 source_session_id: row.get("source_session_id"),
+                source_agent: row.get("source_agent"),
+                trigger: row.get("trigger"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 access_count: row.get("access_count"),
@@ -350,6 +371,25 @@ impl Mem0Engine {
         assistant_msg: &str,
         session_id: Uuid,
     ) -> Vec<Memory> {
+        self.capture_with_metadata(
+            user_msg,
+            assistant_msg,
+            session_id,
+            MemoryCaptureMetadata {
+                source_agent: None,
+                trigger: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn capture_with_metadata(
+        &self,
+        user_msg: &str,
+        assistant_msg: &str,
+        session_id: Uuid,
+        metadata: MemoryCaptureMetadata,
+    ) -> Vec<Memory> {
         if let Err(e) = self.ensure_connected().await {
             warn!(error = %e, "mem0 capture: connection check failed");
             return Vec::new();
@@ -370,7 +410,7 @@ impl Mem0Engine {
         let mut stored = Vec::new();
 
         for fact in facts {
-            match self.store_fact(&fact, session_id).await {
+            match self.store_fact(&fact, session_id, &metadata).await {
                 Ok(Some(mem)) => stored.push(mem),
                 Ok(None) => {
                     debug!(fact = %fact.fact, "mem0: deduplicated (already exists)");
@@ -422,6 +462,8 @@ impl Mem0Engine {
                 fact: row.get("fact"),
                 category: row.get("category"),
                 source_session_id: row.get("source_session_id"),
+                source_agent: row.get("source_agent"),
+                trigger: row.get("trigger"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 access_count: row.get("access_count"),
@@ -465,6 +507,8 @@ impl Mem0Engine {
                 fact: row.get("fact"),
                 category: row.get("category"),
                 source_session_id: row.get("source_session_id"),
+                source_agent: row.get("source_agent"),
+                trigger: row.get("trigger"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 access_count: row.get("access_count"),
@@ -656,6 +700,7 @@ impl Mem0Engine {
         &self,
         fact: &ExtractedFact,
         session_id: Uuid,
+        metadata: &MemoryCaptureMetadata,
     ) -> Result<Option<Memory>, String> {
         let embedding = self.embed(&fact.fact).await?;
         let embedding_str = format_vector(&embedding);
@@ -705,6 +750,14 @@ impl Mem0Engine {
                             Type::TEXT,
                         ),
                         (
+                            &metadata.source_agent as &(dyn tokio_postgres::types::ToSql + Sync),
+                            Type::TEXT,
+                        ),
+                        (
+                            &metadata.trigger as &(dyn tokio_postgres::types::ToSql + Sync),
+                            Type::TEXT,
+                        ),
+                        (
                             &now as &(dyn tokio_postgres::types::ToSql + Sync),
                             Type::TIMESTAMPTZ,
                         ),
@@ -747,6 +800,14 @@ impl Mem0Engine {
                         Type::UUID,
                     ),
                     (
+                        &metadata.source_agent as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &metadata.trigger as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
                         &now as &(dyn tokio_postgres::types::ToSql + Sync),
                         Type::TIMESTAMPTZ,
                     ),
@@ -764,6 +825,8 @@ impl Mem0Engine {
             fact: fact.fact.clone(),
             category: fact.category.clone(),
             source_session_id: Some(session_id),
+            source_agent: metadata.source_agent.clone(),
+            trigger: metadata.trigger.clone(),
             created_at: now,
             updated_at: now,
             access_count: 0,
@@ -827,6 +890,8 @@ mod tests {
                 fact: "User prefers dark mode".to_string(),
                 category: "preference".to_string(),
                 source_session_id: None,
+                source_agent: None,
+                trigger: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 access_count: 3,
@@ -836,6 +901,8 @@ mod tests {
                 fact: "Project uses Rust".to_string(),
                 category: "project".to_string(),
                 source_session_id: None,
+                source_agent: None,
+                trigger: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 access_count: 1,
