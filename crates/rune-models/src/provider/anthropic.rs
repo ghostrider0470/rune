@@ -97,6 +97,10 @@ struct ContentBlock {
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,11 +223,19 @@ impl ModelProvider for AnthropicProvider {
             } else {
                 Some(content)
             },
-            usage: Usage {
-                prompt_tokens: api_resp.usage.input_tokens,
-                completion_tokens: api_resp.usage.output_tokens,
-                total_tokens: api_resp.usage.input_tokens + api_resp.usage.output_tokens,
-                ..Default::default()
+            usage: {
+                let cached = api_resp.usage.cache_read_input_tokens;
+                let created = api_resp.usage.cache_creation_input_tokens;
+                let input = api_resp.usage.input_tokens;
+                Usage {
+                    prompt_tokens: input,
+                    completion_tokens: api_resp.usage.output_tokens,
+                    total_tokens: input + api_resp.usage.output_tokens,
+                    cached_prompt_tokens: cached,
+                    uncached_prompt_tokens: created
+                        .or_else(|| cached.map(|c| input.saturating_sub(c))),
+                    ..Default::default()
+                }
             },
             finish_reason,
             tool_calls: Vec::new(),
