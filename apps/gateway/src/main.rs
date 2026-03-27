@@ -736,7 +736,7 @@ async fn build_services(
 
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-        match Mem0Engine::try_connect(&config.mem0, model_provider.clone()).await {
+        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");
