@@ -5925,11 +5925,11 @@ async fn latest_github_release_version(repo: &str) -> Result<Option<String>, Str
         .map_err(|error| error.to_string())
 }
 
-/// `POST /update/apply` - guide operators to the supported source/self-update flows.
+/// `POST /update/apply` - automatic in-process apply is not supported via the gateway API.
 pub async fn update_apply() -> Result<Json<UpdateApplyResponse>, GatewayError> {
     Ok(Json(UpdateApplyResponse {
         success: false,
-        detail: "automatic in-process update apply is not supported yet; pull the checkout, rebuild `rune` + `rune-gateway`, then restart the service (or run scripts/self-update.sh from the repo)".to_string(),
+        detail: "automatic in-process update apply is intentionally unsupported over the gateway API; run `rune update apply` locally for packaged installs, or `scripts/self-update.sh` from the repo checkout for source installs".to_string(),
         previous_version: None,
         installed_version: None,
         binary_path: None,
