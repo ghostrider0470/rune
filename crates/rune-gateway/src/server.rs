@@ -402,6 +402,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
     let protected_routes = Router::new()
         .route("/gateway/health", get(routes::health))
         .route("/gateway/ready", get(routes::ready))
+        .route("/admin/token-metrics", get(routes::token_metrics))
         .route("/status", get(routes::status))
         .route("/dashboard", get(routes::spa_index))
         .route("/ui", get(routes::spa_index))

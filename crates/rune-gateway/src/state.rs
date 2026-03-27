@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
+
 use rune_config::{AppConfig, Capabilities};
 use rune_models::ModelProvider;
 use rune_runtime::CommsClient;
@@ -54,6 +56,82 @@ pub struct WebChatRateLimiter {
     window: Duration,
     max_requests: u32,
     entries: Arc<Mutex<HashMap<String, WebChatRateLimitEntry>>>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TokenMetricsSnapshot {
+    pub provider: String,
+    pub model: String,
+    pub total_input_tokens: u64,
+    pub cached_tokens: u64,
+    pub uncached_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TokenMetricsEntry {
+    total_input_tokens: u64,
+    cached_tokens: u64,
+    uncached_tokens: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TokenMetricsStore {
+    inner: Arc<Mutex<HashMap<(String, String), TokenMetricsEntry>>>,
+}
+
+impl TokenMetricsStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn record(
+        &self,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+        total_input_tokens: u32,
+        cached_tokens: Option<u32>,
+        uncached_tokens: Option<u32>,
+    ) {
+        let provider = provider.into();
+        let model = model.into();
+        let mut inner = self.inner.lock().await;
+        let entry = inner.entry((provider, model)).or_default();
+
+        let total_input_tokens = u64::from(total_input_tokens);
+        let cached_tokens = u64::from(cached_tokens.unwrap_or(0));
+        let uncached_tokens = uncached_tokens
+            .map(u64::from)
+            .unwrap_or_else(|| total_input_tokens.saturating_sub(cached_tokens));
+
+        entry.total_input_tokens = entry.total_input_tokens.saturating_add(total_input_tokens);
+        entry.cached_tokens = entry.cached_tokens.saturating_add(cached_tokens);
+        entry.uncached_tokens = entry.uncached_tokens.saturating_add(uncached_tokens);
+    }
+
+    pub async fn snapshot(&self) -> Vec<TokenMetricsSnapshot> {
+        let inner = self.inner.lock().await;
+        let mut rows = inner
+            .iter()
+            .map(|((provider, model), entry)| {
+                let ratio = if entry.total_input_tokens == 0 {
+                    0.0
+                } else {
+                    (entry.cached_tokens as f64 / entry.total_input_tokens as f64) * 100.0
+                };
+                TokenMetricsSnapshot {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    total_input_tokens: entry.total_input_tokens,
+                    cached_tokens: entry.cached_tokens,
+                    uncached_tokens: entry.uncached_tokens,
+                    cache_hit_ratio_percent: ratio,
+                }
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|a, b| a.provider.cmp(&b.provider).then_with(|| a.model.cmp(&b.model)));
+        rows
+    }
 }
 
 impl WebChatRateLimiter {
@@ -172,4 +250,6 @@ pub struct AppState {
     pub ms365_users_service: Arc<dyn Ms365UsersService>,
     /// Optional filesystem mailbox client for native inter-agent comms.
     pub comms_client: Option<Arc<CommsClient>>,
+    /// Rolling in-memory prompt cache metrics grouped by provider/model.
+    pub token_metrics: TokenMetricsStore,
 }

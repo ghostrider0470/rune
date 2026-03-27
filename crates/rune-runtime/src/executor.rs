@@ -9,7 +9,7 @@ use rune_core::{
     ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, SessionStatus, ToolCallId,
     TranscriptItem, TriggerKind, TurnId, TurnStatus,
 };
-use rune_models::{CompletionRequest, ModelProvider, StreamEvent};
+use rune_models::{CompletionRequest, ModelProvider, StreamEvent, Usage};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, SessionRepo, ToolApprovalPolicyRepo, TranscriptRepo, TurnRepo,
@@ -58,6 +58,7 @@ pub struct TurnExecutor {
     /// Global approval mode — "yolo" auto-approves all tool calls.
     approval_mode: String,
     agent_registry: Option<Arc<crate::agent_registry::AgentRegistry>>,
+    usage_recorder: Option<Arc<dyn Fn(String, String, Usage) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>>,
 }
 
 impl TurnExecutor {
@@ -118,6 +119,7 @@ impl TurnExecutor {
             mem0: None,
             approval_mode: "on-miss".to_string(),
             agent_registry: None,
+            usage_recorder: None,
         }
     }
 
@@ -129,6 +131,18 @@ impl TurnExecutor {
     }
 
     /// Set the default model name for completion requests.
+
+    pub fn with_usage_recorder<F, Fut>(mut self, recorder: F) -> Self
+    where
+        F: Fn(String, String, Usage) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.usage_recorder = Some(Arc::new(move |provider, model, usage| {
+            Box::pin(recorder(provider, model, usage))
+        }));
+        self
+    }
+
     pub fn with_default_model(mut self, model: impl Into<String>) -> Self {
         self.default_model = Some(model.into());
         self
@@ -901,6 +915,14 @@ impl TurnExecutor {
             };
 
             usage.add(&response.usage);
+            if let Some(recorder) = &self.usage_recorder {
+                recorder(
+                    self.model_provider.name().to_string(),
+                    active_model.clone(),
+                    response.usage.clone(),
+                )
+                .await;
+            }
 
             // If model returned tool calls → execute them and loop
             if !response.tool_calls.is_empty() {
