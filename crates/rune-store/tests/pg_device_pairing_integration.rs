@@ -4,7 +4,6 @@
 //! embedded PostgreSQL server is started automatically.
 
 use chrono::{Duration, Utc};
-use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use rune_store::embedded::EmbeddedPg;
@@ -57,11 +56,6 @@ async fn setup() -> Option<PgPool> {
         }
     };
 
-    if let Err(err) = run_migrations(&url) {
-        eprintln!("skipping rune-store device pairing integration tests: migrations failed: {err}");
-        return None;
-    }
-
     let pool = match create_pool(&url, 5) {
         Ok(pool) => pool,
         Err(err) => {
@@ -72,7 +66,12 @@ async fn setup() -> Option<PgPool> {
         }
     };
 
-    let mut conn = match pool.get().await {
+    if let Err(err) = run_migrations(&pool).await {
+        eprintln!("skipping rune-store device pairing integration tests: migrations failed: {err}");
+        return None;
+    }
+
+    let conn = match pool.get().await {
         Ok(conn) => conn,
         Err(err) => {
             eprintln!(
@@ -82,12 +81,12 @@ async fn setup() -> Option<PgPool> {
         }
     };
 
-    if let Err(err) = diesel::sql_query(
-        "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
-         tool_executions, channel_deliveries, paired_devices, pairing_requests CASCADE",
-    )
-    .execute(&mut conn)
-    .await
+    if let Err(err) = conn
+        .batch_execute(
+            "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
+             tool_executions, channel_deliveries, paired_devices, pairing_requests CASCADE",
+        )
+        .await
     {
         eprintln!("skipping rune-store device pairing integration tests: truncate failed: {err}");
         return None;
@@ -289,8 +288,8 @@ async fn device_repo_rejects_duplicate_public_keys() {
         })
         .await;
 
-    assert!(matches!(
-        duplicate,
-        Err(rune_store::StoreError::Conflict(_))
-    ));
+    match duplicate {
+        Err(rune_store::StoreError::Conflict(_)) => {}
+        other => panic!("expected conflict for duplicate public key, got {other:?}"),
+    }
 }

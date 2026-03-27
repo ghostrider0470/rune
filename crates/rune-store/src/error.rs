@@ -43,6 +43,18 @@ impl From<serde_json::Error> for StoreError {
 #[cfg(feature = "postgres")]
 impl From<tokio_postgres::Error> for StoreError {
     fn from(err: tokio_postgres::Error) -> Self {
+        if let Some(db_err) = err.as_db_error() {
+            let msg = db_err.message().to_string();
+            let code = db_err.code().code();
+            if code == "23505"
+                || msg.contains("duplicate key")
+                || msg.contains("unique constraint")
+            {
+                return StoreError::Conflict(msg);
+            }
+            return StoreError::Database(msg);
+        }
+
         let msg = err.to_string();
         if msg.contains("duplicate key") || msg.contains("unique constraint") {
             StoreError::Conflict(msg)
