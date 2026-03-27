@@ -4062,23 +4062,20 @@ pub async fn get_dashboard_usage(
     }
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 
+    let total_estimated_cost = {
+        let cost: f64 = entries.iter().map(|e| {
+            estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
+        }).sum();
+        if cost > 0.0 { Some(format_cost(cost)) } else { None }
+    };
+
     Ok(Json(UsageSummaryResponse {
         entries,
         total_prompt_tokens,
         total_completion_tokens,
         total_tokens: total_prompt_tokens + total_completion_tokens,
         total_requests,
-        total_estimated_cost: {
-            let total_cost: f64 = entries.iter()
-                .filter_map(|e| e.estimated_cost.as_ref()
-                    .and_then(|s| s.trim_start_matches('$').trim_start_matches('<').parse::<f64>().ok()))
-                .sum();
-            // Re-compute from raw tokens for accuracy
-            let cost: f64 = entries.iter().map(|e| {
-                estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
-            }).sum();
-            if cost > 0.0 { Some(format_cost(cost)) } else { None }
-        },
+        total_estimated_cost,
         usage_cached_prompt_tokens: total_cached_prompt_tokens,
         cache_hit_ratio: if total_prompt_tokens > 0 {
             total_cached_prompt_tokens as f64 / total_prompt_tokens as f64
