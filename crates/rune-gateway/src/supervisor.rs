@@ -696,6 +696,7 @@ async fn run_agent_turn(
                     deps.workspace_root.clone(),
                     Some(parent.id),
                     None,
+                    None,
                 )
                 .await?;
             execute_in_session(deps, &session, message, model, true, TriggerKind::CronJob).await
@@ -723,6 +724,7 @@ async fn run_reminder(
                     SessionKind::Subagent,
                     deps.workspace_root.clone(),
                     Some(parent.id),
+                    None,
                     None,
                 )
                 .await?;
@@ -758,6 +760,7 @@ async fn get_or_create_main_scheduled_session(
             deps.workspace_root.clone(),
             None,
             Some(MAIN_SCHEDULED_CHANNEL_REF.to_string()),
+            None,
         )
         .await?;
 
