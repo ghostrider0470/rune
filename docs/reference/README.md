@@ -3,6 +3,7 @@
 This folder is the stable technical reference hub for Rune architecture, APIs, CLI shape, and subsystem facts.
 
 Start here:
+- use [`SPELLS.md`](SPELLS.md) for the shipped Rune-native spell inventory and current tool surfaces
 - use [`ARCHITECTURE.md`](ARCHITECTURE.md) for runtime shape and subsystem boundary questions
 - use [`API.md`](API.md) for HTTP/dashboard/control-plane contract navigation
 - use [`CLI.md`](CLI.md) for command-surface navigation
