@@ -404,8 +404,6 @@ pub async fn comms_ack(
     }))
 }
 
-
-
 pub async fn acp_send(
     State(state): State<AppState>,
     Json(body): Json<AcpSendRequest>,
@@ -494,9 +492,14 @@ pub async fn acp_ack(
     let (path, _original) = inbox
         .into_iter()
         .find(|(_, msg)| msg.id == body.message_id)
-        .ok_or_else(|| GatewayError::BadRequest(format!("ACP message {} not found", body.message_id)))?;
+        .ok_or_else(|| {
+            GatewayError::BadRequest(format!("ACP message {} not found", body.message_id))
+        })?;
 
-    client.archive(&path).await.map_err(GatewayError::BadRequest)?;
+    client
+        .archive(&path)
+        .await
+        .map_err(GatewayError::BadRequest)?;
 
     Ok(Json(AcpAckResponse { acknowledged: true }))
 }
@@ -2186,6 +2189,14 @@ fn skill_to_response(skill: Skill) -> SkillResponse {
         enabled: skill.enabled,
         source_dir: skill.source_dir.display().to_string(),
         binary_path: skill.binary_path.map(|path| path.display().to_string()),
+        namespace: skill.namespace,
+        version: skill.version,
+        author: skill.author,
+        kind: format!("{:?}", skill.kind).to_lowercase(),
+        requires: skill.requires,
+        tags: skill.tags,
+        match_rules: skill.match_rules,
+        triggers: skill.triggers,
     }
 }
 
@@ -2746,6 +2757,18 @@ pub struct SkillResponse {
     pub source_dir: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binary_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    pub kind: String,
+    pub requires: Vec<String>,
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_rules: Option<serde_json::Value>,
+    pub triggers: Vec<String>,
 }
 
 #[derive(Serialize)]
