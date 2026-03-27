@@ -4,15 +4,17 @@ import { ChatFlatList } from "../../src/components/chat/ChatFlatList";
 import { ChatInputBar } from "../../src/components/chat/ChatInputBar";
 import { useChat } from "../../src/hooks/use-chat";
 import { useSessions } from "../../src/hooks/use-sessions";
+import { useTheme } from "../../src/hooks/use-theme";
 
 export default function ChatScreen() {
+  const colors = useTheme();
   const { sessions, activeSessionId, setActiveSessionId, createSession, loading: sessionsLoading } = useSessions();
   const { messages, sendMessage, sending, loading: transcriptLoading } = useChat(activeSessionId);
 
   return (
-    <SafeAreaView style={{ backgroundColor: "#f9fafb", flex: 1 }}>
-      <View style={{ borderBottomWidth: 1, borderColor: "#e5e7eb", gap: 12, padding: 12 }}>
-        <Text style={{ fontSize: 24, fontWeight: "700" }}>Rune Chat</Text>
+    <SafeAreaView style={{ backgroundColor: colors.background, flex: 1 }}>
+      <View style={{ borderBottomWidth: 1, borderColor: colors.border, gap: 12, padding: 12 }}>
+        <Text style={{ color: colors.text, fontSize: 24, fontWeight: "700" }}>Rune Chat</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: "row", gap: 8 }}>
             {sessions.map((session) => {
@@ -22,13 +24,13 @@ export default function ChatScreen() {
                   key={session.id}
                   onPress={() => setActiveSessionId(session.id)}
                   style={{
-                    backgroundColor: active ? "#2563eb" : "#e5e7eb",
+                    backgroundColor: active ? colors.primary : colors.surfaceMuted,
                     borderRadius: 999,
                     paddingHorizontal: 12,
                     paddingVertical: 8,
                   }}
                 >
-                  <Text style={{ color: active ? "#fff" : "#111827" }}>
+                  <Text style={{ color: active ? colors.onPrimary : colors.text }}>
                     {session.preview || session.id.slice(0, 8)}
                   </Text>
                 </Pressable>
@@ -36,9 +38,9 @@ export default function ChatScreen() {
             })}
             <Pressable
               onPress={() => void createSession()}
-              style={{ backgroundColor: "#111827", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}
+              style={{ backgroundColor: colors.text, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}
             >
-              <Text style={{ color: "#fff" }}>+ New</Text>
+              <Text style={{ color: colors.background }}>+ New</Text>
             </Pressable>
           </View>
         </ScrollView>
@@ -46,7 +48,7 @@ export default function ChatScreen() {
 
       {sessionsLoading || transcriptLoading ? (
         <View style={{ alignItems: "center", flex: 1, justifyContent: "center" }}>
-          <ActivityIndicator />
+          <ActivityIndicator color={colors.primary} />
         </View>
       ) : (
         <ChatFlatList messages={messages} />
