@@ -8,7 +8,6 @@
 //! `cargo test -p rune-store -- --test-threads=1`
 
 use chrono::Utc;
-use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 use rune_store::StoreError;
@@ -65,13 +64,6 @@ async fn setup() -> Option<(PgPool, PgVectorStatus)> {
         }
     };
 
-    if let Err(err) = run_migrations(&url) {
-        eprintln!("skipping rune-store pg integration tests: migrations failed: {err}");
-        return None;
-    }
-
-    let pgvector_status = try_upgrade_pgvector(&url);
-
     let pool = match create_pool(&url, 5) {
         Ok(pool) => pool,
         Err(err) => {
@@ -80,7 +72,14 @@ async fn setup() -> Option<(PgPool, PgVectorStatus)> {
         }
     };
 
-    let mut conn = match pool.get().await {
+    if let Err(err) = run_migrations(&pool).await {
+        eprintln!("skipping rune-store pg integration tests: migrations failed: {err}");
+        return None;
+    }
+
+    let pgvector_status = try_upgrade_pgvector(&pool).await;
+
+    let conn = match pool.get().await {
         Ok(conn) => conn,
         Err(err) => {
             eprintln!("skipping rune-store pg integration tests: failed to get connection: {err}");
@@ -88,12 +87,11 @@ async fn setup() -> Option<(PgPool, PgVectorStatus)> {
         }
     };
 
-    if let Err(err) = diesel::sql_query(
+    if let Err(err) = conn.batch_execute(
         "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
          tool_executions, channel_deliveries, paired_devices, pairing_requests, \
          memory_embeddings CASCADE",
     )
-    .execute(&mut conn)
     .await
     {
         eprintln!("skipping rune-store pg integration tests: truncate failed: {err}");
@@ -338,7 +336,10 @@ async fn turn_create_find_list_update() {
     assert_eq!(updated.status, "model_calling");
     assert!(updated.ended_at.is_none());
 
-    let usage_updated = turn_repo.update_usage(turn_id, 42, 17, Some(10)).await.unwrap();
+    let usage_updated = turn_repo
+        .update_usage(turn_id, 42, 17, Some(10))
+        .await
+        .unwrap();
     assert_eq!(usage_updated.usage_prompt_tokens, Some(42));
     assert_eq!(usage_updated.usage_completion_tokens, Some(17));
     assert_eq!(usage_updated.usage_cached_prompt_tokens, Some(10));
