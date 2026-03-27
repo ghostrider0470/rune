@@ -563,11 +563,11 @@ mod tests {
         }
 
         async fn delete_chunk(&self, _file_path: &str, _chunk_index: i32) -> Result<bool, StoreError> {
-            unreachable!()
+            Ok(false)
         }
 
         async fn delete_all(&self) -> Result<usize, StoreError> {
-            unreachable!()
+            Ok(0)
         }
     }
 
