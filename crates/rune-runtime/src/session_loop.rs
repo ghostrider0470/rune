@@ -50,6 +50,7 @@ pub struct SessionLoop {
     session_repo: Arc<dyn SessionRepo>,
     channel: Arc<Mutex<Box<dyn ChannelAdapter>>>,
     sessions: Mutex<SessionIndex>,
+    resumed_session_notifications: Mutex<HashMap<String, String>>,
     agents: AgentsConfig,
     models: ModelsConfig,
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
@@ -92,6 +93,7 @@ impl SessionLoop {
             session_repo,
             channel: Arc::new(Mutex::new(channel)),
             sessions: Mutex::new(HashMap::new()),
+            resumed_session_notifications: Mutex::new(HashMap::new()),
             agents,
             models,
             stt_engine: None,
@@ -177,6 +179,8 @@ impl SessionLoop {
                 debug!(routing_key = %routing_key, "received inbound message");
 
                 let session = self.find_or_create_session(&routing_key).await?;
+                self.maybe_send_resumed_session_notice(&msg, &routing_key, &session)
+                    .await;
 
                 // Enrich content by downloading/transcribing media attachments.
                 let enriched_content = self.enrich_media_content(&msg).await;
@@ -640,6 +644,48 @@ impl SessionLoop {
         }
 
         Ok(session)
+    }
+
+
+    async fn maybe_send_resumed_session_notice(
+        &self,
+        msg: &rune_channels::ChannelMessage,
+        routing_key: &str,
+        session: &SessionRow,
+    ) {
+        let last_notified = {
+            let notices = self.resumed_session_notifications.lock().await;
+            notices.get(routing_key).cloned()
+        };
+
+        let fingerprint = session.updated_at.to_rfc3339();
+        if last_notified.as_deref() == Some(fingerprint.as_str()) {
+            return;
+        }
+
+        let text = format!(
+            "Resumed session `{}` after restart. Transcript history and durable approval/session state were restored. In-flight turns, live process handles, and typing/progress UI do not resume in place; send your next message to continue.",
+            session.id
+        );
+
+        let ch = self.channel.lock().await;
+        match ch
+            .send(OutboundAction::Reply {
+                channel_id: msg.channel_id,
+                chat_id: msg.raw_chat_id.clone(),
+                reply_to: msg.provider_message_id.clone(),
+                content: text,
+            })
+            .await
+        {
+            Ok(_) => {
+                let mut notices = self.resumed_session_notifications.lock().await;
+                notices.insert(routing_key.to_string(), fingerprint);
+            }
+            Err(e) => {
+                warn!(error = %e, session_id = %session.id, "failed to send resumed-session notice");
+            }
+        }
     }
 
     fn available_models(&self) -> Vec<String> {
