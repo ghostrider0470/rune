@@ -44,6 +44,20 @@ pub fn register_builtin_stubs(registry: &mut ToolRegistry) {
             requires_approval: false,
         },
         ToolDefinition {
+            name: "extract_document".into(),
+            description: "Extract text content from PDF, DOCX, or XLSX files. Supports page ranges for PDFs.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to the document file" },
+                    "pages": { "type": "string", "description": "Page range e.g. '1-5' or 'all'" }
+                },
+                "required": ["path"]
+            }),
+            category: ToolCategory::FileRead,
+            requires_approval: false,
+        },
+        ToolDefinition {
             name: "write_file".into(),
             description: "Write content to a file, creating it if needed.".into(),
             parameters: serde_json::json!({
@@ -151,6 +165,7 @@ pub fn register_builtin_stubs(registry: &mut ToolRegistry) {
     registry.register(crate::web_fetch_tool::web_fetch_tool_definition());
     registry.register(crate::git_tool::git_tool_definition());
     registry.register(crate::image_generation_tool::image_generation_tool_definition());
+    registry.register(crate::document_tools::document_extract_tool_definition());
 }
 
 /// Validate that a tool call's arguments satisfy the `required` fields in the tool schema.

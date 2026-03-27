@@ -94,10 +94,11 @@ fn register_builtin_stubs_populates_expected_tools() {
     let mut reg = ToolRegistry::new();
     register_builtin_stubs(&mut reg);
 
-    assert_eq!(reg.len(), 11);
+    assert_eq!(reg.len(), 13);
 
     let expected = [
         "read_file",
+        "extract_document",
         "write_file",
         "edit_file",
         "list_files",

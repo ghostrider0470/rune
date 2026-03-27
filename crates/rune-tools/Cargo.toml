@@ -17,6 +17,9 @@ tracing.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
+pdf-extract = "0.7"
+zip = "2"
+quick-xml = "0.36"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

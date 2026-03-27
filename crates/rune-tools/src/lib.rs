@@ -21,11 +21,13 @@ pub mod process_tool;
 mod registry;
 pub mod session_tool;
 pub mod spawn_tool;
+pub mod document_tools;
 mod stubs;
 pub mod subagent_tool;
 pub mod web_fetch_tool;
 
 pub use definition::{ToolCall, ToolDefinition, ToolResult};
+pub use document_tools::document_extract_tool_definition;
 pub use error::ToolError;
 pub use executor::{AlwaysAllow, ApprovalCheck, ToolExecutor};
 pub use registry::ToolRegistry;
