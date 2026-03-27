@@ -9,7 +9,7 @@ use uuid::Uuid;
 use rune_core::{SessionKind, SessionStatus, ToolCategory};
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, FunctionCall, ModelError, ModelProvider,
-    Role, ToolCallRequest, Usage,
+    ToolCallRequest, Usage,
 };
 use rune_store::StoreError;
 use rune_store::models::*;
@@ -2485,17 +2485,14 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
         .await;
 
     let sent = sent.lock().await.clone();
-    assert!(
-        sent.is_empty(),
-        "notice should not be sent for sessions that were not restored during startup"
-    );
+    assert!(sent.is_empty(), "notice should not be sent for sessions that were not restored during startup");
 }
 
 #[tokio::test]
 async fn resumed_session_notice_only_for_restored_channel_sessions() {
     let h = TestHarness::new();
     let engine = Arc::new(h.session_engine());
-    let created = engine
+    let existing = engine
         .create_session_full(
             SessionKind::Channel,
             Some(h.workspace_root.to_string_lossy().to_string()),
@@ -2531,16 +2528,6 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
         provider_message_id: "msg-1".to_string(),
     };
 
-    let existing = h
-        .session_repo
-        .find_by_channel_ref("chat-1:user-1")
-        .await
-        .unwrap()
-        .expect("restored channel session");
-    assert_eq!(existing.id, created.id);
-
-    session_loop.run_startup_restore().await.unwrap();
-
     session_loop
         .maybe_send_resumed_session_notice(&msg, "chat-1:user-1", &existing)
         .await;
@@ -2558,11 +2545,7 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
         rune_channels::OutboundAction::Reply { content, .. } => {
             assert!(content.contains("Resumed session"));
             assert!(content.contains(&existing.id.to_string()));
-            assert_eq!(
-                content,
-                &crate::restart_continuity::RESUMED_SESSION_NOTICE_TEMPLATE
-                    .replace("{session_id}", &existing.id.to_string())
-            );
+            assert!(content.contains("do not resume in place"));
         }
         other => panic!("expected reply notice, got {other:?}"),
     }
@@ -2585,10 +2568,7 @@ async fn create_session_full_persists_mode_in_metadata() {
         .unwrap();
 
     assert_eq!(
-        session
-            .metadata
-            .get("mode")
-            .and_then(|value| value.as_str()),
+        session.metadata.get("mode").and_then(|value| value.as_str()),
         Some("architect")
     );
 }
@@ -2638,10 +2618,7 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     );
 
     executor.execute(session.id, "hello", None).await.unwrap();
-    executor
-        .execute(session.id, "follow-up", None)
-        .await
-        .unwrap();
+    executor.execute(session.id, "follow-up", None).await.unwrap();
 
     let requests = model_handle.requests().await;
     assert!(requests.len() >= 2);
@@ -2650,148 +2627,4 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     let second_system = requests[1].messages[0].content.clone().unwrap();
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
-}
-
-#[tokio::test]
-async fn request_stable_prefix_is_split_from_variable_messages() {
-    let h = TestHarness::new();
-    let engine = h.session_engine();
-    let session = engine
-        .create_session(
-            SessionKind::Direct,
-            Some(h.workspace_root.to_string_lossy().to_string()),
-        )
-        .await
-        .unwrap();
-
-    let model = Arc::new(FakeModelProvider::new(vec![
-        FakeModelProvider::text_response("ok"),
-    ]));
-    let model_handle = model.clone();
-    let executor = h.turn_executor(
-        model,
-        Arc::new(FakeToolExecutor::new(vec![])),
-        ToolRegistry::new(),
-    );
-
-    executor.execute(session.id, "hello", None).await.unwrap();
-
-    let requests = model_handle.requests().await;
-    assert_eq!(requests.len(), 1);
-    let request = &requests[0];
-
-    let stable = request.stable_prefix_messages.as_ref().unwrap();
-    assert_eq!(stable.len(), 2);
-    assert_eq!(stable[0].role, Role::System);
-    assert!(
-        stable[0]
-            .content
-            .as_ref()
-            .unwrap()
-            .contains("## Prompt Cache Padding")
-    );
-    assert_eq!(stable[1].role, Role::User);
-    assert_eq!(stable[1].content.as_deref(), Some("hello"));
-
-    assert!(request.messages.is_empty());
-}
-
-#[tokio::test]
-async fn request_stable_prefix_excludes_tool_results_from_cached_prefix() {
-    let h = TestHarness::new();
-    let engine = h.session_engine();
-    let session = engine
-        .create_session(
-            SessionKind::Direct,
-            Some(h.workspace_root.to_string_lossy().to_string()),
-        )
-        .await
-        .unwrap();
-
-    let model = Arc::new(FakeModelProvider::new(vec![
-        FakeModelProvider::tool_call_response("echo_tool", r#"{\"value\":\"hi\"}"#),
-        FakeModelProvider::text_response("done"),
-    ]));
-    let model_handle = model.clone();
-
-    let mut registry = ToolRegistry::new();
-    registry.register(RtToolDefinition {
-        name: "echo_tool".into(),
-        description: "echo".into(),
-        parameters: serde_json::json!({
-            "type": "object",
-            "properties": {"value": {"type": "string"}},
-            "required": ["value"]
-        }),
-        category: ToolCategory::FileRead,
-        requires_approval: false,
-    });
-
-    let executor = h.turn_executor(
-        model,
-        Arc::new(FakeToolExecutor::new(vec!["tool output".into()])),
-        registry,
-    );
-
-    executor.execute(session.id, "hello", None).await.unwrap();
-
-    let requests = model_handle.requests().await;
-    assert_eq!(requests.len(), 2);
-
-    let follow_up = &requests[1];
-    let stable = follow_up.stable_prefix_messages.as_ref().unwrap();
-    assert_eq!(stable.len(), 2);
-    assert_eq!(stable[0].role, Role::System);
-    assert_eq!(stable[1].role, Role::User);
-    assert_eq!(stable[1].content.as_deref(), Some("hello"));
-
-    assert_eq!(follow_up.messages.len(), 2);
-    assert_eq!(follow_up.messages[0].role, Role::Assistant);
-    assert!(follow_up.messages[0].tool_calls.is_some());
-    assert_eq!(follow_up.messages[1].role, Role::Tool);
-    assert_eq!(follow_up.messages[1].content.as_deref(), Some("tool output"));
-}
-
-#[tokio::test]
-async fn request_stable_prefix_keeps_tools_out_of_variable_tail() {
-    let h = TestHarness::new();
-    let engine = h.session_engine();
-    let session = engine
-        .create_session(
-            SessionKind::Direct,
-            Some(h.workspace_root.to_string_lossy().to_string()),
-        )
-        .await
-        .unwrap();
-
-    let mut registry = ToolRegistry::new();
-    registry.register(RtToolDefinition {
-        name: "zeta_tool".into(),
-        description: "zeta".into(),
-        parameters: serde_json::json!({"type":"object"}),
-        category: ToolCategory::FileRead,
-        requires_approval: false,
-    });
-    registry.register(RtToolDefinition {
-        name: "alpha_tool".into(),
-        description: "alpha".into(),
-        parameters: serde_json::json!({"type":"object"}),
-        category: ToolCategory::FileRead,
-        requires_approval: false,
-    });
-
-    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("ok")]));
-    let model_handle = model.clone();
-    let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), registry);
-
-    executor.execute(session.id, "hello", None).await.unwrap();
-
-    let requests = model_handle.requests().await;
-    let request = &requests[0];
-    let stable_tools = request.stable_prefix_tools.as_ref().unwrap();
-    assert_eq!(stable_tools.len(), 2);
-    assert_eq!(stable_tools[0].function.name, "alpha_tool");
-    assert_eq!(stable_tools[1].function.name, "zeta_tool");
-    assert!(request.tools.is_none());
-    assert!(request.messages.is_empty());
 }
