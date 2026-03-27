@@ -51,14 +51,14 @@ function DashboardPage() {
   const { data: diagnostics } = useDashboardDiagnostics();
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Dashboard</h1>
         <p className="mt-1 text-muted-foreground">Gateway overview and system health</p>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Gateway Status</CardTitle>
@@ -152,7 +152,7 @@ function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
         {/* Diagnostics panel */}
         <Card>
           <CardHeader>
@@ -201,7 +201,8 @@ function DashboardPage() {
             {!sessions?.length ? (
               <p className="text-sm text-muted-foreground">No sessions</p>
             ) : (
-              <Table>
+              <div className="overflow-x-auto">
+              <Table className="min-w-[24rem]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>ID</TableHead>
@@ -239,6 +240,7 @@ function DashboardPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>
