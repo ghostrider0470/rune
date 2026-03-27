@@ -23,6 +23,8 @@ pub struct AppConfig {
     pub mode: RuntimeMode,
     pub gateway: GatewayConfig,
     pub database: DatabaseConfig,
+    #[serde(default)]
+    pub vector: VectorConfig,
     pub models: ModelsConfig,
     pub channels: ChannelsConfig,
     #[serde(default)]
@@ -517,6 +519,49 @@ pub enum StorageBackend {
     Sqlite,
     Postgres,
     Cosmos,
+}
+
+/// Which backend to use for vector/semantic memory.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VectorBackend {
+    /// Resolve automatically: lancedb_uri set → LanceDb; database backend has vectors → use it; else → None.
+    #[default]
+    Auto,
+    /// Embedded LanceDB (local path or cloud URI like az://container/path).
+    #[serde(alias = "lance")]
+    LanceDb,
+    /// Use the same backend as `[database]` (Cosmos vector, pgvector, or SQLite stubs).
+    Integrated,
+    /// No vector search — memory recall returns empty results.
+    None,
+}
+
+/// Configuration for the vector/semantic memory backend.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VectorConfig {
+    /// Which vector backend to use.
+    #[serde(default)]
+    pub backend: VectorBackend,
+    /// Path or URI for LanceDB. Local: `~/.rune/db/vectors`, Cloud: `az://container/path`.
+    pub lancedb_uri: Option<String>,
+    /// Embedding dimensions (must match your embedding model output).
+    #[serde(default = "default_embedding_dims")]
+    pub embedding_dims: i32,
+}
+
+fn default_embedding_dims() -> i32 {
+    2000
+}
+
+impl Default for VectorConfig {
+    fn default() -> Self {
+        Self {
+            backend: VectorBackend::Auto,
+            lancedb_uri: None,
+            embedding_dims: default_embedding_dims(),
+        }
+    }
 }
 
 /// Database connectivity and migration settings.
