@@ -391,6 +391,19 @@ fn collect_import_signals(path: &Path) -> Result<Vec<String>, RustPatternsError>
             if !crate_name.is_empty() {
                 signals.push(normalize(crate_name));
             }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("extern crate ") {
+            let crate_name = rest
+                .split([';', ' '])
+                .next()
+                .unwrap_or_default()
+                .trim();
+            if !crate_name.is_empty() {
+                signals.push(normalize(crate_name));
+            }
+            continue;
         }
     }
     Ok(signals)
@@ -488,6 +501,29 @@ mod tests {
 
         assert!(!result.patterns.is_empty());
         assert_eq!(result.patterns[0].topic, "axum_web");
+    }
+
+
+    #[test]
+    fn query_by_extern_crate_imports_prefers_pyo3_patterns() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("bindings.rs");
+        fs::write(
+            &file,
+            "extern crate pyo3;\nuse pyo3::prelude::*;\n#[pyfunction] fn demo() {}\n",
+        )
+        .expect("write file");
+
+        let result = rust_pattern(PatternQuery {
+            context_file: Some(file.clone()),
+            ..Default::default()
+        })
+        .expect("query should work");
+
+        assert!(!result.patterns.is_empty());
+        assert_eq!(result.patterns[0].topic, "pyo3");
+        let import_context = result.import_context.expect("import context");
+        assert!(import_context.imports.contains(&"pyo3".to_string()));
     }
 
     #[test]
