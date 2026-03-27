@@ -3921,6 +3921,52 @@ pub struct AgentListItem {
     pub system_prompt: Option<String>,
 }
 
+/// Per-token pricing in USD (input, cached_input, output) per 1M tokens.
+/// Source: official API pricing pages as of 2026-03.
+fn model_pricing(model: &str) -> Option<(f64, f64, f64)> {
+    // Extract the bare model name from "provider/model" refs.
+    let name = model.rsplit('/').next().unwrap_or(model);
+    // (input_per_1m, cached_input_per_1m, output_per_1m)
+    match name {
+        // OpenAI
+        n if n.starts_with("gpt-4.1") && n.contains("mini") => Some((0.40, 0.10, 1.60)),
+        n if n.starts_with("gpt-4.1") && n.contains("nano") => Some((0.10, 0.025, 0.40)),
+        n if n.starts_with("gpt-4.1") => Some((2.00, 0.50, 8.00)),
+        n if n.starts_with("gpt-4o-mini") => Some((0.15, 0.075, 0.60)),
+        n if n.starts_with("gpt-4o") => Some((2.50, 1.25, 10.00)),
+        n if n.starts_with("gpt-5.4") => Some((2.00, 0.50, 8.00)),
+        n if n.starts_with("o3-mini") => Some((1.10, 0.55, 4.40)),
+        n if n.starts_with("o3") => Some((10.00, 2.50, 40.00)),
+        n if n.starts_with("o4-mini") => Some((1.10, 0.275, 4.40)),
+        // Anthropic
+        n if n.contains("opus-4") => Some((15.00, 1.50, 75.00)),
+        n if n.contains("sonnet-4") => Some((3.00, 0.30, 15.00)),
+        n if n.contains("haiku-4") => Some((0.80, 0.08, 4.00)),
+        n if n.contains("opus-3") || n.contains("opus_3") => Some((15.00, 1.50, 75.00)),
+        n if n.contains("sonnet-3") || n.contains("sonnet_3") => Some((3.00, 0.30, 15.00)),
+        n if n.contains("haiku-3") || n.contains("haiku_3") => Some((0.25, 0.03, 1.25)),
+        _ => None,
+    }
+}
+
+fn estimate_cost(model: &str, prompt: u64, cached: u64, completion: u64) -> Option<f64> {
+    let (input_rate, cached_rate, output_rate) = model_pricing(model)?;
+    let uncached = prompt.saturating_sub(cached);
+    Some(
+        (uncached as f64 * input_rate / 1_000_000.0)
+            + (cached as f64 * cached_rate / 1_000_000.0)
+            + (completion as f64 * output_rate / 1_000_000.0),
+    )
+}
+
+fn format_cost(cost: f64) -> String {
+    if cost < 0.01 {
+        format!("<$0.01")
+    } else {
+        format!("${:.2}", cost)
+    }
+}
+
 /// Query parameters for `GET /api/dashboard/usage`.
 ///
 /// - `from` / `to`: ISO-8601 datetime bounds (both optional).
@@ -4004,6 +4050,16 @@ pub async fn get_dashboard_usage(
     }
 
     let mut entries: Vec<_> = grouped.into_values().collect();
+    // Compute per-entry cost estimates
+    for entry in &mut entries {
+        entry.estimated_cost = estimate_cost(
+            &entry.model,
+            entry.prompt_tokens,
+            0, // per-entry cached breakdown not available yet
+            entry.completion_tokens,
+        )
+        .map(|c| format_cost(c));
+    }
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 
     Ok(Json(UsageSummaryResponse {
@@ -4012,7 +4068,17 @@ pub async fn get_dashboard_usage(
         total_completion_tokens,
         total_tokens: total_prompt_tokens + total_completion_tokens,
         total_requests,
-        total_estimated_cost: None,
+        total_estimated_cost: {
+            let total_cost: f64 = entries.iter()
+                .filter_map(|e| e.estimated_cost.as_ref()
+                    .and_then(|s| s.trim_start_matches('$').trim_start_matches('<').parse::<f64>().ok()))
+                .sum();
+            // Re-compute from raw tokens for accuracy
+            let cost: f64 = entries.iter().map(|e| {
+                estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
+            }).sum();
+            if cost > 0.0 { Some(format_cost(cost)) } else { None }
+        },
         usage_cached_prompt_tokens: total_cached_prompt_tokens,
         cache_hit_ratio: if total_prompt_tokens > 0 {
             total_cached_prompt_tokens as f64 / total_prompt_tokens as f64
