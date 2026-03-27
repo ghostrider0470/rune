@@ -671,6 +671,7 @@
         if (hasGatewayAuth && transcriptToken) queryParts.push('api_key=' + encodeURIComponent(transcriptToken));
         else if (!hasGatewayAuth && browserSessionToken) queryParts.push('session_token=' + encodeURIComponent(browserSessionToken));
         if (sessionPollCursor) queryParts.push('after=' + encodeURIComponent(sessionPollCursor));
+        if (browserSessionToken) queryParts.push('session_token=' + encodeURIComponent(browserSessionToken));
         const response = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/transcript' + (queryParts.length ? ('?' + queryParts.join('&')) : ''));
         if (!response.ok) return;
         const existing = await response.json();
