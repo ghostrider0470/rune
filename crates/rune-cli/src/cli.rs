@@ -119,6 +119,11 @@ pub enum Command {
         #[command(subcommand)]
         action: SkillsAction,
     },
+    /// Inspect installed spells discovered by the gateway.
+    Spells {
+        #[command(subcommand)]
+        action: SpellsAction,
+    },
     /// Inspect workspace memory files and retrieval state.
     Memory {
         #[command(subcommand)]
@@ -1629,6 +1634,29 @@ pub enum SkillsAction {
     /// Disable a discovered skill in the gateway registry.
     Disable {
         /// Skill name.
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SpellsAction {
+    /// List installed spells discovered by the gateway.
+    List,
+    /// Show details for a single installed spell.
+    Info {
+        /// Spell name.
+        name: String,
+    },
+    /// Re-scan the spells directory and report load/remove counts.
+    Check,
+    /// Enable a discovered spell in the gateway registry.
+    Enable {
+        /// Spell name.
+        name: String,
+    },
+    /// Disable a discovered spell in the gateway registry.
+    Disable {
+        /// Spell name.
         name: String,
     },
 }
