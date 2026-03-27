@@ -49,6 +49,21 @@ models = [
   "Kimi-K2.5",
 ]
 
+
+[[models.providers]]
+name = "openrouter"
+kind = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+models = ["openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"]
+
+[[models.providers]]
+name = "perplexity"
+kind = "perplexity"
+base_url = "https://api.perplexity.ai"
+api_key_env = "PERPLEXITY_API_KEY"
+models = ["sonar", "sonar-pro"]
+
 [[models.providers]]
 name = "openai-codex"
 kind = "openai"
