@@ -638,6 +638,9 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/comms/send", post(routes::comms_send))
         .route("/api/comms/inbox", get(routes::comms_inbox))
         .route("/api/comms/ack", post(routes::comms_ack))
+        .route("/acp/send", post(routes::acp_send))
+        .route("/acp/inbox", get(routes::acp_inbox))
+        .route("/acp/ack", post(routes::acp_ack))
         // Update routes
         .route("/update/check", get(routes::update_check))
         .route("/update/apply", post(routes::update_apply))
