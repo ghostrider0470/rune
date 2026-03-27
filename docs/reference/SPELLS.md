@@ -14,4 +14,5 @@ Spell manifests live under `crates/rune-spells/*/SPELL.md`. The inventory below 
 ## Notes
 
 - `Code Review` is intentionally documented as partial: mechanical checks ship today, while semantic review is still scaffolded behind the same tool contract.
+- `Evolver` is currently scaffold-only: the spell manifest exists, but the stable operator-facing tool surface is not exposed yet.
 - The inventory only lists Rune-native spells that are part of the Rust workspace. Prompt-only skills under `.state/skills/` are tracked separately from this spell inventory.
