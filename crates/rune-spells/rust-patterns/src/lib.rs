@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod tool;
+pub use tool::{RustPatternsToolExecutor, rust_patterns_validate_tool_definition};
+
 #[derive(Debug, Error)]
 pub enum RustPatternsError {
     #[error("pattern directory not found: {0}")]
@@ -40,6 +43,7 @@ pub struct PatternQuery {
     pub context_file: Option<PathBuf>,
     pub task_description: Option<String>,
     pub error_message: Option<String>,
+    pub patterns_dir: Option<PathBuf>,
     pub max_results: usize,
 }
 
@@ -57,6 +61,7 @@ impl Default for PatternQuery {
             context_file: None,
             task_description: None,
             error_message: None,
+            patterns_dir: None,
             max_results: 3,
         }
     }
@@ -126,6 +131,7 @@ pub fn rust_patterns_tool_definition() -> rune_tools::ToolDefinition {
                 "context_file": { "type": "string", "description": "Rust file path used for import-based pattern detection" },
                 "task_description": { "type": "string", "description": "Free-form task text used for relevance matching" },
                 "error_message": { "type": "string", "description": "Error text used for debugging-oriented relevance matching" },
+                "patterns_dir": { "type": "string", "description": "Optional alternate pattern directory for hot-reloading TOML pattern files" },
                 "max_results": { "type": "integer", "description": "Maximum number of patterns to return (default: 3)" }
             }
         }),
@@ -135,7 +141,11 @@ pub fn rust_patterns_tool_definition() -> rune_tools::ToolDefinition {
 }
 
 pub fn rust_pattern(query: PatternQuery) -> Result<QueryResult, RustPatternsError> {
-    let topics = load_pattern_library(default_patterns_dir())?;
+    let patterns_dir = query
+        .patterns_dir
+        .clone()
+        .unwrap_or_else(default_patterns_dir);
+    let topics = load_pattern_library(patterns_dir)?;
     let mut scored = Vec::new();
 
     let requested_topic = query.topic.as_ref().map(|t| normalize(t));
@@ -319,6 +329,9 @@ fn load_pattern_library(dir: PathBuf) -> Result<Vec<LoadedTopic>, RustPatternsEr
     if !dir.exists() {
         return Err(RustPatternsError::PatternDirMissing(dir));
     }
+    if !dir.is_dir() {
+        return Err(RustPatternsError::PatternDirNotDirectory(dir));
+    }
 
     let mut topics = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|source| RustPatternsError::ReadFile {
@@ -395,11 +408,7 @@ fn collect_import_signals(path: &Path) -> Result<Vec<String>, RustPatternsError>
         }
 
         if let Some(rest) = trimmed.strip_prefix("extern crate ") {
-            let crate_name = rest
-                .split([';', ' '])
-                .next()
-                .unwrap_or_default()
-                .trim();
+            let crate_name = rest.split([';', ' ']).next().unwrap_or_default().trim();
             if !crate_name.is_empty() {
                 signals.push(normalize(crate_name));
             }
@@ -503,7 +512,6 @@ mod tests {
         assert_eq!(result.patterns[0].topic, "axum_web");
     }
 
-
     #[test]
     fn query_by_extern_crate_imports_prefers_pyo3_patterns() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -560,5 +568,119 @@ use axum::Json;
         assert_eq!(report.scanned_files, 1);
         assert_eq!(report.findings.len(), 1);
         assert!(report.findings[0].issue.contains("unwrap"));
+    }
+}
+
+#[cfg(test)]
+mod hot_reload_tests {
+    use super::*;
+
+    #[test]
+    fn query_uses_custom_patterns_dir_for_hot_reload() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let patterns_dir = tmp.path().join("patterns");
+        fs::create_dir_all(&patterns_dir).expect("create patterns dir");
+        fs::write(
+            patterns_dir.join("custom.toml"),
+            r#"[meta]
+topic = "custom_topic"
+tags = ["custom", "demo"]
+relevance_signals = ["custom"]
+
+[[patterns]]
+name = "custom pattern"
+when = "Testing hot reload from a custom pattern directory"
+code = "let demo = true;"
+rationale = "Queries should load directly from the supplied TOML directory without recompiling"
+anti_pattern = "Hard-coding all patterns into the binary"
+"#,
+        )
+        .expect("write pattern file");
+
+        let result = rust_pattern(PatternQuery {
+            topic: Some("custom_topic".into()),
+            patterns_dir: Some(patterns_dir),
+            ..Default::default()
+        })
+        .expect("query should work");
+
+        assert_eq!(result.patterns.len(), 1);
+        assert_eq!(result.patterns[0].topic, "custom_topic");
+        assert_eq!(result.patterns[0].name, "custom pattern");
+    }
+
+    #[test]
+    fn query_errors_when_patterns_dir_is_a_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("not_a_dir.toml");
+        fs::write(&file, "[meta]\ntopic='bad'\npatterns=[]\n").expect("write file");
+
+        let error = rust_pattern(PatternQuery {
+            patterns_dir: Some(file.clone()),
+            ..Default::default()
+        })
+        .expect_err("file path should be rejected as a patterns dir");
+
+        match error {
+            RustPatternsError::PatternDirNotDirectory(path) => assert_eq!(path, file),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod hot_reload_tests {
+    use super::*;
+
+    #[test]
+    fn query_uses_custom_patterns_dir_for_hot_reload() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let patterns_dir = tmp.path().join("patterns");
+        fs::create_dir_all(&patterns_dir).expect("create patterns dir");
+        fs::write(
+            patterns_dir.join("custom.toml"),
+            r#"[meta]
+topic = "custom_topic"
+tags = ["custom", "demo"]
+relevance_signals = ["custom"]
+
+[[patterns]]
+name = "custom pattern"
+when = "Testing hot reload from a custom pattern directory"
+code = "let demo = true;"
+rationale = "Queries should load directly from the supplied TOML directory without recompiling"
+anti_pattern = "Hard-coding all patterns into the binary"
+"#,
+        )
+        .expect("write pattern file");
+
+        let result = rust_pattern(PatternQuery {
+            topic: Some("custom_topic".into()),
+            patterns_dir: Some(patterns_dir),
+            ..Default::default()
+        })
+        .expect("query should work");
+
+        assert_eq!(result.patterns.len(), 1);
+        assert_eq!(result.patterns[0].topic, "custom_topic");
+        assert_eq!(result.patterns[0].name, "custom pattern");
+    }
+
+    #[test]
+    fn query_errors_when_patterns_dir_is_a_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("not_a_dir.toml");
+        fs::write(&file, "[meta]\ntopic='bad'\npatterns=[]\n").expect("write file");
+
+        let error = rust_pattern(PatternQuery {
+            patterns_dir: Some(file.clone()),
+            ..Default::default()
+        })
+        .expect_err("file path should be rejected as a patterns dir");
+
+        match error {
+            RustPatternsError::PatternDirNotDirectory(path) => assert_eq!(path, file),
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
