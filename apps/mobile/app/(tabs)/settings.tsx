@@ -1,6 +1,7 @@
-import React from "react";
-import { Pressable, SafeAreaView, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Alert, Pressable, SafeAreaView, Text, TextInput, View } from "react-native";
 import { useNotificationStore } from "../../src/store/notification-store";
+import { clearToken } from "../../src/lib/auth";
 import { useAppStore } from "../../src/store/app-store";
 import { useTheme } from "../../src/hooks/use-theme";
 
@@ -93,6 +94,84 @@ function ThemeCard() {
   );
 }
 
+function ConnectionCard() {
+  const colors = useTheme();
+  const gatewayUrl = useAppStore((state) => state.gatewayUrl);
+  const setGatewayUrl = useAppStore((state) => state.setGatewayUrl);
+  const [draftUrl, setDraftUrl] = useState(gatewayUrl ?? "");
+
+  const saveGatewayUrl = () => {
+    const normalized = draftUrl.trim().replace(/\/+$, "");
+    setGatewayUrl(normalized.length > 0 ? normalized : null);
+  };
+
+  const disconnect = async () => {
+    await clearToken();
+    setGatewayUrl(null);
+  };
+
+  return (
+    <View
+      style={{
+        backgroundColor: colors.surface,
+        borderColor: colors.border,
+        borderRadius: 16,
+        borderWidth: 1,
+        gap: 12,
+        padding: 16,
+      }}
+    >
+      <Text style={{ color: colors.text, fontSize: 18, fontWeight: "700" }}>Gateway</Text>
+      <Text style={{ color: colors.textMuted }}>Update the remote Rune gateway URL or disconnect this device.</Text>
+      <TextInput
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder="https://gateway.example.com"
+        placeholderTextColor={colors.textMuted}
+        value={draftUrl}
+        onChangeText={setDraftUrl}
+        style={{
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 12,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          color: colors.text,
+        }}
+      />
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable
+          onPress={() => {
+            saveGatewayUrl();
+            Alert.alert("Gateway updated", "The new gateway URL will be used for future requests.");
+          }}
+          style={{
+            alignItems: "center",
+            backgroundColor: colors.primary,
+            borderRadius: 12,
+            flex: 1,
+            paddingVertical: 12,
+          }}
+        >
+          <Text style={{ color: colors.onPrimary, fontWeight: "700" }}>Save URL</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => void disconnect()}
+          style={{
+            alignItems: "center",
+            backgroundColor: colors.danger,
+            borderRadius: 12,
+            flex: 1,
+            paddingVertical: 12,
+          }}
+        >
+          <Text style={{ color: colors.onPrimary, fontWeight: "700" }}>Disconnect</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export default function SettingsScreen() {
   const colors = useTheme();
   const approvalsEnabled = useNotificationStore((state) => state.approvalsEnabled);
@@ -108,6 +187,7 @@ export default function SettingsScreen() {
       </View>
 
       <View style={{ gap: 12, padding: 16 }}>
+        <ConnectionCard />
         <ThemeCard />
 
         <ToggleCard
