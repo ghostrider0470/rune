@@ -551,7 +551,7 @@ pub struct VectorConfig {
 }
 
 fn default_embedding_dims() -> i32 {
-    2000
+    3072
 }
 
 impl Default for VectorConfig {
