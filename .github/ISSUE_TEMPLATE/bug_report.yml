@@ -1,0 +1,66 @@
+name: Bug Report
+description: Report a bug in Rune
+labels: ["bug", "priority:p2"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the details below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear description of the bug
+      placeholder: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to trigger the bug
+      placeholder: |
+        1. Start gateway with config...
+        2. Send message...
+        3. Observe error...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      placeholder: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      placeholder: What actually happened? Include error messages/logs.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Runtime / Gateway
+        - Memory / Storage
+        - Channels (Telegram/Discord)
+        - Tools / Spells
+        - Automation / Cron
+        - CLI
+        - Models / Providers
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust version, deployment type
+      placeholder: |
+        - OS: Ubuntu 24.04 / WSL2
+        - Rust: 1.87
+        - Storage: SQLite + LanceDB
+        - Deploy: local / cloud

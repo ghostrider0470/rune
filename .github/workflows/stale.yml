@@ -1,0 +1,33 @@
+name: Stale Issues
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v10
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-issue-stale: 14
+          days-before-issue-close: 7
+          days-before-pr-stale: 7
+          days-before-pr-close: 3
+          stale-issue-message: >
+            This issue has been inactive for 14 days. It will be closed in 7 days
+            unless there is new activity. If this is still relevant, please comment
+            or update the issue.
+          stale-pr-message: >
+            This PR has been inactive for 7 days. It will be closed in 3 days
+            unless updated. If blocked, please document the blocker.
+          stale-issue-label: "stale"
+          stale-pr-label: "stale"
+          exempt-issue-labels: "type:epic,priority:p0,priority:p1"
+          exempt-pr-labels: "priority:p0,priority:p1"

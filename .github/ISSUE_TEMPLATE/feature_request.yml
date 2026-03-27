@@ -1,0 +1,56 @@
+name: Feature Request
+description: Propose a new feature or enhancement
+labels: ["enhancement", "priority:p2"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the feature you'd like to see in Rune.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What problem does this solve? Why is it needed?
+      placeholder: I need this because...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this work?
+      placeholder: Describe the ideal behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      placeholder: What other approaches did you consider?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Runtime / Gateway
+        - Memory / Storage
+        - Channels
+        - Tools / Spells
+        - Automation
+        - CLI
+        - Models / Providers
+        - Multi-Project
+        - Multi-Instance
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Epic (multiple features)
+        - Feature (multiple stories)
+        - Story (single deliverable)
+    validations:
+      required: true

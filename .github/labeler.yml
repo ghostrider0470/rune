@@ -1,0 +1,46 @@
+# Auto-label PRs based on changed paths
+"area:runtime":
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/rune-runtime/**'
+      - 'crates/rune-gateway/**'
+      - 'crates/rune-gateway-app/**'
+
+"area:memory":
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/rune-store/**'
+      - 'crates/rune-memory/**'
+      - '**/lancedb/**'
+      - '**/pgvector/**'
+
+"area:channels":
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/rune-channels/**'
+      - '**/telegram/**'
+      - '**/discord/**'
+
+"area:tools":
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'crates/rune-tools/**'
+      - '**/spells/**'
+
+"area:automation":
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/cron/**'
+      - '**/scheduler/**'
+      - '**/heartbeat/**'
+
+"area:mobile":
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'mobile/**'
+
+"documentation":
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'docs/**'
+      - '**/*.md'
