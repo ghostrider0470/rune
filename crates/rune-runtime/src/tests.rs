@@ -487,18 +487,6 @@ impl TurnRepo for MemTurnRepo {
         Ok(turn.clone())
     }
 
-    async fn list_usage(
-        &self,
-        _from: Option<chrono::DateTime<chrono::Utc>>,
-        _to: Option<chrono::DateTime<chrono::Utc>>,
-        limit: u32,
-    ) -> Result<Vec<TurnRow>, StoreError> {
-        let mut turns = self.turns.lock().await.clone();
-        turns.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-        turns.truncate(limit as usize);
-        Ok(turns)
-    }
-
     async fn mark_stale_failed(&self, _stale_secs: i64) -> Result<u64, StoreError> {
         Ok(0)
     }
