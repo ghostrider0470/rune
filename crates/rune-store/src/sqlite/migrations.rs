@@ -284,6 +284,25 @@ ALTER TABLE sessions ADD COLUMN runtime_profile TEXT;
 ALTER TABLE sessions ADD COLUMN policy_profile TEXT;
 "#,
     },
+    Migration {
+        version: 8,
+        name: "memory_facts",
+        sql: r#"
+-- Semantic memory facts (Mem0). SQLite stores facts for CRUD but has no
+-- vector index, so recall/dedup/graph always return empty results.
+CREATE TABLE IF NOT EXISTS rune_memory_facts (
+    id                TEXT PRIMARY KEY,
+    fact              TEXT NOT NULL,
+    category          TEXT NOT NULL DEFAULT 'general',
+    source_session_id TEXT,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    access_count      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_rune_memory_facts_created_at
+    ON rune_memory_facts (created_at DESC);
+"#,
+    },
 ];
 
 /// Run all pending migrations on the given connection.

@@ -1788,3 +1788,277 @@ impl MemoryEmbeddingRepo for PgMemoryEmbeddingRepo {
         Ok(result as usize)
     }
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// PgMemoryFactRepo
+// ══════════════════════════════════════════════════════════════════════
+
+/// PostgreSQL-backed memory fact repository using pgvector for semantic recall.
+#[derive(Clone)]
+pub struct PgMemoryFactRepo {
+    pool: PgPool,
+}
+
+impl PgMemoryFactRepo {
+    /// Create a new repository backed by the given connection pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+fn row_to_memory_fact(row: &tokio_postgres::Row) -> MemoryFact {
+    MemoryFact {
+        id: row.get("id"),
+        fact: row.get("fact"),
+        category: row.get("category"),
+        source_session_id: row.get("source_session_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        access_count: row.get("access_count"),
+    }
+}
+
+#[async_trait]
+impl MemoryFactRepo for PgMemoryFactRepo {
+    async fn recall(
+        &self,
+        embedding_str: &str,
+        threshold: f64,
+        limit: i64,
+    ) -> Result<Vec<MemoryFact>, StoreError> {
+        use tokio_postgres::types::Type;
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let rows = client
+            .query_typed(
+                "SELECT id, fact, category, source_session_id, created_at, updated_at, \
+                        access_count \
+                 FROM rune_memories WHERE 1 - (embedding <=> $1::vector) > $2 \
+                 ORDER BY embedding <=> $1::vector LIMIT $3",
+                &[
+                    (
+                        &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &threshold as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::FLOAT8,
+                    ),
+                    (
+                        &limit as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::INT8,
+                    ),
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(rows.iter().map(row_to_memory_fact).collect())
+    }
+
+    async fn increment_access(&self, ids: &[uuid::Uuid]) -> Result<(), StoreError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        client
+            .execute(
+                "UPDATE rune_memories SET access_count = access_count + 1 WHERE id = ANY($1)",
+                &[&ids],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(())
+    }
+
+    async fn dedup_check(
+        &self,
+        embedding_str: &str,
+        threshold: f64,
+    ) -> Result<Option<(uuid::Uuid, String, f64)>, StoreError> {
+        use tokio_postgres::types::Type;
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let rows = client
+            .query_typed(
+                "SELECT id, fact, 1 - (embedding <=> $1::vector) AS similarity \
+                 FROM rune_memories WHERE 1 - (embedding <=> $1::vector) > $2 \
+                 ORDER BY embedding <=> $1::vector LIMIT 1",
+                &[
+                    (
+                        &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &threshold as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::FLOAT8,
+                    ),
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(rows.into_iter().next().map(|r| {
+            let id: uuid::Uuid = r.get("id");
+            let fact: String = r.get("fact");
+            let similarity: f64 = r.get("similarity");
+            (id, fact, similarity)
+        }))
+    }
+
+    async fn insert(
+        &self,
+        id: uuid::Uuid,
+        fact: &str,
+        category: &str,
+        embedding_str: &str,
+        source_session_id: Option<uuid::Uuid>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError> {
+        use tokio_postgres::types::Type;
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        client
+            .query_typed(
+                "INSERT INTO rune_memories \
+                 (id, fact, category, embedding, source_session_id, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4::vector, $5, $6, $7)",
+                &[
+                    (
+                        &id as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::UUID,
+                    ),
+                    (
+                        &fact as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &category as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &source_session_id as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::UUID,
+                    ),
+                    (
+                        &now as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TIMESTAMPTZ,
+                    ),
+                    (
+                        &now as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TIMESTAMPTZ,
+                    ),
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(())
+    }
+
+    async fn update(
+        &self,
+        id: uuid::Uuid,
+        fact: &str,
+        category: &str,
+        embedding_str: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), StoreError> {
+        use tokio_postgres::types::Type;
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        client
+            .query_typed(
+                "UPDATE rune_memories \
+                 SET fact = $2, category = $3, embedding = $4::vector, updated_at = $5 \
+                 WHERE id = $1",
+                &[
+                    (
+                        &id as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::UUID,
+                    ),
+                    (
+                        &fact as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &category as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &embedding_str as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &now as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TIMESTAMPTZ,
+                    ),
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        client
+            .execute(
+                "DELETE FROM rune_memories WHERE id = $1::uuid",
+                &[&id],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(())
+    }
+
+    async fn list_all(&self) -> Result<Vec<MemoryFact>, StoreError> {
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let rows = client
+            .query(
+                "SELECT id, fact, category, source_session_id, created_at, updated_at, \
+                        access_count \
+                 FROM rune_memories ORDER BY created_at DESC",
+                &[],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(rows.iter().map(row_to_memory_fact).collect())
+    }
+
+    async fn graph_edges(
+        &self,
+        threshold: f64,
+        neighbors_k: i64,
+    ) -> Result<Vec<MemoryFactEdge>, StoreError> {
+        use tokio_postgres::types::Type;
+        let client = self.pool.get().await.map_err(StoreError::from)?;
+        let rows = client
+            .query_typed(
+                "SELECT a.id AS source_id, b.id AS target_id, \
+                         1 - (a.embedding <=> b.embedding) AS similarity \
+                 FROM rune_memories a JOIN LATERAL ( \
+                     SELECT b.id, b.embedding FROM rune_memories b \
+                     WHERE b.id > a.id AND 1 - (a.embedding <=> b.embedding) > $1 \
+                     ORDER BY a.embedding <=> b.embedding LIMIT $2 \
+                 ) b ON true",
+                &[
+                    (
+                        &threshold as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::FLOAT8,
+                    ),
+                    (
+                        &neighbors_k as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::INT8,
+                    ),
+                ],
+            )
+            .await
+            .map_err(StoreError::from)?;
+        Ok(rows
+            .iter()
+            .map(|r| MemoryFactEdge {
+                source: r.get("source_id"),
+                target: r.get("target_id"),
+                similarity: r.get("similarity"),
+            })
+            .collect())
+    }
+}
