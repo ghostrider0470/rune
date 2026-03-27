@@ -61,7 +61,7 @@
 | `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack`, `list-reactions` shipped | #74 |
 | `agent` | `rune agent` | **Shipped** | `run`, `result` | #70 |
 | `agents` | `rune agents` | **Partial** | `list`, `show`, `status`, `tree`, `templates`, `start --template` shipped. `steer`/`kill` remain blocked because no client-facing transport surface exists yet to send those control actions, even though internal lifecycle/session logic already exists. | #63/#70 |
-| `acp` | `acp_dispatch` tool | **Partial** | Tool dispatches tasks to Claude Code / Codex CLIs as subprocesses. CLI `rune acp send/inbox/ack` surface not yet wired. | #70 |
+| `acp` | `acp_dispatch` tool + `rune acp send/inbox/ack` | **Partial** | Tool dispatches tasks to Claude Code / Codex CLIs as subprocesses. CLI ACP send/inbox/ack now routes through gateway `/acp/send`, `/acp/inbox`, and `/acp/ack`. Remaining gaps: streaming output, background dispatch, richer agent config/sandbox controls. | #70 |
 | `devices` | — | **Not started** | `list`, `remove`, `clear`, `approve`, `reject`, `rotate`, `revoke` | — |
 | `pairing` | — | **Not started** | `list`, `approve` | — |
 | `node` | — | **Not started** | `run`, `status`, `install`, `uninstall`, `stop`, `restart` | — |
