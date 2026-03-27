@@ -25,8 +25,8 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: cargo check (library)
-        run: cargo check --workspace
+      - name: cargo check
+        run: cargo check --workspace --all-targets
 
       - name: cargo clippy (library)
         run: cargo clippy --workspace -- -D warnings
