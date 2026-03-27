@@ -89,29 +89,6 @@ fn signal_adapter_requires_number() {
 }
 
 #[test]
-fn teams_adapter_requires_app_id() {
-    let config = ChannelsConfig::default();
-    let err = match create_adapter("teams", &config) {
-        Ok(_) => panic!("teams should require app id"),
-        Err(err) => err,
-    };
-    assert_provider_error(err, "teams_app_id is required");
-}
-
-#[test]
-fn teams_adapter_requires_app_password() {
-    let config = ChannelsConfig {
-        teams_app_id: Some("app-id".into()),
-        ..ChannelsConfig::default()
-    };
-    let err = match create_adapter("teams", &config) {
-        Ok(_) => panic!("teams should require app password"),
-        Err(err) => err,
-    };
-    assert_provider_error(err, "teams_app_password is required");
-}
-
-#[test]
 fn unknown_adapter_kind_returns_provider_error() {
     let config = ChannelsConfig::default();
     let err = match create_adapter("matrix", &config) {
@@ -177,10 +154,8 @@ async fn configured_adapter_kinds_construct_successfully() {
     let teams = create_adapter(
         "teams",
         &ChannelsConfig {
-            teams_app_id: Some("app-id".into()),
-            teams_app_password: Some("app-password".into()),
-            teams_tenant_id: Some("tenant-id".into()),
-            teams_listen_addr: Some("127.0.0.1:3400".into()),
+            teams_bot_token: Some("teams-token".into()),
+            teams_bot_app_id: Some("bot-app-id".into()),
             ..ChannelsConfig::default()
         },
     );
@@ -359,4 +334,14 @@ fn channels_config_defaults_google_chat_fields_safely() {
     assert_eq!(config.google_chat_service_account, None);
     assert_eq!(config.google_chat_listen_addr, None);
     assert_eq!(config.google_chat_verification_token, None);
+}
+
+#[test]
+fn teams_adapter_requires_bot_token() {
+    let config = ChannelsConfig::default();
+    let err = match create_adapter("teams", &config) {
+        Ok(_) => panic!("teams should require bot token"),
+        Err(err) => err,
+    };
+    assert_provider_error(err, "teams_bot_token is required");
 }
