@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use rune_config::{AppConfig, StorageBackend};
+use rune_config::{AppConfig, StorageBackend, VectorBackend};
 use tracing::info;
 
 use crate::error::StoreError;
@@ -58,19 +58,29 @@ pub async fn build_repos(
 ) -> Result<(RepoSet, StorageInfo, Option<crate::embedded::EmbeddedPg>), StoreError> {
     let resolved = resolve_backend(&config.database);
 
-    match resolved {
+    let (mut repos, mut info, embedded_pg) = match resolved {
         #[cfg(feature = "sqlite")]
         ResolvedBackend::Sqlite => {
             let (repos, info) = build_sqlite_repos(config).await?;
-            Ok((repos, info, None))
+            (repos, info, None)
         }
-        ResolvedBackend::Postgres => build_pg_repos(config).await,
+        ResolvedBackend::Postgres => build_pg_repos(config).await?,
         #[cfg(feature = "cosmos")]
         ResolvedBackend::Cosmos => {
             let (repos, info) = build_cosmos_repos(config).await?;
-            Ok((repos, info, None))
+            (repos, info, None)
         }
+    };
+
+    let vector_label = maybe_override_vector_repos(config, &mut repos).await?;
+    if !vector_label.is_empty() {
+        // StorageInfo.backend_name is &'static str, so we use a leaked string.
+        // This is fine — it's called once at startup.
+        let combined = format!("{}{}", info.backend_name, vector_label);
+        info.backend_name = Box::leak(combined.into_boxed_str());
     }
+
+    Ok((repos, info, embedded_pg))
 }
 
 /// Build all repositories from the application config (no-postgres build).
@@ -78,12 +88,20 @@ pub async fn build_repos(
 pub async fn build_repos(config: &AppConfig) -> Result<(RepoSet, StorageInfo), StoreError> {
     let resolved = resolve_backend(&config.database);
 
-    match resolved {
+    let (mut repos, mut info) = match resolved {
         #[cfg(feature = "sqlite")]
-        ResolvedBackend::Sqlite => build_sqlite_repos(config).await,
+        ResolvedBackend::Sqlite => build_sqlite_repos(config).await?,
         #[cfg(feature = "cosmos")]
-        ResolvedBackend::Cosmos => build_cosmos_repos(config).await,
+        ResolvedBackend::Cosmos => build_cosmos_repos(config).await?,
+    };
+
+    let vector_label = maybe_override_vector_repos(config, &mut repos).await?;
+    if !vector_label.is_empty() {
+        let combined = format!("{}{}", info.backend_name, vector_label);
+        info.backend_name = Box::leak(combined.into_boxed_str());
     }
+
+    Ok((repos, info))
 }
 
 // ── Backend resolution ───────────────────────────────────────────────
@@ -138,6 +156,67 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
             return ResolvedBackend::Postgres;
             #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
             panic!("no storage backend available — enable 'sqlite' or 'postgres' feature");
+        }
+    }
+}
+
+// ── Vector backend resolution ────────────────────────────────────────
+
+/// Resolve which vector backend to use.
+fn resolve_vector_backend(config: &AppConfig) -> VectorBackend {
+    match &config.vector.backend {
+        VectorBackend::Auto => {
+            if config.vector.lancedb_uri.is_some() {
+                VectorBackend::LanceDb
+            } else {
+                VectorBackend::Integrated
+            }
+        }
+        other => other.clone(),
+    }
+}
+
+/// Optionally override vector repos based on the vector backend config.
+/// Returns the vector backend label for StorageInfo.
+async fn maybe_override_vector_repos(
+    config: &AppConfig,
+    repos: &mut RepoSet,
+) -> Result<&'static str, StoreError> {
+    let vector_backend = resolve_vector_backend(config);
+
+    match vector_backend {
+        #[cfg(feature = "lancedb")]
+        VectorBackend::LanceDb => {
+            let uri = config
+                .vector
+                .lancedb_uri
+                .clone()
+                .unwrap_or_else(|| {
+                    config
+                        .paths
+                        .db_dir
+                        .join("vectors")
+                        .to_string_lossy()
+                        .to_string()
+                });
+            let lance =
+                crate::lancedb::LanceStore::new(&uri, config.vector.embedding_dims).await?;
+            repos.memory_embedding_repo = Arc::new(lance.clone());
+            repos.memory_fact_repo = Arc::new(lance);
+            Ok(" + lancedb")
+        }
+        #[cfg(not(feature = "lancedb"))]
+        VectorBackend::LanceDb => Err(StoreError::Database(
+            "vector backend set to 'lancedb' but the 'lancedb' feature is not compiled in".into(),
+        )),
+        VectorBackend::None => {
+            // Keep the store backend's stubs (SQLite returns empty, Cosmos has vector support).
+            // No override needed — the integrated repos already handle "no results" gracefully.
+            Ok(" + no-vector")
+        }
+        VectorBackend::Integrated | VectorBackend::Auto => {
+            // Keep whatever the store backend provided.
+            Ok("")
         }
     }
 }
