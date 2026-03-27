@@ -43,6 +43,12 @@ pub struct PatternQuery {
     pub max_results: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustImportContext {
+    pub path: PathBuf,
+    pub imports: Vec<String>,
+}
+
 impl Default for PatternQuery {
     fn default() -> Self {
         Self {
@@ -59,6 +65,7 @@ impl Default for PatternQuery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResult {
     pub patterns: Vec<Pattern>,
+    pub import_context: Option<RustImportContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +79,7 @@ pub struct ValidationFinding {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ValidationReport {
     pub findings: Vec<ValidationFinding>,
+    pub scanned_files: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,10 +146,20 @@ pub fn rust_pattern(query: PatternQuery) -> Result<QueryResult, RustPatternsErro
         .into_iter()
         .map(|tag| normalize(&tag))
         .collect();
-    let import_signals = query
+    let import_context = query
         .context_file
         .as_ref()
-        .map(|path| collect_import_signals(path).unwrap_or_default())
+        .and_then(|path| collect_import_signals(path).ok())
+        .map(|imports| RustImportContext {
+            path: query
+                .context_file
+                .clone()
+                .expect("context_file exists when import context is built"),
+            imports,
+        });
+    let import_signals = import_context
+        .as_ref()
+        .map(|ctx| ctx.imports.clone())
         .unwrap_or_default();
     let task_terms = tokenize(query.task_description.as_deref().unwrap_or_default());
     let error_terms = tokenize(query.error_message.as_deref().unwrap_or_default());
@@ -156,7 +174,10 @@ pub fn rust_pattern(query: PatternQuery) -> Result<QueryResult, RustPatternsErro
             .collect();
 
         let mut score = 0usize;
-        if requested_topic.as_ref().is_some_and(|wanted| wanted == &topic_norm) {
+        if requested_topic
+            .as_ref()
+            .is_some_and(|wanted| wanted == &topic_norm)
+        {
             score += 100;
         }
         for tag in &requested_tags {
@@ -218,16 +239,25 @@ pub fn rust_pattern(query: PatternQuery) -> Result<QueryResult, RustPatternsErro
             .take(query.max_results.max(1))
             .map(|(_, pattern)| pattern)
             .collect(),
+        import_context,
     })
 }
 
 pub fn validate_rune_codebase(root: &Path) -> ValidationReport {
     let mut findings = Vec::new();
-    collect_validation_findings(root, &mut findings);
-    ValidationReport { findings }
+    let mut scanned_files = 0;
+    collect_validation_findings(root, &mut findings, &mut scanned_files);
+    ValidationReport {
+        findings,
+        scanned_files,
+    }
 }
 
-fn collect_validation_findings(root: &Path, findings: &mut Vec<ValidationFinding>) {
+fn collect_validation_findings(
+    root: &Path,
+    findings: &mut Vec<ValidationFinding>,
+    scanned_files: &mut usize,
+) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
@@ -240,7 +270,7 @@ fn collect_validation_findings(root: &Path, findings: &mut Vec<ValidationFinding
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| matches!(name, "target" | ".git" | "node_modules"));
             if !skip {
-                collect_validation_findings(&path, findings);
+                collect_validation_findings(&path, findings, scanned_files);
             }
             continue;
         }
@@ -249,12 +279,17 @@ fn collect_validation_findings(root: &Path, findings: &mut Vec<ValidationFinding
             continue;
         }
 
-        if path.components().any(|component| component.as_os_str() == "tests") {
+        if path
+            .components()
+            .any(|component| component.as_os_str() == "tests")
+        {
             continue;
         }
 
         if let Ok(content) = fs::read_to_string(&path) {
-            let async_and_blocking = content.contains("async fn") && content.contains("std::thread::sleep");
+            *scanned_files += 1;
+            let async_and_blocking =
+                content.contains("async fn") && content.contains("std::thread::sleep");
             for (idx, line) in content.lines().enumerate() {
                 let trimmed = line.trim();
                 if trimmed.contains(".unwrap()") {
@@ -270,7 +305,9 @@ fn collect_validation_findings(root: &Path, findings: &mut Vec<ValidationFinding
                         file: path.display().to_string(),
                         line: idx + 1,
                         issue: "blocking std::thread::sleep inside async context".into(),
-                        recommendation: "Use tokio::time::sleep or spawn_blocking depending on the workload.".into(),
+                        recommendation:
+                            "Use tokio::time::sleep or spawn_blocking depending on the workload."
+                                .into(),
                     });
                 }
             }
@@ -301,10 +338,11 @@ fn load_pattern_library(dir: PathBuf) -> Result<Vec<LoadedTopic>, RustPatternsEr
             path: path.clone(),
             source,
         })?;
-        let parsed: PatternFile = toml::from_str(&raw).map_err(|source| RustPatternsError::ParseToml {
-            path: path.clone(),
-            source,
-        })?;
+        let parsed: PatternFile =
+            toml::from_str(&raw).map_err(|source| RustPatternsError::ParseToml {
+                path: path.clone(),
+                source,
+            })?;
 
         let patterns = parsed
             .patterns
@@ -381,7 +419,8 @@ mod tests {
 
     #[test]
     fn loads_all_seed_topics() {
-        let topics = load_pattern_library(default_patterns_dir()).expect("seed patterns should load");
+        let topics =
+            load_pattern_library(default_patterns_dir()).expect("seed patterns should load");
         assert!(topics.iter().any(|topic| topic.topic == "ownership"));
         assert!(topics.iter().any(|topic| topic.topic == "error_handling"));
         assert!(topics.iter().any(|topic| topic.topic == "async_tokio"));
@@ -396,7 +435,8 @@ mod tests {
 
     #[test]
     fn every_seed_topic_has_at_least_one_pattern() {
-        let topics = load_pattern_library(default_patterns_dir()).expect("seed patterns should load");
+        let topics =
+            load_pattern_library(default_patterns_dir()).expect("seed patterns should load");
         assert!(topics.iter().all(|topic| !topic.patterns.is_empty()));
     }
 
@@ -409,7 +449,12 @@ mod tests {
         .expect("query should work");
 
         assert!(!result.patterns.is_empty());
-        assert!(result.patterns.iter().all(|pattern| pattern.topic == "error_handling"));
+        assert!(
+            result
+                .patterns
+                .iter()
+                .all(|pattern| pattern.topic == "error_handling")
+        );
     }
 
     #[test]
@@ -446,12 +491,37 @@ mod tests {
     }
 
     #[test]
+    fn query_returns_import_context_when_context_file_is_used() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("handler.rs");
+        fs::write(
+            &file,
+            "use tokio::time::sleep;
+use axum::Json;
+",
+        )
+        .expect("write file");
+
+        let result = rust_pattern(PatternQuery {
+            context_file: Some(file.clone()),
+            ..Default::default()
+        })
+        .expect("query should work");
+
+        let import_context = result.import_context.expect("import context");
+        assert_eq!(import_context.path, file);
+        assert!(import_context.imports.contains(&"tokio".to_string()));
+        assert!(import_context.imports.contains(&"axum".to_string()));
+    }
+
+    #[test]
     fn validation_flags_unwrap_in_non_test_code() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let file = tmp.path().join("sample.rs");
         fs::write(&file, "fn demo() { let _ = Some(1).unwrap(); }\n").expect("write file");
 
         let report = validate_rune_codebase(tmp.path());
+        assert_eq!(report.scanned_files, 1);
         assert_eq!(report.findings.len(), 1);
         assert!(report.findings[0].issue.contains("unwrap"));
     }
