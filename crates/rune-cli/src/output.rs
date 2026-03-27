@@ -5307,6 +5307,7 @@ mod tests {
                     message: "unreachable".into(),
                 },
             ],
+<<<<<<< HEAD
             paths: Some(crate::output::DoctorPathSummary {
                 profile: "default".into(),
                 mode: "workspace".into(),
@@ -5325,6 +5326,22 @@ mod tests {
                 capability: "mode=standalone".into(),
                 fix_hint: None,
             }],
+=======
+            paths: crate::output::DoctorPathSummary {
+                workspace: "ok",
+                memory: "ok",
+                skills: "ok",
+                config: "ok",
+                models: "ok",
+                search: "ok",
+            },
+            topology: crate::output::DoctorTopologySummary {
+                mode: "single-process",
+                transport: "http",
+                session_storage: "memory",
+                message_bus: "local",
+            },
+>>>>>>> bc0b8f3 (fix(gateway): repair remaining test-context CI failures (#399))
             run_at: "2026-03-20T09:30:00Z".into(),
         };
         let out = render(&r, OutputFormat::Human);
