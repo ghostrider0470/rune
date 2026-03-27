@@ -5277,20 +5277,17 @@ mod tests {
                     message: "unreachable".into(),
                 },
             ],
-            paths: crate::output::DoctorPathSummary {
-                workspace: "ok",
-                memory: "ok",
-                skills: "ok",
-                config: "ok",
-                models: "ok",
-                search: "ok",
-            },
-            topology: crate::output::DoctorTopologySummary {
-                mode: "single-process",
-                transport: "http",
-                session_storage: "memory",
-                message_bus: "local",
-            },
+            paths: Some(crate::output::DoctorPathSummary {
+                profile: "default".into(),
+                mode: "workspace".into(),
+                auto_create_missing: true,
+            }),
+            topology: Some(crate::output::DoctorTopologySummary {
+                deployment: "single-process".into(),
+                database: "memory".into(),
+                models: "local".into(),
+                search: "embedded".into(),
+            }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
         let out = render(&r, OutputFormat::Human);
