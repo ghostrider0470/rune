@@ -73,87 +73,145 @@ impl CosmosStore {
 
     /// Execute a cross-partition SQL query via the Cosmos REST API.
     ///
-    /// The azure_data_cosmos SDK v0.31 does not support cross-partition queries
-    /// (`PartitionKey::EMPTY` returns 400), so we call the REST endpoint directly
-    /// with HMAC-SHA256 authentication and pagination.
+    /// The Cosmos gateway rejects naive cross-partition POSTs with a "first
+    /// chance exception" 400.  The correct approach is to enumerate partition
+    /// key ranges (`GET .../pkranges`) and query each range individually with
+    /// the `x-ms-documentdb-partitionkeyrangeid` header, then merge results.
     pub async fn query_cross_partition<T: DeserializeOwned>(
         &self,
         sql: &str,
     ) -> Result<Vec<T>, StoreError> {
         let client = reqwest::Client::new();
         let resource_link = "dbs/rune/colls/rune";
+
+        // Step 1: get partition key ranges
+        let pk_ranges = self.get_partition_key_ranges(&client, resource_link).await?;
+
+        // Step 2: query each range, paginating with continuation
         let url = format!("{}/{}/docs", self.endpoint, resource_link);
-
         let mut all_results: Vec<T> = Vec::new();
-        let mut continuation: Option<String> = None;
 
-        loop {
-            // Generate date in RFC 7231 format.
-            let date = chrono::Utc::now()
-                .format("%a, %d %b %Y %H:%M:%S GMT")
-                .to_string();
+        for range_id in &pk_ranges {
+            let mut continuation: Option<String> = None;
+            loop {
+                let date = chrono::Utc::now()
+                    .format("%a, %d %b %Y %H:%M:%S GMT")
+                    .to_string();
+                let auth_token =
+                    generate_auth_token(&self.key, "post", "docs", resource_link, &date)?;
 
-            // Build HMAC-SHA256 auth token.
-            let auth_token = generate_auth_token(&self.key, "post", "docs", resource_link, &date)?;
+                let mut req = client
+                    .post(&url)
+                    .header("Authorization", &auth_token)
+                    .header("x-ms-date", &date)
+                    .header("x-ms-version", "2020-07-15")
+                    .header("Content-Type", "application/query+json")
+                    .header("x-ms-documentdb-isquery", "true")
+                    .header("x-ms-documentdb-query-enablecrosspartition", "true")
+                    .header("x-ms-documentdb-partitionkeyrangeid", range_id.as_str());
 
-            let mut req = client
-                .post(&url)
-                .header("Authorization", &auth_token)
-                .header("x-ms-date", &date)
-                .header("x-ms-version", "2020-07-15")
-                .header("Content-Type", "application/query+json")
-                .header("x-ms-documentdb-isquery", "true")
-                .header("x-ms-documentdb-query-enablecrosspartition", "true");
-
-            if let Some(ref token) = continuation {
-                req = req.header("x-ms-continuation", token);
-            }
-
-            let body = serde_json::json!({ "query": sql });
-            let resp = req
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| StoreError::Database(format!("cosmos REST request failed: {e}")))?;
-
-            let status = resp.status();
-            let next_continuation = resp
-                .headers()
-                .get("x-ms-continuation")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-
-            let resp_body: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| StoreError::Database(format!("cosmos REST response parse failed: {e}")))?;
-
-            if !status.is_success() {
-                let msg = resp_body
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown error");
-                return Err(StoreError::Database(format!(
-                    "cosmos REST query failed ({}): {}",
-                    status, msg
-                )));
-            }
-
-            if let Some(docs_arr) = resp_body.get("Documents").and_then(|v| v.as_array()) {
-                for doc in docs_arr {
-                    let item: T = serde_json::from_value(doc.clone())
-                        .map_err(|e| StoreError::Serialization(e.to_string()))?;
-                    all_results.push(item);
+                if let Some(ref token) = continuation {
+                    req = req.header("x-ms-continuation", token);
                 }
-            }
 
-            match next_continuation {
-                Some(token) if !token.is_empty() => continuation = Some(token),
-                _ => break,
+                let body = serde_json::json!({ "query": sql });
+                let resp = req.json(&body).send().await.map_err(|e| {
+                    StoreError::Database(format!("cosmos REST request failed: {e}"))
+                })?;
+
+                let status = resp.status();
+                let next_continuation = resp
+                    .headers()
+                    .get("x-ms-continuation")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let resp_body: serde_json::Value = resp.json().await.map_err(|e| {
+                    StoreError::Database(format!("cosmos REST response parse failed: {e}"))
+                })?;
+
+                if !status.is_success() {
+                    let msg = resp_body
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown error");
+                    return Err(StoreError::Database(format!(
+                        "cosmos REST query failed ({}): {}",
+                        status, msg
+                    )));
+                }
+
+                if let Some(docs_arr) = resp_body.get("Documents").and_then(|v| v.as_array()) {
+                    for doc in docs_arr {
+                        let item: T = serde_json::from_value(doc.clone())
+                            .map_err(|e| StoreError::Serialization(e.to_string()))?;
+                        all_results.push(item);
+                    }
+                }
+
+                match next_continuation {
+                    Some(token) if !token.is_empty() => continuation = Some(token),
+                    _ => break,
+                }
             }
         }
 
         Ok(all_results)
+    }
+
+    /// Fetch partition key range IDs for the container.
+    async fn get_partition_key_ranges(
+        &self,
+        client: &reqwest::Client,
+        resource_link: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        let url = format!("{}/{}/pkranges", self.endpoint, resource_link);
+        let date = chrono::Utc::now()
+            .format("%a, %d %b %Y %H:%M:%S GMT")
+            .to_string();
+        let auth_token =
+            generate_auth_token(&self.key, "get", "pkranges", resource_link, &date)?;
+
+        let resp = client
+            .get(&url)
+            .header("Authorization", &auth_token)
+            .header("x-ms-date", &date)
+            .header("x-ms-version", "2020-07-15")
+            .send()
+            .await
+            .map_err(|e| StoreError::Database(format!("pkranges request failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StoreError::Database(format!(
+                "pkranges request failed ({}): {}",
+                status, body
+            )));
+        }
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| StoreError::Database(format!("pkranges response parse failed: {e}")))?;
+
+        let ranges = body
+            .get("PartitionKeyRanges")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                StoreError::Database("pkranges response missing PartitionKeyRanges".into())
+            })?;
+
+        let ids: Vec<String> = ranges
+            .iter()
+            .filter_map(|r| r.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .collect();
+
+        if ids.is_empty() {
+            return Err(StoreError::Database("no partition key ranges found".into()));
+        }
+
+        Ok(ids)
     }
 }
 
