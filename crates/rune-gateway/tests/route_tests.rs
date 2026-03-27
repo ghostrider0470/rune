@@ -11276,3 +11276,22 @@ async fn native_comms_send_inbox_and_ack_flow() {
             .is_some()
     );
 }
+
+#[tokio::test]
+async fn transcript_route_accepts_api_key_query_param() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("shared-secret".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::get(format!(
+                "/sessions/{}/transcript?api_key=shared-secret",
+                Uuid::now_v7()
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+}
