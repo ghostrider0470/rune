@@ -3,6 +3,7 @@ import { Button, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { setToken } from "../../src/lib/auth";
 import { setGatewayUrl } from "../../src/store/app-store";
+import { useTheme } from "../../src/hooks/use-theme";
 
 async function verifyGateway(baseUrl: string): Promise<void> {
   const normalized = baseUrl.replace(/\/+$/, "");
@@ -16,6 +17,7 @@ async function verifyGateway(baseUrl: string): Promise<void> {
 }
 
 export default function ConnectScreen() {
+  const colors = useTheme();
   const [gatewayUrl, setGatewayUrlInput] = useState("");
   const [bearerToken, setBearerToken] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,26 +39,28 @@ export default function ConnectScreen() {
   };
 
   return (
-    <View style={{ flex: 1, justifyContent: "center", padding: 24, gap: 12 }}>
-      <Text style={{ fontSize: 24, fontWeight: "600" }}>Connect to Rune Gateway</Text>
+    <View style={{ backgroundColor: colors.background, flex: 1, justifyContent: "center", padding: 24, gap: 12 }}>
+      <Text style={{ color: colors.text, fontSize: 24, fontWeight: "600" }}>Connect to Rune Gateway</Text>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="https://gateway.example.com"
+        placeholderTextColor={colors.textMuted}
         value={gatewayUrl}
         onChangeText={setGatewayUrlInput}
-        style={{ borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 12 }}
+        style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, color: colors.text }}
       />
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="Bearer token"
+        placeholderTextColor={colors.textMuted}
         secureTextEntry
         value={bearerToken}
         onChangeText={setBearerToken}
-        style={{ borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 12 }}
+        style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, color: colors.text }}
       />
-      {error ? <Text style={{ color: "#c00" }}>{error}</Text> : null}
+      {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
       <Button title={submitting ? "Connecting..." : "Connect"} onPress={() => void onSubmit()} />
     </View>
   );

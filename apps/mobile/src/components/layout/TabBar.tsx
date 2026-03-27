@@ -2,8 +2,10 @@ import React from "react";
 import { Text, View } from "react-native";
 import { BottomTabBar, type BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useApprovalsBadge } from "../../hooks/use-approvals-badge";
+import { useTheme } from "../../hooks/use-theme";
 
 export function TabBar(props: BottomTabBarProps) {
+  const colors = useTheme();
   const { count, visible } = useApprovalsBadge();
 
   return (
@@ -21,7 +23,7 @@ export function TabBar(props: BottomTabBarProps) {
           <View
             style={{
               alignItems: "center",
-              backgroundColor: "#dc2626",
+              backgroundColor: colors.danger,
               borderRadius: 999,
               justifyContent: "center",
               minWidth: 20,
@@ -29,7 +31,7 @@ export function TabBar(props: BottomTabBarProps) {
               height: 20,
             }}
           >
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>{count}</Text>
+            <Text style={{ color: colors.onPrimary, fontSize: 12, fontWeight: "700" }}>{count}</Text>
           </View>
         </View>
       ) : null}
