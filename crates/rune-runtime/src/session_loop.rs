@@ -657,13 +657,13 @@ impl SessionLoop {
             notices.get(routing_key).cloned()
         };
 
-        let fingerprint = session.updated_at.to_rfc3339();
+        let fingerprint = session.last_activity_at.to_rfc3339();
         if last_notified.as_deref() == Some(fingerprint.as_str()) {
             return;
         }
 
         let text = format!(
-            "Resumed session `{}` after restart. Transcript history and durable approval/session state were restored. In-flight turns, live process handles, and typing/progress UI do not resume in place; send your next message to continue.",
+            "Resumed session `{}` after restart. Transcript history plus durable approval/session state were restored from the last saved activity. In-flight turns, live process handles, and typing/progress UI do not resume in place; send your next message to continue.",
             session.id
         );
 
