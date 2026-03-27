@@ -3908,6 +3908,8 @@ pub struct UsageSummaryResponse {
     pub total_tokens: u64,
     pub total_requests: u64,
     pub total_estimated_cost: Option<String>,
+    pub usage_cached_prompt_tokens: u64,
+    pub cache_hit_ratio: f64,
 }
 
 #[derive(Serialize)]
@@ -3919,62 +3921,86 @@ pub struct AgentListItem {
     pub system_prompt: Option<String>,
 }
 
+/// Query parameters for `GET /api/dashboard/usage`.
+///
+/// - `from` / `to`: ISO-8601 datetime bounds (both optional).
+/// - `period`: shorthand like `7d`, `30d`, `24h` — ignored when `from` is set.
+/// - `limit`: max turns to scan (default 10 000).
+#[derive(Deserialize)]
+pub struct UsageQuery {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    pub period: Option<String>,
+    pub limit: Option<u32>,
+}
+
 /// `GET /api/dashboard/usage` - aggregate token usage by day + model.
 pub async fn get_dashboard_usage(
     State(state): State<AppState>,
+    Query(params): Query<UsageQuery>,
 ) -> Result<Json<UsageSummaryResponse>, GatewayError> {
-    let sessions = state
-        .session_repo
-        .list(500, 0)
+    let limit = params.limit.unwrap_or(10_000).min(50_000);
+
+    // Resolve time range: explicit `from` wins, otherwise parse `period`.
+    let from = params.from.or_else(|| {
+        params.period.as_deref().and_then(|p| {
+            let dur = if let Some(d) = p.strip_suffix('d') {
+                d.parse::<i64>().ok().map(chrono::Duration::days)
+            } else if let Some(h) = p.strip_suffix('h') {
+                h.parse::<i64>().ok().map(chrono::Duration::hours)
+            } else {
+                None
+            };
+            dur.map(|d| Utc::now() - d)
+        })
+    });
+
+    let turns = state
+        .turn_repo
+        .list_usage(from, params.to, limit)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
     let mut grouped: HashMap<(String, String), UsageEntryResponse> = HashMap::new();
     let mut total_prompt_tokens = 0_u64;
     let mut total_completion_tokens = 0_u64;
+    let mut total_cached_prompt_tokens = 0_u64;
     let mut total_requests = 0_u64;
 
-    for session in sessions {
-        let turns = state
-            .turn_repo
-            .list_by_session(session.id)
-            .await
-            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    for turn in &turns {
+        let date = turn.started_at.date_naive().to_string();
+        let model = turn
+            .model_ref
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or("unknown")
+            .to_string();
+        let provider = model.split('/').next().unwrap_or("unknown").to_string();
+        let prompt = turn.usage_prompt_tokens.unwrap_or(0).max(0) as u64;
+        let completion = turn.usage_completion_tokens.unwrap_or(0).max(0) as u64;
+        let cached = turn.usage_cached_prompt_tokens.unwrap_or(0).max(0) as u64;
 
-        for turn in turns {
-            let date = turn.started_at.date_naive().to_string();
-            let model = turn
-                .model_ref
-                .clone()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "unknown".to_string());
-            let provider = model.split('/').next().unwrap_or("unknown").to_string();
-            let prompt_tokens = turn.usage_prompt_tokens.unwrap_or(0).max(0) as u64;
-            let completion_tokens = turn.usage_completion_tokens.unwrap_or(0).max(0) as u64;
-            let total_tokens = prompt_tokens + completion_tokens;
+        total_prompt_tokens += prompt;
+        total_completion_tokens += completion;
+        total_cached_prompt_tokens += cached;
+        total_requests += 1;
 
-            total_prompt_tokens += prompt_tokens;
-            total_completion_tokens += completion_tokens;
-            total_requests += 1;
-
-            let entry = grouped
-                .entry((date.clone(), model.clone()))
-                .or_insert_with(|| UsageEntryResponse {
-                    date: date.clone(),
-                    model: model.clone(),
-                    provider,
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                    request_count: 0,
-                    estimated_cost: None,
-                });
-
-            entry.prompt_tokens += prompt_tokens;
-            entry.completion_tokens += completion_tokens;
-            entry.total_tokens += total_tokens;
-            entry.request_count += 1;
-        }
+        let entry = grouped
+            .entry((date.clone(), model.clone()))
+            .or_insert_with(|| UsageEntryResponse {
+                date,
+                model,
+                provider,
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                request_count: 0,
+                estimated_cost: None,
+            });
+        entry.prompt_tokens += prompt;
+        entry.completion_tokens += completion;
+        entry.total_tokens += prompt + completion;
+        entry.request_count += 1;
     }
 
     let mut entries: Vec<_> = grouped.into_values().collect();
@@ -3987,6 +4013,12 @@ pub async fn get_dashboard_usage(
         total_tokens: total_prompt_tokens + total_completion_tokens,
         total_requests,
         total_estimated_cost: None,
+        usage_cached_prompt_tokens: total_cached_prompt_tokens,
+        cache_hit_ratio: if total_prompt_tokens > 0 {
+            total_cached_prompt_tokens as f64 / total_prompt_tokens as f64
+        } else {
+            0.0
+        },
     }))
 }
 
