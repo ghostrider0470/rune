@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 320" width="240" height="320">
+  <rect width="240" height="320" rx="24" fill="#FFFFFF" />
+  <path fill="#0A0D14" fill-rule="evenodd" d="
+    M 105,26
+    L 119,40
+    L 119,129
+    L 157,91
+    L 157,111
+    L 119,149
+    L 119,173
+    L 172,226
+    L 105,293
+    L 105,179
+    L 67,141
+    L 67,121
+    L 105,159
+    L 105,119
+    L 67,81
+    L 67,61
+    L 105,99
+    Z
+    M 119,193
+    L 119,259
+    L 152,226
+    Z
+  " />
+</svg>
