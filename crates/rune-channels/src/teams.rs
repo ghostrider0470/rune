@@ -245,6 +245,7 @@ struct TeamsAttachment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rune_core::ChannelId;
     use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
