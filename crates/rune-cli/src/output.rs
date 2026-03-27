@@ -104,16 +104,6 @@ pub struct DoctorTopologySummary {
     pub search: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DoctorBackendMatrixEntry {
-    pub subsystem: String,
-    pub backend: String,
-    pub status: String,
-    pub capability: String,
-    #[serde(default)]
-    pub fix_hint: Option<String>,
-}
-
 /// Full doctor report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
@@ -123,8 +113,6 @@ pub struct DoctorReport {
     pub paths: Option<DoctorPathSummary>,
     #[serde(default)]
     pub topology: Option<DoctorTopologySummary>,
-    #[serde(default)]
-    pub backend_matrix: Vec<DoctorBackendMatrixEntry>,
     pub run_at: String,
 }
 
@@ -146,24 +134,6 @@ impl fmt::Display for DoctorReport {
                 "Paths:    profile={}, mode={}, auto_create_missing={}",
                 paths.profile, paths.mode, paths.auto_create_missing
             )?;
-        }
-        if !self.backend_matrix.is_empty() {
-            writeln!(f, "Backend Matrix:")?;
-            for entry in &self.backend_matrix {
-                writeln!(
-                    f,
-                    "  {}: {} ({}) — {}{}",
-                    entry.subsystem,
-                    entry.backend,
-                    entry.status,
-                    entry.capability,
-                    entry
-                        .fix_hint
-                        .as_ref()
-                        .map(|hint| format!(" [fix: {hint}]"))
-                        .unwrap_or_default()
-                )?;
-            }
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
@@ -5318,13 +5288,6 @@ mod tests {
                 models: "local".into(),
                 search: "embedded".into(),
             }),
-            backend_matrix: vec![crate::output::DoctorBackendMatrixEntry {
-                subsystem: "storage".into(),
-                backend: "sqlite".into(),
-                status: "connected".into(),
-                capability: "mode=standalone".into(),
-                fix_hint: None,
-            }],
             run_at: "2026-03-20T09:30:00Z".into(),
         };
         let out = render(&r, OutputFormat::Human);

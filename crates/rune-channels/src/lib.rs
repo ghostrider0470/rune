@@ -135,16 +135,25 @@ pub fn create_adapter(
             Ok(Box::new(SignalAdapter::new(number, api_url)))
         }
         "teams" => {
-            let bot_token =
-                config
-                    .teams_bot_token
-                    .as_deref()
-                    .ok_or_else(|| ChannelError::Provider {
-                        message: "teams_bot_token is required for the Teams adapter".into(),
-                    })?;
+            let app_id = config
+                .teams_app_id
+                .as_deref()
+                .or(config.teams_bot_app_id.as_deref())
+                .ok_or_else(|| ChannelError::Provider {
+                    message: "teams_app_id or teams_bot_app_id is required for the Teams adapter".into(),
+                })?;
+            let app_password = config
+                .teams_app_password
+                .as_deref()
+                .or(config.teams_bot_token.as_deref())
+                .ok_or_else(|| ChannelError::Provider {
+                    message: "teams_app_password or teams_bot_token is required for the Teams adapter".into(),
+                })?;
             Ok(Box::new(TeamsAdapter::new(
-                bot_token,
-                config.teams_bot_app_id.clone(),
+                app_id,
+                app_password,
+                config.teams_tenant_id.as_deref(),
+                config.teams_listen_addr.clone(),
             )))
         }
         other => Err(ChannelError::Provider {
