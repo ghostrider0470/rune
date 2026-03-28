@@ -167,12 +167,14 @@ CREATE INDEX IF NOT EXISTS idx_pairing_requests_expires ON pairing_requests (exp
 CREATE TABLE IF NOT EXISTS memory_embeddings (
     id          TEXT PRIMARY KEY,
     file_path   TEXT NOT NULL,
+    project_id  TEXT NOT NULL DEFAULT 'default',
     chunk_index INTEGER NOT NULL,
     chunk_text  TEXT NOT NULL,
     created_at  TEXT NOT NULL,
     UNIQUE (file_path, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS idx_memory_embeddings_file_path ON memory_embeddings (file_path);
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_project_id ON memory_embeddings (project_id);
 
 -- FTS5 virtual table for keyword search
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings_fts
@@ -295,6 +297,8 @@ CREATE TABLE IF NOT EXISTS rune_memory_facts (
     fact              TEXT NOT NULL,
     category          TEXT NOT NULL DEFAULT 'general',
     source_session_id TEXT,
+    source_agent      TEXT,
+    trigger           TEXT,
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
     access_count      INTEGER NOT NULL DEFAULT 0
@@ -307,6 +311,17 @@ CREATE INDEX IF NOT EXISTS idx_rune_memory_facts_created_at
         version: 9,
         name: "add_cached_prompt_tokens",
         sql: "ALTER TABLE turns ADD COLUMN usage_cached_prompt_tokens INTEGER;",
+    },
+    Migration {
+        version: 10,
+        name: "memory_fact_metadata",
+        sql: r#"
+ALTER TABLE rune_memory_facts ADD COLUMN source_agent TEXT;
+ALTER TABLE rune_memory_facts ADD COLUMN trigger TEXT;
+
+ALTER TABLE memory_embeddings ADD COLUMN project_id TEXT NOT NULL DEFAULT 'default';
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_project_id ON memory_embeddings (project_id);
+"#,
     },
 ];
 

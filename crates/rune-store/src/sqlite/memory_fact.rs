@@ -13,7 +13,7 @@ use crate::models::{MemoryFact, MemoryFactEdge};
 use crate::repos::MemoryFactRepo;
 
 const FACT_COLS: &str =
-    "id, fact, category, source_session_id, created_at, updated_at, access_count";
+    "id, fact, category, source_session_id, source_agent, trigger, created_at, updated_at, access_count";
 
 fn row_to_memory_fact(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryFact> {
     Ok(MemoryFact {
@@ -21,9 +21,11 @@ fn row_to_memory_fact(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryFact> {
         fact: row.get(1)?,
         category: row.get(2)?,
         source_session_id: parse_uuid_opt(row.get(3)?),
-        created_at: parse_dt(&row.get::<_, String>(4)?),
-        updated_at: parse_dt(&row.get::<_, String>(5)?),
-        access_count: row.get(6)?,
+        source_agent: row.get(4)?,
+        trigger: row.get(5)?,
+        created_at: parse_dt(&row.get::<_, String>(6)?),
+        updated_at: parse_dt(&row.get::<_, String>(7)?),
+        access_count: row.get(8)?,
     })
 }
 
@@ -87,20 +89,24 @@ impl MemoryFactRepo for SqliteMemoryFactRepo {
         category: &str,
         _embedding_str: &str,
         source_session_id: Option<Uuid>,
+        source_agent: Option<&str>,
+        trigger: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<(), StoreError> {
         let fact = fact.to_string();
         let category = category.to_string();
         let now_s = to_rfc3339(&now);
         let sid = source_session_id.map(|u| u.to_string());
+        let source_agent = source_agent.map(str::to_string);
+        let trigger = trigger.map(str::to_string);
         self.conn
             .call(move |conn| {
                 conn.execute(
                     &format!(
                         "INSERT OR REPLACE INTO rune_memory_facts ({FACT_COLS}) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)"
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)"
                     ),
-                    rusqlite::params![id.to_string(), fact, category, sid, now_s, now_s],
+                    rusqlite::params![id.to_string(), fact, category, sid, source_agent, trigger, now_s, now_s],
                 )?;
                 Ok(())
             })

@@ -346,6 +346,8 @@ pub struct MemoryFact {
     pub fact: String,
     pub category: String,
     pub source_session_id: Option<Uuid>,
+    pub source_agent: Option<String>,
+    pub trigger: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub access_count: i32,

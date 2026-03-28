@@ -21,6 +21,8 @@ struct MemoryFactDoc {
     category: String,
     embedding: Vec<f32>,
     source_session_id: Option<Uuid>,
+    source_agent: Option<String>,
+    trigger: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     access_count: i32,
@@ -28,12 +30,12 @@ struct MemoryFactDoc {
 
 impl From<MemoryFactDoc> for MemoryFact {
     fn from(d: MemoryFactDoc) -> Self {
-        Self { id: d.fact_id, fact: d.fact, category: d.category, source_session_id: d.source_session_id, created_at: d.created_at, updated_at: d.updated_at, access_count: d.access_count }
+        Self { id: d.fact_id, fact: d.fact, category: d.category, source_session_id: d.source_session_id, source_agent: d.source_agent, trigger: d.trigger, created_at: d.created_at, updated_at: d.updated_at, access_count: d.access_count }
     }
 }
 
 #[derive(Debug, Deserialize)]
-struct VectorHit { fact_id: Uuid, fact: String, category: String, source_session_id: Option<Uuid>, created_at: DateTime<Utc>, updated_at: DateTime<Utc>, access_count: i32, score: f64 }
+struct VectorHit { fact_id: Uuid, fact: String, category: String, source_session_id: Option<Uuid>, source_agent: Option<String>, trigger: Option<String>, created_at: DateTime<Utc>, updated_at: DateTime<Utc>, access_count: i32, score: f64 }
 
 #[derive(Debug, Deserialize)]
 struct DedupHit { fact_id: Uuid, fact: String, score: f64 }
@@ -44,9 +46,9 @@ struct EmbeddingOnly { fact_id: Uuid, embedding: Vec<f32> }
 #[async_trait]
 impl MemoryFactRepo for CosmosStore {
     async fn recall(&self, embedding_str: &str, threshold: f64, limit: i64) -> Result<Vec<MemoryFact>, StoreError> {
-        let sql = format!("SELECT TOP {} c.fact_id, c.fact, c.category, c.source_session_id, c.created_at, c.updated_at, c.access_count, VectorDistance(c.embedding, {}) AS score FROM c WHERE c.type = 'memory_fact' ORDER BY VectorDistance(c.embedding, {})", limit, embedding_str, embedding_str);
+        let sql = format!("SELECT TOP {} c.fact_id, c.fact, c.category, c.source_session_id, c.source_agent, c.trigger, c.created_at, c.updated_at, c.access_count, VectorDistance(c.embedding, {}) AS score FROM c WHERE c.type = 'memory_fact' ORDER BY VectorDistance(c.embedding, {})", limit, embedding_str, embedding_str);
         let hits: Vec<VectorHit> = self.query_cross_partition(&sql).await?;
-        Ok(hits.into_iter().filter(|h| h.score > threshold).map(|h| MemoryFact { id: h.fact_id, fact: h.fact, category: h.category, source_session_id: h.source_session_id, created_at: h.created_at, updated_at: h.updated_at, access_count: h.access_count }).collect())
+        Ok(hits.into_iter().filter(|h| h.score > threshold).map(|h| MemoryFact { id: h.fact_id, fact: h.fact, category: h.category, source_session_id: h.source_session_id, source_agent: h.source_agent, trigger: h.trigger, created_at: h.created_at, updated_at: h.updated_at, access_count: h.access_count }).collect())
     }
 
     async fn increment_access(&self, ids: &[Uuid]) -> Result<(), StoreError> {
@@ -67,9 +69,9 @@ impl MemoryFactRepo for CosmosStore {
         Ok(hits.into_iter().next().filter(|h| h.score > threshold).map(|h| (h.fact_id, h.fact, h.score)))
     }
 
-    async fn insert(&self, id: Uuid, fact: &str, category: &str, embedding_str: &str, source_session_id: Option<Uuid>, now: DateTime<Utc>) -> Result<(), StoreError> {
+    async fn insert(&self, id: Uuid, fact: &str, category: &str, embedding_str: &str, source_session_id: Option<Uuid>, source_agent: Option<&str>, trigger: Option<&str>, now: DateTime<Utc>) -> Result<(), StoreError> {
         let embedding = parse_embedding_str(embedding_str)?;
-        let doc = MemoryFactDoc { id: id.to_string(), pk: format!("fact:{}", id), doc_type: "memory_fact".to_string(), fact_id: id, fact: fact.to_string(), category: category.to_string(), embedding, source_session_id, created_at: now, updated_at: now, access_count: 0 };
+        let doc = MemoryFactDoc { id: id.to_string(), pk: format!("fact:{}", id), doc_type: "memory_fact".to_string(), fact_id: id, fact: fact.to_string(), category: category.to_string(), embedding, source_session_id, source_agent: source_agent.map(str::to_string), trigger: trigger.map(str::to_string), created_at: now, updated_at: now, access_count: 0 };
         self.container().upsert_item(pk(&doc.pk), &doc, None).await?;
         Ok(())
     }

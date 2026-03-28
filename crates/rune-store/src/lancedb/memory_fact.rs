@@ -62,6 +62,8 @@ impl MemoryFactRepo for LanceStore {
                                 .map_err(|e| StoreError::Serialization(e.to_string()))?,
                         )
                     },
+                    source_agent: None,
+                    trigger: None,
                     created_at: DateTime::parse_from_rfc3339(created.value(i))
                         .map_err(|e| StoreError::Serialization(e.to_string()))?
                         .with_timezone(&Utc),
@@ -141,6 +143,8 @@ impl MemoryFactRepo for LanceStore {
         category: &str,
         embedding_str: &str,
         source_session_id: Option<Uuid>,
+        _source_agent: Option<&str>,
+        _trigger: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<(), StoreError> {
         let table = self.open_facts_table().await?;
@@ -264,6 +268,8 @@ impl MemoryFactRepo for LanceStore {
                                 .map_err(|e| StoreError::Serialization(e.to_string()))?,
                         )
                     },
+                    source_agent: None,
+                    trigger: None,
                     created_at: DateTime::parse_from_rfc3339(created.value(i))
                         .map_err(|e| StoreError::Serialization(e.to_string()))?
                         .with_timezone(&Utc),

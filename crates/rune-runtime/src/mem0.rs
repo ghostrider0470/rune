@@ -58,8 +58,8 @@ impl From<rune_store::models::MemoryFact> for Memory {
             fact: f.fact,
             category: f.category,
             source_session_id: f.source_session_id,
-            source_agent: None,
-            trigger: None,
+            source_agent: f.source_agent,
+            trigger: f.trigger,
             created_at: f.created_at,
             updated_at: f.updated_at,
             access_count: f.access_count,
@@ -198,7 +198,7 @@ impl Mem0Engine {
         user_msg: &str,
         assistant_msg: &str,
         session_id: Uuid,
-        _metadata: MemoryCaptureMetadata,
+        metadata: MemoryCaptureMetadata,
     ) -> Vec<Memory> {
         let facts = match self.extract_facts(user_msg, assistant_msg).await {
             Ok(f) => f,
@@ -216,7 +216,7 @@ impl Mem0Engine {
         let mut stored = Vec::new();
 
         for fact in facts {
-            match self.store_fact(&fact, session_id).await {
+            match self.store_fact(&fact, session_id, &metadata).await {
                 Ok(Some(mem)) => stored.push(mem),
                 Ok(None) => {
                     debug!(fact = %fact.fact, "mem0: deduplicated (already exists)");
@@ -409,6 +409,7 @@ impl Mem0Engine {
         &self,
         fact: &ExtractedFact,
         session_id: Uuid,
+        metadata: &MemoryCaptureMetadata,
     ) -> Result<Option<Memory>, String> {
         let embedding = self.embed(&fact.fact).await?;
         let embedding_str = format_vector(&embedding);
@@ -438,6 +439,8 @@ impl Mem0Engine {
                 &fact.category,
                 &embedding_str,
                 Some(session_id),
+                metadata.source_agent.as_deref(),
+                metadata.trigger.as_deref(),
                 now,
             )
             .await
@@ -448,8 +451,8 @@ impl Mem0Engine {
             fact: fact.fact.clone(),
             category: fact.category.clone(),
             source_session_id: Some(session_id),
-            source_agent: None,
-            trigger: None,
+            source_agent: metadata.source_agent.clone(),
+            trigger: metadata.trigger.clone(),
             created_at: now,
             updated_at: now,
             access_count: 0,

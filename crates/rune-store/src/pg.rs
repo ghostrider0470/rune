@@ -1854,6 +1854,8 @@ fn row_to_memory_fact(row: &tokio_postgres::Row) -> MemoryFact {
         fact: row.get("fact"),
         category: row.get("category"),
         source_session_id: row.get("source_session_id"),
+        source_agent: row.get("source_agent"),
+        trigger: row.get("trigger"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         access_count: row.get("access_count"),
@@ -1872,7 +1874,7 @@ impl MemoryFactRepo for PgMemoryFactRepo {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         let rows = client
             .query_typed(
-                "SELECT id, fact, category, source_session_id, created_at, updated_at, \
+                "SELECT id, fact, category, source_session_id, source_agent, trigger, created_at, updated_at, \
                         access_count \
                  FROM rune_memories WHERE 1 - (embedding <=> $1::vector) > $2 \
                  ORDER BY embedding <=> $1::vector LIMIT $3",
@@ -1951,6 +1953,8 @@ impl MemoryFactRepo for PgMemoryFactRepo {
         category: &str,
         embedding_str: &str,
         source_session_id: Option<uuid::Uuid>,
+        source_agent: Option<&str>,
+        trigger: Option<&str>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), StoreError> {
         use tokio_postgres::types::Type;
@@ -1958,8 +1962,8 @@ impl MemoryFactRepo for PgMemoryFactRepo {
         client
             .query_typed(
                 "INSERT INTO rune_memories \
-                 (id, fact, category, embedding, source_session_id, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4::vector, $5, $6, $7)",
+                 (id, fact, category, embedding, source_session_id, source_agent, trigger, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8, $9)",
                 &[
                     (
                         &id as &(dyn tokio_postgres::types::ToSql + Sync),
@@ -1980,6 +1984,14 @@ impl MemoryFactRepo for PgMemoryFactRepo {
                     (
                         &source_session_id as &(dyn tokio_postgres::types::ToSql + Sync),
                         Type::UUID,
+                    ),
+                    (
+                        &source_agent as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
+                    ),
+                    (
+                        &trigger as &(dyn tokio_postgres::types::ToSql + Sync),
+                        Type::TEXT,
                     ),
                     (
                         &now as &(dyn tokio_postgres::types::ToSql + Sync),
@@ -2055,7 +2067,7 @@ impl MemoryFactRepo for PgMemoryFactRepo {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         let rows = client
             .query(
-                "SELECT id, fact, category, source_session_id, created_at, updated_at, \
+                "SELECT id, fact, category, source_session_id, source_agent, trigger, created_at, updated_at, \
                         access_count \
                  FROM rune_memories ORDER BY created_at DESC",
                 &[],

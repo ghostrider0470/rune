@@ -494,6 +494,8 @@ pub trait MemoryFactRepo: Send + Sync {
         category: &str,
         embedding_str: &str,
         source_session_id: Option<uuid::Uuid>,
+        source_agent: Option<&str>,
+        trigger: Option<&str>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), StoreError>;
 
