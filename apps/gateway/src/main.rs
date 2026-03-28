@@ -3268,6 +3268,7 @@ mod tests {
     impl MemoryEmbeddingRepo for MemMemoryEmbeddingRepo {
         async fn upsert_chunk(
             &self,
+            _project_id: Option<&str>,
             file_path: &str,
             chunk_index: i32,
             chunk_text: &str,
@@ -3288,7 +3289,11 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError> {
+        async fn delete_by_file(
+            &self,
+            _project_id: Option<&str>,
+            file_path: &str,
+        ) -> Result<usize, StoreError> {
             self.deleted_files.lock().await.push(file_path.to_string());
             let mut existing = self.existing_files.lock().await;
             let before = existing.len();
@@ -3298,6 +3303,7 @@ mod tests {
 
         async fn delete_chunk(
             &self,
+            _project_id: Option<&str>,
             file_path: &str,
             _chunk_index: i32,
         ) -> Result<bool, StoreError> {
@@ -3305,7 +3311,7 @@ mod tests {
             Ok(true)
         }
 
-        async fn delete_all(&self) -> Result<usize, StoreError> {
+        async fn delete_all(&self, _project_id: Option<&str>) -> Result<usize, StoreError> {
             let mut existing = self.existing_files.lock().await;
             let count = existing.len();
             existing.clear();
@@ -3314,6 +3320,7 @@ mod tests {
 
         async fn keyword_search(
             &self,
+            _project_id: Option<&str>,
             _query: &str,
             _limit: i64,
         ) -> Result<Vec<KeywordSearchRow>, StoreError> {
@@ -3322,17 +3329,21 @@ mod tests {
 
         async fn vector_search(
             &self,
+            _project_id: Option<&str>,
             _embedding: &[f32],
             _limit: i64,
         ) -> Result<Vec<VectorSearchRow>, StoreError> {
             Ok(Vec::new())
         }
 
-        async fn count(&self) -> Result<i64, StoreError> {
+        async fn count(&self, _project_id: Option<&str>) -> Result<i64, StoreError> {
             Ok(self.existing_files.lock().await.len() as i64)
         }
 
-        async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
+        async fn list_indexed_files(
+            &self,
+            _project_id: Option<&str>,
+        ) -> Result<Vec<String>, StoreError> {
             Ok(self.existing_files.lock().await.clone())
         }
     }
