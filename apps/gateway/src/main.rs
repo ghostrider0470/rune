@@ -1131,14 +1131,14 @@ async fn sync_workspace_memory_index(
 ) -> Result<()> {
     let memory_files = collect_workspace_memory_files(workspace_root).await?;
     let current_files: BTreeSet<String> = memory_files.iter().cloned().collect();
-    let indexed_files = repo.list_indexed_files().await?;
+    let indexed_files = repo.list_indexed_files(None).await?;
     let stale_files: Vec<String> = indexed_files
         .into_iter()
         .filter(|path| !current_files.contains(path))
         .collect();
 
     for stale_path in &stale_files {
-        repo.delete_by_file(stale_path).await?;
+        repo.delete_by_file(None, stale_path).await?;
     }
 
     let mut indexed_chunk_count = 0usize;
@@ -1148,7 +1148,7 @@ async fn sync_workspace_memory_index(
             .await
             .with_context(|| format!("failed to read memory file {}", full_path.display()))?;
 
-        repo.delete_by_file(relative_path).await?;
+        repo.delete_by_file(None, relative_path).await?;
 
         let embedded_chunks = index.index_file(Path::new(relative_path), &content).await?;
         indexed_chunk_count += embedded_chunks.len();
@@ -1161,6 +1161,7 @@ async fn sync_workspace_memory_index(
                 )
             })?;
             repo.upsert_chunk(
+                None,
                 relative_path,
                 chunk_index,
                 &embedded.chunk.chunk_text,
@@ -1370,6 +1371,10 @@ impl CommsOps for CommsClientOps {
         priority: &str,
     ) -> Result<String, String> {
         self.client.send(msg_type, subject, body, priority).await
+    }
+
+    async fn read_inbox(&self, mark_read: bool) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
+        self.client.read_inbox_summary(mark_read).await.map(|msgs| msgs.into_iter().map(|msg| rune_tools::comms_tool::CommsMessageSummary { id: msg.id, from: msg.from, subject: msg.subject, body: msg.body, priority: msg.priority, created_at: msg.created_at, }).collect())
     }
 }
 
@@ -3874,6 +3879,8 @@ impl ModelProvider for EchoModelProvider {
                 prompt_tokens: latest_user.len() as u32,
                 completion_tokens: (latest_user.len() as u32) + 6,
                 total_tokens: (latest_user.len() as u32) * 2 + 6,
+                cached_prompt_tokens: None,
+                uncached_prompt_tokens: None,
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: Vec::new(),
