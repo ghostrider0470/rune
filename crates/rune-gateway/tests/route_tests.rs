@@ -6865,6 +6865,164 @@ async fn get_session_status_surfaces_orchestration_metadata() {
 }
 
 #[tokio::test]
+async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
+    };
+
+    let app = build_router(state, None);
+    let now = chrono::Utc::now();
+    let session_id = Uuid::new_v4();
+
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "direct".into(),
+            status: "created".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id,
+            trigger_kind: "user_message".into(),
+            status: "completed".into(),
+            model_ref: Some("openai/gpt-4.1".into()),
+            started_at: now,
+            ended_at: Some(now),
+            usage_prompt_tokens: Some(1000),
+            usage_completion_tokens: Some(500),
+            usage_cached_prompt_tokens: Some(400),
+        })
+        .await
+        .unwrap();
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id,
+            trigger_kind: "user_message".into(),
+            status: "completed".into(),
+            model_ref: Some("openai/gpt-4.1".into()),
+            started_at: now + chrono::TimeDelta::seconds(1),
+            ended_at: Some(now + chrono::TimeDelta::seconds(1)),
+            usage_prompt_tokens: Some(500),
+            usage_completion_tokens: Some(200),
+            usage_cached_prompt_tokens: Some(100),
+        })
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(Request::get("/api/dashboard/usage").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+
+    assert_eq!(json["total_prompt_tokens"], 1500);
+    assert_eq!(json["total_completion_tokens"], 700);
+    assert_eq!(json["usage_cached_prompt_tokens"], 500);
+    assert_eq!(json["total_requests"], 2);
+    assert_eq!(json["cache_hit_ratio"], serde_json::json!(500.0 / 1500.0));
+
+    let entry = &json["entries"][0];
+    assert_eq!(entry["model"], "openai/gpt-4.1");
+    assert_eq!(entry["prompt_tokens"], 1500);
+    assert_eq!(entry["completion_tokens"], 700);
+    assert_eq!(entry["request_count"], 2);
+    assert_eq!(entry["estimated_cost"], "<$0.01");
+    assert_eq!(json["total_estimated_cost"], "<$0.01");
+}
+
+#[tokio::test]
 async fn get_session_returns_aggregate_usage_and_turn_metadata() {
     let app = build_test_app(None);
 
