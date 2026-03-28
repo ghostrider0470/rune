@@ -736,7 +736,25 @@ async fn build_services(
 
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
+        let vault_dir = if config.mem0.vault_enabled {
+            Some(
+                config
+                    .mem0
+                    .vault_dir
+                    .clone()
+                    .unwrap_or_else(|| config.paths.memory_dir.join("vault")),
+            )
+        } else {
+            None
+        };
+        match Mem0Engine::try_new(
+            &config.mem0,
+            model_provider.clone(),
+            repos.memory_fact_repo.clone(),
+            vault_dir,
+        )
+        .await
+        {
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");

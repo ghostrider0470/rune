@@ -1882,6 +1882,18 @@ pub struct Mem0Config {
     /// the routing provider.  If empty, defaults to "gpt-5.4".
     #[serde(default = "Mem0Config::default_extraction_model")]
     pub extraction_model: String,
+
+    /// Enable Obsidian-compatible markdown vault sync (one-way: vector → markdown).
+    #[serde(default)]
+    pub vault_enabled: bool,
+
+    /// Directory for the vault. Defaults to `{memory_dir}/vault/`.
+    #[serde(default)]
+    pub vault_dir: Option<PathBuf>,
+
+    /// Cosine similarity threshold for wikilink generation between facts.
+    #[serde(default = "Mem0Config::default_vault_link_threshold")]
+    pub vault_link_threshold: f64,
 }
 
 /// `Eq` is required because `AppConfig` derives `Eq`. Configuration
@@ -1899,6 +1911,9 @@ impl PartialEq for Mem0Config {
             && self.similarity_threshold.to_bits() == other.similarity_threshold.to_bits()
             && self.dedup_threshold.to_bits() == other.dedup_threshold.to_bits()
             && self.extraction_model == other.extraction_model
+            && self.vault_enabled == other.vault_enabled
+            && self.vault_dir == other.vault_dir
+            && self.vault_link_threshold.to_bits() == other.vault_link_threshold.to_bits()
     }
 }
 impl Eq for Mem0Config {}
@@ -1925,6 +1940,9 @@ impl Mem0Config {
     fn default_extraction_model() -> String {
         "gpt-5.4".to_string()
     }
+    fn default_vault_link_threshold() -> f64 {
+        0.45
+    }
 }
 
 impl Default for Mem0Config {
@@ -1941,6 +1959,9 @@ impl Default for Mem0Config {
             similarity_threshold: Self::default_similarity_threshold(),
             dedup_threshold: Self::default_dedup_threshold(),
             extraction_model: Self::default_extraction_model(),
+            vault_enabled: false,
+            vault_dir: None,
+            vault_link_threshold: Self::default_vault_link_threshold(),
         }
     }
 }
