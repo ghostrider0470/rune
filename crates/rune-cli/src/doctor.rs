@@ -22,7 +22,6 @@ use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use crate::output::{DoctorBackendMatrixEntry, DoctorPathSummary, DoctorReport, DoctorTopologySummary};
 
 /// Result of a single diagnostic check.
 #[derive(Clone, Debug, Serialize)]
@@ -1846,95 +1845,5 @@ mod tests {
                 .any(|r| r.name == "security.unrestricted" && r.status == CheckStatus::Warn),
             "combined CLI flags should trigger unrestricted warning"
         );
-    }
-}
-
-
-fn overall_status(checks: &[CheckResult]) -> String {
-    if checks.iter().any(|check| check.status == CheckStatus::Fail) {
-        "fail".into()
-    } else if checks.iter().any(|check| check.status == CheckStatus::Warn) {
-        "warn".into()
-    } else {
-        "pass".into()
-    }
-}
-
-pub fn build_doctor_report(checks: &[CheckResult], config: &AppConfig) -> DoctorReport {
-    let overall = overall_status(checks);
-    let checks = checks
-        .iter()
-        .map(|check| crate::output::DoctorCheck {
-            name: check.name.clone(),
-            status: match check.status {
-                CheckStatus::Pass => "pass".into(),
-                CheckStatus::Warn => "warn".into(),
-                CheckStatus::Fail => "fail".into(),
-                CheckStatus::Skip => "skip".into(),
-            },
-            message: check.message.clone(),
-        })
-        .collect();
-
-    let resolved_mode = config.mode.resolve(config);
-    let paths = DoctorPathSummary {
-        profile: std::env::var("RUNE_PROFILE").unwrap_or_else(|_| "default".into()),
-        mode: format!("{:?}", resolved_mode).to_lowercase(),
-        auto_create_missing: false,
-    };
-
-    let topology = DoctorTopologySummary {
-        deployment: match resolved_mode {
-            RuntimeMode::Standalone => "single-process".into(),
-            RuntimeMode::Server => "gateway".into(),
-            RuntimeMode::Auto => "auto".into(),
-        },
-        database: if config.database.database_url.is_some() {
-            "postgres".into()
-        } else {
-            "sqlite".into()
-        },
-        models: if config.models.providers.is_empty() {
-            "unconfigured".into()
-        } else {
-            format!("{} provider(s)", config.models.providers.len())
-        },
-        search: if config.memory.semantic_search_enabled {
-            "semantic".into()
-        } else {
-            "keyword".into()
-        },
-    };
-
-    let mut backend_matrix = Vec::new();
-    backend_matrix.push(DoctorBackendMatrixEntry {
-        subsystem: "storage".into(),
-        backend: topology.database.clone(),
-        status: if config.database.database_url.is_some() { "configured" } else { "embedded" }.into(),
-        capability: format!("mode={}", paths.mode),
-        fix_hint: None,
-    });
-    backend_matrix.push(DoctorBackendMatrixEntry {
-        subsystem: "models".into(),
-        backend: topology.models.clone(),
-        status: if config.models.providers.is_empty() { "missing" } else { "configured" }.into(),
-        capability: "provider registry loaded".into(),
-        fix_hint: config.models.providers.is_empty().then(|| "Configure at least one model provider in config.toml".into()),
-    });
-    backend_matrix.push(DoctorBackendMatrixEntry {
-        subsystem: "memory".into(),
-        backend: topology.search.clone(),
-        status: if config.memory.semantic_search_enabled { "enabled" } else { "degraded" }.into(),
-        capability: if config.memory.semantic_search_enabled { "semantic retrieval available" } else { "keyword-only retrieval" }.into(),
-        fix_hint: (!config.memory.semantic_search_enabled).then(|| "Enable memory.semantic_search_enabled for embedding-backed retrieval".into()),
-    });
-
-    DoctorReport {
-        overall,
-        checks,
-        paths: Some(paths),
-        topology: Some(topology),
-        backend_matrix,
-        run_at: chrono::Utc::now().to_rfc3339(),
     }
 }

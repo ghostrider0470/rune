@@ -5341,7 +5341,7 @@ mod tests {
             out.contains("Paths:    profile=default, mode=workspace, auto_create_missing=true")
         );
         assert!(out.contains("Backend Matrix:"));
-        assert!(out.contains("storage: sqlite (connected) — mode=standalone"));
+        assert!(out.contains("storage: sqlite (connected) — 4 repo surfaces configured"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
