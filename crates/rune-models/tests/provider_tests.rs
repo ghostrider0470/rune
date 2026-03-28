@@ -311,11 +311,12 @@ async fn azure_request_golden_shape_full() {
     // Must NOT have model
     assert!(body.get("model").is_none(), "Azure body must omit 'model'");
 
-    // Must have messages
+    // Must have messages, including stable-prefix system prompt prepended once.
     let msgs = body["messages"].as_array().unwrap();
-    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs.len(), 3);
     assert_eq!(msgs[0]["role"], "system");
-    assert_eq!(msgs[1]["role"], "user");
+    assert_eq!(msgs[1]["role"], "system");
+    assert_eq!(msgs[2]["role"], "user");
 
     // Must have temperature and max_tokens
     assert_eq!(body["temperature"], serde_json::json!(0.7));
