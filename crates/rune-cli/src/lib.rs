@@ -244,6 +244,10 @@ fn discover_home_dir() -> Option<PathBuf> {
 }
 
 fn default_workspace_root() -> Result<PathBuf> {
+    if let Some(workspace) = std::env::var_os("RUNE_WORKSPACE") {
+        return Ok(PathBuf::from(workspace));
+    }
+
     discover_home_dir()
         .map(|home| home.join(".rune"))
         .ok_or_else(|| anyhow::anyhow!("failed to resolve home directory for default workspace"))
@@ -376,6 +380,7 @@ fn handle_projects_list() -> Result<()> {
 fn handle_projects_remove(name: String) -> Result<()> {
     let workspace = default_workspace_root()?;
     let mut registry = ProjectRegistry::load(&workspace)?;
+    let was_active = registry.active_project() == Some(name.as_str());
     let removed = registry
         .remove(&name)
         .ok_or_else(|| anyhow!("project '{}' is not registered", name))?;
@@ -387,6 +392,9 @@ fn handle_projects_remove(name: String) -> Result<()> {
         removed.repo_path.display(),
         ProjectRegistry::agent_dir(&workspace, &name).display()
     );
+    if was_active {
+        println!("active project cleared");
+    }
     Ok(())
 }
 
@@ -4123,6 +4131,49 @@ mod tests {
         unsafe { std::env::remove_var("RUNE_WORKSPACE"); }
 
         assert!(err.to_string().contains("project 'missing' is not registered"));
+    }
+
+    #[test]
+    fn parse_projects_remove_command() {
+        let cli = Cli::try_parse_from(["rune", "projects", "remove", "alpha"]).unwrap();
+
+        match cli.command {
+            Command::Projects { action: ProjectsAction::Remove { name } } => {
+                assert_eq!(name, "alpha");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn projects_remove_clears_active_project_via_cli_handler() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = TempDir::new().unwrap();
+        let workspace = dir.path();
+
+        let mut registry = ProjectRegistry::new();
+        registry
+            .onboard(
+                "alpha",
+                "https://github.com/org/alpha.git",
+                workspace.join("alpha"),
+                workspace,
+                None,
+                None,
+            )
+            .unwrap();
+        registry.switch_active("alpha").unwrap();
+        registry.save(workspace).unwrap();
+
+        unsafe { std::env::set_var("RUNE_WORKSPACE", workspace); }
+        handle_projects_remove("alpha".to_string()).unwrap();
+        unsafe { std::env::remove_var("RUNE_WORKSPACE"); }
+
+        let updated = ProjectRegistry::load(workspace).unwrap();
+        assert!(updated.is_empty());
+        assert_eq!(updated.active_project(), None);
     }
 
     #[test]
