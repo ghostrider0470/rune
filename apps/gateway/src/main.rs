@@ -48,11 +48,11 @@ use rune_runtime::{
     session_loop::SessionLoop,
 };
 use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
-use rune_spells_evolver::{EvolverStatusExecutor, evolve_status_tool_definition};
 use rune_spells_rust_patterns::{
-    RustPatternsToolExecutor, rust_patterns_tool_definition, rust_patterns_validate_tool_definition,
+    RustPatternsToolExecutor, rust_patterns_tool_definition,
+    rust_patterns_validate_tool_definition,
 };
-use rune_spells_security_audit::{SecurityAuditToolExecutor, security_audit_tool_definition};
+use rune_spells_security_audit::security_audit_tool_definition;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
@@ -659,13 +659,7 @@ async fn build_services(
     // Build comms tool executor if comms is enabled in config.
     let comms_tool_executor = if config.comms.enabled {
         config.comms.comms_dir.as_deref().map(|dir| {
-            let transport = config
-                .comms
-                .transport
-                .parse()
-                .unwrap_or(rune_runtime::CommsTransportKind::Filesystem);
-            let client = Arc::new(CommsClient::with_transport_kind(
-                transport,
+            let client = Arc::new(CommsClient::new(
                 dir,
                 config.comms.agent_id.clone(),
                 config.comms.peer_id.clone(),
@@ -713,19 +707,10 @@ async fn build_services(
         tool_registry,
         ContextAssembler::new(&system_prompt),
         {
-            let compaction_cfg = &config.runtime.compaction;
             let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
                 TokenBudgetCompaction::new(
-                    compaction_cfg.effective_max_tokens(),
-                    compaction_cfg.preserve_tail,
-                )
-                .with_budget_settings(
-                    compaction_cfg.effective_warn_at_tokens(),
-                    compaction_cfg.effective_compress_after(),
-                    compaction_cfg.reserved_system,
-                    compaction_cfg.reserved_task,
-                    compaction_cfg.auto_inject_project,
-                    compaction_cfg.memory_search_k,
+                    config.runtime.compaction.context_window,
+                    config.runtime.compaction.preserve_tail,
                 )
                 .with_memory_flush(&workspace_root),
             );
@@ -751,11 +736,7 @@ async fn build_services(
 
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-        match Mem0Engine::try_new(
-            &config.mem0,
-            model_provider.clone(),
-            repos.memory_fact_repo.clone(),
-        ) {
+        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");
@@ -765,6 +746,7 @@ async fn build_services(
             }
         }
     }
+
     let turn_executor = Arc::new(turn_executor);
 
     // Build STT engine (shared across session loops).
@@ -1391,29 +1373,8 @@ impl CommsOps for CommsClientOps {
         self.client.send(msg_type, subject, body, priority).await
     }
 
-    async fn read_inbox(
-        &self,
-        mark_read: bool,
-    ) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
-        let messages = self.client.read_inbox().await;
-        let mut summaries = Vec::with_capacity(messages.len());
-
-        for (path, msg) in messages {
-            summaries.push(rune_tools::comms_tool::CommsMessageSummary {
-                id: msg.id.clone(),
-                from: msg.from.clone(),
-                subject: msg.subject.clone(),
-                body: msg.body.clone(),
-                priority: msg.priority.clone(),
-                created_at: msg.created_at.clone(),
-            });
-
-            if mark_read {
-                self.client.archive(&path).await?;
-            }
-        }
-
-        Ok(summaries)
+    async fn read_inbox(&self, mark_read: bool) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
+        self.client.read_inbox_summary(mark_read).await.map(|msgs| msgs.into_iter().map(|msg| rune_tools::comms_tool::CommsMessageSummary { id: msg.id, from: msg.from, subject: msg.subject, body: msg.body, priority: msg.priority, created_at: msg.created_at, }).collect())
     }
 }
 
@@ -1741,16 +1702,10 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "evolve_status" => EvolverStatusExecutor.execute(call).await,
-            "security_audit" => {
-                SecurityAuditToolExecutor::new(self.workspace_root.clone())
-                    .execute(call)
-                    .await
-            }
-            "comms_send" | "comms_read" => match &self.comms {
+            "comms_send" => match &self.comms {
                 Some(comms) => comms.execute(call).await,
                 None => Err(ToolError::UnknownTool {
-                    name: call.tool_name.clone(),
+                    name: "comms_send".to_string(),
                 }),
             },
             other if other.contains("__") => match &self.mcp {
@@ -2070,18 +2025,6 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
             category: ToolCategory::External,
             requires_approval: false,
         },
-        ToolDefinition {
-            name: "comms_read".into(),
-            description: "Check your comms inbox for messages from peer agents (e.g. OpenClaw). Returns unread messages and optionally marks them read.".into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "mark_read": { "type": "boolean", "description": "Move processed messages to archive. Defaults to true." }
-                }
-            }),
-            category: ToolCategory::External,
-            requires_approval: false,
-        },
     ];
 
     for tool in builtins {
@@ -2094,7 +2037,6 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
 
     registry.register(security_audit_tool_definition());
     registry.register(rust_patterns_tool_definition());
-    registry.register(evolve_status_tool_definition());
     registry.register(rust_patterns_validate_tool_definition());
     registry.register(code_review_tool_definition());
 }
@@ -2197,34 +2139,6 @@ fn render_session_status_card(
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
     let verbose = metadata_bool(metadata, "verbose").unwrap_or(false);
     let elevated = metadata_bool(metadata, "elevated").unwrap_or(false);
-    let parent_session_id = row.requester_session_id.map(|id| id.to_string());
-    let session_mode = metadata_string(metadata, "mode");
-    let orchestration_status = metadata_string(metadata, "orchestration_status")
-        .or_else(|| metadata_string(metadata, "subagent_lifecycle"));
-    let delegation_roles = metadata
-        .get("delegation_roles")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(ToOwned::to_owned))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let delegation_depth = if parent_session_id.is_some() {
-        Some(
-            metadata
-                .get("delegation_depth")
-                .and_then(|value| value.as_u64())
-                .map(|value| value as u32)
-                .unwrap_or(1),
-        )
-    } else {
-        metadata
-            .get("delegation_depth")
-            .and_then(|value| value.as_u64())
-            .map(|value| value as u32)
-    };
     let subagent_lifecycle = metadata_string(metadata, "subagent_lifecycle");
     let subagent_runtime_status = metadata_string(metadata, "subagent_runtime_status");
     let subagent_runtime_attached = metadata_bool(metadata, "subagent_runtime_attached");
@@ -2234,7 +2148,9 @@ fn render_session_status_card(
     let mut unresolved =
         vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
     if approval_mode == "on-miss" {
-        unresolved.push(rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string());
+        unresolved.push(
+            "approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable".to_string(),
+        );
     }
     if security_mode == "allowlist" {
         unresolved.push(
@@ -2256,13 +2172,6 @@ fn render_session_status_card(
             row.status,
         ),
         "status": row.status,
-        "kind": row.kind,
-        "channel_ref": row.channel_ref,
-        "parent_session_id": parent_session_id,
-        "session_mode": session_mode,
-        "orchestration_status": orchestration_status,
-        "delegation_roles": delegation_roles,
-        "delegation_depth": delegation_depth,
         "current_model": current_model,
         "model_override": model_override,
         "prompt_tokens": aggregate.usage_prompt_tokens,
