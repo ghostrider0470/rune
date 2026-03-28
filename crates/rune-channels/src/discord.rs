@@ -224,6 +224,7 @@ impl DiscordAdapter {
                         mime_type: a.content_type.clone(),
                         size_bytes: Some(a.size),
                         url: Some(a.url.clone()),
+                        provider_file_id: None,
                     })
                     .collect(),
                 timestamp,

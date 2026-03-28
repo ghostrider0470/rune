@@ -246,6 +246,8 @@ pub struct AttachmentRef {
     pub mime_type: Option<String>,
     pub size_bytes: Option<u64>,
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_file_id: Option<String>,
 }
 
 /// Transcript entries persisted during session execution.
@@ -859,6 +861,22 @@ mod tests {
         assert!(message.channel_id.is_none());
         assert!(message.attachments.is_empty());
         assert_eq!(message.metadata, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn attachment_ref_serde_backfills_provider_file_id_for_legacy_payloads() {
+        let attachment: AttachmentRef = serde_json::from_value(serde_json::json!({
+            "name": "photo.jpg",
+            "mime_type": "image/jpeg",
+            "size_bytes": 42,
+            "url": "https://example.com/photo.jpg"
+        }))
+        .unwrap();
+
+        assert_eq!(attachment.provider_file_id, None);
+
+        let value = serde_json::to_value(&attachment).unwrap();
+        assert!(value.get("provider_file_id").is_none());
     }
 
     #[test]

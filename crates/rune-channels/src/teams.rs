@@ -125,6 +125,7 @@ impl TeamsAdapter {
                         .as_ref()
                         .map(|_| "teams-inline:adaptive-card".into())
                 }),
+                provider_file_id: None,
             })
             .collect()
     }

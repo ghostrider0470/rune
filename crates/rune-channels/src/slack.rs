@@ -353,6 +353,7 @@ impl SlackAdapter {
                     mime_type: mime,
                     size_bytes: size,
                     url,
+                    provider_file_id: None,
                 }
             })
             .collect()
