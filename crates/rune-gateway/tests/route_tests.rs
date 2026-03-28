@@ -1784,7 +1784,17 @@ async fn ws_rpc_status_matches_http_status_basics() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
+        config: Arc::new(RwLock::new({
+            let mut config = AppConfig::default();
+            config.runtime.lanes = LaneQueueConfig {
+                main_capacity: 2,
+                subagent_capacity: 3,
+                cron_capacity: 4,
+                global_tool_capacity: 20,
+                project_tool_capacity: 5,
+            };
+            config
+        })),
         started_at: Arc::new(Instant::now()),
         session_engine,
         turn_executor,
@@ -2023,6 +2033,8 @@ async fn status_reports_configured_lane_capacities() {
         main_capacity: 6,
         subagent_capacity: 9,
         cron_capacity: 128,
+        global_tool_capacity: 20,
+        project_tool_capacity: 5,
     };
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
@@ -2108,7 +2120,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
-    let lane_queue = Arc::new(LaneQueue::with_capacities(2, 3, 4));
+    let lane_queue = Arc::new(LaneQueue::with_limits(2, 3, 4, 20, 5));
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
@@ -2192,6 +2204,9 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["tools"]["active"], 0);
+    assert_eq!(payload["lanes"]["tools"]["capacity"], 20);
+    assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 5);
 
     drop(main_permit);
     drop(subagent_permit);
