@@ -2647,3 +2647,79 @@ async fn google_provider_streams_openai_compatible_sse() {
     assert_eq!(resp.finish_reason, Some(FinishReason::Stop));
     assert_eq!(resp.usage.total_tokens, 6);
 }
+
+
+#[tokio::test]
+async fn routed_model_provider_stream_routes_google_inventory_model() {
+    let server = MockServer::start().await;
+
+    let sse_body = concat!(
+        r#"data: {"choices":[{"delta":{"content":"Gemini"},"finish_reason":null}],"usage":null}
+
+"#,
+        r#"data: {"choices":[{"delta":{"content":" stream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}
+
+"#,
+        "data: [DONE]\n\n"
+    );
+
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer test-google-key"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "stream": true,
+            "stream_options": {"include_usage": true}
+        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let models = ModelsConfig {
+        default_model: None,
+        default_image_model: None,
+        fallbacks: vec![],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![ModelProviderConfig {
+            name: "google".into(),
+            kind: "gemini".into(),
+            base_url: server.uri(),
+            api_key: Some("test-google-key".into()),
+            deployment_name: None,
+            api_version: None,
+            api_key_env: None,
+            model_alias: None,
+            models: vec![ConfiguredModel::Id("gemini-2.5-pro".into())],
+        }],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+    let mut request = simple_request();
+    request.model = Some("google/gemini-2.5-pro".into());
+
+    let mut rx = provider.complete_stream(&request).await.unwrap();
+    let mut deltas = Vec::new();
+    let mut final_response = None;
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            StreamEvent::TextDelta(delta) => deltas.push(delta),
+            StreamEvent::Done(resp) => {
+                final_response = Some(resp);
+                break;
+            }
+        }
+    }
+
+    assert_eq!(deltas, vec!["Gemini", " stream"]);
+    let resp = final_response.expect("stream should yield final response");
+    assert_eq!(resp.content.as_deref(), Some("Gemini stream"));
+    assert_eq!(resp.finish_reason, Some(FinishReason::Stop));
+    assert_eq!(resp.usage.total_tokens, 9);
+}
+
