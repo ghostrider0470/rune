@@ -153,18 +153,27 @@ Implementation note (2026-03-28): the roadmap entry was stale relative to the co
 
 ### Phase 2 — WebSocket Gateway RPC Protocol (Backend)
 
-Upgrade from simple event broadcast to full req/res/event framing.
+Status: ✅ Completed 2026-03-28
 
-**Modify** `crates/rune-gateway/src/ws.rs`
-- Add request frame handling: `{"type":"req","id":"<uuid>","method":"<string>","params":{...}}`
-- Add response frame: `{"type":"res","id":"<uuid>","ok":true|false,"payload":{...},"error":{...}}`
-- Keep event frame: `{"type":"event","event":"<string>","payload":{...},"seq":<number>}`
-- Add sequence numbering for gap detection
-- Route RPC methods to handler functions (reusing existing route handlers)
-- Support `stateVersion` tracking for presence/health
+Rune already ships the req/res/event WebSocket RPC protocol, sequence numbering, and connection-visible `stateVersion` tracking described in this roadmap item. This pass verified the implementation on current `main` and updated roadmap bookkeeping to match shipped reality.
 
-**New file**
-- `crates/rune-gateway/src/ws_rpc.rs` — RPC method dispatcher mapping WS methods to existing service calls
+**Landed work**
+- `crates/rune-gateway/src/ws.rs`
+  - request frame handling for `{"type":"req","id":"<uuid>","method":"<string>","params":{...}}`
+  - response frames for success/error with `stateVersion`
+  - event frames with monotonic `seq` numbering for gap detection
+  - subscription management plus state-change-aware version bumps
+- `crates/rune-gateway/src/ws_rpc.rs`
+  - RPC dispatcher mapping WS methods onto existing gateway/runtime services
+  - broad parity coverage for session, agent, tools, approvals, process, memory, dashboard, and doctor methods
+- `crates/rune-gateway/src/lib.rs`
+  - module wiring for the WS RPC dispatcher
+
+**Validation**
+- `cargo check -p rune-gateway`
+- `cargo test -p rune-gateway ws:: -- --nocapture`
+
+Implementation note (2026-03-28): the roadmap entry was stale relative to the codebase. Instead of re-implementing already-landed functionality, this pass verified the shipped backend behavior and marked the item complete so the roadmap reflects actual repo state.
 
 ---
 
