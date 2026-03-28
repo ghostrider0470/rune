@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight, Wrench, CheckCircle, XCircle, Clock, FileText, PanelRightOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { InlineApprovalActions } from "./InlineApprovalActions";
 import type { TranscriptEntry } from "@/lib/api-types";
 
 interface ToolCardProps {
@@ -203,6 +204,8 @@ export function ToolCard({
           </div>
         </div>
       )}
+
+      <InlineApprovalActions entry={entry} className="mx-4 mb-3" />
 
       {expanded && (
         <div className="space-y-2 border-t border-dashed px-4 py-3">
