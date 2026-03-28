@@ -106,3 +106,15 @@ logs_dir = "/data/logs"
 backups_dir = "/data/backups"
 config_dir = "/config"
 secrets_dir = "/secrets"
+
+# Runtime execution / context management
+[runtime.compaction]
+context_window = 128000
+preserve_tail = 20
+# max_tokens = 128000
+# reserved_system = 5000
+# reserved_task = 10000
+# auto_inject_project = true
+# memory_search_k = 10
+# compress_after = 50000
+# warn_at_tokens = 102400
