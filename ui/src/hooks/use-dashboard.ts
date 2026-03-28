@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { api } from "@/lib/api-client";
+import { useSessionEvents } from "@/lib/websocket";
 import type {
   DashboardSummaryResponse,
   DashboardModelItem,
@@ -61,4 +63,64 @@ export function useGatewayRestart() {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
     },
   });
+}
+
+function parseActivityTimestamp(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as Record<string, unknown>;
+  const value = candidate.timestamp ?? candidate.observed_at ?? candidate.finished_at ?? candidate.started_at;
+  return typeof value === "string" ? value : null;
+}
+
+function dashboardQueryKeys() {
+  return [
+    ["dashboard", "summary"],
+    ["dashboard", "sessions"],
+    ["dashboard", "diagnostics"],
+    ["channels"],
+    ["health"],
+    ["status"],
+  ] as const;
+}
+
+export interface DashboardLiveActivityItem {
+  id: string;
+  session_id: string;
+  kind: string;
+  observed_at: string;
+  message: string;
+}
+
+export function useDashboardLiveUpdates() {
+  const queryClient = useQueryClient();
+  const { events, connected } = useSessionEvents("dashboard", {
+    enabled: true,
+    clearOnSessionChange: false,
+  });
+
+  useEffect(() => {
+    if (!events.length) return;
+
+    const latest = events[events.length - 1];
+    const kind = latest.kind;
+
+    if (kind.startsWith("turn.") || kind.startsWith("approval.") || kind.startsWith("tool.")) {
+      for (const key of dashboardQueryKeys()) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    }
+  }, [events, queryClient]);
+
+  const activity = events
+    .slice(-24)
+    .reverse()
+    .map((event, index) => ({
+      id: `${event.session_id}-${event.kind}-${index}`,
+      session_id: event.session_id,
+      kind: event.kind,
+      observed_at: parseActivityTimestamp(event.payload) ?? new Date().toISOString(),
+      message: event.kind.replace(/\./g, " "),
+    } satisfies DashboardLiveActivityItem));
+
+  return { connected, activity };
 }
