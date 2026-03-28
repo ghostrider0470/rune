@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::output::{
-    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorPathSummary, DoctorReport,
+    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorMemoryHierarchySummary, DoctorPathSummary, DoctorReport,
     DoctorTopologySummary,
 };
 use rune_config::{AppConfig, RuntimeMode};
@@ -1304,6 +1304,15 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             search: config.memory.requested_level().as_str().to_string(),
         }),
         backend_matrix: build_backend_matrix(config),
+        memory_hierarchy: Some(DoctorMemoryHierarchySummary {
+            l0: "current context window".to_string(),
+            l1: "prompt cache".to_string(),
+            l2: format!("{} retrieval", config.memory.requested_level().as_str()),
+            l3: "session log archive".to_string(),
+            promotion: "reused recall can re-enter cached prefixes".to_string(),
+            demotion: format!("compaction threshold {} tokens", config.runtime.compaction.compress_after),
+            metrics: "offline doctor report has no live cache metrics".to_string(),
+        }),
         run_at: chrono::Utc::now().to_rfc3339(),
     }
 }
