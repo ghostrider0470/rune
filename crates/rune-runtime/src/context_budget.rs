@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -267,6 +269,37 @@ pub enum GcResult {
     Compacted { freed_tokens: usize },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckpointStore {
+    path: std::path::PathBuf,
+}
+
+impl CheckpointStore {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn persist(&self, checkpoint: &Checkpoint) -> std::io::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_vec_pretty(checkpoint)?;
+        fs::write(&self.path, json)
+    }
+
+    pub fn load(&self) -> std::io::Result<Option<Checkpoint>> {
+        match fs::read(&self.path) {
+            Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 pub fn heartbeat_gc(
     budget: &mut TokenBudget,
     status: impl Into<String>,
@@ -291,6 +324,14 @@ pub fn heartbeat_gc(
             freed_tokens: freed,
         },
     )
+}
+
+pub fn persist_checkpoint(store: &CheckpointStore, checkpoint: &Checkpoint) -> std::io::Result<()> {
+    store.persist(checkpoint)
+}
+
+pub fn recover_checkpoint(store: &CheckpointStore) -> std::io::Result<Option<Checkpoint>> {
+    store.load()
 }
 
 #[cfg(test)]
@@ -340,6 +381,38 @@ mod tests {
         assert_eq!(budget.partitions[&Partition::History].items.len(), 5);
         assert_eq!(budget.partitions[&Partition::Background].items.len(), 0);
         assert!(budget.last_gc.is_some());
+    }
+
+    #[test]
+    fn checkpoint_store_persists_and_recovers_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(dir.path().join("context-checkpoint.json"));
+
+        let mut budget = TokenBudget::new(512);
+        budget.add_item(Partition::Objective, BudgetItem::new("goal", 42, 1.0));
+        let checkpoint = budget.create_checkpoint(
+            "implemented checkpointing",
+            vec!["store latest checkpoint on compaction".into()],
+            "wire runtime recovery",
+        );
+
+        persist_checkpoint(&store, &checkpoint).unwrap();
+        let recovered = recover_checkpoint(&store)
+            .unwrap()
+            .expect("checkpoint should exist");
+
+        assert_eq!(recovered, checkpoint);
+        assert_eq!(
+            store.path().file_name().and_then(|s| s.to_str()),
+            Some("context-checkpoint.json")
+        );
+    }
+
+    #[test]
+    fn recover_checkpoint_returns_none_when_store_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(dir.path().join("missing.json"));
+        assert!(recover_checkpoint(&store).unwrap().is_none());
     }
 
     #[test]

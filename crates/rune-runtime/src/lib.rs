@@ -40,8 +40,8 @@ pub use command_registry::CommandRegistry;
 pub use compaction::{CompactionStrategy, NoOpCompaction, TokenBudgetCompaction};
 pub use context::ContextAssembler;
 pub use context_budget::{
-    BudgetItem, BudgetReport, Checkpoint, GcResult, Partition, PartitionBudget, PartitionReport,
-    TokenBudget, heartbeat_gc,
+    BudgetItem, BudgetReport, Checkpoint, CheckpointStore, GcResult, Partition, PartitionBudget,
+    PartitionReport, TokenBudget, heartbeat_gc, persist_checkpoint, recover_checkpoint,
 };
 pub use dispatcher::{DispatchDecision, MessageDispatcher, OrchestratorRegistry};
 pub use engine::SessionEngine;
