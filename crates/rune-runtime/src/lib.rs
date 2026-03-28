@@ -3,7 +3,7 @@
 pub mod comms;
 pub use comms::{
     CommsClient, CommsMessageSummary, CommsTransport, CommsTransportKind, FsCommsTransport,
-    build_comms_transport,
+    HttpCommsTransport, build_comms_transport,
 };
 
 pub mod agent_registry;

@@ -5745,33 +5745,59 @@ fn doctor_backend_matrix(
         None
     };
 
-    let comms_enabled = config.comms.enabled && config.comms.comms_dir.is_some();
+    let comms_transport = config.comms.transport.trim().to_ascii_lowercase();
+    let comms_enabled = config.comms.enabled
+        && match comms_transport.as_str() {
+            "http" | "https" => config
+                .comms
+                .http
+                .as_ref()
+                .and_then(|http| http.base_url.as_ref())
+                .is_some(),
+            _ => config.comms.comms_dir.is_some(),
+        };
     let comms_status = if comms_enabled {
         "connected"
     } else {
         "unavailable"
     };
     let comms_backend = if comms_enabled {
-        "filesystem"
+        comms_transport.as_str()
     } else {
         "disabled"
     };
     let comms_capability = if comms_enabled {
-        format!(
-            "peer={} dir={}",
-            config.comms.peer_id.as_str(),
-            config.comms.comms_dir.as_deref().unwrap_or("<unset>")
-        )
+        match comms_transport.as_str() {
+            "http" | "https" => format!(
+                "peer={} url={}",
+                config.comms.peer_id.as_str(),
+                config
+                    .comms
+                    .http
+                    .as_ref()
+                    .and_then(|http| http.base_url.as_deref())
+                    .unwrap_or("<unset>")
+            ),
+            _ => format!(
+                "peer={} dir={}",
+                config.comms.peer_id.as_str(),
+                config.comms.comms_dir.as_deref().unwrap_or("<unset>")
+            ),
+        }
     } else {
         "inter-agent comms not configured".to_string()
     };
     let comms_hint = if comms_enabled {
         None
     } else {
-        Some(
-            "Set comms.enabled=true and comms.comms_dir to enable native inter-agent messaging"
+        Some(match comms_transport.as_str() {
+            "http" | "https" => {
+                "Set comms.enabled=true, comms.transport=\"http\", and comms.http.base_url to enable network inter-agent messaging"
+                    .to_string()
+            }
+            _ => "Set comms.enabled=true and comms.comms_dir to enable native inter-agent messaging"
                 .to_string(),
-        )
+        })
     };
 
     let channels_status = if capabilities.channels.is_empty() {

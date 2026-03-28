@@ -6,10 +6,12 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -60,12 +62,14 @@ pub trait CommsTransport: Send + Sync {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommsTransportKind {
     Filesystem,
+    Http,
 }
 
 impl CommsTransportKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Filesystem => "filesystem",
+            Self::Http => "http",
         }
     }
 }
@@ -76,12 +80,178 @@ impl FromStr for CommsTransportKind {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
             "filesystem" | "fs" => Ok(Self::Filesystem),
+            "http" | "https" => Ok(Self::Http),
             other => Err(format!("unsupported comms transport: {other}")),
         }
     }
 }
 
 /// Filesystem-backed transport for the `.comms/` mailbox protocol.
+#[derive(Clone, Debug)]
+pub struct HttpCommsTransport {
+    client: reqwest::Client,
+    base_url: String,
+    auth_token: Option<String>,
+}
+
+impl HttpCommsTransport {
+    pub fn new(base_url: impl Into<String>, auth_token: Option<String>) -> Result<Self, String> {
+        let base_url = normalize_http_base_url(base_url.into())?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("failed to build HTTP comms client: {e}"))?;
+        Ok(Self {
+            client,
+            base_url,
+            auth_token,
+        })
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    fn endpoint(&self, path: &str) -> String {
+        format!("{}/{}", self.base_url, path.trim_start_matches('/'))
+    }
+
+    fn auth_headers(&self) -> Result<HeaderMap, String> {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = &self.auth_token {
+            let value = HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|e| format!("invalid HTTP comms auth token header: {e}"))?;
+            headers.insert(AUTHORIZATION, value);
+        }
+        Ok(headers)
+    }
+}
+
+fn normalize_http_base_url(base_url: String) -> Result<String, String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("http comms base url cannot be empty".to_string());
+    }
+    let url = reqwest::Url::parse(trimmed)
+        .map_err(|e| format!("invalid HTTP comms base url: {e}"))?;
+    match url.scheme() {
+        "http" | "https" => Ok(trimmed.to_string()),
+        scheme => Err(format!("unsupported HTTP comms scheme: {scheme}")),
+    }
+}
+
+fn pathbuf_from_remote_message_id(id: &str) -> PathBuf {
+    PathBuf::from(format!("remote:{id}"))
+}
+
+fn remote_message_id_from_path(path: &Path) -> Option<String> {
+    path.to_str()
+        .and_then(|value| value.strip_prefix("remote:"))
+        .map(|value| value.to_string())
+}
+
+#[async_trait]
+impl CommsTransport for HttpCommsTransport {
+    async fn send(&self, message: CommsMessage) -> Result<(), String> {
+        let response = self
+            .client
+            .post(self.endpoint("api/comms/send"))
+            .headers(self.auth_headers()?)
+            .json(&serde_json::json!({
+                "to": message.to,
+                "type": message.msg_type,
+                "subject": message.subject,
+                "body": message.body,
+                "priority": message.priority,
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("HTTP comms send request failed: {e}"))?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable body>".to_string());
+            Err(format!("HTTP comms send failed with {status}: {body}"))
+        }
+    }
+
+    async fn receive(&self, _agent_id: &str) -> Result<Vec<(PathBuf, CommsMessage)>, String> {
+        let response = self
+            .client
+            .get(self.endpoint("api/comms/inbox?mark_read=false"))
+            .headers(self.auth_headers()?)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP comms inbox request failed: {e}"))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable body>".to_string());
+            return Err(format!("HTTP comms inbox failed with {status}: {body}"));
+        }
+
+        let summaries: Vec<CommsMessageSummary> = response
+            .json()
+            .await
+            .map_err(|e| format!("HTTP comms inbox decode failed: {e}"))?;
+
+        Ok(summaries
+            .into_iter()
+            .map(|summary| {
+                (
+                    pathbuf_from_remote_message_id(&summary.id),
+                    CommsMessage {
+                        id: summary.id,
+                        from: summary.from,
+                        to: String::new(),
+                        msg_type: "remote".to_string(),
+                        subject: summary.subject,
+                        body: summary.body,
+                        priority: summary.priority,
+                        refs: None,
+                        created_at: summary.created_at,
+                        expires_at: None,
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn ack(&self, path: &Path) -> Result<(), String> {
+        let Some(id) = remote_message_id_from_path(path) else {
+            return Err("HTTP comms ack requires a remote message id".to_string());
+        };
+
+        let response = self
+            .client
+            .post(self.endpoint("api/comms/ack"))
+            .headers(self.auth_headers()?)
+            .json(&serde_json::json!({ "id": id }))
+            .send()
+            .await
+            .map_err(|e| format!("HTTP comms ack request failed: {e}"))?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable body>".to_string());
+            Err(format!("HTTP comms ack failed with {status}: {body}"))
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct FsCommsTransport {
     comms_dir: PathBuf,
@@ -188,6 +358,7 @@ pub fn build_comms_transport(
 ) -> Arc<dyn CommsTransport> {
     match transport {
         CommsTransportKind::Filesystem => Arc::new(FsCommsTransport::new(comms_dir)),
+        CommsTransportKind::Http => panic!("http transport requires explicit HttpCommsTransport configuration"),
     }
 }
 
@@ -200,6 +371,16 @@ pub struct CommsClient {
 }
 
 impl CommsClient {
+    pub fn with_http_transport(
+        base_url: impl Into<String>,
+        auth_token: Option<String>,
+        agent_id: impl Into<String>,
+        peer_id: impl Into<String>,
+    ) -> Result<Self, String> {
+        let transport = HttpCommsTransport::new(base_url, auth_token)?;
+        Ok(Self::with_transport(Arc::new(transport), agent_id, peer_id))
+    }
+
     pub fn new(
         comms_dir: impl Into<PathBuf>,
         agent_id: impl Into<String>,
@@ -358,6 +539,8 @@ impl rune_tools::comms_tool::CommsOps for CommsClient {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use wiremock::matchers::{body_json, header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn send_and_read_message() {
@@ -413,7 +596,8 @@ mod tests {
     async fn parse_transport_kind_aliases() {
         assert_eq!(CommsTransportKind::from_str("filesystem").unwrap(), CommsTransportKind::Filesystem);
         assert_eq!(CommsTransportKind::from_str("FS").unwrap(), CommsTransportKind::Filesystem);
-        assert!(CommsTransportKind::from_str("http").is_err());
+        assert_eq!(CommsTransportKind::from_str("http").unwrap(), CommsTransportKind::Http);
+        assert_eq!(CommsTransportKind::from_str("HTTPS").unwrap(), CommsTransportKind::Http);
     }
 
     #[tokio::test]
@@ -431,5 +615,108 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].subject, "ship it");
         assert!(receiver.read_inbox().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn http_transport_round_trips_send_receive_and_ack() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/comms/send"))
+            .and(header("authorization", "Bearer shared-secret"))
+            .and(body_json(serde_json::json!({
+                "to": "horizon-ai",
+                "type": "status",
+                "subject": "ship it",
+                "body": "done",
+                "priority": "p1"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id":"remote-send"})))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/comms/inbox"))
+            .and(query_param("mark_read", "false"))
+            .and(header("authorization", "Bearer shared-secret"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(vec![serde_json::json!({
+                "id": "msg-123",
+                "from": "openclaw",
+                "subject": "directive",
+                "body": "ship code",
+                "priority": "p0",
+                "created_at": "2026-03-28T07:00:00Z"
+            })]))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/comms/ack"))
+            .and(header("authorization", "Bearer shared-secret"))
+            .and(body_json(serde_json::json!({"id":"msg-123"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
+            .mount(&server)
+            .await;
+
+        let client = CommsClient::with_http_transport(
+            server.uri(),
+            Some("shared-secret".to_string()),
+            "rune",
+            "horizon-ai",
+        )
+        .unwrap();
+
+        client.send("status", "ship it", "done", "p1").await.unwrap();
+
+        let messages = client.read_inbox().await;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].1.from, "openclaw");
+        assert_eq!(messages[0].1.subject, "directive");
+        client.archive(&messages[0].0).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn http_transport_rejects_invalid_base_url() {
+        let err = HttpCommsTransport::new("ftp://example.com", None).unwrap_err();
+        assert!(err.contains("unsupported HTTP comms scheme"));
+    }
+
+    #[tokio::test]
+    async fn http_transport_requires_remote_ack_path() {
+        let server = MockServer::start().await;
+        let transport = HttpCommsTransport::new(server.uri(), None).unwrap();
+        let err = transport.ack(Path::new("local.json")).await.unwrap_err();
+        assert!(err.contains("remote message id"));
+    }
+
+    #[tokio::test]
+    async fn read_inbox_summary_marks_remote_http_messages_read() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/comms/inbox"))
+            .and(query_param("mark_read", "false"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(vec![serde_json::json!({
+                "id": "msg-999",
+                "from": "openclaw",
+                "subject": "status",
+                "body": "merged",
+                "priority": "p2",
+                "created_at": null
+            })]))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/comms/ack"))
+            .and(body_json(serde_json::json!({"id":"msg-999"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
+            .mount(&server)
+            .await;
+
+        let client = CommsClient::with_http_transport(server.uri(), None, "rune", "horizon-ai").unwrap();
+        let summaries = client.read_inbox_summary(true).await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "msg-999");
     }
 }

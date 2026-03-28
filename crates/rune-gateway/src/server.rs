@@ -119,24 +119,47 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let plugin_scan_interval_secs = services.config.plugins.scan_interval_secs;
     let plugins_config = services.config.plugins.clone();
     let comms_client = if services.config.comms.enabled {
-        let comms_dir = services
-            .config
-            .comms
-            .comms_dir
-            .clone()
-            .unwrap_or_else(|| ".comms".to_string());
         let transport = services
             .config
             .comms
             .transport
             .parse()
             .map_err(GatewayError::BadRequest)?;
-        Some(Arc::new(CommsClient::with_transport_kind(
-            transport,
-            comms_dir,
-            services.config.comms.agent_id.clone(),
-            services.config.comms.peer_id.clone(),
-        )))
+        let client = match transport {
+            rune_runtime::CommsTransportKind::Filesystem => {
+                let comms_dir = services
+                    .config
+                    .comms
+                    .comms_dir
+                    .clone()
+                    .unwrap_or_else(|| ".comms".to_string());
+                CommsClient::with_transport_kind(
+                    transport,
+                    comms_dir,
+                    services.config.comms.agent_id.clone(),
+                    services.config.comms.peer_id.clone(),
+                )
+            }
+            rune_runtime::CommsTransportKind::Http => {
+                let http = services
+                    .config
+                    .comms
+                    .http
+                    .clone()
+                    .ok_or_else(|| GatewayError::BadRequest("comms.http config is required for HTTP transport".to_string()))?;
+                let base_url = http
+                    .base_url
+                    .ok_or_else(|| GatewayError::BadRequest("comms.http.base_url is required for HTTP transport".to_string()))?;
+                CommsClient::with_http_transport(
+                    base_url,
+                    http.auth_token,
+                    services.config.comms.agent_id.clone(),
+                    services.config.comms.peer_id.clone(),
+                )
+                .map_err(GatewayError::BadRequest)?
+            }
+        };
+        Some(Arc::new(client))
     } else {
         None
     };
