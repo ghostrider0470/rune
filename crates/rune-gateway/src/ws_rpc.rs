@@ -607,9 +607,8 @@ impl RpcDispatcher {
         let mut unresolved =
             vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
         if approval_mode == "on-miss" {
-            unresolved.push(
-                rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string(),
-            );
+            unresolved
+                .push(rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string());
         }
         if security_mode == "allowlist" {
             unresolved.push(
@@ -1435,8 +1434,7 @@ impl RpcDispatcher {
         let report = crate::routes::doctor_run(axum::extract::State(self.state.clone()))
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?;
-        serde_json::to_value(report.0)
-                .map_err(|error| RpcError::internal(error.to_string()))
+        serde_json::to_value(report.0).map_err(|error| RpcError::internal(error.to_string()))
     }
 
     /// Latest doctor results parity payload.

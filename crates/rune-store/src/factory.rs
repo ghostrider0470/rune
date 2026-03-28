@@ -187,20 +187,15 @@ async fn maybe_override_vector_repos(
     match vector_backend {
         #[cfg(feature = "lancedb")]
         VectorBackend::LanceDb => {
-            let uri = config
-                .vector
-                .lancedb_uri
-                .clone()
-                .unwrap_or_else(|| {
-                    config
-                        .paths
-                        .db_dir
-                        .join("vectors")
-                        .to_string_lossy()
-                        .to_string()
-                });
-            let lance =
-                crate::lancedb::LanceStore::new(&uri, config.vector.embedding_dims).await?;
+            let uri = config.vector.lancedb_uri.clone().unwrap_or_else(|| {
+                config
+                    .paths
+                    .db_dir
+                    .join("vectors")
+                    .to_string_lossy()
+                    .to_string()
+            });
+            let lance = crate::lancedb::LanceStore::new(&uri, config.vector.embedding_dims).await?;
             repos.memory_embedding_repo = Arc::new(lance.clone());
             repos.memory_fact_repo = Arc::new(lance);
             Ok(" + lancedb")
