@@ -9,6 +9,16 @@ use rune_models::{
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+async fn collect_stream_events(
+    mut rx: tokio::sync::mpsc::Receiver<rune_models::StreamEvent>,
+) -> Vec<rune_models::StreamEvent> {
+    let mut events = Vec::new();
+    while let Some(event) = rx.recv().await {
+        events.push(event);
+    }
+    events
+}
+
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn lock_env() -> MutexGuard<'static, ()> {
@@ -2548,4 +2558,58 @@ async fn openai_request_prepends_stable_prefix_messages() {
     assert_eq!(msgs[0]["role"], "system");
     assert_eq!(msgs[0]["content"], "Stable prefix");
     assert_eq!(msgs[1]["role"], "user");
+}
+
+#[tokio::test]
+async fn google_provider_streams_via_openai_compatible_sse() {
+    let server = MockServer::start().await;
+
+    let sse_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12}}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer test-google-key"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gemini-2.0-flash",
+            "stream": true
+        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "text/event-stream")
+                .set_body_string(sse_body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = rune_models::GoogleProvider::with_base_url(&server.uri(), "test-google-key");
+    let request = CompletionRequest {
+        model: Some("gemini-2.0-flash".into()),
+        ..simple_request()
+    };
+
+    let rx = provider.complete_stream(&request).await.unwrap();
+    let events = collect_stream_events(rx).await;
+
+    assert!(
+        matches!(events.first(), Some(rune_models::StreamEvent::TextDelta(delta)) if delta == "Hello")
+    );
+    assert!(
+        matches!(events.get(1), Some(rune_models::StreamEvent::TextDelta(delta)) if delta == " world")
+    );
+
+    let done = events
+        .iter()
+        .find_map(|event| match event {
+            rune_models::StreamEvent::Done(done) => Some(done),
+            _ => None,
+        })
+        .expect("expected final done event");
+    assert_eq!(done.content.as_deref(), Some("Hello world"));
+    assert_eq!(done.finish_reason, Some(FinishReason::Stop));
+    assert_eq!(done.usage.total_tokens, 12);
 }
