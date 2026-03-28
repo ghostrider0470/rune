@@ -317,6 +317,8 @@ export interface ApprovalRequestResponse {
   completed_at: string | null;
   resume_result_summary: string | null;
   command: string | null;
+  handle_ref: string | null;
+  host_ref: string | null;
   presented_payload: unknown;
   created_at: string;
 }
