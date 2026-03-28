@@ -358,6 +358,7 @@ impl Mem0Engine {
             messages: vec![
                 rune_models::ChatMessage {
                     role: rune_models::Role::System,
+                    attachments: Vec::new(),
                     content: Some(EXTRACTION_SYSTEM_PROMPT.to_string()),
                     name: None,
                     tool_call_id: None,
@@ -365,6 +366,7 @@ impl Mem0Engine {
                 },
                 rune_models::ChatMessage {
                     role: rune_models::Role::User,
+                    attachments: Vec::new(),
                     content: Some(user_content),
                     name: None,
                     tool_call_id: None,

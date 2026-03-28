@@ -20,6 +20,7 @@ fn lock_env() -> MutexGuard<'static, ()> {
 fn simple_request() -> CompletionRequest {
     CompletionRequest {
         messages: vec![ChatMessage {
+            attachments: Vec::new(),
             role: Role::User,
             content: Some("Hello".into()),
             name: None,
@@ -95,7 +96,10 @@ async fn google_complete_stream_passthroughs_openai_compatible_sse() {
 
     let requests = server.received_requests().await.unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    assert_eq!(payload.get("model"), Some(&serde_json::json!("gemini-2.5-pro")));
+    assert_eq!(
+        payload.get("model"),
+        Some(&serde_json::json!("gemini-2.5-pro"))
+    );
     assert_eq!(payload.get("stream"), Some(&serde_json::json!(true)));
     assert_eq!(
         payload.get("stream_options"),
@@ -298,6 +302,7 @@ async fn azure_request_golden_shape_full() {
     let request = CompletionRequest {
         messages: vec![
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::System,
                 content: Some("You are helpful.".into()),
                 name: None,
@@ -305,6 +310,7 @@ async fn azure_request_golden_shape_full() {
                 tool_calls: None,
             },
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::User,
                 content: Some("Hello".into()),
                 name: None,
@@ -314,6 +320,7 @@ async fn azure_request_golden_shape_full() {
         ],
         stable_prefix_tools: None,
         stable_prefix_messages: Some(vec![ChatMessage {
+            attachments: Vec::new(),
             role: Role::System,
             content: Some("You are helpful.".into()),
             name: None,
@@ -1791,6 +1798,7 @@ async fn foundry_openai_request_golden_shape() {
         stable_prefix_tools: None,
         messages: vec![
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::System,
                 content: Some("You are helpful.".into()),
                 name: None,
@@ -1798,6 +1806,7 @@ async fn foundry_openai_request_golden_shape() {
                 tool_calls: None,
             },
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::User,
                 content: Some("What is Rust?".into()),
                 name: None,
@@ -1910,6 +1919,7 @@ async fn foundry_anthropic_extracts_system_message() {
         stable_prefix_tools: None,
         messages: vec![
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::System,
                 content: Some("You are a helpful assistant.".into()),
                 name: None,
@@ -1917,6 +1927,7 @@ async fn foundry_anthropic_extracts_system_message() {
                 tool_calls: None,
             },
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::User,
                 content: Some("Hi".into()),
                 name: None,
@@ -2024,6 +2035,7 @@ async fn foundry_anthropic_request_golden_shape() {
         stable_prefix_tools: None,
         messages: vec![
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::System,
                 content: Some("Be concise.".into()),
                 name: None,
@@ -2031,6 +2043,7 @@ async fn foundry_anthropic_request_golden_shape() {
                 tool_calls: None,
             },
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::User,
                 content: Some("Explain Rust.".into()),
                 name: None,
@@ -2038,6 +2051,7 @@ async fn foundry_anthropic_request_golden_shape() {
                 tool_calls: None,
             },
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::Assistant,
                 content: Some("Rust is a systems language.".into()),
                 name: None,
@@ -2045,6 +2059,7 @@ async fn foundry_anthropic_request_golden_shape() {
                 tool_calls: None,
             },
             ChatMessage {
+                attachments: Vec::new(),
                 role: Role::User,
                 content: Some("More detail.".into()),
                 name: None,
@@ -2207,6 +2222,7 @@ fn claude_request() -> CompletionRequest {
         stable_prefix_messages: None,
         stable_prefix_tools: None,
         messages: vec![ChatMessage {
+            attachments: Vec::new(),
             role: Role::User,
             content: Some("Hello".into()),
             name: None,
@@ -2529,6 +2545,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
     let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
     let request = CompletionRequest {
         messages: vec![ChatMessage {
+            attachments: Vec::new(),
             role: Role::User,
             content: Some("Hello".into()),
             name: None,
@@ -2537,6 +2554,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
         }],
         stable_prefix_tools: None,
         stable_prefix_messages: Some(vec![ChatMessage {
+            attachments: Vec::new(),
             role: Role::System,
             content: Some("Stable prefix".into()),
             name: None,
@@ -2572,6 +2590,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
     let p = OpenAiProvider::new(&server.uri(), "k");
     let request = CompletionRequest {
         messages: vec![ChatMessage {
+            attachments: Vec::new(),
             role: Role::User,
             content: Some("Hello".into()),
             name: None,
@@ -2580,6 +2599,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
         }],
         stable_prefix_tools: None,
         stable_prefix_messages: Some(vec![ChatMessage {
+            attachments: Vec::new(),
             role: Role::System,
             content: Some("Stable prefix".into()),
             name: None,

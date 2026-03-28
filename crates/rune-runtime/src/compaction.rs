@@ -354,6 +354,7 @@ impl CompactionStrategy for TokenBudgetCompaction {
         let summary_text = Self::summarize(old);
         let summary_msg = ChatMessage {
             role: Role::System,
+            attachments: Vec::new(),
             content: Some(summary_text),
             name: None,
             tool_call_id: None,
@@ -378,6 +379,7 @@ mod tests {
     fn msg(role: Role, content: &str) -> ChatMessage {
         ChatMessage {
             role,
+            attachments: Vec::new(),
             content: Some(content.to_string()),
             name: None,
             tool_call_id: None,
