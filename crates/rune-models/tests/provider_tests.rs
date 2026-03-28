@@ -710,6 +710,68 @@ fn selects_google_provider() {
     unsafe { std::env::remove_var("TEST_GOOGLE_KEY_SEL") };
 }
 
+
+#[tokio::test]
+async fn google_provider_streams_via_openai_compatible_sse() {
+    let server = MockServer::start().await;
+
+    let sse_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer test-google-key"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let cfg = ModelProviderConfig {
+        name: "google".into(),
+        kind: "google".into(),
+        base_url: server.uri(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        api_key: Some("test-google-key".into()),
+        model_alias: None,
+        models: vec![],
+    };
+
+    let provider = provider_from_config(&cfg).unwrap();
+    let mut request = simple_request();
+    request.model = Some("gemini-2.0-flash".into());
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+
+    let first = stream.recv().await.expect("first stream event");
+    let second = stream.recv().await.expect("second stream event");
+    let done = stream.recv().await.expect("done stream event");
+
+    match first {
+        rune_models::StreamEvent::TextDelta(text) => assert_eq!(text, "Hello"),
+        other => panic!("expected first text delta, got {other:?}"),
+    }
+    match second {
+        rune_models::StreamEvent::TextDelta(text) => assert_eq!(text, " world"),
+        other => panic!("expected second text delta, got {other:?}"),
+    }
+    match done {
+        rune_models::StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Hello world"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+            assert_eq!(response.usage.total_tokens, 5);
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
+}
+
 #[test]
 fn selects_azure_foundry_provider_via_primary_kind() {
     let _guard = lock_env();
