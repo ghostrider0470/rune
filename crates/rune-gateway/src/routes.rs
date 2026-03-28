@@ -6562,7 +6562,7 @@ mod tests {
             ..Default::default()
         };
         let checks = storage_path_checks(&config);
-        assert_eq!(checks.len(), 13);
+        assert_eq!(checks.len(), 14);
         for c in &checks {
             assert_eq!(
                 c.status, "pass",
