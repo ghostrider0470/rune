@@ -18,6 +18,7 @@ import {
   useDashboardDiagnostics,
   useChannelStatus,
   useGatewayRestart,
+  useDashboardLiveUpdates,
 } from "@/hooks/use-dashboard";
 import { cn } from "@/lib/utils";
 import {
@@ -81,6 +82,29 @@ function statusTone(level: string) {
   return "outline" as const;
 }
 
+function describeDashboardEvent(kind: string): { title: string; detail: string } {
+  switch (kind) {
+    case "turn.started":
+      return { title: "Turn started", detail: "A session started a new model turn." };
+    case "turn.completed":
+      return { title: "Turn completed", detail: "A session completed a model turn." };
+    case "turn.failed":
+      return { title: "Turn failed", detail: "A session reported a failed model turn." };
+    case "tool.approval_required":
+      return { title: "Approval pending", detail: "A tool call is waiting for operator approval." };
+    case "tool.completed":
+      return { title: "Tool completed", detail: "A tool invocation completed successfully." };
+    case "tool.failed":
+      return { title: "Tool failed", detail: "A tool invocation failed and needs inspection." };
+    case "approval.created":
+      return { title: "Approval created", detail: "A new approval request was emitted." };
+    case "approval.resolved":
+      return { title: "Approval resolved", detail: "An approval request was resolved." };
+    default:
+      return { title: kind.replace(/\./g, " "), detail: "Live runtime event received over WebSocket." };
+  }
+}
+
 function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useDashboardSummary();
   const { data: models } = useDashboardModels();
@@ -88,6 +112,7 @@ function DashboardPage() {
   const { data: diagnostics } = useDashboardDiagnostics();
   const { data: channelStatus } = useChannelStatus();
   const restartGateway = useGatewayRestart();
+  const { connected: liveConnected, activity: liveActivity } = useDashboardLiveUpdates();
 
   const topDiagnostics = diagnostics?.items.slice(0, 5) ?? [];
   const activeChannels = channelStatus?.configured ?? [];
@@ -335,18 +360,43 @@ function DashboardPage() {
                 Activity feed
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Recent diagnostics and system observations.
+                Recent diagnostics and runtime events. Updates stream over WebSocket.
               </p>
             </div>
+            <Badge variant={liveConnected ? "default" : "secondary"}>
+              {liveConnected ? "live" : "reconnecting"}
+            </Badge>
             <Button asChild variant="ghost" size="sm">
               <Link to="/diagnostics">Open diagnostics</Link>
             </Button>
           </CardHeader>
           <CardContent>
-            {!topDiagnostics.length ? (
+            {!liveActivity.length && !topDiagnostics.length ? (
               <p className="text-sm text-muted-foreground">No diagnostics to report.</p>
             ) : (
               <div className="space-y-2">
+                {liveActivity.map((item) => {
+                  const eventCopy = describeDashboardEvent(item.kind);
+                  return (
+                    <div key={item.id} className="rounded-md border p-3">
+                      <div className="flex items-start gap-2 text-sm">
+                        <Activity className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium">{eventCopy.title}</p>
+                            <Badge variant="outline">{item.kind}</Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {formatRelativeTime(item.observed_at)}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-muted-foreground">
+                            {eventCopy.detail} Session {item.session_id.slice(0, 8)}...
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
                 {topDiagnostics.map((item, i) => (
                   <div key={`${item.source}-${item.observed_at}-${i}`} className="rounded-md border p-3">
                     <div className="flex items-start gap-2 text-sm">
