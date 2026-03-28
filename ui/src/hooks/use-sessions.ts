@@ -15,6 +15,11 @@ interface SessionFilters {
   limit?: number;
 }
 
+export interface SessionTranscriptFilters {
+  limit?: number;
+  offset?: number;
+}
+
 export function useSessions(filters?: SessionFilters) {
   const params = new URLSearchParams();
   if (filters?.active_minutes) params.set("active", String(filters.active_minutes));
@@ -46,10 +51,15 @@ export function useSessionStatus(id: string) {
   });
 }
 
-export function useSessionTranscript(id: string) {
+export function useSessionTranscript(id: string, filters?: SessionTranscriptFilters) {
+  const params = new URLSearchParams();
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  if (typeof filters?.offset === "number") params.set("offset", String(filters.offset));
+  const qs = params.toString();
+
   return useQuery({
-    queryKey: ["sessions", id, "transcript"],
-    queryFn: () => api.get<TranscriptEntry[]>(`/sessions/${id}/transcript`),
+    queryKey: ["sessions", id, "transcript", filters],
+    queryFn: () => api.get<TranscriptEntry[]>(`/sessions/${id}/transcript${qs ? `?${qs}` : ""}`),
     enabled: !!id,
     refetchInterval: 5_000,
   });
