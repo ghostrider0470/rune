@@ -23,7 +23,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
 );
 
 use rune_core::TranscriptItem;
-use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
+use rune_models::{ChatMessage, ContentPart, FunctionCall, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
 
@@ -89,6 +89,7 @@ impl ContextAssembler {
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(system_content),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -140,6 +141,7 @@ impl ContextAssembler {
                     messages.push(ChatMessage {
                         role: Role::Assistant,
                         content: None,
+                        content_parts: None,
                         name: None,
                         tool_call_id: None,
                         tool_calls: Some(tool_calls),
@@ -167,7 +169,11 @@ impl ContextAssembler {
                 }
                 Some(ChatMessage {
                     role: Role::User,
-                    content: Some(message.content),
+                    content: Some(message.content.clone()),
+                    content_parts: Some(build_content_parts(
+                        &message.content,
+                        &message.attachments,
+                    )),
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -179,7 +185,8 @@ impl ContextAssembler {
                 }
                 Some(ChatMessage {
                     role: Role::Assistant,
-                    content: Some(content),
+                    content: Some(content.clone()),
+                    content_parts: None,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -194,6 +201,7 @@ impl ContextAssembler {
             } => Some(ChatMessage {
                 role: Role::Tool,
                 content: Some(output),
+                content_parts: None,
                 name: None,
                 tool_call_id: Some(tool_call_id.to_string()),
                 tool_calls: None,
@@ -278,6 +286,7 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
                     ChatMessage {
                         role: Role::Tool,
                         content: Some("[Tool call interrupted — no result available]".to_string()),
+                        content_parts: None,
                         name: None,
                         tool_call_id: Some(id),
                         tool_calls: None,
@@ -289,4 +298,27 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
             i = j;
         }
     }
+}
+
+fn build_content_parts(
+    content: &str,
+    attachments: &[rune_core::AttachmentRef],
+) -> Vec<ContentPart> {
+    let mut parts = Vec::new();
+    if !content.is_empty() {
+        parts.push(ContentPart::Text {
+            text: content.to_string(),
+        });
+    }
+    for attachment in attachments {
+        let mime = attachment.mime_type.as_deref().unwrap_or("");
+        if mime.starts_with("image/") {
+            if let Some(url) = attachment.url.as_ref() {
+                parts.push(ContentPart::Image {
+                    image_url: url.clone(),
+                });
+            }
+        }
+    }
+    parts
 }

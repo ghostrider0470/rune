@@ -12,7 +12,7 @@ use super::response::{ApiResponse, map_error_response, parse_response};
 use super::response::{StreamChunkResponse, StreamDelta};
 use crate::error::ModelError;
 use crate::types::{
-    CompletionRequest, CompletionResponse, FinishReason, FunctionCall, StreamEvent,
+    CompletionRequest, CompletionResponse, ContentPart, FinishReason, FunctionCall, StreamEvent,
     ToolCallRequest, Usage,
 };
 
@@ -134,7 +134,7 @@ impl OpenAiProvider {
 /// Azure/newer OpenAI models use `max_completion_tokens` instead of `max_tokens`.
 #[derive(Debug, serde::Serialize)]
 struct OpenAiRequest<'a> {
-    messages: Vec<crate::types::ChatMessage>,
+    messages: Vec<OpenAiMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: &'a Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -154,6 +154,72 @@ fn is_false(v: &bool) -> bool {
 }
 
 #[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
+enum OpenAiMessageContent {
+    Text(String),
+    Parts(Vec<OpenAiContentPart>),
+}
+
+#[derive(Debug, serde::Serialize)]
+struct OpenAiMessage {
+    role: crate::types::Role,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<OpenAiMessageContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<crate::types::ToolCallRequest>>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "type")]
+enum OpenAiContentPart {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: OpenAiImageUrl },
+}
+
+#[derive(Debug, serde::Serialize)]
+struct OpenAiImageUrl {
+    url: String,
+}
+
+fn map_message(msg: crate::types::ChatMessage) -> OpenAiMessage {
+    let content = if let Some(parts) = msg.content_parts.clone().filter(|parts| !parts.is_empty()) {
+        Some(OpenAiMessageContent::Parts(
+            parts
+                .into_iter()
+                .map(|part| match part {
+                    ContentPart::Text { text } => OpenAiContentPart::Text { text },
+                    ContentPart::Image { image_url } => OpenAiContentPart::ImageUrl {
+                        image_url: OpenAiImageUrl { url: image_url },
+                    },
+                })
+                .collect(),
+        ))
+    } else {
+        msg.content.clone().map(OpenAiMessageContent::Text)
+    };
+
+    OpenAiMessage {
+        role: msg.role,
+        content,
+        name: msg.name,
+        tool_call_id: msg.tool_call_id,
+        tool_calls: msg.tool_calls,
+    }
+}
+
+fn collect_messages(
+    messages: impl IntoIterator<Item = crate::types::ChatMessage>,
+) -> Vec<OpenAiMessage> {
+    messages.into_iter().map(map_message).collect()
+}
+
+#[derive(Debug, serde::Serialize)]
 struct StreamOptions {
     include_usage: bool,
 }
@@ -165,17 +231,22 @@ impl ModelProvider for OpenAiProvider {
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
         let body = OpenAiRequest {
-            messages: request
-                .stable_prefix_messages
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .chain(request.messages.iter().cloned())
-                .collect(),
+            messages: collect_messages(
+                request
+                    .stable_prefix_messages
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain(request.messages.iter().cloned()),
+            ),
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
-            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
+            tools: &request
+                .stable_prefix_tools
+                .as_ref()
+                .or(request.tools.as_ref())
+                .cloned(),
             stream: false,
             stream_options: None,
         };
@@ -205,17 +276,22 @@ impl ModelProvider for OpenAiProvider {
         request: &CompletionRequest,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ModelError> {
         let body = OpenAiRequest {
-            messages: request
-                .stable_prefix_messages
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .chain(request.messages.iter().cloned())
-                .collect(),
+            messages: collect_messages(
+                request
+                    .stable_prefix_messages
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain(request.messages.iter().cloned()),
+            ),
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
-            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
+            tools: &request
+                .stable_prefix_tools
+                .as_ref()
+                .or(request.tools.as_ref())
+                .cloned(),
             stream: true,
             stream_options: Some(StreamOptions {
                 include_usage: true,

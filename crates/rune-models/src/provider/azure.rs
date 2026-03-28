@@ -13,7 +13,9 @@ use tracing::debug;
 use super::ModelProvider;
 use super::response::{ApiResponse, map_error_response, parse_response};
 use crate::error::ModelError;
-use crate::types::{ChatMessage, CompletionRequest, CompletionResponse, ToolDefinition};
+use crate::types::{
+    ChatMessage, CompletionRequest, CompletionResponse, ContentPart, ToolDefinition,
+};
 
 /// Azure OpenAI provider.
 ///
@@ -56,7 +58,7 @@ impl AzureOpenAiProvider {
 /// Uses `max_tokens` which is the field name Azure OpenAI expects.
 #[derive(Debug, Serialize)]
 struct AzureOpenAiRequest<'a> {
-    messages: Vec<ChatMessage>,
+    messages: Vec<AzureChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,10 +80,15 @@ impl ModelProvider for AzureOpenAiProvider {
                 .unwrap_or_default()
                 .into_iter()
                 .chain(request.messages.iter().cloned())
+                .map(map_message)
                 .collect(),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
-            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
+            tools: &request
+                .stable_prefix_tools
+                .as_ref()
+                .or(request.tools.as_ref())
+                .cloned(),
         };
 
         debug!(url = %self.url, msg_count = body.messages.len(), "Azure OpenAI completion request");
@@ -148,5 +155,82 @@ mod tests {
             p.url(),
             "https://custom.azure-api.net/v1/openai/deployments/my-deploy/chat/completions?api-version=2024-02-15-preview"
         );
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum AzureMessageContent {
+    Text(String),
+    Parts(Vec<AzureContentPart>),
+}
+
+#[derive(Debug, Serialize)]
+struct AzureChatMessage {
+    role: RoleWire,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<AzureMessageContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<crate::types::ToolCallRequest>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum RoleWire {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum AzureContentPart {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: AzureImageUrl },
+}
+
+#[derive(Debug, Serialize)]
+struct AzureImageUrl {
+    url: String,
+}
+
+fn map_role(role: crate::types::Role) -> RoleWire {
+    match role {
+        crate::types::Role::System => RoleWire::System,
+        crate::types::Role::User => RoleWire::User,
+        crate::types::Role::Assistant => RoleWire::Assistant,
+        crate::types::Role::Tool => RoleWire::Tool,
+    }
+}
+
+fn map_message(msg: ChatMessage) -> AzureChatMessage {
+    let content = if let Some(parts) = msg.content_parts.clone().filter(|parts| !parts.is_empty()) {
+        Some(AzureMessageContent::Parts(
+            parts
+                .into_iter()
+                .map(|part| match part {
+                    ContentPart::Text { text } => AzureContentPart::Text { text },
+                    ContentPart::Image { image_url } => AzureContentPart::ImageUrl {
+                        image_url: AzureImageUrl { url: image_url },
+                    },
+                })
+                .collect(),
+        ))
+    } else {
+        msg.content.clone().map(AzureMessageContent::Text)
+    };
+    AzureChatMessage {
+        role: map_role(msg.role),
+        content,
+        name: msg.name,
+        tool_call_id: msg.tool_call_id,
+        tool_calls: msg.tool_calls,
     }
 }

@@ -359,6 +359,7 @@ impl Mem0Engine {
                 rune_models::ChatMessage {
                     role: rune_models::Role::System,
                     content: Some(EXTRACTION_SYSTEM_PROMPT.to_string()),
+                    content_parts: None,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -366,6 +367,7 @@ impl Mem0Engine {
                 rune_models::ChatMessage {
                     role: rune_models::Role::User,
                     content: Some(user_content),
+                    content_parts: None,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
