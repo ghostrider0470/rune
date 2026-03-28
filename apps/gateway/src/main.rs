@@ -733,17 +733,14 @@ async fn build_services(
     turn_executor = turn_executor.with_approval_mode(config.approval.mode.as_str());
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
 
+
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-<<<<<<< HEAD
         match Mem0Engine::try_new(
             &config.mem0,
             model_provider.clone(),
             repos.memory_fact_repo.clone(),
         ) {
-=======
-        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
->>>>>>> 37afe59 (refactor(runtime): back mem0 with repository layer (#13))
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");
@@ -753,7 +750,6 @@ async fn build_services(
             }
         }
     }
-
     let turn_executor = Arc::new(turn_executor);
 
     // Build STT engine (shared across session loops).
