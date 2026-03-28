@@ -168,7 +168,6 @@ impl SignalAdapter {
                     mime_type: a.content_type.clone(),
                     size_bytes: a.size.map(|s| s as u64),
                     url: None,
-                    provider_file_id: None,
                 })
                 .collect();
 
