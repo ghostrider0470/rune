@@ -638,6 +638,8 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/logs", get(routes::query_logs))
         // Doctor routes
         .route("/api/doctor/run", post(routes::doctor_run))
+        .route("/security/audit", post(routes::security_audit))
+        .route("/api/security/audit", post(routes::security_audit))
         .route("/api/doctor/results", get(routes::doctor_results))
         // Configure / Setup routes
         .route("/configure", post(routes::configure))

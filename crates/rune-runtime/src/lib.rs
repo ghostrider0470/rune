@@ -26,6 +26,7 @@ pub mod plugin_scanner;
 pub mod project;
 pub mod restart_continuity;
 pub mod scheduler;
+pub mod security_audit;
 pub mod session_loop;
 mod session_metadata;
 pub mod skill;

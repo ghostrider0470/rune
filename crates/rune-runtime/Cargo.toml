@@ -13,6 +13,7 @@ rune-store = { path = "../rune-store" }
 rune-models = { path = "../rune-models" }
 rune-stt = { path = "../rune-stt" }
 rune-tools = { path = "../rune-tools" }
+rune-spells-security-audit = { path = "../rune-spells/security-audit" }
 async-trait.workspace = true
 dirs = "6"
 chrono.workspace = true

@@ -21,6 +21,7 @@ use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
     SessionTarget, compute_initial_next_run,
 };
+use rune_runtime::security_audit::run_host_security_audit;
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
@@ -5794,6 +5795,68 @@ pub async fn doctor_results(
     State(state): State<AppState>,
 ) -> Result<Json<DoctorReport>, GatewayError> {
     doctor_run(State(state)).await
+}
+
+#[derive(Deserialize)]
+pub struct SecurityAuditRequest {
+    pub target: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SecurityAuditResponse {
+    pub passed: bool,
+    pub checks: Vec<SecurityAuditCheck>,
+    pub summary: String,
+}
+
+#[derive(Serialize)]
+pub struct SecurityAuditCheck {
+    pub name: String,
+    pub status: String,
+    pub detail: String,
+}
+
+/// `POST /security/audit` - run baseline host security checks and return operator-friendly output.
+pub async fn security_audit(
+    State(_state): State<AppState>,
+    payload: Option<Json<SecurityAuditRequest>>,
+) -> Result<Json<SecurityAuditResponse>, GatewayError> {
+    let target = payload
+        .and_then(|Json(req)| req.target)
+        .map(std::path::PathBuf::from);
+    let report = run_host_security_audit(target.as_deref());
+
+    let checks = report
+        .findings
+        .into_iter()
+        .map(|finding| SecurityAuditCheck {
+            name: finding.check,
+            status: finding.status,
+            detail: if finding.detail.trim().is_empty() {
+                finding.summary
+            } else {
+                format!("{} — {}", finding.summary, finding.detail)
+            },
+        })
+        .collect();
+
+    let summary = if report.passed {
+        format!(
+            "{} critical, {} warning, {} info finding(s)",
+            report.summary.critical, report.summary.warning, report.summary.info
+        )
+    } else {
+        format!(
+            "{} critical finding(s), {} warning(s), {} info",
+            report.summary.critical, report.summary.warning, report.summary.info
+        )
+    };
+
+    Ok(Json(SecurityAuditResponse {
+        passed: report.passed,
+        checks,
+        summary,
+    }))
 }
 
 // ── Configure / Setup ────────────────────────────────────────────────────────

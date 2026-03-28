@@ -34,6 +34,7 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
+use rune_gateway::TokenMetricsStore;
 use rune_gateway::logging::LogStore;
 use rune_gateway::ms365::{
     CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest, FileContent,
@@ -45,7 +46,6 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
-use rune_gateway::TokenMetricsStore;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
@@ -10145,6 +10145,51 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
     assert_eq!(ws_body["overall"], http_body["overall"]);
     assert_eq!(ws_body["checks"], http_body["checks"]);
     assert!(ws_body["run_at"].as_str().unwrap().contains('T'));
+}
+
+#[tokio::test]
+async fn security_audit_route_runs_and_returns_operator_shape() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .oneshot(
+            Request::post("/security/audit")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"target":"."}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert!(body["passed"].is_boolean());
+    assert!(body["summary"].as_str().unwrap().contains("finding"));
+    let checks = body["checks"].as_array().unwrap();
+    assert!(!checks.is_empty());
+    assert!(
+        checks
+            .iter()
+            .any(|check| check["name"] == "file_permissions")
+    );
+}
+
+#[tokio::test]
+async fn api_security_audit_parity_route_is_registered() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .oneshot(
+            Request::post("/api/security/audit")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

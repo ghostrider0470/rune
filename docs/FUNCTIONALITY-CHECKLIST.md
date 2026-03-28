@@ -100,7 +100,8 @@ Implementation note (2026-03-19): the operator CLI now exposes the `models` comm
 - [x] `config get|set|unset|file|validate`
 - [ ] `configure` command family
 - [ ] `secrets reload|audit|configure|apply`
-- [ ] `security audit`
+- [x] `security audit`
+  - 2026-03-28: gateway-backed `POST /security/audit` and `/api/security/audit` now execute the native host audit spell end-to-end, with CLI parsing/client rendering already wired in `rune-cli` plus new route coverage proving the operator response shape.
 - [x] `system event`
 - [x] `system heartbeat enable|disable`
 - [x] `system heartbeat last|presence`
