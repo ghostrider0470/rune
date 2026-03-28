@@ -2225,9 +2225,27 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         },
         Command::Doctor { action } => {
-            let result = match action.unwrap_or(DoctorAction::Run) {
-                DoctorAction::Run => client.doctor_run().await?,
-                DoctorAction::Results => client.doctor_results().await?,
+            let action = action.unwrap_or(DoctorAction::Run);
+            let gateway_reachable = reqwest::Client::new()
+                .get(format!("{}/health", cli.gateway_url.trim_end_matches('/')))
+                .timeout(std::time::Duration::from_secs(2))
+                .send()
+                .await
+                .is_ok();
+            let result = if matches!(action, DoctorAction::Run) && !gateway_reachable {
+                let config_path = std::env::var_os("RUNE_CONFIG").map(std::path::PathBuf::from);
+                let workspace_root = std::env::current_dir().ok();
+                let checks =
+                    doctor::run_all_checks(config_path.as_deref(), None, workspace_root.as_deref())
+                        .await;
+                let config =
+                    rune_config::AppConfig::load(config_path.as_deref()).unwrap_or_default();
+                doctor::build_doctor_report(&checks, &config)
+            } else {
+                match action {
+                    DoctorAction::Run => client.doctor_run().await?,
+                    DoctorAction::Results => client.doctor_results().await?,
+                }
             };
             println!("{}", render(&result, format));
         }
