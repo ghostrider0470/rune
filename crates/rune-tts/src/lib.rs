@@ -84,6 +84,21 @@ impl TtsEngine {
             return Err(TtsError::Disabled);
         }
 
+        let api_key = self.config.api_key.as_deref().unwrap_or("");
+        if api_key.is_empty() {
+            return Err(TtsError::Config(
+                "API key is required but not configured".to_owned(),
+            ));
+        }
+
+        info!(
+            provider = %self.config.provider,
+            voice = %voice,
+            model = %model,
+            text_len = text.len(),
+            "synthesizing speech",
+        );
+
         self.provider.synthesize(text, voice, model).await
     }
 
@@ -165,6 +180,22 @@ mod tests {
         };
         let engine = TtsEngine::new(Box::new(EchoProvider), config);
         let err = engine.convert("hello").await.unwrap_err();
+        assert!(matches!(err, TtsError::Config(_)));
+    }
+
+
+    #[tokio::test]
+    async fn convert_with_without_key_returns_config_error() {
+        let config = TtsConfig {
+            enabled: true,
+            api_key: None,
+            ..Default::default()
+        };
+        let engine = TtsEngine::new(Box::new(EchoProvider), config);
+        let err = engine
+            .convert_with("hello", "custom-voice", "custom-model")
+            .await
+            .unwrap_err();
         assert!(matches!(err, TtsError::Config(_)));
     }
 
