@@ -166,3 +166,27 @@ export function useSttStatus() {
     refetchInterval: 30_000,
   });
 }
+
+export function useSttEnable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<{ enabled: boolean }>("/stt/enable"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stt"] });
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
+
+export function useSttDisable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<{ enabled: boolean }>("/stt/disable"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stt"] });
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
