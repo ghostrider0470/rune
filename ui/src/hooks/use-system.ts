@@ -9,6 +9,7 @@ import type {
   ReminderAddRequest,
   TtsStatusResponse,
   SttStatusResponse,
+  DoctorReport,
 } from "@/lib/api-types";
 
 export function useHealth() {
@@ -126,6 +127,27 @@ export function useUpdateConfig() {
   });
 }
 
+export function useDoctorResults() {
+  return useQuery({
+    queryKey: ["doctor", "results"],
+    queryFn: () => api.get<DoctorReport>("/api/doctor/results"),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useDoctorRun() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<DoctorReport>("/api/doctor/run"),
+    onSuccess: (report) => {
+      queryClient.setQueryData(["doctor", "results"], report);
+      queryClient.invalidateQueries({ queryKey: ["doctor"] });
+      queryClient.invalidateQueries({ queryKey: ["status"] });
+      queryClient.invalidateQueries({ queryKey: ["health"] });
+    },
+  });
+}
 
 export function useTtsStatus() {
   return useQuery({

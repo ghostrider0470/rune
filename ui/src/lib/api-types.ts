@@ -450,3 +450,39 @@ export interface TranscribeResponse {
   language: string | null;
   duration_seconds: number | null;
 }
+
+export interface DoctorCheck {
+  name: string;
+  status: string;
+  message: string;
+}
+
+export interface DoctorPathSummary {
+  profile: string;
+  mode: string;
+  auto_create_missing: boolean;
+}
+
+export interface DoctorTopologySummary {
+  deployment: string;
+  database: string;
+  models: string;
+  search: string;
+}
+
+export interface DoctorBackendMatrixEntry {
+  subsystem: string;
+  backend: string;
+  status: string;
+  capability: string;
+  fix_hint?: string | null;
+}
+
+export interface DoctorReport {
+  overall: string;
+  checks: DoctorCheck[];
+  paths?: DoctorPathSummary | null;
+  topology?: DoctorTopologySummary | null;
+  backend_matrix: DoctorBackendMatrixEntry[];
+  run_at: string;
+}
