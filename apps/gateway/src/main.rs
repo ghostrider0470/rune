@@ -1729,10 +1729,10 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "comms_send" => match &self.comms {
+            "comms_send" | "comms_read" => match &self.comms {
                 Some(comms) => comms.execute(call).await,
                 None => Err(ToolError::UnknownTool {
-                    name: "comms_send".to_string(),
+                    name: call.tool_name.clone(),
                 }),
             },
             other if other.contains("__") => match &self.mcp {
@@ -2048,6 +2048,18 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
                     "priority": { "type": "string", "enum": ["p0", "p1", "p2"], "default": "p1" }
                 },
                 "required": ["subject", "body"]
+            }),
+            category: ToolCategory::External,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "comms_read".into(),
+            description: "Check your comms inbox for messages from peer agents (e.g. OpenClaw). Returns unread messages and optionally marks them read.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "mark_read": { "type": "boolean", "description": "Move processed messages to archive. Defaults to true." }
+                }
             }),
             category: ToolCategory::External,
             requires_approval: false,
