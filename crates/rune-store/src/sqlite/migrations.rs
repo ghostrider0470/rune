@@ -104,7 +104,9 @@ CREATE TABLE IF NOT EXISTS tool_executions (
     result_summary  TEXT,
     error_summary   TEXT,
     started_at      TEXT NOT NULL,
-    ended_at        TEXT
+    ended_at        TEXT,
+    approval_id     TEXT,
+    execution_mode  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tool_executions_session_id ON tool_executions (session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_executions_turn_id ON tool_executions (turn_id);
