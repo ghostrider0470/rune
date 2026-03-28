@@ -355,7 +355,11 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         event_tx: state.event_tx.clone(),
         operator_delivery,
         plugin_scanner: Some(plugin_scanner.clone()),
-        plugin_scan_interval_ticks: plugin_scan_interval_secs / 10,
+        plugin_scan_interval_ticks: if plugin_scan_interval_secs == 0 {
+            0
+        } else {
+            std::cmp::max(1, plugin_scan_interval_secs.div_ceil(10))
+        },
         comms: state.comms_client.clone(),
     };
 
