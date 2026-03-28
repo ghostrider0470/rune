@@ -684,10 +684,20 @@ pub struct CommsConfig {
     pub transport: String,
     #[serde(default)]
     pub comms_dir: Option<String>,
+    #[serde(default)]
+    pub http: Option<CommsHttpConfig>,
     #[serde(default = "default_comms_agent_id")]
     pub agent_id: String,
     #[serde(default = "default_comms_peer_id")]
     pub peer_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CommsHttpConfig {
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub auth_token: Option<String>,
 }
 
 fn default_comms_transport() -> String {
@@ -706,6 +716,7 @@ impl Default for CommsConfig {
             enabled: false,
             transport: default_comms_transport(),
             comms_dir: None,
+            http: None,
             agent_id: default_comms_agent_id(),
             peer_id: default_comms_peer_id(),
         }
