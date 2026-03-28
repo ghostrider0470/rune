@@ -5327,7 +5327,7 @@ mod tests {
                 subsystem: "storage".into(),
                 backend: "sqlite".into(),
                 status: "connected".into(),
-                capability: "mode=standalone".into(),
+                capability: "4 repo surfaces configured".into(),
                 fix_hint: None,
             }],
             run_at: "2026-03-20T09:30:00Z".into(),

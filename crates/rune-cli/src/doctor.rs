@@ -14,8 +14,13 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::output::{
+    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorPathSummary, DoctorReport,
+    DoctorTopologySummary,
+};
 use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 use crate::output::{DoctorBackendMatrixEntry, DoctorPathSummary, DoctorReport, DoctorTopologySummary};
 
@@ -930,6 +935,377 @@ async fn check_gateway(url: &str) -> CheckResult {
             message: format!("Cannot reach gateway: {e}"),
             hint: Some(format!("Ensure gateway is running at {url}")),
         },
+    }
+}
+
+#[derive(Clone, Debug)]
+struct BackendMatrixRawEntry {
+    subsystem: &'static str,
+    backend: String,
+    status: String,
+    capability: String,
+    fix_hint: Option<String>,
+}
+
+pub fn build_backend_matrix(config: &AppConfig) -> Vec<DoctorBackendMatrixEntry> {
+    build_backend_matrix_raw(config)
+        .into_iter()
+        .map(|entry| DoctorBackendMatrixEntry {
+            subsystem: entry.subsystem.to_string(),
+            backend: entry.backend,
+            status: entry.status,
+            capability: entry.capability,
+            fix_hint: entry.fix_hint,
+        })
+        .collect()
+}
+
+fn build_backend_matrix_raw(config: &AppConfig) -> Vec<BackendMatrixRawEntry> {
+    let resolved_storage = resolved_storage_backend(config);
+    let storage_connected = matches!(resolved_storage, "sqlite" | "postgres" | "cosmos");
+    let storage_repos = configured_repo_count(config);
+    let storage_capability = format!(
+        "{storage_repos} repo surfaces configured; mode={}",
+        config.mode.resolve(config).as_str()
+    );
+
+    let vector_backend = resolved_vector_backend(config);
+    let memory_level = config.memory.requested_level();
+    let vector_status = if matches!(memory_level, rune_config::MemoryLevel::Semantic) {
+        if vector_backend == "none" {
+            "degraded"
+        } else {
+            "connected"
+        }
+    } else {
+        "unavailable"
+    };
+    let vector_capability = match vector_backend.as_str() {
+        "lancedb" => format!(
+            "{}-dim semantic search via LanceDB",
+            config.vector.embedding_dims
+        ),
+        "pgvector" => format!(
+            "{}-dim semantic search via pgvector",
+            config.vector.embedding_dims
+        ),
+        "integrated" => "integrated vector backend via primary database".to_string(),
+        _ => "semantic retrieval disabled; keyword/file memory only".to_string(),
+    };
+
+    let comms_enabled = config.comms.enabled && config.comms.comms_dir.is_some();
+    let comms_status = if comms_enabled {
+        "connected"
+    } else {
+        "unavailable"
+    };
+    let comms_backend = if comms_enabled {
+        "filesystem"
+    } else {
+        "disabled"
+    };
+    let comms_capability = if comms_enabled {
+        format!(
+            "peer={} dir={}",
+            config.comms.peer_id.as_str(),
+            config.comms.comms_dir.as_deref().unwrap_or("<unset>")
+        )
+    } else {
+        "inter-agent comms not configured".to_string()
+    };
+
+    let enabled_channels = configured_channels(config);
+    let channels_status = if enabled_channels.is_empty() {
+        "unavailable"
+    } else {
+        "connected"
+    };
+    let channels_backend = if enabled_channels.is_empty() {
+        "none".to_string()
+    } else {
+        enabled_channels.join(", ")
+    };
+    let channels_capability = if enabled_channels.is_empty() {
+        "no channels enabled".to_string()
+    } else {
+        format!("{} enabled channel(s)", enabled_channels.len())
+    };
+
+    let provider_descriptions = model_provider_descriptions(config);
+    let models_status = if provider_descriptions.is_empty() {
+        "degraded"
+    } else {
+        "connected"
+    };
+    let models_backend = if provider_descriptions.is_empty() {
+        config
+            .models
+            .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+            .map(|_| "ollama-zero-config".to_string())
+            .unwrap_or_else(|| "none".to_string())
+    } else {
+        provider_descriptions
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let models_capability = if provider_descriptions.is_empty() {
+        config
+            .models
+            .zero_config_ollama_base_url(std::env::var("OLLAMA_HOST").ok().as_deref())
+            .map(|base| format!("zero-config Ollama available at {base}"))
+            .unwrap_or_else(|| "no providers configured".to_string())
+    } else {
+        provider_descriptions
+            .into_iter()
+            .map(|(name, count)| {
+                format!(
+                    "{name} ({count} model{})",
+                    if count == 1 { "" } else { "s" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    let memory_backend = match memory_level {
+        rune_config::MemoryLevel::File => "file".to_string(),
+        rune_config::MemoryLevel::Keyword => "keyword".to_string(),
+        rune_config::MemoryLevel::Semantic => match vector_backend.as_str() {
+            "none" => "keyword".to_string(),
+            backend => backend.to_string(),
+        },
+    };
+    let memory_status = match memory_level {
+        rune_config::MemoryLevel::Semantic if vector_backend == "none" => "degraded",
+        _ => "connected",
+    };
+    let memory_capability = match memory_level {
+        rune_config::MemoryLevel::File => "file scan only".to_string(),
+        rune_config::MemoryLevel::Keyword => "keyword retrieval".to_string(),
+        rune_config::MemoryLevel::Semantic => match vector_backend.as_str() {
+            "none" => "semantic requested but vector backend unavailable; keyword fallback only"
+                .to_string(),
+            backend => format!("semantic ({backend}) + keyword retrieval"),
+        },
+    };
+
+    vec![
+        BackendMatrixRawEntry {
+            subsystem: "storage",
+            backend: resolved_storage.to_string(),
+            status: if storage_connected {
+                "connected"
+            } else {
+                "degraded"
+            }
+            .to_string(),
+            capability: storage_capability,
+            fix_hint: if storage_connected {
+                None
+            } else {
+                Some("Set database.backend to sqlite/postgres/cosmos and provide matching connection settings".to_string())
+            },
+        },
+        BackendMatrixRawEntry {
+            subsystem: "vector",
+            backend: vector_backend.clone(),
+            status: vector_status.to_string(),
+            capability: vector_capability,
+            fix_hint: if vector_backend == "none"
+                && matches!(memory_level, rune_config::MemoryLevel::Semantic)
+            {
+                Some(
+                    "Enable vector.backend=lancedb or postgres+pgvector for semantic memory"
+                        .to_string(),
+                )
+            } else {
+                None
+            },
+        },
+        BackendMatrixRawEntry {
+            subsystem: "comms",
+            backend: comms_backend.to_string(),
+            status: comms_status.to_string(),
+            capability: comms_capability,
+            fix_hint: if comms_enabled {
+                None
+            } else {
+                Some(
+                    "Set comms.enabled=true and comms.comms_dir to enable peer messaging"
+                        .to_string(),
+                )
+            },
+        },
+        BackendMatrixRawEntry {
+            subsystem: "channels",
+            backend: channels_backend,
+            status: channels_status.to_string(),
+            capability: channels_capability,
+            fix_hint: if enabled_channels.is_empty() {
+                Some(
+                    "Configure at least one channel credential and add it to channels.enabled"
+                        .to_string(),
+                )
+            } else {
+                None
+            },
+        },
+        BackendMatrixRawEntry {
+            subsystem: "models",
+            backend: models_backend,
+            status: models_status.to_string(),
+            capability: models_capability,
+            fix_hint: if config.models.providers.is_empty() {
+                Some(
+                    "Add one or more models.providers entries for production inference".to_string(),
+                )
+            } else {
+                None
+            },
+        },
+        BackendMatrixRawEntry {
+            subsystem: "memory",
+            backend: memory_backend,
+            status: memory_status.to_string(),
+            capability: memory_capability,
+            fix_hint: if memory_status == "degraded" {
+                Some(
+                    "Configure a semantic vector backend or lower memory.level to keyword/file"
+                        .to_string(),
+                )
+            } else {
+                None
+            },
+        },
+    ]
+}
+
+fn resolved_storage_backend(config: &AppConfig) -> &'static str {
+    match config.database.backend {
+        rune_config::StorageBackend::Postgres => "postgres",
+        rune_config::StorageBackend::Sqlite => "sqlite",
+        rune_config::StorageBackend::Cosmos => "cosmos",
+        rune_config::StorageBackend::Auto => {
+            if config.database.database_url.is_some() {
+                "postgres"
+            } else if config.database.cosmos_endpoint.is_some() {
+                "cosmos"
+            } else {
+                "sqlite"
+            }
+        }
+    }
+}
+
+fn resolved_vector_backend(config: &AppConfig) -> String {
+    match config.vector.backend {
+        rune_config::VectorBackend::LanceDb => "lancedb".to_string(),
+        rune_config::VectorBackend::Integrated => {
+            if resolved_storage_backend(config) == "postgres" {
+                "pgvector".to_string()
+            } else {
+                "integrated".to_string()
+            }
+        }
+        rune_config::VectorBackend::None => "none".to_string(),
+        rune_config::VectorBackend::Auto => {
+            if config.vector.lancedb_uri.is_some() {
+                "lancedb".to_string()
+            } else if resolved_storage_backend(config) == "postgres" {
+                "pgvector".to_string()
+            } else {
+                "none".to_string()
+            }
+        }
+    }
+}
+
+fn configured_repo_count(config: &AppConfig) -> usize {
+    let mut count = 4;
+    if !config.channels.enabled.is_empty() {
+        count += 1;
+    }
+    if config.comms.enabled {
+        count += 1;
+    }
+    if !config.mcp_servers.is_empty() {
+        count += 1;
+    }
+    count
+}
+
+fn configured_channels(config: &AppConfig) -> Vec<String> {
+    config
+        .channels
+        .enabled
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect()
+}
+
+fn model_provider_descriptions(config: &AppConfig) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for provider in &config.models.providers {
+        counts.insert(provider.name.clone(), provider.models.len());
+    }
+    counts.into_iter().collect()
+}
+
+pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> DoctorReport {
+    let checks = results
+        .iter()
+        .map(|result| OutputDoctorCheck {
+            name: result.name.clone(),
+            status: match result.status {
+                CheckStatus::Pass => "pass",
+                CheckStatus::Warn => "warn",
+                CheckStatus::Fail => "fail",
+                CheckStatus::Skip => "skip",
+            }
+            .to_string(),
+            message: result.message.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let overall = if results
+        .iter()
+        .any(|result| result.status == CheckStatus::Fail)
+    {
+        "unhealthy"
+    } else if results
+        .iter()
+        .any(|result| result.status == CheckStatus::Warn)
+    {
+        "degraded"
+    } else {
+        "healthy"
+    }
+    .to_string();
+
+    let resolved_mode = config.mode.resolve(config);
+
+    DoctorReport {
+        overall,
+        checks,
+        paths: Some(DoctorPathSummary {
+            profile: config.paths.profile().as_str().to_string(),
+            mode: resolved_mode.as_str().to_string(),
+            auto_create_missing: resolved_mode == RuntimeMode::Standalone,
+        }),
+        topology: Some(DoctorTopologySummary {
+            deployment: resolved_mode.as_str().to_string(),
+            database: resolved_storage_backend(config).to_string(),
+            models: if config.models.providers.is_empty() {
+                "fallback".to_string()
+            } else {
+                "configured".to_string()
+            },
+            search: config.memory.requested_level().as_str().to_string(),
+        }),
+        backend_matrix: build_backend_matrix(config),
+        run_at: chrono::Utc::now().to_rfc3339(),
     }
 }
 
