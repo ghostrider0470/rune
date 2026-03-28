@@ -373,6 +373,24 @@ fn handle_projects_list() -> Result<()> {
     Ok(())
 }
 
+fn handle_projects_remove(name: String) -> Result<()> {
+    let workspace = default_workspace_root()?;
+    let mut registry = ProjectRegistry::load(&workspace)?;
+    let removed = registry
+        .remove(&name)
+        .ok_or_else(|| anyhow::anyhow!("project '{}' is not registered", name))?;
+    registry.save(&workspace)?;
+    println!(
+        "removed project '{}' from {}",
+        removed.name,
+        removed.repo_path.display()
+    );
+    if registry.active_project().is_none() {
+        println!("active project: none");
+    }
+    Ok(())
+}
+
 fn handle_projects_switch(name: String) -> Result<()> {
     let workspace = default_workspace_root()?;
     let mut registry = ProjectRegistry::load(&workspace)?;
@@ -3935,6 +3953,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Projects { action } => match action {
             ProjectsAction::Add(args) => handle_projects_add(args)?,
             ProjectsAction::List => handle_projects_list()?,
+            ProjectsAction::Remove { name } => handle_projects_remove(name)?,
             ProjectsAction::Switch { name } => handle_projects_switch(name)?,
         },
         Command::Reset { confirm } => {
@@ -4033,6 +4052,55 @@ mod tests {
     use super::*;
     use clap::Parser;
     use tempfile::TempDir;
+
+    #[test]
+    fn cli_projects_remove_parses_name() {
+        let cli = Cli::try_parse_from(["rune", "projects", "remove", "demo"])
+            .expect("projects remove should parse");
+
+        match cli.command {
+            Command::Projects {
+                action: ProjectsAction::Remove { name },
+            } => assert_eq!(name, "demo"),
+            other => panic!("expected projects remove command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn handle_projects_remove_deletes_registration_and_clears_active() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("RUNE_HOME", temp.path());
+        }
+
+        let workspace = default_workspace_root().unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let repo = temp.path().join("demo-repo");
+        std::fs::create_dir_all(&repo).unwrap();
+
+        let mut registry = ProjectRegistry::new();
+        registry
+            .onboard(
+                "demo",
+                "https://github.com/org/demo.git",
+                repo.clone(),
+                &workspace,
+                Some("main"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(registry.active_project(), Some("demo"));
+
+        handle_projects_remove("demo".to_string()).unwrap();
+
+        let loaded = ProjectRegistry::load(&workspace).unwrap();
+        assert!(loaded.get("demo").is_none());
+        assert_eq!(loaded.active_project(), None);
+    }
 
     #[test]
     fn cli_setup_alias_supports_negative_quickstart_flags() {

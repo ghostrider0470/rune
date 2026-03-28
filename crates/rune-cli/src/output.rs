@@ -6270,6 +6270,7 @@ mod tests {
                     kind: "direct".into(),
                     status: "running".into(),
                     channel: Some("telegram".into()),
+                    project_id: None,
                     requester_session_id: None,
                     created_at: None,
                     turn_count: Some(1),

@@ -1194,6 +1194,11 @@ pub enum ProjectsAction {
     Add(ProjectAddArgs),
     /// List all registered projects.
     List,
+    /// Remove a registered project.
+    Remove {
+        /// Registered project name.
+        name: String,
+    },
     /// Switch the active foreground project.
     Switch {
         /// Registered project name.
