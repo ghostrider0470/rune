@@ -40,7 +40,7 @@ use crate::ms365::{
     UpdateTodoTaskRequest, UserProfile, UserSummary,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
-use crate::state::{AppState, SessionEvent, TokenMetricsSnapshot};
+use crate::state::{AppState, SessionEvent, TokenMetricsSnapshot, TokenMetricsStore};
 use crate::ws::active_ws_connections;
 use crate::{SupervisorDeps, run_job_lifecycle};
 
@@ -5489,6 +5489,18 @@ pub struct DoctorBackendMatrixEntry {
     pub fix_hint: Option<String>,
 }
 
+
+#[derive(Clone, Serialize)]
+pub struct DoctorMemoryHierarchySummary {
+    pub l0: String,
+    pub l1: String,
+    pub l2: String,
+    pub l3: String,
+    pub promotion: String,
+    pub demotion: String,
+    pub metrics: String,
+}
+
 #[derive(Serialize)]
 pub struct DoctorReport {
     pub overall: &'static str,
@@ -5496,6 +5508,7 @@ pub struct DoctorReport {
     pub paths: DoctorPathSummary,
     pub topology: DoctorTopologySummary,
     pub backend_matrix: Vec<DoctorBackendMatrixEntry>,
+    pub memory_hierarchy: DoctorMemoryHierarchySummary,
     pub run_at: String,
 }
 
@@ -5679,6 +5692,63 @@ fn doctor_topology_summary(config: &rune_config::AppConfig) -> DoctorTopologySum
         database,
         models,
         search,
+    }
+}
+
+async fn doctor_memory_hierarchy(
+    config: &rune_config::AppConfig,
+    capabilities: &rune_config::Capabilities,
+    token_metrics: &TokenMetricsStore,
+) -> DoctorMemoryHierarchySummary {
+    let prompt_cache_rows = token_metrics.snapshot().await;
+    let (cached_tokens, total_input_tokens) = prompt_cache_rows
+        .iter()
+        .fold((0_u64, 0_u64), |(cached, total), row| {
+            (
+                cached.saturating_add(row.cached_tokens),
+                total.saturating_add(row.total_input_tokens),
+            )
+        });
+    let cache_ratio = if total_input_tokens == 0 {
+        0.0
+    } else {
+        (cached_tokens as f64 / total_input_tokens as f64) * 100.0
+    };
+    let vector_backend = if capabilities.storage_backend.contains("lancedb") {
+        "LanceDB"
+    } else if capabilities.pgvector {
+        "pgvector"
+    } else if capabilities.memory_mode.contains("semantic") {
+        "integrated semantic memory"
+    } else {
+        "keyword/file fallback"
+    };
+
+    DoctorMemoryHierarchySummary {
+        l0: "current turn context window (active transcript + system/task/project context)"
+            .to_string(),
+        l1: format!(
+            "prompt cache via provider prefixes ({} metric row(s), {:.1}% cached input tokens)",
+            prompt_cache_rows.len(),
+            cache_ratio
+        ),
+        l2: format!(
+            "{} memory retrieval ({})",
+            vector_backend, capabilities.memory_mode
+        ),
+        l3: "durable session logs in transcript/session storage".to_string(),
+        promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions"
+            .to_string(),
+        demotion: format!(
+            "compaction checkpoints persist stale L0 context to warm/cold memory after {} tokens",
+            config.runtime.compaction.compress_after
+        ),
+        metrics: format!(
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}",
+            prompt_cache_rows.len(),
+            cached_tokens,
+            total_input_tokens
+        ),
     }
 }
 
@@ -6016,6 +6086,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     });
     checks.extend(storage_path_checks(&config));
     let backend_matrix = doctor_backend_matrix(&config, &state.capabilities, provider_ok, auth_ok);
+    let memory_hierarchy = doctor_memory_hierarchy(&config, &state.capabilities, &state.token_metrics).await;
     drop(config);
 
     let session_check = state.session_repo.list(1, 0).await;
@@ -6088,6 +6159,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         paths: paths_summary,
         topology: topology_summary,
         backend_matrix,
+        memory_hierarchy,
         run_at: Utc::now().to_rfc3339(),
     }))
 }

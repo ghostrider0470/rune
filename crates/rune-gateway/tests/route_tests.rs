@@ -10650,6 +10650,62 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
 }
 
 #[tokio::test]
+async fn doctor_run_reports_memory_hierarchy_summary() {
+    let mut config = AppConfig::default();
+    config.gateway.auth_token = Some("secret-token".into());
+    config.comms.enabled = true;
+    config.comms.comms_dir = Some(std::env::temp_dir().display().to_string());
+    config.models.providers = vec![rune_config::ModelProviderConfig {
+        name: "azure".into(),
+        kind: "azure_openai".into(),
+        base_url: "https://example.invalid".into(),
+        api_key_env: Some("AZURE_OPENAI_API_KEY".into()),
+        api_key: None,
+        deployment_name: Some("gpt-4.1".into()),
+        api_version: None,
+        model_alias: Some("gpt-4.1".into()),
+        models: vec![rune_config::ConfiguredModel::Id("gpt-4.1".into())],
+    }];
+
+    let (app, _) = build_test_app_parts(config, Some("secret-token".into()));
+
+    let response = app
+        .oneshot(
+            Request::post("/api/doctor/run")
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+
+    assert_eq!(body["memory_hierarchy"]["l0"], "current turn context window (active transcript + system/task/project context)");
+    assert!(body["memory_hierarchy"]["l1"]
+        .as_str()
+        .unwrap()
+        .contains("prompt cache via provider prefixes"));
+    assert!(body["memory_hierarchy"]["l2"]
+        .as_str()
+        .unwrap()
+        .contains("memory retrieval"));
+    assert_eq!(body["memory_hierarchy"]["l3"], "durable session logs in transcript/session storage");
+    assert!(body["memory_hierarchy"]["promotion"]
+        .as_str()
+        .unwrap()
+        .contains("L2 hits become L1 candidates"));
+    assert!(body["memory_hierarchy"]["demotion"]
+        .as_str()
+        .unwrap()
+        .contains("compaction checkpoints persist stale L0 context"));
+    assert!(body["memory_hierarchy"]["metrics"]
+        .as_str()
+        .unwrap()
+        .contains("prompt_cache_rows="));
+}
+
+#[tokio::test]
 async fn api_gateway_parity_auth_and_memory_routes_are_registered() {
     let app = build_test_app(None);
 

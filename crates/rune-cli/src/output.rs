@@ -105,6 +105,17 @@ pub struct DoctorTopologySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorMemoryHierarchySummary {
+    pub l0: String,
+    pub l1: String,
+    pub l2: String,
+    pub l3: String,
+    pub promotion: String,
+    pub demotion: String,
+    pub metrics: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorBackendMatrixEntry {
     pub subsystem: String,
     pub backend: String,
@@ -125,6 +136,8 @@ pub struct DoctorReport {
     pub topology: Option<DoctorTopologySummary>,
     #[serde(default)]
     pub backend_matrix: Vec<DoctorBackendMatrixEntry>,
+    #[serde(default)]
+    pub memory_hierarchy: Option<DoctorMemoryHierarchySummary>,
     pub run_at: String,
 }
 
@@ -164,6 +177,16 @@ impl fmt::Display for DoctorReport {
                         .unwrap_or_default()
                 )?;
             }
+        }
+        if let Some(memory_hierarchy) = &self.memory_hierarchy {
+            writeln!(f, "Memory Hierarchy:")?;
+            writeln!(f, "  L0: {}", memory_hierarchy.l0)?;
+            writeln!(f, "  L1: {}", memory_hierarchy.l1)?;
+            writeln!(f, "  L2: {}", memory_hierarchy.l2)?;
+            writeln!(f, "  L3: {}", memory_hierarchy.l3)?;
+            writeln!(f, "  Promotion: {}", memory_hierarchy.promotion)?;
+            writeln!(f, "  Demotion: {}", memory_hierarchy.demotion)?;
+            writeln!(f, "  Metrics: {}", memory_hierarchy.metrics)?;
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
@@ -5330,6 +5353,15 @@ mod tests {
                 capability: "4 repo surfaces configured".into(),
                 fix_hint: None,
             }],
+            memory_hierarchy: Some(crate::output::DoctorMemoryHierarchySummary {
+                l0: "current context window".into(),
+                l1: "prompt cache".into(),
+                l2: "semantic retrieval".into(),
+                l3: "session log archive".into(),
+                promotion: "reuse hot facts".into(),
+                demotion: "compact stale context".into(),
+                metrics: "prompt_cache_rows=1".into(),
+            }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
         let out = render(&r, OutputFormat::Human);
@@ -5342,6 +5374,8 @@ mod tests {
         );
         assert!(out.contains("Backend Matrix:"));
         assert!(out.contains("storage: sqlite (connected) — 4 repo surfaces configured"));
+        assert!(out.contains("Memory Hierarchy:"));
+        assert!(out.contains("L1: prompt cache"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }

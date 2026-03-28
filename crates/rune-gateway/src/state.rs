@@ -111,6 +111,11 @@ impl TokenMetricsStore {
 
     pub async fn snapshot(&self) -> Vec<TokenMetricsSnapshot> {
         let inner = self.inner.lock().await;
+        Self::rows_from_inner(&inner)
+    }
+    fn rows_from_inner(
+        inner: &HashMap<(String, String), TokenMetricsEntry>,
+    ) -> Vec<TokenMetricsSnapshot> {
         let mut rows = inner
             .iter()
             .map(|((provider, model), entry)| {
