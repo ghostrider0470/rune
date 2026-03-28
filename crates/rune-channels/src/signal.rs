@@ -492,7 +492,6 @@ mod tests {
                     group_id: Some("abc123group".into()),
                     group_type: Some("DELIVER".into()),
                 }),
-                provider_file_id: None,
             }),
             receipt_message: None,
             typing_message: None,

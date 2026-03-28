@@ -211,7 +211,7 @@ async fn memory_embedding_repo_round_trip_search_and_cleanup() {
 
     if has_pgvector {
         // Full test with vector embeddings.
-        repo.upsert_chunk(
+        repo.upsert_chunk(None, 
             "memory/preferences.md",
             0,
             "Prefers dark mode and keyboard shortcuts.",
@@ -219,7 +219,7 @@ async fn memory_embedding_repo_round_trip_search_and_cleanup() {
         )
         .await
         .unwrap();
-        repo.upsert_chunk(
+        repo.upsert_chunk(None, 
             "memory/tasks.md",
             0,
             "Reviewed build pipeline rollout notes.",
@@ -228,33 +228,33 @@ async fn memory_embedding_repo_round_trip_search_and_cleanup() {
         .await
         .unwrap();
 
-        assert_eq!(repo.count().await.unwrap(), 2);
+        assert_eq!(repo.count(None).await.unwrap(), 2);
 
-        let keyword_hits = repo.keyword_search("dark mode", 5).await.unwrap();
+        let keyword_hits = repo.keyword_search(None, "dark mode", 5).await.unwrap();
         assert_eq!(keyword_hits.len(), 1);
         assert_eq!(keyword_hits[0].file_path, "memory/preferences.md");
         assert!(keyword_hits[0].score > 0.0);
 
         let vector_hits = repo
-            .vector_search(&[0.95, 0.05, 0.0, 0.0], 5)
+            .vector_search(None, &[0.95, 0.05, 0.0, 0.0], 5)
             .await
             .unwrap();
         assert!(!vector_hits.is_empty());
         assert_eq!(vector_hits[0].file_path, "memory/preferences.md");
 
-        let indexed_files = repo.list_indexed_files().await.unwrap();
+        let indexed_files = repo.list_indexed_files(None).await.unwrap();
         assert_eq!(
             indexed_files,
             vec!["memory/preferences.md", "memory/tasks.md"]
         );
 
-        let deleted = repo.delete_by_file("memory/preferences.md").await.unwrap();
+        let deleted = repo.delete_by_file(None, "memory/preferences.md").await.unwrap();
         assert_eq!(deleted, 1);
-        assert_eq!(repo.count().await.unwrap(), 1);
+        assert_eq!(repo.count(None).await.unwrap(), 1);
     } else {
         // pgvector unavailable — verify keyword-only path works.
         // Insert directly without embeddings for keyword search testing.
-        repo.upsert_keyword_only(
+        repo.upsert_keyword_only(None, 
             "memory/preferences.md",
             0,
             "Prefers dark mode and keyboard shortcuts.",
@@ -262,13 +262,13 @@ async fn memory_embedding_repo_round_trip_search_and_cleanup() {
         .await
         .unwrap();
 
-        let keyword_hits = repo.keyword_search("dark mode", 5).await.unwrap();
+        let keyword_hits = repo.keyword_search(None, "dark mode", 5).await.unwrap();
         assert_eq!(keyword_hits.len(), 1);
         assert_eq!(keyword_hits[0].file_path, "memory/preferences.md");
 
-        let deleted = repo.delete_by_file("memory/preferences.md").await.unwrap();
+        let deleted = repo.delete_by_file(None, "memory/preferences.md").await.unwrap();
         assert_eq!(deleted, 1);
-        assert_eq!(repo.count().await.unwrap(), 0);
+        assert_eq!(repo.count(None).await.unwrap(), 0);
     }
 }
 
