@@ -5,7 +5,7 @@
 //! ensuring that (for example) a burst of subagent work cannot starve
 //! interactive user sessions.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 
@@ -52,6 +52,8 @@ impl fmt::Display for Lane {
 const MAIN_CAPACITY: usize = 4;
 const SUBAGENT_CAPACITY: usize = 8;
 const CRON_CAPACITY: usize = 1024;
+const DEFAULT_GLOBAL_TOOL_CAPACITY: usize = 32;
+const DEFAULT_PROJECT_TOOL_CAPACITY: usize = 4;
 
 // ── Internal: a single lane's semaphore + FIFO waiters ───────────────
 
@@ -102,8 +104,6 @@ impl LaneSemaphore {
         match rx.await {
             Ok(permit) => permit,
             Err(_) => {
-                // Defensive: channel was dropped without sending.
-                // Fall back to blocking acquire on the semaphore.
                 self.semaphore
                     .clone()
                     .acquire_owned()
@@ -114,21 +114,14 @@ impl LaneSemaphore {
     }
 
     /// Drain the oldest waiter when a permit becomes available.
-    ///
-    /// Called by `LanePermit::drop` (via `LaneQueue::release`) after
-    /// returning a permit to the semaphore.
     async fn wake_next(&self) {
         let mut queue = self.waiters.lock().await;
         while let Some(tx) = queue.pop_front() {
-            // Try to acquire a permit for this waiter.
             if let Ok(permit) = self.semaphore.clone().try_acquire_owned() {
                 if tx.send(permit).is_ok() {
                     return;
                 }
-                // Receiver gone — permit returns to the semaphore via Drop,
-                // try the next waiter.
             } else {
-                // No permits available yet; re-enqueue at the front and stop.
                 queue.push_front(tx);
                 return;
             }
@@ -141,18 +134,12 @@ impl LaneSemaphore {
     }
 }
 
-// ── Public API ───────────────────────────────────────────────────────
-
 /// Central lane-based concurrency controller.
-///
-/// Instantiate once and share (via `Arc`) across all turn executors.
-/// When a turn begins, call [`acquire`] with the appropriate lane; the
-/// returned [`LanePermit`] is held for the duration of the turn and
-/// automatically released on drop.
 pub struct LaneQueue {
     main: LaneSemaphore,
     subagent: LaneSemaphore,
     cron: LaneSemaphore,
+    tool_limits: ToolConcurrencyQueue,
 }
 
 impl LaneQueue {
@@ -162,6 +149,10 @@ impl LaneQueue {
             main: LaneSemaphore::new(MAIN_CAPACITY),
             subagent: LaneSemaphore::new(SUBAGENT_CAPACITY),
             cron: LaneSemaphore::new(CRON_CAPACITY),
+            tool_limits: ToolConcurrencyQueue::new(
+                DEFAULT_GLOBAL_TOOL_CAPACITY,
+                DEFAULT_PROJECT_TOOL_CAPACITY,
+            ),
         }
     }
 
@@ -171,13 +162,42 @@ impl LaneQueue {
             main: LaneSemaphore::new(main),
             subagent: LaneSemaphore::new(subagent),
             cron: LaneSemaphore::new(cron),
+            tool_limits: ToolConcurrencyQueue::new(
+                DEFAULT_GLOBAL_TOOL_CAPACITY,
+                DEFAULT_PROJECT_TOOL_CAPACITY,
+            ),
+        }
+    }
+
+    /// Create a queue with custom lane caps and tool concurrency limits.
+    pub fn with_limits(
+        main: usize,
+        subagent: usize,
+        cron: usize,
+        global_tool_capacity: usize,
+        project_tool_capacity: usize,
+    ) -> Self {
+        Self {
+            main: LaneSemaphore::new(main),
+            subagent: LaneSemaphore::new(subagent),
+            cron: LaneSemaphore::new(cron),
+            tool_limits: ToolConcurrencyQueue::new(global_tool_capacity, project_tool_capacity),
+        }
+    }
+
+    /// Acquire a concurrency permit for a tool invocation.
+    pub async fn acquire_tool(self: &Arc<Self>, project_key: Option<&str>) -> ToolPermit {
+        let project_key = project_key.unwrap_or("__default").to_string();
+        let permit = self.tool_limits.acquire(project_key.clone()).await;
+        ToolPermit {
+            _global_permit: permit.global_permit,
+            _project_permit: permit.project_permit,
+            project_key,
+            queue: Arc::clone(self),
         }
     }
 
     /// Acquire a permit for the given lane.
-    ///
-    /// This future resolves once a slot is available. Waiters are served
-    /// in FIFO order within each lane.
     pub async fn acquire(self: &Arc<Self>, lane: Lane) -> LanePermit {
         let lane_sem = self.lane_semaphore(&lane);
         debug!(lane = %lane, "acquiring lane permit");
@@ -205,6 +225,9 @@ impl LaneQueue {
             subagent_capacity: self.subagent.capacity,
             cron_active: self.cron.active(),
             cron_capacity: self.cron.capacity,
+            tool_active: self.tool_limits.active(),
+            tool_capacity: self.tool_limits.global_capacity(),
+            project_tool_capacity: self.tool_limits.project_capacity(),
         }
     }
 
@@ -216,9 +239,71 @@ impl LaneQueue {
         }
     }
 
-    /// Called when a permit is dropped — wake the next FIFO waiter if any.
     async fn release(&self, lane: &Lane) {
         self.lane_semaphore(lane).wake_next().await;
+    }
+}
+
+struct ToolPermitInner {
+    global_permit: OwnedSemaphorePermit,
+    project_permit: OwnedSemaphorePermit,
+}
+
+struct ToolConcurrencyQueue {
+    global: LaneSemaphore,
+    project_capacity: usize,
+    projects: Mutex<HashMap<String, Arc<LaneSemaphore>>>,
+}
+
+impl ToolConcurrencyQueue {
+    fn new(global_capacity: usize, project_capacity: usize) -> Self {
+        Self {
+            global: LaneSemaphore::new(global_capacity.max(1)),
+            project_capacity: project_capacity.max(1),
+            projects: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn acquire(&self, project_key: String) -> ToolPermitInner {
+        let global_permit = self.global.acquire().await;
+        let project_semaphore = self.project_semaphore(&project_key).await;
+        let project_permit = project_semaphore.acquire().await;
+        ToolPermitInner {
+            global_permit,
+            project_permit,
+        }
+    }
+
+    async fn project_semaphore(&self, project_key: &str) -> Arc<LaneSemaphore> {
+        let mut projects = self.projects.lock().await;
+        Arc::clone(
+            projects
+                .entry(project_key.to_string())
+                .or_insert_with(|| Arc::new(LaneSemaphore::new(self.project_capacity))),
+        )
+    }
+
+    fn active(&self) -> usize {
+        self.global.active()
+    }
+
+    fn global_capacity(&self) -> usize {
+        self.global.capacity
+    }
+
+    fn project_capacity(&self) -> usize {
+        self.project_capacity
+    }
+
+    async fn release(&self, project_key: &str) {
+        let project = {
+            let projects = self.projects.lock().await;
+            projects.get(project_key).cloned()
+        };
+        if let Some(project) = project {
+            project.wake_next().await;
+        }
+        self.global.wake_next().await;
     }
 }
 
@@ -228,16 +313,22 @@ impl Default for LaneQueue {
     }
 }
 
-/// A held lane permit. The turn holds this value for its entire lifetime;
-/// dropping it releases the lane slot and wakes the next queued waiter.
+/// A held lane permit.
 pub struct LanePermit {
     _permit: OwnedSemaphorePermit,
     lane: Lane,
     queue: Arc<LaneQueue>,
 }
 
+/// A held concurrency permit for a tool invocation.
+pub struct ToolPermit {
+    _global_permit: OwnedSemaphorePermit,
+    _project_permit: OwnedSemaphorePermit,
+    project_key: String,
+    queue: Arc<LaneQueue>,
+}
+
 impl LanePermit {
-    /// Which lane this permit belongs to.
     pub fn lane(&self) -> Lane {
         self.lane
     }
@@ -247,9 +338,18 @@ impl Drop for LanePermit {
     fn drop(&mut self) {
         let queue = Arc::clone(&self.queue);
         let lane = self.lane;
-        // Spawn the wake notification so it doesn't block the dropper.
         tokio::spawn(async move {
             queue.release(&lane).await;
+        });
+    }
+}
+
+impl Drop for ToolPermit {
+    fn drop(&mut self) {
+        let queue = Arc::clone(&self.queue);
+        let project_key = self.project_key.clone();
+        tokio::spawn(async move {
+            queue.tool_limits.release(&project_key).await;
         });
     }
 }
@@ -263,24 +363,28 @@ pub struct LaneStats {
     pub subagent_capacity: usize,
     pub cron_active: usize,
     pub cron_capacity: usize,
+    pub tool_active: usize,
+    pub tool_capacity: usize,
+    pub project_tool_capacity: usize,
 }
 
 impl fmt::Display for LaneStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "main={}/{} subagent={}/{} cron={}/{}",
+            "main={}/{} subagent={}/{} cron={}/{} tools={}/{} per_project={}",
             self.main_active,
             self.main_capacity,
             self.subagent_active,
             self.subagent_capacity,
             self.cron_active,
             self.cron_capacity,
+            self.tool_active,
+            self.tool_capacity,
+            self.project_tool_capacity,
         )
     }
 }
-
-// ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -292,10 +396,7 @@ mod tests {
     fn lane_from_session_kind_mapping() {
         assert_eq!(Lane::from_session_kind(&SessionKind::Direct), Lane::Main);
         assert_eq!(Lane::from_session_kind(&SessionKind::Channel), Lane::Main);
-        assert_eq!(
-            Lane::from_session_kind(&SessionKind::Subagent),
-            Lane::Subagent
-        );
+        assert_eq!(Lane::from_session_kind(&SessionKind::Subagent), Lane::Subagent);
         assert_eq!(Lane::from_session_kind(&SessionKind::Scheduled), Lane::Cron);
     }
 
@@ -310,7 +411,6 @@ mod tests {
         assert_eq!(stats.main_active, 2);
 
         drop(p1);
-        // Give the spawned wake task a moment to run.
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let stats = queue.stats();
@@ -328,10 +428,8 @@ mod tests {
         let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
         let observed = Arc::new(StdMutex::new(Vec::new()));
 
-        // Grab the single permit so subsequent acquires must wait.
         let blocker = queue.acquire(Lane::Main).await;
 
-        // Spawn two waiters in known order.
         let observed1 = Arc::clone(&observed);
         let q1 = Arc::clone(&queue);
         let h1 = tokio::spawn(async move {
@@ -339,7 +437,6 @@ mod tests {
             observed1.lock().unwrap().push("first");
         });
 
-        // Let the first waiter enqueue before spawning the second.
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         let observed2 = Arc::clone(&observed);
@@ -349,10 +446,7 @@ mod tests {
             observed2.lock().unwrap().push("second");
         });
 
-        // Let both waiters enqueue.
         tokio::time::sleep(Duration::from_millis(20)).await;
-
-        // Release the blocker — the first waiter should proceed, then the second.
         drop(blocker);
 
         h1.await.unwrap();
@@ -365,11 +459,8 @@ mod tests {
     #[tokio::test]
     async fn lanes_are_independent() {
         let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
-
-        // Saturate the main lane.
         let _main = queue.acquire(Lane::Main).await;
 
-        // Subagent lane should still be available immediately.
         let sub =
             tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
         assert!(sub.is_ok(), "subagent lane should not be blocked by main");
@@ -443,6 +534,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_limits_are_project_scoped() {
+        let queue = Arc::new(LaneQueue::with_limits(1, 1, 1, 8, 1));
+
+        let _first = queue.acquire_tool(Some("alpha")).await;
+
+        let queue_for_other = Arc::clone(&queue);
+        let other_project = tokio::time::timeout(
+            Duration::from_millis(50),
+            queue_for_other.acquire_tool(Some("beta")),
+        )
+        .await;
+        assert!(other_project.is_ok(), "different project should not be blocked");
+    }
+
+    #[tokio::test]
+    async fn tool_limits_block_same_project_until_release() {
+        let queue = Arc::new(LaneQueue::with_limits(1, 1, 1, 8, 1));
+        let blocker = queue.acquire_tool(Some("alpha")).await;
+
+        let queue_for_waiter = Arc::clone(&queue);
+        let waiter = tokio::spawn(async move {
+            let _permit = queue_for_waiter.acquire_tool(Some("alpha")).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        drop(blocker);
+
+        tokio::time::timeout(Duration::from_millis(200), waiter)
+            .await
+            .expect("same-project waiter should be released")
+            .expect("join should succeed");
+    }
+
+    #[tokio::test]
     async fn stats_reflect_utilisation() {
         let queue = Arc::new(LaneQueue::new());
         let stats = queue.stats();
@@ -452,6 +577,9 @@ mod tests {
         assert_eq!(stats.subagent_capacity, 8);
         assert_eq!(stats.cron_active, 0);
         assert_eq!(stats.cron_capacity, 1024);
+        assert_eq!(stats.tool_active, 0);
+        assert_eq!(stats.tool_capacity, 32);
+        assert_eq!(stats.project_tool_capacity, 4);
     }
 
     #[test]
@@ -470,7 +598,13 @@ mod tests {
             subagent_capacity: 8,
             cron_active: 0,
             cron_capacity: 1024,
+            tool_active: 0,
+            tool_capacity: 32,
+            project_tool_capacity: 4,
         };
-        assert_eq!(stats.to_string(), "main=2/4 subagent=1/8 cron=0/1024");
+        assert_eq!(
+            stats.to_string(),
+            "main=2/4 subagent=1/8 cron=0/1024 tools=0/32 per_project=4"
+        );
     }
 }
