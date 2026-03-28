@@ -117,7 +117,7 @@ function ChatPage() {
     refetch: refetchTranscript,
   } = useChatMergedTranscript(activeSessionId);
 
-  const { state: a2uiState } = useA2ui(rawEvents);
+  const { state: a2uiState, submitForm, triggerAction } = useA2ui(rawEvents, activeSessionId);
   const sendMutation = useChatSend(activeSessionId);
   const deleteMutation = useDeleteSession();
 
@@ -623,7 +623,7 @@ function ChatPage() {
                           />
                         ) : (
                           <div className="h-full overflow-y-auto border-l border-border/70 p-4">
-                            <A2uiRenderer components={a2uiState.panel} />
+                            <A2uiRenderer components={a2uiState.panel} onAction={triggerAction} onSubmit={submitForm} />
                           </div>
                         )}
                       </div>
@@ -667,7 +667,7 @@ function ChatPage() {
 
           {activeSessionId && a2uiState.inline.length > 0 && (
             <div className="border-t border-border/70 bg-background/80 px-4 py-2">
-              <A2uiRenderer components={a2uiState.inline} />
+              <A2uiRenderer components={a2uiState.inline} onAction={triggerAction} onSubmit={submitForm} />
             </div>
           )}
 
