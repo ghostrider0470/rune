@@ -562,7 +562,11 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn delete_chunk(&self, _file_path: &str, _chunk_index: i32) -> Result<bool, StoreError> {
+        async fn delete_chunk(
+            &self,
+            _file_path: &str,
+            _chunk_index: i32,
+        ) -> Result<bool, StoreError> {
             Ok(false)
         }
 

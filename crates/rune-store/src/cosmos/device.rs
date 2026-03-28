@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, parse_doc, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, parse_doc};
 use crate::error::StoreError;
 use crate::models::{NewPairedDevice, NewPairingRequest, PairedDeviceRow, PairingRequestRow};
 use crate::repos::DeviceRepo;
@@ -162,8 +162,10 @@ impl DeviceRepo for CosmosStore {
                     StoreError::Database(msg)
                 }
             })?;
-        let doc: DeviceDoc =
-            parse_doc(resp.into_model().map_err(|e| StoreError::Database(e.to_string()))?)?;
+        let doc: DeviceDoc = parse_doc(
+            resp.into_model()
+                .map_err(|e| StoreError::Database(e.to_string()))?,
+        )?;
         Ok(PairedDeviceRow::from(doc))
     }
 

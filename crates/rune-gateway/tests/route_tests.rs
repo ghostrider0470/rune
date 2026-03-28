@@ -34,6 +34,7 @@ use rune_tools::process_tool::ProcessManager;
 use rune_tools::{ToolCall, ToolError, ToolExecutor, ToolRegistry, ToolResult};
 use std::collections::HashMap;
 
+use rune_gateway::TokenMetricsStore;
 use rune_gateway::logging::LogStore;
 use rune_gateway::ms365::{
     CreateCalendarEventRequest, CreatePlannerTaskRequest, CreateTodoTaskRequest, FileContent,
@@ -45,7 +46,6 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
-use rune_gateway::TokenMetricsStore;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};

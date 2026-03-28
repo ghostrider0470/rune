@@ -69,7 +69,13 @@ impl SpellLoader {
         let mut loaded = 0;
         let mut seen_names = Vec::new();
 
-        self.scan_dir_recursive(&self.spells_dir.clone(), &mut discovered, &mut loaded, &mut seen_names).await;
+        self.scan_dir_recursive(
+            &self.spells_dir.clone(),
+            &mut discovered,
+            &mut loaded,
+            &mut seen_names,
+        )
+        .await;
 
         let removed = self.remove_missing_registry_entries(&seen_names).await;
         let elapsed = start.elapsed();
@@ -125,7 +131,8 @@ impl SpellLoader {
                     skill_md
                 } else {
                     // No manifest here — recurse deeper for namespace dirs
-                    self.scan_dir_recursive(&path, discovered, loaded, seen_names).await;
+                    self.scan_dir_recursive(&path, discovered, loaded, seen_names)
+                        .await;
                     continue;
                 };
 
@@ -289,7 +296,9 @@ async fn load_spell_from_path(path: &Path, dir_namespace: Option<&str>) -> Resul
         .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
 
     // Use frontmatter namespace or fall back to directory-derived namespace
-    let namespace = frontmatter.namespace.or_else(|| dir_namespace.map(String::from));
+    let namespace = frontmatter
+        .namespace
+        .or_else(|| dir_namespace.map(String::from));
 
     Ok(Spell {
         name,
@@ -526,7 +535,6 @@ enabled: true
         assert_eq!(second.loaded, 1);
         assert!(!registry.get("sticky-spell").await.unwrap().enabled);
     }
-
 
     #[tokio::test]
     async fn scan_rejects_spell_missing_required_version() {

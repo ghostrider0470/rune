@@ -181,7 +181,6 @@ impl CommsTransport for FsCommsTransport {
     }
 }
 
-
 pub fn build_comms_transport(
     transport: CommsTransportKind,
     comms_dir: impl Into<PathBuf>,
@@ -214,7 +213,11 @@ impl CommsClient {
         agent_id: impl Into<String>,
         peer_id: impl Into<String>,
     ) -> Self {
-        Self::with_transport(build_comms_transport(transport, comms_dir), agent_id, peer_id)
+        Self::with_transport(
+            build_comms_transport(transport, comms_dir),
+            agent_id,
+            peer_id,
+        )
     }
 
     pub fn with_transport(
@@ -411,8 +414,14 @@ mod tests {
 
     #[tokio::test]
     async fn parse_transport_kind_aliases() {
-        assert_eq!(CommsTransportKind::from_str("filesystem").unwrap(), CommsTransportKind::Filesystem);
-        assert_eq!(CommsTransportKind::from_str("FS").unwrap(), CommsTransportKind::Filesystem);
+        assert_eq!(
+            CommsTransportKind::from_str("filesystem").unwrap(),
+            CommsTransportKind::Filesystem
+        );
+        assert_eq!(
+            CommsTransportKind::from_str("FS").unwrap(),
+            CommsTransportKind::Filesystem
+        );
         assert!(CommsTransportKind::from_str("http").is_err());
     }
 

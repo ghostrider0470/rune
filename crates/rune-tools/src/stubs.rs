@@ -45,7 +45,9 @@ pub fn register_builtin_stubs(registry: &mut ToolRegistry) {
         },
         ToolDefinition {
             name: "extract_document".into(),
-            description: "Extract text content from PDF, DOCX, or XLSX files. Supports page ranges for PDFs.".into(),
+            description:
+                "Extract text content from PDF, DOCX, or XLSX files. Supports page ranges for PDFs."
+                    .into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {

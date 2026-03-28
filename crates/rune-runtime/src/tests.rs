@@ -2485,7 +2485,10 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
         .await;
 
     let sent = sent.lock().await.clone();
-    assert!(sent.is_empty(), "notice should not be sent for sessions that were not restored during startup");
+    assert!(
+        sent.is_empty(),
+        "notice should not be sent for sessions that were not restored during startup"
+    );
 }
 
 #[tokio::test]
@@ -2568,7 +2571,10 @@ async fn create_session_full_persists_mode_in_metadata() {
         .unwrap();
 
     assert_eq!(
-        session.metadata.get("mode").and_then(|value| value.as_str()),
+        session
+            .metadata
+            .get("mode")
+            .and_then(|value| value.as_str()),
         Some("architect")
     );
 }
@@ -2618,7 +2624,10 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     );
 
     executor.execute(session.id, "hello", None).await.unwrap();
-    executor.execute(session.id, "follow-up", None).await.unwrap();
+    executor
+        .execute(session.id, "follow-up", None)
+        .await
+        .unwrap();
 
     let requests = model_handle.requests().await;
     assert!(requests.len() >= 2);

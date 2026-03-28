@@ -749,7 +749,6 @@ async fn build_services(
     turn_executor = turn_executor.with_approval_mode(config.approval.mode.as_str());
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
 
-
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
         match Mem0Engine::try_new(
@@ -1741,9 +1740,7 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "evolve_status" => {
-                EvolverStatusExecutor.execute(call).await
-            }
+            "evolve_status" => EvolverStatusExecutor.execute(call).await,
             "security_audit" => {
                 SecurityAuditToolExecutor::new(self.workspace_root.clone())
                     .execute(call)

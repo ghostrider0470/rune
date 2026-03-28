@@ -4,8 +4,6 @@
 //! Prefer importing from `crate::spell` directly in new code.
 
 pub use crate::spell::{
-    Spell as Skill,
-    SpellFrontmatter as SkillFrontmatter,
-    SpellRegistry as SkillRegistry,
+    Spell as Skill, SpellFrontmatter as SkillFrontmatter, SpellRegistry as SkillRegistry,
     parse_spell_frontmatter as parse_skill_frontmatter,
 };
