@@ -239,12 +239,10 @@ fn path_to_namespace(rel: &Path) -> Option<String> {
         .collect();
 
     if components.len() <= 1 {
-        // Flat layout: the single component is the spell name itself
         return None;
     }
 
-    // Namespace is the parent path only; the leaf directory is the spell name, not part of the namespace
-    Some(components[..components.len() - 1].join("."))
+    Some(components.join("."))
 }
 
 /// Load a single spell from a SPELL.md (or SKILL.md) file path.

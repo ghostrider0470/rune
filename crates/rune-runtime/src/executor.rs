@@ -916,7 +916,7 @@ impl TurnExecutor {
             let request = CompletionRequest {
                 stable_prefix_messages,
                 stable_prefix_tools,
-                messages: messages.into_iter().skip(2).collect(),
+                messages,
                 model: model_ref.map(str::to_owned),
                 temperature: None,
                 max_tokens: None,

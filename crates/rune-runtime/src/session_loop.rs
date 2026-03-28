@@ -664,6 +664,17 @@ impl SessionLoop {
             let restored = self.restored_session_routes.lock().await;
             restored.get(routing_key).cloned()
         };
+        if restored.is_none() {
+            let notices = self.resumed_session_notifications.lock().await;
+            if notices.get(routing_key).is_some() {
+                return;
+            }
+            drop(notices);
+
+            let mut notices = self.resumed_session_notifications.lock().await;
+            notices.insert(routing_key.to_string(), fingerprint.clone());
+            return;
+        }
         if restored.as_deref() != Some(fingerprint.as_str()) {
             return;
         }
@@ -698,6 +709,12 @@ impl SessionLoop {
                 warn!(error = %e, session_id = %session.id, "failed to send resumed-session notice");
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn mark_route_restored_for_test(&self, routing_key: &str, fingerprint: String) {
+        let mut restored = self.restored_session_routes.lock().await;
+        restored.insert(routing_key.to_string(), fingerprint);
     }
 
     fn available_models(&self) -> Vec<String> {

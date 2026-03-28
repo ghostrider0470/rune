@@ -2529,6 +2529,10 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
     };
 
     session_loop
+        .mark_route_restored_for_test("chat-1:user-1", existing.last_activity_at.to_rfc3339())
+        .await;
+
+    session_loop
         .maybe_send_resumed_session_notice(&msg, "chat-1:user-1", &existing)
         .await;
     session_loop
