@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+/// Content block for multimodal chat messages.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessagePart {
+    Text {
+        text: String,
+    },
+    ImageUrl {
+        image_url: ImageUrlPart,
+    },
+}
+
+/// OpenAI-compatible image URL content block.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImageUrlPart {
+    pub url: String,
+}
+
 /// Role of a message participant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -16,6 +34,8 @@ pub struct ChatMessage {
     pub role: Role,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_parts: Option<Vec<MessagePart>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
