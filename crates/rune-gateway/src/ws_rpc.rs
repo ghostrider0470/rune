@@ -1055,9 +1055,38 @@ impl RpcDispatcher {
             budget.create_checkpoint(status, key_decisions, next_step)
         });
 
+        let context = &self.state.config.read().await.context;
+
         Ok(json!({
             "report": report,
             "checkpoint": checkpoint,
+            "tiers": {
+                "identity": {
+                    "token_budget": context.identity,
+                    "priority": 0,
+                    "staleness_policy": "always_fresh"
+                },
+                "task": {
+                    "token_budget": context.task,
+                    "priority": 1,
+                    "staleness_policy": "per_turn"
+                },
+                "project": {
+                    "token_budget": context.project,
+                    "priority": 2,
+                    "staleness_policy": "per_session"
+                },
+                "shared": {
+                    "token_budget": context.shared,
+                    "priority": 3,
+                    "staleness_policy": "on_demand"
+                },
+                "historical": {
+                    "token_budget": 0,
+                    "priority": 4,
+                    "staleness_policy": "retrieval_only"
+                }
+            }
         }))
     }
 

@@ -570,6 +570,7 @@ pub struct DashboardDiagnosticsResponse {
     pub structured_errors_available: bool,
     pub items: Vec<DashboardDiagnosticItem>,
     pub context_budget: ContextBudgetDiagnostics,
+    pub context_tiers: ContextTierDiagnostics,
 }
 
 #[derive(Serialize)]
@@ -582,6 +583,14 @@ pub struct ContextBudgetDiagnostics {
     pub usable_prompt_budget: usize,
     pub auto_inject_project: bool,
     pub memory_search_k: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ContextTierDiagnostics {
+    pub identity: usize,
+    pub task: usize,
+    pub project: usize,
+    pub shared: usize,
 }
 
 // SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
@@ -809,6 +818,13 @@ pub async fn dashboard_diagnostics(
         memory_search_k: compaction.memory_search_k,
     };
 
+    let context_tiers = ContextTierDiagnostics {
+        identity: config.context.identity,
+        task: config.context.task,
+        project: config.context.project,
+        shared: config.context.shared,
+    };
+
     items.push(DashboardDiagnosticItem {
         level: "info",
         source: "context",
@@ -841,6 +857,7 @@ pub async fn dashboard_diagnostics(
         structured_errors_available: false,
         items,
         context_budget,
+        context_tiers,
     }))
 }
 
@@ -5489,7 +5506,6 @@ pub struct DoctorBackendMatrixEntry {
     pub fix_hint: Option<String>,
 }
 
-
 #[derive(Clone, Serialize)]
 pub struct DoctorMemoryHierarchySummary {
     pub l0: String,
@@ -5701,14 +5717,15 @@ async fn doctor_memory_hierarchy(
     token_metrics: &TokenMetricsStore,
 ) -> DoctorMemoryHierarchySummary {
     let prompt_cache_rows = token_metrics.snapshot().await;
-    let (cached_tokens, total_input_tokens) = prompt_cache_rows
-        .iter()
-        .fold((0_u64, 0_u64), |(cached, total), row| {
-            (
-                cached.saturating_add(row.cached_tokens),
-                total.saturating_add(row.total_input_tokens),
-            )
-        });
+    let (cached_tokens, total_input_tokens) =
+        prompt_cache_rows
+            .iter()
+            .fold((0_u64, 0_u64), |(cached, total), row| {
+                (
+                    cached.saturating_add(row.cached_tokens),
+                    total.saturating_add(row.total_input_tokens),
+                )
+            });
     let cache_ratio = if total_input_tokens == 0 {
         0.0
     } else {
@@ -6086,7 +6103,8 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     });
     checks.extend(storage_path_checks(&config));
     let backend_matrix = doctor_backend_matrix(&config, &state.capabilities, provider_ok, auth_ok);
-    let memory_hierarchy = doctor_memory_hierarchy(&config, &state.capabilities, &state.token_metrics).await;
+    let memory_hierarchy =
+        doctor_memory_hierarchy(&config, &state.capabilities, &state.token_metrics).await;
     drop(config);
 
     let session_check = state.session_repo.list(1, 0).await;

@@ -34,6 +34,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub runtime: RuntimeConfig,
     #[serde(default)]
+    pub context: ContextConfig,
+    #[serde(default)]
     pub mcp_servers: Vec<McpServerConfig>,
     pub memory: MemoryConfig,
     #[serde(default)]
@@ -106,7 +108,6 @@ impl AppConfig {
         out
     }
 
-
     /// Return a lightweight JSON schema-like shape for the redacted config.
     ///
     /// This is intentionally derived from the current redacted config value so the
@@ -122,7 +123,10 @@ impl AppConfig {
                 Value::Number(v) => serde_json::json!({"type": "number", "default": v}),
                 Value::String(v) => serde_json::json!({"type": "string", "default": v}),
                 Value::Array(items) => {
-                    let item_schema = items.first().map(infer_schema).unwrap_or_else(|| serde_json::json!({}));
+                    let item_schema = items
+                        .first()
+                        .map(infer_schema)
+                        .unwrap_or_else(|| serde_json::json!({}));
                     serde_json::json!({"type": "array", "items": item_schema, "default": value})
                 }
                 Value::Object(map) => {
@@ -641,6 +645,57 @@ impl Default for DatabaseConfig {
             cosmos_endpoint: None,
             cosmos_key: None,
         }
+    }
+}
+
+/// Context tier budgets and loading priorities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextConfig {
+    #[serde(default = "default_context_identity_tokens")]
+    pub identity: usize,
+    #[serde(default = "default_context_task_tokens")]
+    pub task: usize,
+    #[serde(default = "default_context_project_tokens")]
+    pub project: usize,
+    #[serde(default = "default_context_shared_tokens")]
+    pub shared: usize,
+}
+
+fn default_context_identity_tokens() -> usize {
+    1_000
+}
+fn default_context_task_tokens() -> usize {
+    10_000
+}
+fn default_context_project_tokens() -> usize {
+    20_000
+}
+fn default_context_shared_tokens() -> usize {
+    5_000
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            identity: default_context_identity_tokens(),
+            task: default_context_task_tokens(),
+            project: default_context_project_tokens(),
+            shared: default_context_shared_tokens(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod context_config_tests {
+    use super::ContextConfig;
+
+    #[test]
+    fn default_context_tier_budgets_match_story_defaults() {
+        let cfg = ContextConfig::default();
+        assert_eq!(cfg.identity, 1_000);
+        assert_eq!(cfg.task, 10_000);
+        assert_eq!(cfg.project, 20_000);
+        assert_eq!(cfg.shared, 5_000);
     }
 }
 

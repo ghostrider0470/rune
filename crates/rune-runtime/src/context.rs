@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
+
 const STABLE_PREFIX_PADDING: &str = concat!(
     "## Prompt Cache Padding\n\n",
     "This stable prefix padding exists to help upstream providers like Azure OpenAI\n",
@@ -31,16 +33,221 @@ use crate::compaction::CompactionStrategy;
 use crate::memory::MemoryContext;
 use crate::workspace::WorkspaceContext;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextTierKind {
+    Identity,
+    ActiveTask,
+    Project,
+    Shared,
+    Historical,
+}
+
+impl ContextTierKind {
+    #[must_use]
+    pub fn default_priority(self) -> u8 {
+        match self {
+            Self::Identity => 0,
+            Self::ActiveTask => 1,
+            Self::Project => 2,
+            Self::Shared => 3,
+            Self::Historical => 4,
+        }
+    }
+
+    #[must_use]
+    pub fn default_staleness_policy(self) -> ContextStalenessPolicy {
+        match self {
+            Self::Identity => ContextStalenessPolicy::AlwaysFresh,
+            Self::ActiveTask => ContextStalenessPolicy::PerTurn,
+            Self::Project => ContextStalenessPolicy::PerSession,
+            Self::Shared => ContextStalenessPolicy::OnDemand,
+            Self::Historical => ContextStalenessPolicy::RetrievalOnly,
+        }
+    }
+
+    #[must_use]
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Identity => "Identity",
+            Self::ActiveTask => "Active task",
+            Self::Project => "Project context",
+            Self::Shared => "Shared knowledge",
+            Self::Historical => "Historical",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextStalenessPolicy {
+    AlwaysFresh,
+    PerTurn,
+    PerSession,
+    OnDemand,
+    RetrievalOnly,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextTierSpec {
+    pub kind: ContextTierKind,
+    pub token_budget: usize,
+    pub priority: u8,
+    pub staleness_policy: ContextStalenessPolicy,
+}
+
+impl ContextTierSpec {
+    #[must_use]
+    pub fn new(kind: ContextTierKind, token_budget: usize) -> Self {
+        let priority = kind.clone().default_priority();
+        let staleness_policy = kind.clone().default_staleness_policy();
+        Self {
+            kind,
+            token_budget,
+            priority,
+            staleness_policy,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ContextTierUsage {
+    pub kind: ContextTierKind,
+    pub token_budget: usize,
+    pub estimated_tokens: usize,
+    pub priority: u8,
+    pub staleness_policy: ContextStalenessPolicy,
+    pub loaded: bool,
+    pub source: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ContextAssemblyReport {
+    pub total_estimated_tokens: usize,
+    pub tiers: Vec<ContextTierUsage>,
+}
+
+impl ContextAssemblyReport {
+    #[must_use]
+    pub fn identity_tokens(&self) -> usize {
+        self.tokens_for(ContextTierKind::Identity)
+    }
+
+    #[must_use]
+    pub fn project_tokens(&self) -> usize {
+        self.tokens_for(ContextTierKind::Project)
+    }
+
+    #[must_use]
+    pub fn tokens_for(&self, kind: ContextTierKind) -> usize {
+        self.tiers
+            .iter()
+            .find(|tier| tier.kind == kind)
+            .map(|tier| tier.estimated_tokens)
+            .unwrap_or_default()
+    }
+}
+
+fn estimate_tokens(text: &str) -> usize {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        0
+    } else {
+        trimmed.chars().count().div_ceil(4)
+    }
+}
+
 /// Builds the prompt messages from session history, system instructions, and context.
 #[derive(Clone)]
 pub struct ContextAssembler {
     system_instructions: String,
+    tier_specs: Vec<ContextTierSpec>,
 }
 
 impl ContextAssembler {
     pub fn new(system_instructions: impl Into<String>) -> Self {
         Self {
             system_instructions: system_instructions.into(),
+            tier_specs: vec![
+                ContextTierSpec::new(ContextTierKind::Identity, 1_000),
+                ContextTierSpec::new(ContextTierKind::ActiveTask, 10_000),
+                ContextTierSpec::new(ContextTierKind::Project, 20_000),
+                ContextTierSpec::new(ContextTierKind::Shared, 5_000),
+                ContextTierSpec::new(ContextTierKind::Historical, 0),
+            ],
+        }
+    }
+
+    #[must_use]
+    pub fn tier_specs(&self) -> &[ContextTierSpec] {
+        &self.tier_specs
+    }
+
+    #[must_use]
+    pub fn analyze_context_usage(
+        &self,
+        workspace: Option<&WorkspaceContext>,
+        memory: Option<&MemoryContext>,
+        extra_system_sections: &[String],
+    ) -> ContextAssemblyReport {
+        let identity_section = self.system_instructions.trim();
+        let active_task_section = extra_system_sections
+            .iter()
+            .filter(|section| !section.trim().is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let project_section = workspace
+            .map(WorkspaceContext::format_for_prompt)
+            .unwrap_or_default();
+        let shared_section = memory
+            .map(MemoryContext::format_for_prompt)
+            .unwrap_or_default();
+
+        let tiers = self
+            .tier_specs
+            .iter()
+            .map(|spec| {
+                let (estimated_tokens, loaded, source) = match spec.kind {
+                    ContextTierKind::Identity => (
+                        estimate_tokens(identity_section),
+                        !identity_section.is_empty(),
+                        "system_instructions",
+                    ),
+                    ContextTierKind::ActiveTask => (
+                        estimate_tokens(&active_task_section),
+                        !active_task_section.is_empty(),
+                        "extra_system_sections",
+                    ),
+                    ContextTierKind::Project => (
+                        estimate_tokens(&project_section),
+                        !project_section.is_empty(),
+                        "workspace_context",
+                    ),
+                    ContextTierKind::Shared => (
+                        estimate_tokens(&shared_section),
+                        !shared_section.is_empty(),
+                        "memory_context",
+                    ),
+                    ContextTierKind::Historical => (0, false, "transcript_history"),
+                };
+
+                ContextTierUsage {
+                    kind: spec.kind.clone(),
+                    token_budget: spec.token_budget,
+                    estimated_tokens,
+                    priority: spec.priority,
+                    staleness_policy: spec.staleness_policy.clone(),
+                    loaded,
+                    source,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let total_estimated_tokens = tiers.iter().map(|tier| tier.estimated_tokens).sum();
+        ContextAssemblyReport {
+            total_estimated_tokens,
+            tiers,
         }
     }
 
@@ -163,7 +370,8 @@ impl ContextAssembler {
         match item {
             TranscriptItem::UserMessage { message } => {
                 let content = render_user_message_content(&message.content, &message.attachments);
-                let content_parts = build_user_message_parts(&message.content, &message.attachments);
+                let content_parts =
+                    build_user_message_parts(&message.content, &message.attachments);
                 if content.trim().is_empty() && content_parts.is_none() {
                     return None;
                 }
@@ -297,8 +505,10 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
     }
 }
 
-
-fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Option<Vec<MessagePart>> {
+fn build_user_message_parts(
+    content: &str,
+    attachments: &[AttachmentRef],
+) -> Option<Vec<MessagePart>> {
     let trimmed = content.trim();
     let mut parts = Vec::new();
 
@@ -317,11 +527,7 @@ fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Opt
         });
     }
 
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts)
-    }
+    if parts.is_empty() { None } else { Some(parts) }
 }
 
 fn attachment_image_ref(attachment: &AttachmentRef) -> Option<String> {
@@ -390,7 +596,10 @@ fn format_attachment_ref(attachment: &AttachmentRef) -> String {
 
 #[cfg(test)]
 mod attachment_prompt_tests {
-    use super::{attachment_image_ref, build_user_message_parts, format_attachment_ref, render_user_message_content, ContextAssembler};
+    use super::{
+        ContextAssembler, attachment_image_ref, build_user_message_parts, format_attachment_ref,
+        render_user_message_content,
+    };
     use rune_core::{AttachmentRef, NormalizedMessage, TranscriptItem};
     use rune_models::{MessagePart, Role};
     use rune_store::models::TranscriptItemRow;
@@ -466,7 +675,10 @@ mod attachment_prompt_tests {
             provider_file_id: Some("abc".into()),
         });
 
-        assert_eq!(formatted, "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)");
+        assert_eq!(
+            formatted,
+            "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)"
+        );
     }
     #[test]
     fn prefers_attachment_url_for_image_parts() {
@@ -524,8 +736,53 @@ mod attachment_prompt_tests {
         .expect("expected multimodal parts");
 
         assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
-        assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg"));
+        assert!(
+            matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg")
+        );
         assert_eq!(parts.len(), 2);
     }
+}
 
+#[cfg(test)]
+mod context_tier_tests {
+    use super::*;
+
+    #[test]
+    fn default_tier_specs_match_story_budgets() {
+        let assembler = ContextAssembler::new("You are Rune.");
+        let specs = assembler.tier_specs();
+        assert_eq!(specs.len(), 5);
+        assert_eq!(specs[0], ContextTierSpec::new(ContextTierKind::Identity, 1_000));
+        assert_eq!(specs[1], ContextTierSpec::new(ContextTierKind::ActiveTask, 10_000));
+        assert_eq!(specs[2], ContextTierSpec::new(ContextTierKind::Project, 20_000));
+        assert_eq!(specs[3], ContextTierSpec::new(ContextTierKind::Shared, 5_000));
+        assert_eq!(specs[4], ContextTierSpec::new(ContextTierKind::Historical, 0));
+    }
+
+    #[test]
+    fn analyze_context_usage_reports_loaded_tiers() {
+        let assembler = ContextAssembler::new("Identity instructions");
+        let workspace = WorkspaceContext {
+            files: vec![("AGENTS.md".into(), "project rules".into())],
+        };
+        let memory = MemoryContext {
+            today: Some("today note".into()),
+            ..Default::default()
+        };
+        let report = assembler.analyze_context_usage(
+            Some(&workspace),
+            Some(&memory),
+            &["Active task goes here".into()],
+        );
+
+        assert!(report.total_estimated_tokens > 0);
+        assert!(report.identity_tokens() > 0);
+        assert!(report.project_tokens() > 0);
+        assert!(report.tokens_for(ContextTierKind::Shared) > 0);
+        assert_eq!(report.tokens_for(ContextTierKind::Historical), 0);
+        assert!(report
+            .tiers
+            .iter()
+            .any(|tier| tier.kind == ContextTierKind::ActiveTask && tier.loaded));
+    }
 }
