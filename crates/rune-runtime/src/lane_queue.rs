@@ -103,13 +103,12 @@ impl LaneSemaphore {
         // back to a direct semaphore acquire.
         match rx.await {
             Ok(permit) => permit,
-            Err(_) => {
-                self.semaphore
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .expect("semaphore should not be closed")
-            }
+            Err(_) => self
+                .semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore should not be closed"),
         }
     }
 
@@ -396,7 +395,10 @@ mod tests {
     fn lane_from_session_kind_mapping() {
         assert_eq!(Lane::from_session_kind(&SessionKind::Direct), Lane::Main);
         assert_eq!(Lane::from_session_kind(&SessionKind::Channel), Lane::Main);
-        assert_eq!(Lane::from_session_kind(&SessionKind::Subagent), Lane::Subagent);
+        assert_eq!(
+            Lane::from_session_kind(&SessionKind::Subagent),
+            Lane::Subagent
+        );
         assert_eq!(Lane::from_session_kind(&SessionKind::Scheduled), Lane::Cron);
     }
 
@@ -545,7 +547,10 @@ mod tests {
             queue_for_other.acquire_tool(Some("beta")),
         )
         .await;
-        assert!(other_project.is_ok(), "different project should not be blocked");
+        assert!(
+            other_project.is_ok(),
+            "different project should not be blocked"
+        );
     }
 
     #[tokio::test]
@@ -565,6 +570,26 @@ mod tests {
             .await
             .expect("same-project waiter should be released")
             .expect("join should succeed");
+    }
+
+    #[tokio::test]
+    async fn default_project_key_is_shared_when_missing() {
+        let queue = Arc::new(LaneQueue::with_limits(1, 1, 1, 8, 1));
+        let blocker = queue.acquire_tool(None).await;
+
+        let queue_for_waiter = Arc::clone(&queue);
+        let waiter = tokio::spawn(async move {
+            let _permit = queue_for_waiter.acquire_tool(None).await;
+        });
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), waiter)
+                .await
+                .is_err(),
+            "missing project keys should share the default bucket and block"
+        );
+
+        drop(blocker);
     }
 
     #[tokio::test]
