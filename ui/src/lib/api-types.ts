@@ -73,6 +73,17 @@ export interface DashboardDiagnosticsResponse {
   items: DashboardDiagnosticItem[];
 }
 
+export interface ChannelItem {
+  name: string;
+  kind: string;
+  enabled: boolean;
+}
+
+export interface ChannelStatusResponse {
+  configured: ChannelItem[];
+  active_sessions: number;
+}
+
 // Actions
 export interface ActionResponse {
   success: boolean;

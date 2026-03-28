@@ -1,10 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type {
   DashboardSummaryResponse,
   DashboardModelItem,
   DashboardSessionItem,
   DashboardDiagnosticsResponse,
+  ChannelStatusResponse,
+  ActionResponse,
 } from "@/lib/api-types";
 
 export function useDashboardSummary() {
@@ -36,5 +38,27 @@ export function useDashboardDiagnostics() {
     queryKey: ["dashboard", "diagnostics"],
     queryFn: () => api.get<DashboardDiagnosticsResponse>("/api/dashboard/diagnostics"),
     refetchInterval: 60_000,
+  });
+}
+
+export function useChannelStatus() {
+  return useQuery({
+    queryKey: ["channels", "status"],
+    queryFn: () => api.get<ChannelStatusResponse>("/api/channels/status"),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useGatewayRestart() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.post<ActionResponse>("/gateway/restart"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["health"] });
+      queryClient.invalidateQueries({ queryKey: ["status"] });
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+    },
   });
 }
