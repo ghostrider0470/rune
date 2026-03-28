@@ -5329,6 +5329,10 @@ mod tests {
         };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("Overall: degraded"));
+        assert!(out.contains("Topology: deployment=single-process, database=memory, models=local, search=embedded"));
+        assert!(out.contains("Paths:    profile=default, mode=workspace, auto_create_missing=true"));
+        assert!(out.contains("Backend Matrix:"));
+        assert!(out.contains("storage: sqlite (connected) — mode=standalone"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
