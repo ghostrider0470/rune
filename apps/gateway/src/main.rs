@@ -658,7 +658,13 @@ async fn build_services(
     // Build comms tool executor if comms is enabled in config.
     let comms_tool_executor = if config.comms.enabled {
         config.comms.comms_dir.as_deref().map(|dir| {
-            let client = Arc::new(CommsClient::new(
+            let transport = config
+                .comms
+                .transport
+                .parse()
+                .unwrap_or(rune_runtime::CommsTransportKind::Filesystem);
+            let client = Arc::new(CommsClient::with_transport_kind(
+                transport,
                 dir,
                 config.comms.agent_id.clone(),
                 config.comms.peer_id.clone(),
