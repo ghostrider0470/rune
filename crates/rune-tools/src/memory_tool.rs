@@ -30,6 +30,11 @@ pub struct MemorySearchConfig {
     pub mmr_lambda: f64,
     /// Enable query expansion (default: true).
     pub query_expansion_enabled: bool,
+    /// Boost matches found in evergreen files like MEMORY.md so durable facts
+    /// outrank equally-matching daily notes (default: true).
+    pub evergreen_file_boost_enabled: bool,
+    /// Multiplicative boost applied to evergreen files like MEMORY.md.
+    pub evergreen_file_boost: f64,
 }
 
 impl Default for MemorySearchConfig {
@@ -40,6 +45,8 @@ impl Default for MemorySearchConfig {
             mmr_enabled: true,
             mmr_lambda: memory_ranking::DEFAULT_MMR_LAMBDA,
             query_expansion_enabled: true,
+            evergreen_file_boost_enabled: true,
+            evergreen_file_boost: 1.25,
         }
     }
 }
@@ -257,8 +264,27 @@ impl MemoryToolExecutor {
         }
     }
 
-    /// Apply the ranking pipeline (temporal decay + MMR) to search results.
+    fn apply_evergreen_file_boost(&self, hits: &mut [MemoryHit]) {
+        if !self.search_config.evergreen_file_boost_enabled {
+            return;
+        }
+
+        for hit in hits.iter_mut() {
+            let path = hit.file_path.split('#').next().unwrap_or(&hit.file_path);
+            let filename = Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(path);
+
+            if filename.eq_ignore_ascii_case("MEMORY.md") {
+                hit.score *= self.search_config.evergreen_file_boost;
+            }
+        }
+    }
+
+    /// Apply the ranking pipeline (evergreen boost + temporal decay + MMR) to search results.
     fn apply_ranking(&self, mut hits: Vec<MemoryHit>, max_results: usize) -> Vec<MemoryHit> {
+        self.apply_evergreen_file_boost(&mut hits);
         if self.search_config.temporal_decay_enabled {
             memory_ranking::apply_temporal_decay(&mut hits, self.search_config.half_life_days);
             // Re-sort after decay so MMR sees the adjusted scores
@@ -731,6 +757,32 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].file_path, "MEMORY.md");
         assert!(results[0].chunk_text.contains("dark mode"));
+    }
+
+    #[tokio::test]
+    async fn evergreen_memory_file_outranks_equally_matching_daily_note() {
+        let tmp = TempDir::new().unwrap();
+        tokio::fs::write(tmp.path().join("MEMORY.md"), "- prefers rust and dark mode
+")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory")).await.unwrap();
+        tokio::fs::write(
+            tmp.path().join("memory/2026-03-13.md"),
+            "- prefers rust and dark mode
+",
+        )
+        .await
+        .unwrap();
+
+        let exec = MemoryToolExecutor::new(tmp.path());
+        let call = make_call(
+            "memory_search",
+            serde_json::json!({"query": "prefers rust dark mode", "maxResults": 1}),
+        );
+        let result = exec.execute(call).await.unwrap();
+
+        assert!(result.output.contains("Source: MEMORY.md#1"), "{0}", result.output);
     }
 
     #[tokio::test]
