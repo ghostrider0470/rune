@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -16,6 +17,7 @@ import {
   useDashboardModels,
   useDashboardSessions,
   useDashboardDiagnostics,
+  useGatewayRestartAction,
 } from "@/hooks/use-dashboard";
 import {
   Activity,
@@ -49,6 +51,7 @@ function DashboardPage() {
   const { data: models } = useDashboardModels();
   const { data: sessions } = useDashboardSessions();
   const { data: diagnostics } = useDashboardDiagnostics();
+  const restartGateway = useGatewayRestartAction();
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -128,27 +131,48 @@ function DashboardPage() {
 
       {/* Info badges */}
       {summary && (
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="outline" className="gap-2">
-            <Shield className="h-3 w-3" />
-            Auth: {summary.auth_enabled ? "enabled" : "disabled"}
-          </Badge>
-          <Badge variant="outline" className="gap-2">
-            <Users className="h-3 w-3" />
-            WS subscribers: {summary.ws_subscribers}
-          </Badge>
-          {summary.channels.map((ch) => (
-            <Badge key={ch} variant="outline" className="gap-2">
-              <Radio className="h-3 w-3" />
-              {ch}
-            </Badge>
-          ))}
-          {summary.default_model && (
-            <Badge variant="outline" className="gap-2">
-              <Cpu className="h-3 w-3" />
-              {summary.default_model}
-            </Badge>
-          )}
+        <div className="space-y-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline" className="gap-2">
+                <Shield className="h-3 w-3" />
+                Auth: {summary.auth_enabled ? "enabled" : "disabled"}
+              </Badge>
+              <Badge variant="outline" className="gap-2">
+                <Users className="h-3 w-3" />
+                WS subscribers: {summary.ws_subscribers}
+              </Badge>
+              {summary.channels.map((ch) => (
+                <Badge key={ch} variant="outline" className="gap-2">
+                  <Radio className="h-3 w-3" />
+                  {ch}
+                </Badge>
+              ))}
+              {summary.default_model && (
+                <Badge variant="outline" className="gap-2">
+                  <Cpu className="h-3 w-3" />
+                  {summary.default_model}
+                </Badge>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => restartGateway.mutate()}
+              disabled={restartGateway.isPending}
+            >
+              {restartGateway.isPending ? "Restarting…" : "Restart gateway"}
+            </Button>
+          </div>
+          {restartGateway.isError ? (
+            <p className="text-sm text-destructive">
+              {(restartGateway.error as Error).message || "Failed to restart gateway"}
+            </p>
+          ) : null}
+          {restartGateway.isSuccess ? (
+            <p className="text-sm text-emerald-600 dark:text-emerald-400">
+              Gateway restart requested successfully.
+            </p>
+          ) : null}
         </div>
       )}
 
