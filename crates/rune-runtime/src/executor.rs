@@ -1008,6 +1008,18 @@ impl TurnExecutor {
                         arguments: args,
                     };
 
+                    let _tool_permit = if let Some(ref lq) = self.lane_queue {
+                        Some(
+                            lq.acquire_tool(resolve_project_key(
+                                call.project_key(),
+                                session.workspace_root.as_deref(),
+                            ))
+                            .await,
+                        )
+                    } else {
+                        None
+                    };
+
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,
                         Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
@@ -1086,6 +1098,18 @@ impl TurnExecutor {
                                     tool_call_id: call.tool_call_id.clone(),
                                     tool_name: call.tool_name.clone(),
                                     arguments: auto_args,
+                                };
+
+                                let _tool_permit = if let Some(ref lq) = self.lane_queue {
+                                    Some(
+                                        lq.acquire_tool(resolve_project_key(
+                                            auto_call.project_key(),
+                                            session.workspace_root.as_deref(),
+                                        ))
+                                        .await,
+                                    )
+                                } else {
+                                    None
                                 };
 
                                 match self.tool_executor.execute(auto_call).await {
@@ -1341,6 +1365,16 @@ impl TurnExecutor {
             .await?;
         Ok(())
     }
+}
+
+
+fn resolve_project_key<'a>(explicit: Option<&'a str>, workspace_root: Option<&'a str>) -> Option<&'a str> {
+    explicit.or_else(|| {
+        workspace_root.and_then(|root| {
+            let trimmed = root.trim_end_matches('/');
+            trimmed.rsplit('/').next().filter(|segment| !segment.is_empty())
+        })
+    })
 }
 
 fn parse_session_kind(kind: &str) -> Result<SessionKind, RuntimeError> {

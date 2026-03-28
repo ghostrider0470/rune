@@ -749,6 +749,18 @@ pub struct LaneQueueConfig {
     pub main_capacity: usize,
     pub subagent_capacity: usize,
     pub cron_capacity: usize,
+    #[serde(default = "default_global_tool_capacity")]
+    pub global_tool_capacity: usize,
+    #[serde(default = "default_project_tool_capacity")]
+    pub project_tool_capacity: usize,
+}
+
+const fn default_global_tool_capacity() -> usize {
+    32
+}
+
+const fn default_project_tool_capacity() -> usize {
+    4
 }
 
 impl Default for LaneQueueConfig {
@@ -757,6 +769,8 @@ impl Default for LaneQueueConfig {
             main_capacity: 4,
             subagent_capacity: 8,
             cron_capacity: 1024,
+            global_tool_capacity: default_global_tool_capacity(),
+            project_tool_capacity: default_project_tool_capacity(),
         }
     }
 }
@@ -1974,6 +1988,8 @@ run_migrations = false
 main_capacity = 6
 subagent_capacity = 9
 cron_capacity = 128
+global_tool_capacity = 24
+project_tool_capacity = 3
 
 [memory]
 level = "keyword"
@@ -1989,6 +2005,8 @@ level = "keyword"
         assert_eq!(config.runtime.lanes.main_capacity, 6);
         assert_eq!(config.runtime.lanes.subagent_capacity, 9);
         assert_eq!(config.runtime.lanes.cron_capacity, 128);
+        assert_eq!(config.runtime.lanes.global_tool_capacity, 24);
+        assert_eq!(config.runtime.lanes.project_tool_capacity, 3);
         assert_eq!(config.memory.level, Some(MemoryLevel::Keyword));
         assert_eq!(config.memory.requested_level(), MemoryLevel::Keyword);
 
@@ -2021,6 +2039,8 @@ main_capacity = 4
         let config = AppConfig::load(Some(&path)).unwrap();
         assert_eq!(config.gateway.port, 9090);
         assert_eq!(config.runtime.lanes.main_capacity, 12);
+        assert_eq!(config.runtime.lanes.global_tool_capacity, 32);
+        assert_eq!(config.runtime.lanes.project_tool_capacity, 4);
         assert!(config.browser.enabled);
         assert_eq!(config.memory.level, Some(MemoryLevel::File));
         assert_eq!(config.memory.requested_level(), MemoryLevel::File);
