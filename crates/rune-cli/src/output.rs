@@ -6271,6 +6271,7 @@ mod tests {
                     status: "running".into(),
                     channel: Some("telegram".into()),
                     requester_session_id: None,
+                    project_id: None,
                     created_at: None,
                     turn_count: Some(1),
                     usage_prompt_tokens: Some(10),

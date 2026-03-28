@@ -1194,6 +1194,11 @@ pub enum ProjectsAction {
     Add(ProjectAddArgs),
     /// List all registered projects.
     List,
+    /// Remove a registered project from the local registry.
+    Remove {
+        /// Registered project name.
+        name: String,
+    },
     /// Switch the active foreground project.
     Switch {
         /// Registered project name.
@@ -5771,6 +5776,17 @@ mod subagent_cli_tests {
                 action: ProjectsAction::List
             }
         ));
+    }
+
+    #[test]
+    fn parse_projects_remove() {
+        let cli = Cli::try_parse_from(["rune", "projects", "remove", "phoenix-iot"]).unwrap();
+        match cli.command {
+            Command::Projects {
+                action: ProjectsAction::Remove { name },
+            } => assert_eq!(name, "phoenix-iot"),
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 
     #[test]

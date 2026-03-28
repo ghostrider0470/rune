@@ -4868,7 +4868,7 @@ mod tests {
 
         let client = GatewayClient::new(&server.uri());
         let resp = client
-            .sessions_list(None, None, None, None, 100)
+            .sessions_list(None, None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(resp.sessions.len(), 2);
