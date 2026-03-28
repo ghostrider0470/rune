@@ -8,8 +8,9 @@ use tokio::time::sleep;
 use tracing::{debug, warn};
 
 use super::ModelProvider;
-use super::response::{ApiResponse, map_error_response, parse_response};
-use super::response::{StreamChunkResponse, StreamDelta};
+use super::response::{
+    ApiResponse, StreamChunkResponse, StreamDelta, map_error_response, parse_response,
+};
 use crate::error::ModelError;
 use crate::types::{
     CompletionRequest, CompletionResponse, FinishReason, FunctionCall, StreamEvent,
@@ -21,8 +22,15 @@ use crate::types::{
 pub struct OpenAiProvider {
     url: String,
     api_key: String,
-    use_azure_auth: bool,
+    auth: OpenAiAuth,
     client: Client,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenAiAuth {
+    Bearer,
+    ApiKey,
+    None,
 }
 
 impl OpenAiProvider {
@@ -33,7 +41,7 @@ impl OpenAiProvider {
         Self {
             url,
             api_key: api_key.to_owned(),
-            use_azure_auth: false,
+            auth: OpenAiAuth::Bearer,
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
@@ -48,7 +56,22 @@ impl OpenAiProvider {
         Self {
             url,
             api_key: api_key.to_owned(),
-            use_azure_auth: true,
+            auth: OpenAiAuth::ApiKey,
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .build()
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Create a new OpenAI-compatible provider without authentication headers.
+    pub fn unauthenticated(endpoint: &str) -> Self {
+        let base = endpoint.trim_end_matches('/');
+        let url = format!("{base}/chat/completions");
+        Self {
+            url,
+            api_key: String::new(),
+            auth: OpenAiAuth::None,
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()
@@ -69,10 +92,10 @@ impl OpenAiProvider {
             .post(&self.url)
             .header("Content-Type", "application/json");
 
-        req = if self.use_azure_auth {
-            req.header("api-key", &self.api_key)
-        } else {
-            req.header("Authorization", format!("Bearer {}", self.api_key))
+        req = match self.auth {
+            OpenAiAuth::ApiKey => req.header("api-key", &self.api_key),
+            OpenAiAuth::Bearer => req.header("Authorization", format!("Bearer {}", self.api_key)),
+            OpenAiAuth::None => req,
         };
 
         req
@@ -113,10 +136,10 @@ impl OpenAiProvider {
             let wait_secs = delay_secs.or(retry_after_secs).unwrap_or(1).clamp(1, 60);
 
             warn!(
-                provider = if self.use_azure_auth {
-                    "azure-openai"
-                } else {
-                    "openai"
+                provider = match self.auth {
+                    OpenAiAuth::ApiKey => "azure-openai",
+                    OpenAiAuth::Bearer => "openai",
+                    OpenAiAuth::None => "openai-compatible",
                 },
                 model = body.model.as_deref().unwrap_or("<unspecified>"),
                 wait_secs,
@@ -175,7 +198,11 @@ impl ModelProvider for OpenAiProvider {
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
-            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
+            tools: &request
+                .stable_prefix_tools
+                .as_ref()
+                .or(request.tools.as_ref())
+                .cloned(),
             stream: false,
             stream_options: None,
         };
@@ -183,7 +210,7 @@ impl ModelProvider for OpenAiProvider {
         let body_json = serde_json::to_string(&body).unwrap_or_default();
         debug!(
             url = %self.url,
-            azure = self.use_azure_auth,
+            auth = ?self.auth,
             model = ?body.model,
             msg_count = body.messages.len(),
             body_len = body_json.len(),
@@ -215,7 +242,11 @@ impl ModelProvider for OpenAiProvider {
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
-            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
+            tools: &request
+                .stable_prefix_tools
+                .as_ref()
+                .or(request.tools.as_ref())
+                .cloned(),
             stream: true,
             stream_options: Some(StreamOptions {
                 include_usage: true,
@@ -224,7 +255,7 @@ impl ModelProvider for OpenAiProvider {
 
         debug!(
             url = %self.url,
-            azure = self.use_azure_auth,
+            auth = ?self.auth,
             model = ?body.model,
             msg_count = body.messages.len(),
             "OpenAI streaming completion request"
