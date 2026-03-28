@@ -373,6 +373,23 @@ fn handle_projects_list() -> Result<()> {
     Ok(())
 }
 
+fn handle_projects_remove(name: String) -> Result<()> {
+    let workspace = default_workspace_root()?;
+    let mut registry = ProjectRegistry::load(&workspace)?;
+    let removed = registry
+        .remove(&name)
+        .ok_or_else(|| anyhow!("project '{}' is not registered", name))?;
+    registry.save(&workspace)?;
+
+    println!(
+        "removed project '{}' from registry\nrepo: {}\nagent dir retained: {}",
+        removed.name,
+        removed.repo_path.display(),
+        ProjectRegistry::agent_dir(&workspace, &name).display()
+    );
+    Ok(())
+}
+
 fn handle_projects_switch(name: String) -> Result<()> {
     let workspace = default_workspace_root()?;
     let mut registry = ProjectRegistry::load(&workspace)?;
@@ -3935,6 +3952,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Projects { action } => match action {
             ProjectsAction::Add(args) => handle_projects_add(args)?,
             ProjectsAction::List => handle_projects_list()?,
+            ProjectsAction::Remove { name } => handle_projects_remove(name)?,
             ProjectsAction::Switch { name } => handle_projects_switch(name)?,
         },
         Command::Reset { confirm } => {
