@@ -607,9 +607,8 @@ impl RpcDispatcher {
         let mut unresolved =
             vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
         if approval_mode == "on-miss" {
-            unresolved.push(
-                rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string(),
-            );
+            unresolved
+                .push(rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string());
         }
         if security_mode == "allowlist" {
             unresolved.push(
@@ -1333,10 +1332,21 @@ impl RpcDispatcher {
     /// Memory subsystem status.
     async fn memory_status(&self) -> Result<Value, RpcError> {
         let config = self.state.config.read().await;
+        let compaction = &config.runtime.compaction;
         Ok(json!({
             "memory_mode": self.state.capabilities.memory_mode,
             "memory_dir": config.paths.memory_dir.display().to_string(),
             "pgvector": self.state.capabilities.pgvector,
+            "context_budget": {
+                "max_tokens": compaction.effective_max_tokens(),
+                "warn_at_tokens": compaction.effective_warn_at_tokens(),
+                "compress_after": compaction.effective_compress_after(),
+                "reserved_system": compaction.reserved_system,
+                "reserved_task": compaction.reserved_task,
+                "usable_prompt_budget": compaction.usable_prompt_budget(),
+                "auto_inject_project": compaction.auto_inject_project,
+                "memory_search_k": compaction.memory_search_k,
+            }
         }))
     }
 
@@ -1435,8 +1445,7 @@ impl RpcDispatcher {
         let report = crate::routes::doctor_run(axum::extract::State(self.state.clone()))
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?;
-        serde_json::to_value(report.0)
-                .map_err(|error| RpcError::internal(error.to_string()))
+        serde_json::to_value(report.0).map_err(|error| RpcError::internal(error.to_string()))
     }
 
     /// Latest doctor results parity payload.

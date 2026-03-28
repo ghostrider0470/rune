@@ -570,6 +570,18 @@ pub struct DashboardDiagnosticsResponse {
     pub items: Vec<DashboardDiagnosticItem>,
 }
 
+#[derive(Serialize)]
+pub struct ContextBudgetDiagnostics {
+    pub max_tokens: usize,
+    pub warn_at_tokens: usize,
+    pub compress_after: usize,
+    pub reserved_system: usize,
+    pub reserved_task: usize,
+    pub usable_prompt_budget: usize,
+    pub auto_inject_project: bool,
+    pub memory_search_k: usize,
+}
+
 // SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
 
 pub async fn spa_index() -> Response {
@@ -667,7 +679,9 @@ pub async fn branded_asset(Path(path): Path<String>) -> Result<Response, Gateway
         ),
         // Legacy aliases
         "hero.png" => ("image/png", include_bytes!("../../../assets/hero.png")),
-        "rune-logo-favicon.svg" | "rune-logo-icon.svg" | "rune-logo-wordmark.svg"
+        "rune-logo-favicon.svg"
+        | "rune-logo-icon.svg"
+        | "rune-logo-wordmark.svg"
         | "rune-logo-wordmark-dark.svg" => (
             "image/svg+xml",
             include_bytes!("../../../assets/core_rune_midnight.svg"),
@@ -779,6 +793,35 @@ pub async fn dashboard_diagnostics(
             observed_at: now.clone(),
         });
     }
+
+    let compaction = &config.runtime.compaction;
+    let context_budget = ContextBudgetDiagnostics {
+        max_tokens: compaction.effective_max_tokens(),
+        warn_at_tokens: compaction.effective_warn_at_tokens(),
+        compress_after: compaction.effective_compress_after(),
+        reserved_system: compaction.reserved_system,
+        reserved_task: compaction.reserved_task,
+        usable_prompt_budget: compaction.usable_prompt_budget(),
+        auto_inject_project: compaction.auto_inject_project,
+        memory_search_k: compaction.memory_search_k,
+    };
+
+    items.push(DashboardDiagnosticItem {
+        level: "info",
+        source: "context",
+        message: format!(
+            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={}",
+            context_budget.max_tokens,
+            context_budget.warn_at_tokens,
+            context_budget.compress_after,
+            context_budget.usable_prompt_budget,
+            context_budget.reserved_system,
+            context_budget.reserved_task,
+            context_budget.auto_inject_project,
+            context_budget.memory_search_k,
+        ),
+        observed_at: now.clone(),
+    });
 
     if items.is_empty() {
         items.push(DashboardDiagnosticItem {
@@ -1535,9 +1578,7 @@ pub async fn get_session_status(
     let mut unresolved = Vec::new();
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
     if approval_mode == "on-miss" {
-        unresolved.push(
-            rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string(),
-        );
+        unresolved.push(rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string());
     }
     if security_mode == "allowlist" {
         unresolved.push(
@@ -4089,10 +4130,17 @@ pub async fn get_dashboard_usage(
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 
     let total_estimated_cost = {
-        let cost: f64 = entries.iter().map(|e| {
-            estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
-        }).sum();
-        if cost > 0.0 { Some(format_cost(cost)) } else { None }
+        let cost: f64 = entries
+            .iter()
+            .map(|e| {
+                estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
+            })
+            .sum();
+        if cost > 0.0 {
+            Some(format_cost(cost))
+        } else {
+            None
+        }
     };
 
     Ok(Json(UsageSummaryResponse {
@@ -5656,22 +5704,40 @@ fn doctor_backend_matrix(
     } else {
         "none"
     };
-    let vector_status = if vector_backend == "none" { "degraded" } else { "connected" };
+    let vector_status = if vector_backend == "none" {
+        "degraded"
+    } else {
+        "connected"
+    };
     let vector_capability = match vector_backend {
-        "lancedb" => format!("{}-dim semantic search via LanceDB", config.vector.embedding_dims),
+        "lancedb" => format!(
+            "{}-dim semantic search via LanceDB",
+            config.vector.embedding_dims
+        ),
         "pgvector" => "pgvector-backed semantic search".to_string(),
         "integrated-semantic" => "integrated semantic memory backend".to_string(),
         _ => "keyword/file-only memory search".to_string(),
     };
     let vector_hint = if vector_backend == "none" {
-        Some("Enable vector.backend=lancedb or configure a semantic-capable integrated backend".to_string())
+        Some(
+            "Enable vector.backend=lancedb or configure a semantic-capable integrated backend"
+                .to_string(),
+        )
     } else {
         None
     };
 
     let comms_enabled = config.comms.enabled && config.comms.comms_dir.is_some();
-    let comms_status = if comms_enabled { "connected" } else { "unavailable" };
-    let comms_backend = if comms_enabled { "filesystem" } else { "disabled" };
+    let comms_status = if comms_enabled {
+        "connected"
+    } else {
+        "unavailable"
+    };
+    let comms_backend = if comms_enabled {
+        "filesystem"
+    } else {
+        "disabled"
+    };
     let comms_capability = if comms_enabled {
         format!(
             "peer={} dir={}",
@@ -5684,10 +5750,17 @@ fn doctor_backend_matrix(
     let comms_hint = if comms_enabled {
         None
     } else {
-        Some("Set comms.enabled=true and comms.comms_dir to enable native inter-agent messaging".to_string())
+        Some(
+            "Set comms.enabled=true and comms.comms_dir to enable native inter-agent messaging"
+                .to_string(),
+        )
     };
 
-    let channels_status = if capabilities.channels.is_empty() { "degraded" } else { "connected" };
+    let channels_status = if capabilities.channels.is_empty() {
+        "degraded"
+    } else {
+        "connected"
+    };
     let channels_backend = if capabilities.channels.is_empty() {
         "none".to_string()
     } else {
@@ -5699,7 +5772,10 @@ fn doctor_backend_matrix(
         format!("{} enabled channel(s)", capabilities.channels.len())
     };
     let channels_hint = if capabilities.channels.is_empty() {
-        Some("Configure at least one channel token/credential to receive inbound traffic".to_string())
+        Some(
+            "Configure at least one channel token/credential to receive inbound traffic"
+                .to_string(),
+        )
     } else {
         None
     };
@@ -5740,7 +5816,10 @@ fn doctor_backend_matrix(
     let memory_hint = if memory_status == "connected" {
         None
     } else {
-        Some("Enable semantic search and a vector backend for higher-quality memory retrieval".to_string())
+        Some(
+            "Enable semantic search and a vector backend for higher-quality memory retrieval"
+                .to_string(),
+        )
     };
 
     vec![
@@ -5783,7 +5862,11 @@ fn doctor_backend_matrix(
             subsystem: "memory",
             backend: capabilities.memory_mode.clone(),
             status: memory_status,
-            capability: format!("approval={}, auth={}", capabilities.approval_mode, if auth_ok { "enabled" } else { "disabled" }),
+            capability: format!(
+                "approval={}, auth={}",
+                capabilities.approval_mode,
+                if auth_ok { "enabled" } else { "disabled" }
+            ),
             fix_hint: memory_hint,
         },
     ]

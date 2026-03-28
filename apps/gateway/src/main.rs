@@ -49,12 +49,9 @@ use rune_runtime::{
 };
 use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
 use rune_spells_rust_patterns::{
-    RustPatternsToolExecutor, rust_patterns_tool_definition,
-    rust_patterns_validate_tool_definition,
+    RustPatternsToolExecutor, rust_patterns_tool_definition, rust_patterns_validate_tool_definition,
 };
-use rune_spells_security_audit::{
-    SecurityAuditToolExecutor, security_audit_tool_definition,
-};
+use rune_spells_security_audit::{SecurityAuditToolExecutor, security_audit_tool_definition};
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
@@ -709,10 +706,19 @@ async fn build_services(
         tool_registry,
         ContextAssembler::new(&system_prompt),
         {
+            let compaction_cfg = &config.runtime.compaction;
             let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
                 TokenBudgetCompaction::new(
-                    config.runtime.compaction.context_window,
-                    config.runtime.compaction.preserve_tail,
+                    compaction_cfg.effective_max_tokens(),
+                    compaction_cfg.preserve_tail,
+                )
+                .with_budget_settings(
+                    compaction_cfg.effective_warn_at_tokens(),
+                    compaction_cfg.effective_compress_after(),
+                    compaction_cfg.reserved_system,
+                    compaction_cfg.reserved_task,
+                    compaction_cfg.auto_inject_project,
+                    compaction_cfg.memory_search_k,
                 )
                 .with_memory_flush(&workspace_root),
             );
@@ -738,7 +744,11 @@ async fn build_services(
 
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
+        match Mem0Engine::try_new(
+            &config.mem0,
+            model_provider.clone(),
+            repos.memory_fact_repo.clone(),
+        ) {
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");

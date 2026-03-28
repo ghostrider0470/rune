@@ -34,6 +34,18 @@ pub struct TokenBudgetCompaction {
     context_window: usize,
     /// Number of recent messages to always preserve verbatim.
     preserve_tail: usize,
+    /// Warn threshold in estimated tokens.
+    warn_at_tokens: usize,
+    /// Threshold at which transcript compaction should trigger.
+    compress_after: usize,
+    /// Tokens reserved for system/identity instructions.
+    reserved_system: usize,
+    /// Tokens reserved for active task instructions.
+    reserved_task: usize,
+    /// Whether project memory should be auto-injected when available.
+    auto_inject_project: bool,
+    /// Maximum number of memory search results considered for injection.
+    memory_search_k: usize,
     /// Workspace root for memory flush. When `Some`, compaction writes a
     /// summary to today's daily notes before dropping messages.
     workspace_root: Option<PathBuf>,
@@ -45,11 +57,38 @@ impl TokenBudgetCompaction {
     /// - `context_window`: model context window size in tokens (default 128000)
     /// - `preserve_tail`: number of recent messages to keep verbatim (default 20)
     pub fn new(context_window: usize, preserve_tail: usize) -> Self {
+        let warn_at_tokens = (context_window * 80) / 100;
         Self {
             context_window,
             preserve_tail,
+            warn_at_tokens,
+            compress_after: warn_at_tokens,
+            reserved_system: 0,
+            reserved_task: 0,
+            auto_inject_project: true,
+            memory_search_k: 10,
             workspace_root: None,
         }
+    }
+
+    /// Override thresholds and reserved budget metadata from runtime config.
+    pub fn with_budget_settings(
+        mut self,
+        warn_at_tokens: usize,
+        compress_after: usize,
+        reserved_system: usize,
+        reserved_task: usize,
+        auto_inject_project: bool,
+        memory_search_k: usize,
+    ) -> Self {
+        let effective_ceiling = self.context_window;
+        self.warn_at_tokens = warn_at_tokens.min(effective_ceiling);
+        self.compress_after = compress_after.min(effective_ceiling);
+        self.reserved_system = reserved_system;
+        self.reserved_task = reserved_task;
+        self.auto_inject_project = auto_inject_project;
+        self.memory_search_k = memory_search_k;
+        self
     }
 
     /// Enable memory flush: compaction will write a summary to today's daily
@@ -244,9 +283,17 @@ impl TokenBudgetCompaction {
 
 impl Default for TokenBudgetCompaction {
     fn default() -> Self {
+        let context_window = 128_000;
+        let warn_at_tokens = (context_window * 80) / 100;
         Self {
-            context_window: 128_000,
+            context_window,
             preserve_tail: 20,
+            warn_at_tokens,
+            compress_after: 50_000,
+            reserved_system: 0,
+            reserved_task: 0,
+            auto_inject_project: true,
+            memory_search_k: 10,
             workspace_root: None,
         }
     }
@@ -255,9 +302,26 @@ impl Default for TokenBudgetCompaction {
 impl CompactionStrategy for TokenBudgetCompaction {
     fn compact(&self, messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
         let total_tokens: usize = messages.iter().map(Self::estimate_tokens).sum();
-        let threshold = (self.context_window * 80) / 100;
+        let warn_threshold = self.warn_at_tokens.min(self.context_window);
+        let compress_threshold = self.compress_after.min(self.context_window);
+        let reserved_total = self.reserved_system.saturating_add(self.reserved_task);
+        let usable_budget = self.context_window.saturating_sub(reserved_total);
 
-        if total_tokens <= threshold {
+        if total_tokens >= warn_threshold {
+            debug!(
+                total_tokens,
+                warn_threshold,
+                compress_threshold,
+                usable_budget,
+                reserved_system = self.reserved_system,
+                reserved_task = self.reserved_task,
+                auto_inject_project = self.auto_inject_project,
+                memory_search_k = self.memory_search_k,
+                "context budget warning threshold reached"
+            );
+        }
+
+        if total_tokens <= compress_threshold {
             return messages;
         }
 
