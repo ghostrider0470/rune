@@ -598,10 +598,12 @@ async fn build_services(
     let process_audit_store: Arc<dyn ProcessAuditStore> =
         Arc::new(DbProcessAuditStore::new(tool_execution_repo));
     let process_manager = ProcessManager::new().with_audit_store(process_audit_store.clone());
-    let lane_queue = Arc::new(LaneQueue::with_capacities(
+    let lane_queue = Arc::new(LaneQueue::with_limits(
         config.runtime.lanes.main_capacity,
         config.runtime.lanes.subagent_capacity,
         config.runtime.lanes.cron_capacity,
+        config.runtime.tools.global_max_concurrent_tools,
+        config.runtime.tools.max_concurrent_tools,
     ));
     let workspace_root = config
         .paths

@@ -30,6 +30,7 @@ use crate::hooks::{HookEvent, HookRegistry};
 use crate::lane_queue::{Lane, LaneQueue};
 use crate::mem0::Mem0Engine;
 use crate::memory::MemoryLoader;
+use crate::session_metadata::project_id as session_project_id;
 use crate::session_metadata::selected_model;
 use crate::skill::SkillRegistry;
 use crate::usage::UsageAccumulator;
@@ -599,6 +600,17 @@ impl TurnExecutor {
             arguments,
         };
 
+        let _tool_permit = if let Some(ref lq) = self.lane_queue {
+            Some(
+                lq.acquire_tool(session_project_id(
+                    &self.session_repo.find_by_id(session_id).await?,
+                ))
+                .await,
+            )
+        } else {
+            None
+        };
+
         let tool_result = match self.tool_executor.execute(call.clone()).await {
             Ok(result) => result,
             Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
@@ -1006,6 +1018,12 @@ impl TurnExecutor {
                         tool_call_id: tool_call_id.clone(),
                         tool_name: tc.function.name.clone(),
                         arguments: args,
+                    };
+
+                    let _tool_permit = if let Some(ref lq) = self.lane_queue {
+                        Some(lq.acquire_tool(session_project_id(&session)).await)
+                    } else {
+                        None
                     };
 
                     let tool_result = match self.tool_executor.execute(call.clone()).await {

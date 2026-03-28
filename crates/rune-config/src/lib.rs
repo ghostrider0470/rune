@@ -631,6 +631,8 @@ pub struct RuntimeConfig {
     pub lanes: LaneQueueConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    #[serde(default)]
+    pub tools: ToolConcurrencyConfig,
 }
 
 /// Plugin system configuration.
@@ -749,6 +751,35 @@ pub struct LaneQueueConfig {
     pub main_capacity: usize,
     pub subagent_capacity: usize,
     pub cron_capacity: usize,
+}
+
+/// Tool execution concurrency controls.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolConcurrencyConfig {
+    #[serde(default = "default_global_tool_capacity")]
+    pub global_max_concurrent_tools: usize,
+    #[serde(
+        default = "default_project_tool_capacity",
+        alias = "max_concurrent_tools"
+    )]
+    pub max_concurrent_tools: usize,
+}
+
+fn default_global_tool_capacity() -> usize {
+    32
+}
+
+fn default_project_tool_capacity() -> usize {
+    4
+}
+
+impl Default for ToolConcurrencyConfig {
+    fn default() -> Self {
+        Self {
+            global_max_concurrent_tools: default_global_tool_capacity(),
+            max_concurrent_tools: default_project_tool_capacity(),
+        }
+    }
 }
 
 impl Default for LaneQueueConfig {

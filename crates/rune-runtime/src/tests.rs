@@ -2573,6 +2573,7 @@ async fn create_session_full_persists_mode_in_metadata() {
             None,
             None,
             Some("architect".to_string()),
+            None,
         )
         .await
         .unwrap();
