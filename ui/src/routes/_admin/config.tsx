@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,14 @@ type JsonEntry = {
   key: string;
   value: unknown;
   source: string;
+  sensitive: boolean;
+};
+
+type DiffEntry = {
+  key: string;
+  before: unknown;
+  after: unknown;
+  changed: boolean;
   sensitive: boolean;
 };
 
@@ -90,6 +98,27 @@ function maskValue(value: unknown, reveal: boolean): string {
   if (reveal) return value;
   if (value.length <= 4) return "••••";
   return `${value.slice(0, 2)}••••${value.slice(-2)}`;
+}
+
+function diffConfigEntries(original: unknown, edited: unknown): DiffEntry[] {
+  const beforeEntries = new Map(flattenConfig(original).map((entry) => [entry.key, entry]));
+  const afterEntries = new Map(flattenConfig(edited).map((entry) => [entry.key, entry]));
+  const keys = Array.from(new Set([...beforeEntries.keys(), ...afterEntries.keys()])).sort();
+
+  return keys.map((key) => {
+    const before = beforeEntries.get(key);
+    const after = afterEntries.get(key);
+    const beforeValue = before?.value;
+    const afterValue = after?.value;
+
+    return {
+      key,
+      before: beforeValue,
+      after: afterValue,
+      changed: JSON.stringify(beforeValue) !== JSON.stringify(afterValue),
+      sensitive: before?.sensitive ?? after?.sensitive ?? isSensitivePath(key.toLowerCase()),
+    };
+  });
 }
 
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -185,6 +214,7 @@ function ConfigPage() {
   const [editJson, setEditJson] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [revealSensitive, setRevealSensitive] = useState(false);
+  const [parsedEditConfig, setParsedEditConfig] = useState<Record<string, unknown> | null>(null);
 
   const configSections = useMemo(() => {
     if (!config) return [];
@@ -206,10 +236,39 @@ function ConfigPage() {
     [config],
   );
 
+  useEffect(() => {
+    if (!editMode) {
+      setParsedEditConfig(null);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(editJson) as Record<string, unknown>;
+      setParsedEditConfig(parsed);
+      setSaveError(null);
+    } catch {
+      setParsedEditConfig(null);
+    }
+  }, [editJson, editMode]);
+
+  const diffEntries = useMemo(() => {
+    if (!config || !editMode || !parsedEditConfig) return [];
+
+    return diffConfigEntries(config, parsedEditConfig).filter((entry) => {
+      if (!entry.changed) return false;
+      if (!search) return true;
+      return entry.key.toLowerCase().includes(search.toLowerCase());
+    });
+  }, [config, editMode, parsedEditConfig, search]);
+
   function handleEditToggle() {
     if (!editMode) {
       setEditJson(rawJson);
+      setParsedEditConfig(config ?? null);
       setSaveError(null);
+    }
+    if (editMode) {
+      setParsedEditConfig(null);
     }
     setEditMode(!editMode);
   }
@@ -270,6 +329,10 @@ function ConfigPage() {
           <TabsTrigger value="json">
             <FileJson className="mr-2 h-4 w-4" />
             JSON
+          </TabsTrigger>
+          <TabsTrigger value="diff" disabled={!editMode}>
+            <Shield className="mr-2 h-4 w-4" />
+            Diff
           </TabsTrigger>
         </TabsList>
 
@@ -455,6 +518,70 @@ function ConfigPage() {
                 </CardContent>
               </Card>
             </>
+          )}
+        </TabsContent>
+
+
+
+        <TabsContent value="diff" className="space-y-6">
+          {!editMode ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Enable edit mode to preview config changes before saving.</p>
+              </CardContent>
+            </Card>
+          ) : saveError && !parsedEditConfig ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-red-600">{saveError}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Fix JSON syntax errors to generate a diff preview.</p>
+              </CardContent>
+            </Card>
+          ) : !diffEntries.length ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">No config changes detected.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-3">
+                <CardTitle className="text-base">Pending config changes</CardTitle>
+                <Badge variant="outline">{diffEntries.length} changed entries</Badge>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {diffEntries.map((entry) => (
+                    <div key={entry.key} className="rounded-lg border p-4">
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-mono text-xs text-muted-foreground">{entry.key}</p>
+                          {entry.sensitive && <Badge variant="secondary">masked</Badge>}
+                        </div>
+                        <div className="grid gap-3 lg:grid-cols-2">
+                          <div className="rounded-md bg-muted/60 p-3">
+                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current</p>
+                            <p className="mt-2 break-all text-sm">
+                              {entry.before === undefined
+                                ? "—"
+                                : maskValue(entry.before, !entry.sensitive || revealSensitive)}
+                            </p>
+                          </div>
+                          <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Edited</p>
+                            <p className="mt-2 break-all text-sm">
+                              {entry.after === undefined
+                                ? "—"
+                                : maskValue(entry.after, !entry.sensitive || revealSensitive)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
