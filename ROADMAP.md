@@ -426,11 +426,28 @@ Implementation note (2026-03-16): the original roadmap described a direct Postgr
 
 ### Phase 13 — Usage Analytics (Backend + UI)
 
-**Backend**
-- `GET /api/dashboard/usage` — Aggregate token usage by model/day
+Status: ✅ Completed 2026-03-28
 
-**UI**
-- `ui/src/routes/_admin/usage.tsx` — Tokens, cost, trends, CSV export
+Rune already ships the backend usage aggregation endpoint and the admin Usage page with range filters, grouped breakdowns, summary cards, and CSV export. This pass verified the implementation against the roadmap and updated the roadmap status to match the shipped code.
+
+**Landed work**
+- `crates/rune-gateway/src/routes.rs`
+  - `GET /api/dashboard/usage` with period/custom range filtering, token aggregation, cache-hit ratio reporting, and estimated cost formatting
+- `crates/rune-gateway/src/server.rs`
+  - route registration for `/api/dashboard/usage`
+- `ui/src/hooks/use-operators.ts` + `ui/src/hooks/use-usage.ts`
+  - typed React Query usage hook for analytics fetching
+- `ui/src/routes/_admin/usage.tsx`
+  - summary cards for prompt/completion/total tokens, estimated cost, cache hit ratio
+  - preset/custom date range filtering
+  - grouped breakdown table by model or date
+  - CSV export of usage entries
+
+**Validation**
+- `cargo check`
+- `cd ui && npm run build`
+
+Implementation note (2026-03-28): the roadmap entry was stale relative to the repository state. No missing implementation remained for the phase acceptance bar, so this update records the actual shipped status instead of redoing already-landed functionality.
 
 ---
 
