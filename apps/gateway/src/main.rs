@@ -48,6 +48,7 @@ use rune_runtime::{
     session_loop::SessionLoop,
 };
 use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
+use rune_spells_evolver::{EvolverStatusExecutor, evolve_status_tool_definition};
 use rune_spells_rust_patterns::{
     RustPatternsToolExecutor, rust_patterns_tool_definition, rust_patterns_validate_tool_definition,
 };
@@ -1740,6 +1741,9 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
+            "evolve_status" => {
+                EvolverStatusExecutor.execute(call).await
+            }
             "security_audit" => {
                 SecurityAuditToolExecutor::new(self.workspace_root.clone())
                     .execute(call)
@@ -2092,6 +2096,7 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
 
     registry.register(security_audit_tool_definition());
     registry.register(rust_patterns_tool_definition());
+    registry.register(evolve_status_tool_definition());
     registry.register(rust_patterns_validate_tool_definition());
     registry.register(code_review_tool_definition());
 }
