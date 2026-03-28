@@ -3759,10 +3759,24 @@ pub struct TtsSynthesizeRequest {
     pub as_voice: Option<bool>,
 }
 
+impl TtsSynthesizeRequest {
+    fn validated_text(&self) -> Result<&str, GatewayError> {
+        let trimmed = self.text.trim();
+        if trimmed.is_empty() {
+            return Err(GatewayError::BadRequest(
+                "text is required for TTS synthesis".to_string(),
+            ));
+        }
+        Ok(trimmed)
+    }
+}
+
 pub async fn tts_synthesize(
     State(state): State<AppState>,
     Json(body): Json<TtsSynthesizeRequest>,
 ) -> Result<Response, GatewayError> {
+    let text = body.validated_text()?;
+
     let engine_lock = state
         .tts_engine
         .as_ref()
@@ -3770,8 +3784,8 @@ pub async fn tts_synthesize(
 
     let engine = engine_lock.read().await;
     let audio = match (body.voice.as_deref(), body.model.as_deref()) {
-        (Some(voice), Some(model)) => engine.convert_with(&body.text, voice, model).await,
-        _ => engine.convert(&body.text).await,
+        (Some(voice), Some(model)) => engine.convert_with(text, voice, model).await,
+        _ => engine.convert(text).await,
     }
     .map_err(|e| GatewayError::Internal(e.to_string()))?;
 

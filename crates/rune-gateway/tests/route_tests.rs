@@ -11327,6 +11327,28 @@ async fn api_tool_execution_route_returns_persisted_execution() {
     assert_eq!(json["result_summary"], "ok");
 }
 
+
+#[tokio::test]
+async fn tts_synthesize_rejects_empty_text() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/tts/synthesize")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"text":"   "}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["message"], "bad request: text is required for TTS synthesis");
+}
+
 #[tokio::test]
 async fn api_approvals_post_and_policy_routes_are_exposed() {
     let app = build_test_app(None);
