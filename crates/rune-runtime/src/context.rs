@@ -23,7 +23,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
 );
 
 use rune_core::{AttachmentRef, TranscriptItem};
-use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
+use rune_models::{ChatMessage, FunctionCall, ImageUrlPart, MessagePart, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
 
@@ -163,13 +163,14 @@ impl ContextAssembler {
         match item {
             TranscriptItem::UserMessage { message } => {
                 let content = render_user_message_content(&message.content, &message.attachments);
-                if content.trim().is_empty() {
+                let content_parts = build_user_message_parts(&message.content, &message.attachments);
+                if content.trim().is_empty() && content_parts.is_none() {
                     return None;
                 }
                 Some(ChatMessage {
                     role: Role::User,
                     content: Some(content),
-                    content_parts: None,
+                    content_parts,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -297,6 +298,38 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
 }
 
 
+fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Option<Vec<MessagePart>> {
+    let trimmed = content.trim();
+    let mut parts = Vec::new();
+
+    if !trimmed.is_empty() {
+        parts.push(MessagePart::Text {
+            text: trimmed.to_string(),
+        });
+    }
+
+    for attachment in attachments {
+        let Some(url) = attachment.url.as_deref() else {
+            continue;
+        };
+        let mime = attachment.mime_type.as_deref().unwrap_or("");
+        if !mime.starts_with("image/") {
+            continue;
+        }
+        parts.push(MessagePart::ImageUrl {
+            image_url: ImageUrlPart {
+                url: url.to_string(),
+            },
+        });
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts)
+    }
+}
+
 fn render_user_message_content(content: &str, attachments: &[AttachmentRef]) -> String {
     let trimmed = content.trim();
     if attachments.is_empty() {
@@ -347,9 +380,9 @@ fn format_attachment_ref(attachment: &AttachmentRef) -> String {
 
 #[cfg(test)]
 mod attachment_prompt_tests {
-    use super::{format_attachment_ref, render_user_message_content, ContextAssembler};
+    use super::{build_user_message_parts, format_attachment_ref, render_user_message_content, ContextAssembler};
     use rune_core::{AttachmentRef, NormalizedMessage, TranscriptItem};
-    use rune_models::Role;
+    use rune_models::{MessagePart, Role};
     use rune_store::models::TranscriptItemRow;
     use uuid::Uuid;
 
@@ -425,4 +458,32 @@ mod attachment_prompt_tests {
 
         assert_eq!(formatted, "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)");
     }
+    #[test]
+    fn builds_multimodal_parts_for_user_text_and_image_attachments() {
+        let parts = build_user_message_parts(
+            "Describe this image",
+            &[
+                AttachmentRef {
+                    name: "photo.jpg".into(),
+                    mime_type: Some("image/jpeg".into()),
+                    size_bytes: Some(42),
+                    url: Some("https://example.test/photo.jpg".into()),
+                    provider_file_id: None,
+                },
+                AttachmentRef {
+                    name: "notes.txt".into(),
+                    mime_type: Some("text/plain".into()),
+                    size_bytes: None,
+                    url: Some("https://example.test/notes.txt".into()),
+                    provider_file_id: None,
+                },
+            ],
+        )
+        .expect("expected multimodal parts");
+
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
+        assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg"));
+        assert_eq!(parts.len(), 2);
+    }
+
 }

@@ -29,12 +29,12 @@ pub enum Role {
 }
 
 /// A single chat message.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "serialize_message_content")]
     pub content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub content_parts: Option<Vec<MessagePart>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -132,4 +132,34 @@ pub enum StreamEvent {
     TextDelta(String),
     /// Streaming is complete; carries the assembled final response.
     Done(CompletionResponse),
+}
+
+impl Serialize for ChatMessage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("role", &self.role)?;
+
+        if let Some(content_parts) = &self.content_parts {
+            map.serialize_entry("content", content_parts)?;
+        } else if let Some(content) = &self.content {
+            map.serialize_entry("content", content)?;
+        }
+
+        if let Some(name) = &self.name {
+            map.serialize_entry("name", name)?;
+        }
+        if let Some(tool_call_id) = &self.tool_call_id {
+            map.serialize_entry("tool_call_id", tool_call_id)?;
+        }
+        if let Some(tool_calls) = &self.tool_calls {
+            map.serialize_entry("tool_calls", tool_calls)?;
+        }
+
+        map.end()
+    }
 }
