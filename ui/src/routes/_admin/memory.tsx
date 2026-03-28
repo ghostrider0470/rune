@@ -7,6 +7,7 @@ import { api } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   BrainCircuit,
   Link2,
@@ -17,6 +18,10 @@ import {
   RefreshCw,
   Trash2,
   Zap,
+  Network,
+  CalendarClock,
+  Hash,
+  Sparkles,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/memory")({
@@ -29,6 +34,8 @@ interface MemoryNode {
   id: string;
   fact: string;
   category: string;
+  source_agent?: string | null;
+  trigger?: string | null;
   session_id: string | null;
   created_at: string;
   access_count: number;
@@ -43,6 +50,15 @@ interface MemoryEdge {
 interface GraphResponse {
   nodes: MemoryNode[];
   edges: MemoryEdge[];
+}
+
+interface InsightCluster {
+  id: string;
+  category: string;
+  nodes: GraphNode[];
+  links: GraphLink[];
+  totalAccess: number;
+  avgSimilarity: number;
 }
 
 // Force-graph node with position
@@ -84,7 +100,7 @@ type SizeMode = "access" | "connections" | "recency";
 function MemoryGraphPage() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sizeMode, setSizeMode] = useState<SizeMode>("access");
+  const [sizeMode, setSizeMode] = useState<SizeMode>("connections");
   const [enabledCategories, setEnabledCategories] = useState<Set<string>>(
     () => new Set(CATEGORIES.map((c) => c.name)),
   );
@@ -179,6 +195,79 @@ function MemoryGraphPage() {
     }
     return counts;
   }, [rawGraph]);
+
+
+  const selectedConnections = useMemo(() => {
+    if (!selectedNode || !rawGraph) return [] as { node: GraphNode; similarity: number }[];
+
+    const nodeById = new Map(graphData.nodes.map((node) => [node.id, node] as const));
+    return rawGraph.edges
+      .flatMap((edge) => {
+        if (edge.source === selectedNode.id) {
+          const node = nodeById.get(edge.target);
+          return node ? [{ node, similarity: edge.similarity }] : [];
+        }
+        if (edge.target === selectedNode.id) {
+          const node = nodeById.get(edge.source);
+          return node ? [{ node, similarity: edge.similarity }] : [];
+        }
+        return [];
+      })
+      .sort((a, b) => b.similarity - a.similarity);
+  }, [selectedNode, rawGraph, graphData.nodes]);
+
+  const clusterInsights = useMemo(() => {
+    if (!rawGraph) return [] as InsightCluster[];
+
+    const nodeById = new Map(graphData.nodes.map((node) => [node.id, node] as const));
+    const groups = new Map<string, { nodes: GraphNode[]; links: GraphLink[]; totalAccess: number; simSum: number }>();
+
+    for (const node of graphData.nodes) {
+      const key = node.category.toLowerCase();
+      const bucket = groups.get(key) ?? { nodes: [], links: [], totalAccess: 0, simSum: 0 };
+      bucket.nodes.push(node);
+      bucket.totalAccess += node.access_count;
+      groups.set(key, bucket);
+    }
+
+    for (const link of rawGraph.edges) {
+      const source = nodeById.get(link.source);
+      const target = nodeById.get(link.target);
+      if (!source || !target) continue;
+      if (source.category.toLowerCase() !== target.category.toLowerCase()) continue;
+
+      const key = source.category.toLowerCase();
+      const bucket = groups.get(key);
+      if (!bucket) continue;
+      bucket.links.push(link);
+      bucket.simSum += link.similarity;
+    }
+
+    return [...groups.entries()]
+      .map(([category, bucket]) => ({
+        id: category,
+        category,
+        nodes: bucket.nodes.sort((a, b) => (b.__connections ?? 0) - (a.__connections ?? 0)),
+        links: bucket.links.sort((a, b) => b.similarity - a.similarity),
+        totalAccess: bucket.totalAccess,
+        avgSimilarity: bucket.links.length ? bucket.simSum / bucket.links.length : 0,
+      }))
+      .sort((a, b) => b.nodes.length - a.nodes.length);
+  }, [rawGraph, graphData.nodes]);
+
+  const recentMemories = useMemo(() => {
+    return [...graphData.nodes]
+      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
+      .slice(0, 8);
+  }, [graphData.nodes]);
+
+  const centralMemories = useMemo(() => {
+    return [...graphData.nodes]
+      .sort((a, b) => (b.__connections ?? 0) - (a.__connections ?? 0) || b.access_count - a.access_count)
+      .slice(0, 8);
+  }, [graphData.nodes]);
+
+  const densestCluster = clusterInsights[0] ?? null;
 
   // ── Node rendering ───────────────────────────────────────────
 
@@ -445,13 +534,89 @@ function MemoryGraphPage() {
         </div>
       </div>
 
-      {/* ── Stats (top-right) ───────────────────────────────────── */}
+      {/* ── Stats + insight rail (top-right) ───────────────────────── */}
       {stats && (
-        <div className="absolute right-4 top-4 z-10 flex items-center gap-3">
-          <Stat icon={BrainCircuit} value={stats.memories} label="memories" color="text-primary" />
-          <Stat icon={Link2} value={stats.connections} label="links" color="text-blue-500" />
-          <Stat icon={TrendingUp} value={stats.avgSimilarity.toFixed(2)} label="avg sim" color="text-violet-500" />
-          <Stat icon={Zap} value={stats.totalRecalls} label="recalls" color="text-amber-500" />
+        <div className="absolute right-4 top-4 bottom-4 z-10 flex w-[25rem] flex-col gap-3 pointer-events-none">
+          <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
+            <Stat icon={BrainCircuit} value={stats.memories} label="memories" color="text-primary" />
+            <Stat icon={Link2} value={stats.connections} label="links" color="text-blue-500" />
+            <Stat icon={TrendingUp} value={stats.avgSimilarity.toFixed(2)} label="avg sim" color="text-violet-500" />
+            <Stat icon={Zap} value={stats.totalRecalls} label="recalls" color="text-amber-500" />
+          </div>
+
+          <div className="pointer-events-auto ml-auto flex min-h-0 w-full flex-1 flex-col gap-3 overflow-hidden">
+            <Card className="border-border/50 bg-background/82 shadow-xl backdrop-blur-2xl">
+              <CardContent className="space-y-3 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">Knowledge pulse</p>
+                    <p className="text-sm font-semibold">Memory map insights</p>
+                  </div>
+                  {densestCluster && (
+                    <Badge variant="secondary" className="capitalize">
+                      {densestCluster.category}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <InsightMetric
+                    icon={Network}
+                    label="Most linked cluster"
+                    value={densestCluster ? `${densestCluster.nodes.length} ${densestCluster.category}` : "—"}
+                  />
+                  <InsightMetric
+                    icon={Sparkles}
+                    label="Cluster cohesion"
+                    value={densestCluster ? `${(densestCluster.avgSimilarity * 100).toFixed(0)}%` : "—"}
+                  />
+                  <InsightMetric
+                    icon={CalendarClock}
+                    label="Newest note"
+                    value={recentMemories[0] ? formatShortDate(recentMemories[0].created_at) : "—"}
+                  />
+                  <InsightMetric
+                    icon={Hash}
+                    label="Hub memory links"
+                    value={centralMemories[0] ? `${centralMemories[0].__connections ?? 0}` : "0"}
+                  />
+                </div>
+
+                {selectedNode ? (
+                  <div className="rounded-xl border border-border/50 bg-muted/25 p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Focused note</p>
+                    <p className="mt-1 text-sm font-medium line-clamp-2">{selectedNode.fact}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {selectedConnections.length} linked memories • {selectedNode.access_count} recalls
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Select a node to inspect it like a note and see its local neighborhood.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-2">
+              <InsightListCard
+                title="Central memories"
+                subtitle="Most connected notes in the graph"
+                items={centralMemories}
+                onSelect={setSelectedNode}
+                renderMeta={(item) => `${item.__connections ?? 0} links • ${item.access_count} recalls`}
+              />
+              <InsightListCard
+                title="Recent memories"
+                subtitle="Newest captured notes"
+                items={recentMemories}
+                onSelect={setSelectedNode}
+                renderMeta={(item) => `${formatShortDate(item.created_at)} • ${item.category}`}
+              />
+            </div>
+
+            <InsightClusterCard clusters={clusterInsights} onSelect={setSelectedNode} />
+          </div>
         </div>
       )}
 
@@ -634,5 +799,135 @@ function DetailPanel({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+
+function formatShortDate(value: string): string {
+  return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function InsightMetric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border/50 bg-muted/20 p-2.5">
+      <div className="flex items-center gap-2">
+        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+        <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      </div>
+      <p className="mt-2 text-sm font-semibold leading-tight">{value}</p>
+    </div>
+  );
+}
+
+function InsightListCard({
+  title,
+  subtitle,
+  items,
+  onSelect,
+  renderMeta,
+}: {
+  title: string;
+  subtitle: string;
+  items: GraphNode[];
+  onSelect: (node: GraphNode) => void;
+  renderMeta: (node: GraphNode) => string;
+}) {
+  return (
+    <Card className="min-h-0 border-border/50 bg-background/82 shadow-xl backdrop-blur-2xl">
+      <CardContent className="flex h-full min-h-0 flex-col gap-3 p-4">
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+        <div className="min-h-0 space-y-2 overflow-auto pr-1">
+          {items.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No memories in this view.</p>
+          ) : (
+            items.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => onSelect(item)}
+                className="w-full rounded-xl border border-border/50 bg-muted/20 p-3 text-left transition-colors hover:bg-muted/40"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: getCategoryColor(item.category) }}
+                  />
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                    {item.category}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm leading-snug line-clamp-3">{item.fact}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{renderMeta(item)}</p>
+              </button>
+            ))
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function InsightClusterCard({
+  clusters,
+  onSelect,
+}: {
+  clusters: InsightCluster[];
+  onSelect: (node: GraphNode) => void;
+}) {
+  return (
+    <Card className="min-h-[16rem] border-border/50 bg-background/82 shadow-xl backdrop-blur-2xl">
+      <CardContent className="flex h-full flex-col gap-3 p-4">
+        <div>
+          <p className="text-sm font-semibold">Topic clusters</p>
+          <p className="text-xs text-muted-foreground">Category-driven pockets that read like note neighborhoods.</p>
+        </div>
+        <div className="space-y-3 overflow-auto pr-1">
+          {clusters.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No cluster data available.</p>
+          ) : (
+            clusters.slice(0, 6).map((cluster) => (
+              <div key={cluster.id} className="rounded-xl border border-border/50 bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: getCategoryColor(cluster.category) }}
+                      />
+                      <p className="text-sm font-semibold capitalize">{cluster.category}</p>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {cluster.nodes.length} notes • {cluster.links.length} internal links • {(cluster.avgSimilarity * 100).toFixed(0)}% cohesion
+                    </p>
+                  </div>
+                  <Badge variant="outline">{cluster.totalAccess} recalls</Badge>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {cluster.nodes.slice(0, 4).map((node) => (
+                    <button
+                      key={node.id}
+                      onClick={() => onSelect(node)}
+                      className="rounded-full border border-border/50 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                    >
+                      {node.fact.length > 42 ? `${node.fact.slice(0, 42)}…` : node.fact}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
