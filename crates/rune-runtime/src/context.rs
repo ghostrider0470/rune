@@ -23,7 +23,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
 );
 
 use rune_core::{AttachmentRef, TranscriptItem};
-use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
+use rune_models::{ChatMessage, FunctionCall, ImageUrlPart, MessagePart, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
 
@@ -162,14 +162,19 @@ impl ContextAssembler {
     fn item_to_chat_message(&self, item: TranscriptItem) -> Option<ChatMessage> {
         match item {
             TranscriptItem::UserMessage { message } => {
-                let content = render_user_message_content(&message.content, &message.attachments);
-                if content.trim().is_empty() {
+                let (content, content_parts) =
+                    render_user_message_content(&message.content, &message.attachments);
+                if content
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                    && content_parts.as_ref().is_none_or(|parts| parts.is_empty())
+                {
                     return None;
                 }
                 Some(ChatMessage {
                     role: Role::User,
-                    content: Some(content),
-                    content_parts: None,
+                    content,
+                    content_parts,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -296,27 +301,70 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
     }
 }
 
-
-fn render_user_message_content(content: &str, attachments: &[AttachmentRef]) -> String {
+fn render_user_message_content(
+    content: &str,
+    attachments: &[AttachmentRef],
+) -> (Option<String>, Option<Vec<MessagePart>>) {
     let trimmed = content.trim();
-    if attachments.is_empty() {
-        return trimmed.to_string();
-    }
+    let mut text_lines = Vec::new();
+    let mut content_parts = Vec::new();
 
-    let mut rendered = String::new();
     if !trimmed.is_empty() {
-        rendered.push_str(trimmed);
-        rendered.push_str("\n\n");
+        text_lines.push(trimmed.to_string());
+        content_parts.push(MessagePart::Text {
+            text: trimmed.to_string(),
+        });
     }
 
-    rendered.push_str("[Attachments]\n");
+    let mut non_image_attachments = Vec::new();
     for attachment in attachments {
-        rendered.push_str("- ");
-        rendered.push_str(&format_attachment_ref(attachment));
-        rendered.push('\n');
+        if let Some(url) = image_attachment_url(attachment) {
+            content_parts.push(MessagePart::ImageUrl {
+                image_url: ImageUrlPart { url },
+            });
+        } else {
+            non_image_attachments.push(attachment);
+        }
     }
 
-    rendered.trim_end().to_string()
+    if !non_image_attachments.is_empty() {
+        let mut rendered = String::from("[Attachments]\n");
+        for attachment in non_image_attachments {
+            rendered.push_str("- ");
+            rendered.push_str(&format_attachment_ref(attachment));
+            rendered.push('\n');
+        }
+        let rendered = rendered.trim_end().to_string();
+        text_lines.push(rendered.clone());
+        content_parts.push(MessagePart::Text { text: rendered });
+    }
+
+    let content = if text_lines.is_empty() {
+        None
+    } else {
+        Some(text_lines.join("\n\n"))
+    };
+
+    let content_parts = if content_parts.is_empty() {
+        None
+    } else {
+        Some(content_parts)
+    };
+
+    (content, content_parts)
+}
+
+fn image_attachment_url(attachment: &AttachmentRef) -> Option<String> {
+    let mime = attachment.mime_type.as_deref()?.to_ascii_lowercase();
+    if !mime.starts_with("image/") {
+        return None;
+    }
+
+    attachment
+        .url
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn format_attachment_ref(attachment: &AttachmentRef) -> String {
@@ -347,9 +395,11 @@ fn format_attachment_ref(attachment: &AttachmentRef) -> String {
 
 #[cfg(test)]
 mod attachment_prompt_tests {
-    use super::{format_attachment_ref, render_user_message_content, ContextAssembler};
+    use super::{
+        ContextAssembler, format_attachment_ref, image_attachment_url, render_user_message_content,
+    };
     use rune_core::{AttachmentRef, NormalizedMessage, TranscriptItem};
-    use rune_models::Role;
+    use rune_models::{MessagePart, Role};
     use rune_store::models::TranscriptItemRow;
     use uuid::Uuid;
 
@@ -395,11 +445,12 @@ mod attachment_prompt_tests {
         assert!(content.contains("invoice.pdf"));
         assert!(content.contains("application/pdf"));
         assert!(content.contains("provider_file_id=file_123"));
+        assert_eq!(messages[1].content_parts.as_ref().unwrap().len(), 1);
     }
 
     #[test]
     fn appends_attachment_summary_after_text_content() {
-        let rendered = render_user_message_content(
+        let (content, content_parts) = render_user_message_content(
             "Please summarize this",
             &[AttachmentRef {
                 name: "notes.txt".into(),
@@ -410,7 +461,95 @@ mod attachment_prompt_tests {
             }],
         );
 
-        assert!(rendered.starts_with("Please summarize this\n\n[Attachments]\n- notes.txt"));
+        assert!(
+            content
+                .as_deref()
+                .unwrap()
+                .starts_with("Please summarize this\n\n[Attachments]\n- notes.txt")
+        );
+        assert_eq!(content_parts.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn includes_image_attachments_as_multimodal_content_parts() {
+        let (content, content_parts) = render_user_message_content(
+            "What is in this image?",
+            &[AttachmentRef {
+                name: "photo.jpg".into(),
+                mime_type: Some("image/jpeg".into()),
+                size_bytes: Some(2048),
+                url: Some("https://example.test/photo.jpg".into()),
+                provider_file_id: Some("file_456".into()),
+            }],
+        );
+
+        assert_eq!(content.as_deref(), Some("What is in this image?"));
+        let parts = content_parts.unwrap();
+        assert_eq!(parts.len(), 2);
+        match &parts[0] {
+            MessagePart::Text { text } => assert_eq!(text, "What is in this image?"),
+            other => panic!("expected text part, got {other:?}"),
+        }
+        match &parts[1] {
+            MessagePart::ImageUrl { image_url } => {
+                assert_eq!(image_url.url, "https://example.test/photo.jpg")
+            }
+            other => panic!("expected image part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keeps_non_image_attachments_in_text_summary_even_with_images() {
+        let (content, content_parts) = render_user_message_content(
+            "Review these",
+            &[
+                AttachmentRef {
+                    name: "photo.png".into(),
+                    mime_type: Some("image/png".into()),
+                    size_bytes: None,
+                    url: Some("https://example.test/photo.png".into()),
+                    provider_file_id: None,
+                },
+                AttachmentRef {
+                    name: "report.pdf".into(),
+                    mime_type: Some("application/pdf".into()),
+                    size_bytes: None,
+                    url: Some("https://example.test/report.pdf".into()),
+                    provider_file_id: None,
+                },
+            ],
+        );
+
+        assert!(content.as_deref().unwrap().contains("report.pdf"));
+        assert!(!content.as_deref().unwrap().contains("photo.png"));
+        assert_eq!(content_parts.as_ref().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn image_attachment_url_requires_image_mime_and_url() {
+        let image = AttachmentRef {
+            name: "photo.jpg".into(),
+            mime_type: Some("image/jpeg".into()),
+            size_bytes: None,
+            url: Some("https://example.test/photo.jpg".into()),
+            provider_file_id: None,
+        };
+        assert_eq!(
+            image_attachment_url(&image).as_deref(),
+            Some("https://example.test/photo.jpg")
+        );
+
+        let missing_url = AttachmentRef {
+            url: None,
+            ..image.clone()
+        };
+        assert!(image_attachment_url(&missing_url).is_none());
+
+        let non_image = AttachmentRef {
+            mime_type: Some("application/pdf".into()),
+            ..image
+        };
+        assert!(image_attachment_url(&non_image).is_none());
     }
 
     #[test]
@@ -423,6 +562,9 @@ mod attachment_prompt_tests {
             provider_file_id: Some("abc".into()),
         });
 
-        assert_eq!(formatted, "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)");
+        assert_eq!(
+            formatted,
+            "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)"
+        );
     }
 }
