@@ -667,7 +667,9 @@ pub async fn branded_asset(Path(path): Path<String>) -> Result<Response, Gateway
         ),
         // Legacy aliases
         "hero.png" => ("image/png", include_bytes!("../../../assets/hero.png")),
-        "rune-logo-favicon.svg" | "rune-logo-icon.svg" | "rune-logo-wordmark.svg"
+        "rune-logo-favicon.svg"
+        | "rune-logo-icon.svg"
+        | "rune-logo-wordmark.svg"
         | "rune-logo-wordmark-dark.svg" => (
             "image/svg+xml",
             include_bytes!("../../../assets/core_rune_midnight.svg"),
@@ -1535,9 +1537,7 @@ pub async fn get_session_status(
     let mut unresolved = Vec::new();
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
     if approval_mode == "on-miss" {
-        unresolved.push(
-            rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string(),
-        );
+        unresolved.push(rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string());
     }
     if security_mode == "allowlist" {
         unresolved.push(
@@ -4089,10 +4089,17 @@ pub async fn get_dashboard_usage(
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 
     let total_estimated_cost = {
-        let cost: f64 = entries.iter().map(|e| {
-            estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
-        }).sum();
-        if cost > 0.0 { Some(format_cost(cost)) } else { None }
+        let cost: f64 = entries
+            .iter()
+            .map(|e| {
+                estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
+            })
+            .sum();
+        if cost > 0.0 {
+            Some(format_cost(cost))
+        } else {
+            None
+        }
     };
 
     Ok(Json(UsageSummaryResponse {
@@ -5633,13 +5640,31 @@ fn doctor_backend_matrix(
     provider_ok: bool,
     auth_ok: bool,
 ) -> Vec<DoctorBackendMatrixEntry> {
-    let storage_status = if capabilities.storage_backend.contains("sqlite")
-        || capabilities.storage_backend.contains("postgres")
-        || capabilities.storage_backend.contains("cosmos")
+    let storage_backend = capabilities.storage_backend.as_str();
+    let storage_status = if storage_backend.contains("sqlite")
+        || storage_backend.contains("postgres")
+        || storage_backend.contains("cosmos")
     {
         "connected"
     } else {
         "degraded"
+    };
+    let storage_capability = if storage_backend.contains("sqlite") {
+        "sqlite-backed repos active".to_string()
+    } else if storage_backend.contains("postgres") {
+        let vector_note = if capabilities.pgvector {
+            ", pgvector ready"
+        } else {
+            ""
+        };
+        format!(
+            "postgres repo set active{}; pool max_connections={}",
+            vector_note, config.database.max_connections
+        )
+    } else if storage_backend.contains("cosmos") {
+        "Cosmos NoSQL repo set active".to_string()
+    } else {
+        format!("mode={}", capabilities.mode.as_str())
     };
     let storage_hint = if storage_status == "connected" {
         None
@@ -5647,7 +5672,7 @@ fn doctor_backend_matrix(
         Some("Configure database.backend/database_url so the gateway can initialize a supported store".to_string())
     };
 
-    let vector_backend = if capabilities.storage_backend.contains("lancedb") {
+    let vector_backend = if storage_backend.contains("lancedb") {
         "lancedb"
     } else if capabilities.pgvector {
         "pgvector"
@@ -5656,25 +5681,49 @@ fn doctor_backend_matrix(
     } else {
         "none"
     };
-    let vector_status = if vector_backend == "none" { "degraded" } else { "connected" };
+    let vector_status = if vector_backend == "none" {
+        "degraded"
+    } else {
+        "connected"
+    };
     let vector_capability = match vector_backend {
-        "lancedb" => format!("{}-dim semantic search via LanceDB", config.vector.embedding_dims),
-        "pgvector" => "pgvector-backed semantic search".to_string(),
-        "integrated-semantic" => "integrated semantic memory backend".to_string(),
+        "lancedb" => format!(
+            "{}-dim semantic search via LanceDB",
+            config.vector.embedding_dims
+        ),
+        "pgvector" => format!(
+            "{}-dim semantic search via pgvector",
+            config.vector.embedding_dims
+        ),
+        "integrated-semantic" => {
+            "semantic retrieval requested; vector store provided by integrated backend".to_string()
+        }
         _ => "keyword/file-only memory search".to_string(),
     };
     let vector_hint = if vector_backend == "none" {
-        Some("Enable vector.backend=lancedb or configure a semantic-capable integrated backend".to_string())
+        Some(
+            "Enable vector.backend=lancedb or configure a semantic-capable integrated backend"
+                .to_string(),
+        )
     } else {
         None
     };
 
     let comms_enabled = config.comms.enabled && config.comms.comms_dir.is_some();
-    let comms_status = if comms_enabled { "connected" } else { "unavailable" };
-    let comms_backend = if comms_enabled { "filesystem" } else { "disabled" };
+    let comms_status = if comms_enabled {
+        "connected"
+    } else {
+        "unavailable"
+    };
+    let comms_backend = if comms_enabled {
+        "filesystem"
+    } else {
+        "disabled"
+    };
     let comms_capability = if comms_enabled {
         format!(
-            "peer={} dir={}",
+            "agent={} peer={} dir={}",
+            config.comms.agent_id.as_str(),
             config.comms.peer_id.as_str(),
             config.comms.comms_dir.as_deref().unwrap_or("<unset>")
         )
@@ -5684,41 +5733,62 @@ fn doctor_backend_matrix(
     let comms_hint = if comms_enabled {
         None
     } else {
-        Some("Set comms.enabled=true and comms.comms_dir to enable native inter-agent messaging".to_string())
+        Some(
+            "Set comms.enabled=true and comms.comms_dir to enable native inter-agent messaging"
+                .to_string(),
+        )
     };
 
-    let channels_status = if capabilities.channels.is_empty() { "degraded" } else { "connected" };
-    let channels_backend = if capabilities.channels.is_empty() {
+    let enabled_channels = &capabilities.channels;
+    let channels_status = if enabled_channels.is_empty() {
+        "degraded"
+    } else {
+        "connected"
+    };
+    let channels_backend = if enabled_channels.is_empty() {
         "none".to_string()
     } else {
-        capabilities.channels.join(", ")
+        enabled_channels.join(", ")
     };
-    let channels_capability = if capabilities.channels.is_empty() {
+    let channels_capability = if enabled_channels.is_empty() {
         "no interactive channels enabled".to_string()
     } else {
-        format!("{} enabled channel(s)", capabilities.channels.len())
+        let configured = config.channels.enabled.len();
+        format!(
+            "{} active / {} configured channel(s)",
+            enabled_channels.len(),
+            configured
+        )
     };
-    let channels_hint = if capabilities.channels.is_empty() {
-        Some("Configure at least one channel token/credential to receive inbound traffic".to_string())
+    let channels_hint = if enabled_channels.is_empty() {
+        Some(
+            "Configure at least one channel token/credential to receive inbound traffic"
+                .to_string(),
+        )
     } else {
         None
     };
 
-    let model_count = config.models.providers.len();
+    let configured_models = config.models.inventory();
+    let model_count = configured_models.len();
     let models_status = if provider_ok { "connected" } else { "degraded" };
     let models_backend = if provider_ok {
         config
             .models
             .providers
             .iter()
-            .map(|provider| provider.name.clone())
+            .map(|provider| format!("{}:{}", provider.name, provider.kind))
             .collect::<Vec<_>>()
             .join(", ")
     } else {
         "zero-config-local".to_string()
     };
     let models_capability = if provider_ok {
-        format!("{} configured provider(s)", model_count)
+        format!(
+            "{} provider(s), {} model inventory entry(s)",
+            config.models.providers.len(),
+            model_count
+        )
     } else {
         config
             .models
@@ -5732,23 +5802,47 @@ fn doctor_backend_matrix(
         Some("Add a models.providers entry for production inference capacity".to_string())
     };
 
+    let memory_backend = match capabilities.memory_mode.as_str() {
+        "semantic-hybrid" => {
+            if vector_backend == "lancedb" {
+                "semantic (lancedb) + keyword".to_string()
+            } else if vector_backend == "pgvector" {
+                "semantic (pgvector) + keyword".to_string()
+            } else {
+                "semantic + keyword".to_string()
+            }
+        }
+        "semantic-keyword-fallback" => "semantic requested + keyword fallback".to_string(),
+        "keyword-local" => "keyword".to_string(),
+        "file-local" => "file".to_string(),
+        other => other.to_string(),
+    };
     let memory_status = if capabilities.memory_mode.contains("semantic") {
         "connected"
     } else {
         "degraded"
     };
+    let memory_capability = format!(
+        "level={} | approval={} | auth={}",
+        config.memory.requested_level().as_str(),
+        capabilities.approval_mode,
+        if auth_ok { "enabled" } else { "disabled" }
+    );
     let memory_hint = if memory_status == "connected" {
         None
     } else {
-        Some("Enable semantic search and a vector backend for higher-quality memory retrieval".to_string())
+        Some(
+            "Enable semantic search and a vector backend for higher-quality memory retrieval"
+                .to_string(),
+        )
     };
 
     vec![
         DoctorBackendMatrixEntry {
             subsystem: "storage",
-            backend: capabilities.storage_backend.clone(),
+            backend: storage_backend.to_string(),
             status: storage_status,
-            capability: format!("mode={}", capabilities.mode.as_str()),
+            capability: storage_capability,
             fix_hint: storage_hint,
         },
         DoctorBackendMatrixEntry {
@@ -5781,9 +5875,9 @@ fn doctor_backend_matrix(
         },
         DoctorBackendMatrixEntry {
             subsystem: "memory",
-            backend: capabilities.memory_mode.clone(),
+            backend: memory_backend,
             status: memory_status,
-            capability: format!("approval={}, auth={}", capabilities.approval_mode, if auth_ok { "enabled" } else { "disabled" }),
+            capability: memory_capability,
             fix_hint: memory_hint,
         },
     ]
