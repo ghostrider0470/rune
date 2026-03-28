@@ -1,5 +1,8 @@
 use std::collections::HashSet;
 
+const VISION_PROMPT_PREFIX: &str =
+    "The user sent this image. Describe what you see and respond to their message.";
+
 const STABLE_PREFIX_PADDING: &str = concat!(
     "## Prompt Cache Padding\n\n",
     "This stable prefix padding exists to help upstream providers like Azure OpenAI\n",
@@ -300,13 +303,7 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
 
 fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Option<Vec<MessagePart>> {
     let trimmed = content.trim();
-    let mut parts = Vec::new();
-
-    if !trimmed.is_empty() {
-        parts.push(MessagePart::Text {
-            text: trimmed.to_string(),
-        });
-    }
+    let mut image_urls = Vec::new();
 
     for attachment in attachments {
         let Some(url) = attachment.url.as_deref() else {
@@ -316,18 +313,28 @@ fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Opt
         if !mime.starts_with("image/") {
             continue;
         }
+        image_urls.push(url.to_string());
+    }
+
+    if image_urls.is_empty() {
+        return None;
+    }
+
+    let mut parts = Vec::with_capacity(image_urls.len() + 1);
+    let text = if trimmed.is_empty() {
+        VISION_PROMPT_PREFIX.to_string()
+    } else {
+        format!("{VISION_PROMPT_PREFIX}\n\nUser message: {trimmed}")
+    };
+    parts.push(MessagePart::Text { text });
+
+    for url in image_urls {
         parts.push(MessagePart::ImageUrl {
-            image_url: ImageUrlPart {
-                url: url.to_string(),
-            },
+            image_url: ImageUrlPart { url },
         });
     }
 
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts)
-    }
+    Some(parts)
 }
 
 fn render_user_message_content(content: &str, attachments: &[AttachmentRef]) -> String {
@@ -380,7 +387,7 @@ fn format_attachment_ref(attachment: &AttachmentRef) -> String {
 
 #[cfg(test)]
 mod attachment_prompt_tests {
-    use super::{build_user_message_parts, format_attachment_ref, render_user_message_content, ContextAssembler};
+    use super::{build_user_message_parts, format_attachment_ref, render_user_message_content, ContextAssembler, VISION_PROMPT_PREFIX};
     use rune_core::{AttachmentRef, NormalizedMessage, TranscriptItem};
     use rune_models::{MessagePart, Role};
     use rune_store::models::TranscriptItemRow;
@@ -459,6 +466,25 @@ mod attachment_prompt_tests {
         assert_eq!(formatted, "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)");
     }
     #[test]
+    fn builds_multimodal_parts_for_attachment_only_image_messages() {
+        let parts = build_user_message_parts(
+            "",
+            &[AttachmentRef {
+                name: "whiteboard.png".into(),
+                mime_type: Some("image/png".into()),
+                size_bytes: Some(2048),
+                url: Some("https://example.test/whiteboard.png".into()),
+                provider_file_id: None,
+            }],
+        )
+        .expect("expected multimodal parts");
+
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == VISION_PROMPT_PREFIX));
+        assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/whiteboard.png"));
+        assert_eq!(parts.len(), 2);
+    }
+
+    #[test]
     fn builds_multimodal_parts_for_user_text_and_image_attachments() {
         let parts = build_user_message_parts(
             "Describe this image",
@@ -481,7 +507,7 @@ mod attachment_prompt_tests {
         )
         .expect("expected multimodal parts");
 
-        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == &format!("{VISION_PROMPT_PREFIX}\n\nUser message: Describe this image")));
         assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg"));
         assert_eq!(parts.len(), 2);
     }

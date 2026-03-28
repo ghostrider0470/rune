@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use rune_core::{SessionKind, SessionStatus, ToolCategory};
 use rune_models::{
-    CompletionRequest, CompletionResponse, FinishReason, FunctionCall, ModelError, ModelProvider,
+    CompletionRequest, CompletionResponse, FinishReason, FunctionCall, MessagePart, ModelError, ModelProvider,
     ToolCallRequest, Usage,
 };
 use rune_store::StoreError;
@@ -845,6 +845,50 @@ async fn full_turn_cycle_no_tools() {
     assert_eq!(transcript[0].seq, 0);
     assert_eq!(transcript[1].kind, "assistant_message");
     assert_eq!(transcript[1].seq, 1);
+}
+
+#[tokio::test]
+async fn image_attachments_are_forwarded_as_multimodal_prompt_parts() {
+    let row = TranscriptItemRow {
+        id: Uuid::now_v7(),
+        session_id: Uuid::now_v7(),
+        turn_id: None,
+        seq: 0,
+        kind: "user_message".into(),
+        payload: serde_json::to_value(rune_core::TranscriptItem::UserMessage {
+            message: rune_core::NormalizedMessage {
+                channel_id: None,
+                sender_id: "user".into(),
+                sender_display_name: None,
+                message_id: Some("msg-vision".into()),
+                reply_to_message_id: None,
+                content: "What does this show?".into(),
+                attachments: vec![rune_core::AttachmentRef {
+                    name: "screenshot.png".into(),
+                    mime_type: Some("image/png".into()),
+                    size_bytes: Some(1024),
+                    url: Some("https://example.test/screenshot.png".into()),
+                    provider_file_id: None,
+                }],
+                metadata: serde_json::Value::Null,
+            },
+        })
+        .unwrap(),
+        created_at: chrono::Utc::now(),
+    };
+
+    let messages = ContextAssembler::new("You are a helpful assistant.")
+        .assemble(&[row], &NoOpCompaction, None, None, &[]);
+
+    assert_eq!(messages.len(), 2);
+    let user_message = &messages[1];
+    let parts = user_message
+        .content_parts
+        .as_ref()
+        .expect("expected multimodal content parts");
+    assert!(matches!(&parts[0], MessagePart::Text { text } if text.contains("The user sent this image.") && text.contains("User message: What does this show?")));
+    assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/screenshot.png"));
+    assert_eq!(parts.len(), 2);
 }
 
 #[tokio::test]
