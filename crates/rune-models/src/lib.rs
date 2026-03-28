@@ -17,7 +17,7 @@ pub use provider::mistral::MistralProvider;
 pub use provider::ollama::OllamaProvider;
 pub use provider::openai::OpenAiProvider;
 pub use types::{
-    ChatMessage, CompletionRequest, CompletionResponse, FinishReason, FunctionCall,
+    ChatMessage, CompletionRequest, CompletionResponse, ContentPart, FinishReason, FunctionCall,
     FunctionDefinition, Role, StreamEvent, ToolCallRequest, ToolDefinition, Usage,
 };
 

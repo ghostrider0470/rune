@@ -22,8 +22,8 @@ const STABLE_PREFIX_PADDING: &str = concat!(
     "Cache padding block 57. Cache padding block 58. Cache padding block 59. Cache padding block 60.\n"
 );
 
-use rune_core::TranscriptItem;
-use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
+use rune_core::{AttachmentRef, TranscriptItem};
+use rune_models::{ChatMessage, ContentPart, FunctionCall, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
 
@@ -89,6 +89,7 @@ impl ContextAssembler {
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(system_content),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -140,6 +141,7 @@ impl ContextAssembler {
                     messages.push(ChatMessage {
                         role: Role::Assistant,
                         content: None,
+                        content_parts: None,
                         name: None,
                         tool_call_id: None,
                         tool_calls: Some(tool_calls),
@@ -160,14 +162,19 @@ impl ContextAssembler {
     fn item_to_chat_message(&self, item: TranscriptItem) -> Option<ChatMessage> {
         match item {
             TranscriptItem::UserMessage { message } => {
-                // OpenAI rejects user messages with empty content.
-                // This can happen with media-only messages or commands.
-                if message.content.trim().is_empty() {
+                let content_parts =
+                    build_user_content_parts(&message.content, &message.attachments);
+                let has_text = !message.content.trim().is_empty();
+                let has_parts = content_parts
+                    .as_ref()
+                    .is_some_and(|parts| !parts.is_empty());
+                if !has_text && !has_parts {
                     return None;
                 }
                 Some(ChatMessage {
                     role: Role::User,
-                    content: Some(message.content),
+                    content: has_text.then_some(message.content),
+                    content_parts,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -180,6 +187,7 @@ impl ContextAssembler {
                 Some(ChatMessage {
                     role: Role::Assistant,
                     content: Some(content),
+                    content_parts: None,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -194,6 +202,7 @@ impl ContextAssembler {
             } => Some(ChatMessage {
                 role: Role::Tool,
                 content: Some(output),
+                content_parts: None,
                 name: None,
                 tool_call_id: Some(tool_call_id.to_string()),
                 tool_calls: None,
@@ -201,6 +210,39 @@ impl ContextAssembler {
             _ => None,
         }
     }
+}
+
+fn build_user_content_parts(
+    content: &str,
+    attachments: &[AttachmentRef],
+) -> Option<Vec<ContentPart>> {
+    let mut parts = Vec::new();
+
+    if !content.trim().is_empty() {
+        parts.push(ContentPart::Text {
+            text: content.to_string(),
+        });
+    }
+
+    parts.extend(
+        attachments
+            .iter()
+            .filter(|attachment| is_image_attachment(attachment))
+            .filter_map(|attachment| {
+                attachment.url.as_ref().map(|url| ContentPart::Image {
+                    image_url: url.clone(),
+                })
+            }),
+    );
+
+    (!parts.is_empty()).then_some(parts)
+}
+
+fn is_image_attachment(attachment: &AttachmentRef) -> bool {
+    attachment
+        .mime_type
+        .as_deref()
+        .is_some_and(|mime| mime.starts_with("image/"))
 }
 
 /// Ensures every `tool_call_id` in an Assistant message has a corresponding
@@ -278,6 +320,7 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
                     ChatMessage {
                         role: Role::Tool,
                         content: Some("[Tool call interrupted — no result available]".to_string()),
+                        content_parts: None,
                         name: None,
                         tool_call_id: Some(id),
                         tool_calls: None,

@@ -355,6 +355,7 @@ impl CompactionStrategy for TokenBudgetCompaction {
         let summary_msg = ChatMessage {
             role: Role::System,
             content: Some(summary_text),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
