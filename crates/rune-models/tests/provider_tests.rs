@@ -22,6 +22,7 @@ fn simple_request() -> CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -303,6 +304,7 @@ async fn azure_request_golden_shape_full() {
             ChatMessage {
                 role: Role::System,
                 content: Some("You are helpful.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -310,6 +312,7 @@ async fn azure_request_golden_shape_full() {
             ChatMessage {
                 role: Role::User,
                 content: Some("Hello".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -319,6 +322,7 @@ async fn azure_request_golden_shape_full() {
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
             content: Some("You are helpful.".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -365,12 +369,12 @@ async fn azure_request_golden_shape_full() {
     // Must NOT have model
     assert!(body.get("model").is_none(), "Azure body must omit 'model'");
 
-    // Must have messages
+    // Must have messages with stable-prefix system message prepended.
     let msgs = body["messages"].as_array().unwrap();
     assert_eq!(msgs.len(), 3);
     assert_eq!(msgs[0]["role"], "system");
-    assert_eq!(msgs[1]["role"], "user");
-    assert_eq!(msgs[2]["role"], "assistant");
+    assert_eq!(msgs[1]["role"], "system");
+    assert_eq!(msgs[2]["role"], "user");
 
     // Must have temperature and max_tokens
     assert_eq!(body["temperature"], serde_json::json!(0.7));
@@ -1405,7 +1409,7 @@ async fn routed_provider_does_not_fallback_on_non_retriable_error() {
         .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
             "error": { "message": "Invalid key", "code": "invalid_api_key" }
         })))
-        .expect(4)
+        .expect(1)
         .mount(&primary_server)
         .await;
 
@@ -1796,6 +1800,7 @@ async fn foundry_openai_request_golden_shape() {
             ChatMessage {
                 role: Role::System,
                 content: Some("You are helpful.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -1803,6 +1808,7 @@ async fn foundry_openai_request_golden_shape() {
             ChatMessage {
                 role: Role::User,
                 content: Some("What is Rust?".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -1915,6 +1921,7 @@ async fn foundry_anthropic_extracts_system_message() {
             ChatMessage {
                 role: Role::System,
                 content: Some("You are a helpful assistant.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -1922,6 +1929,7 @@ async fn foundry_anthropic_extracts_system_message() {
             ChatMessage {
                 role: Role::User,
                 content: Some("Hi".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2029,6 +2037,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::System,
                 content: Some("Be concise.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2036,6 +2045,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::User,
                 content: Some("Explain Rust.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2043,6 +2053,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::Assistant,
                 content: Some("Rust is a systems language.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2050,6 +2061,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::User,
                 content: Some("More detail.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2212,6 +2224,7 @@ fn claude_request() -> CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2534,6 +2547,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2542,6 +2556,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
             content: Some("Stable prefix".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2577,6 +2592,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2585,6 +2601,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
             content: Some("Stable prefix".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
