@@ -106,6 +106,53 @@ impl AppConfig {
         out
     }
 
+
+    /// Return a lightweight JSON schema-like shape for the redacted config.
+    ///
+    /// This is intentionally derived from the current redacted config value so the
+    /// admin UI can inspect object structure without exposing secrets. It is not a
+    /// full JSON Schema contract yet, but it provides stable field/type/default
+    /// information for schema-aware editor work.
+    #[must_use]
+    pub fn schema_value(&self) -> Value {
+        fn infer_schema(value: &Value) -> Value {
+            match value {
+                Value::Null => serde_json::json!({"type": "null", "default": Value::Null}),
+                Value::Bool(v) => serde_json::json!({"type": "boolean", "default": v}),
+                Value::Number(v) => serde_json::json!({"type": "number", "default": v}),
+                Value::String(v) => serde_json::json!({"type": "string", "default": v}),
+                Value::Array(items) => {
+                    let item_schema = items.first().map(infer_schema).unwrap_or_else(|| serde_json::json!({}));
+                    serde_json::json!({"type": "array", "items": item_schema, "default": value})
+                }
+                Value::Object(map) => {
+                    let mut properties = serde_json::Map::new();
+                    for (key, child) in map {
+                        properties.insert(key.clone(), infer_schema(child));
+                    }
+                    let keys: Vec<Value> = map.keys().cloned().map(Value::String).collect();
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": properties,
+                        "required": keys,
+                        "default": value
+                    })
+                }
+            }
+        }
+
+        let redacted = self.redacted();
+        let value = serde_json::to_value(redacted).unwrap_or(Value::Null);
+        serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Rune AppConfig",
+            "type": "object",
+            "properties": infer_schema(&value).get("properties").cloned().unwrap_or_else(|| serde_json::json!({})),
+            "required": infer_schema(&value).get("required").cloned().unwrap_or_else(|| serde_json::json!([])),
+            "default": value
+        })
+    }
+
     /// Validate that required persistent paths exist and are writable.
     ///
     /// Per DOCKER-DEPLOYMENT.md §9.1 the runtime must fail fast on
