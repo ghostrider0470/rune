@@ -24,6 +24,17 @@ pub struct ToolCall {
     pub arguments: serde_json::Value,
 }
 
+impl ToolCall {
+    /// Return the project identifier attached to the tool call, if present.
+    #[must_use]
+    pub fn project_key(&self) -> Option<&str> {
+        self.arguments
+            .get("__project")
+            .or_else(|| self.arguments.get("project"))
+            .and_then(serde_json::Value::as_str)
+    }
+}
+
 /// The result of executing a tool call.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolResult {
