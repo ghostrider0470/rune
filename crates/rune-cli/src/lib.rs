@@ -382,6 +382,23 @@ fn handle_projects_switch(name: String) -> Result<()> {
     Ok(())
 }
 
+fn handle_projects_remove(name: String) -> Result<()> {
+    let workspace = default_workspace_root()?;
+    let mut registry = ProjectRegistry::load(&workspace)?;
+    let was_active = registry.active_project() == Some(name.as_str());
+
+    if registry.remove(&name).is_none() {
+        anyhow::bail!("project '{name}' is not registered");
+    }
+
+    registry.save(&workspace)?;
+    println!("removed project: {name}");
+    if was_active {
+        println!("active project cleared");
+    }
+    Ok(())
+}
+
 fn open_config_instructions(workspace: &Path, config_path: &Path) {
     let workspace_hint = workspace.display();
     let config_hint = config_path.display();
@@ -3936,6 +3953,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             ProjectsAction::Add(args) => handle_projects_add(args)?,
             ProjectsAction::List => handle_projects_list()?,
             ProjectsAction::Switch { name } => handle_projects_switch(name)?,
+            ProjectsAction::Remove { name } => handle_projects_remove(name)?,
         },
         Command::Reset { confirm } => {
             if !confirm {
@@ -4932,5 +4950,109 @@ models = ["gpt-5.4"]
             std::env::remove_var("RUST_LOG");
             std::env::remove_var("NO_COLOR");
         }
+    }
+}
+
+#[cfg(test)]
+mod project_command_tests {
+    use assert_cmd::Command;
+    use rune_runtime::ProjectRegistry;
+    use std::fs;
+
+    fn home_env_key() -> &'static str {
+        if cfg!(windows) { "USERPROFILE" } else { "HOME" }
+    }
+
+    #[test]
+    fn projects_remove_persists_registry_update() {
+        let home = tempfile::tempdir().unwrap();
+        let project_dir = tempfile::tempdir().unwrap();
+        let workspace = home.path().join(".rune");
+        fs::create_dir_all(&workspace).unwrap();
+
+        let mut registry = ProjectRegistry::new();
+        registry
+            .onboard(
+                "alpha",
+                "https://github.com/org/alpha.git",
+                project_dir.path().to_path_buf(),
+                &workspace,
+                Some("main"),
+                None,
+            )
+            .unwrap();
+        registry
+            .onboard(
+                "beta",
+                "https://github.com/org/beta.git",
+                project_dir.path().to_path_buf(),
+                &workspace,
+                Some("main"),
+                None,
+            )
+            .unwrap();
+        registry.switch_active("beta").unwrap();
+        registry.save(&workspace).unwrap();
+
+        Command::cargo_bin("rune")
+            .unwrap()
+            .env(home_env_key(), home.path())
+            .args(["projects", "remove", "alpha"])
+            .assert()
+            .success()
+            .stdout("removed project: alpha\n");
+
+        let loaded = ProjectRegistry::load(&workspace).unwrap();
+        assert!(loaded.get("alpha").is_none());
+        assert!(loaded.get("beta").is_some());
+        assert_eq!(loaded.active_project(), Some("beta"));
+    }
+
+    #[test]
+    fn projects_remove_clears_active_project_when_target_matches() {
+        let home = tempfile::tempdir().unwrap();
+        let project_dir = tempfile::tempdir().unwrap();
+        let workspace = home.path().join(".rune");
+        fs::create_dir_all(&workspace).unwrap();
+
+        let mut registry = ProjectRegistry::new();
+        registry
+            .onboard(
+                "alpha",
+                "https://github.com/org/alpha.git",
+                project_dir.path().to_path_buf(),
+                &workspace,
+                Some("main"),
+                None,
+            )
+            .unwrap();
+        registry.save(&workspace).unwrap();
+
+        Command::cargo_bin("rune")
+            .unwrap()
+            .env(home_env_key(), home.path())
+            .args(["projects", "remove", "alpha"])
+            .assert()
+            .success()
+            .stdout("removed project: alpha\nactive project cleared\n");
+
+        let loaded = ProjectRegistry::load(&workspace).unwrap();
+        assert!(loaded.is_empty());
+        assert_eq!(loaded.active_project(), None);
+    }
+
+    #[test]
+    fn projects_remove_reports_missing_project() {
+        let home = tempfile::tempdir().unwrap();
+
+        Command::cargo_bin("rune")
+            .unwrap()
+            .env(home_env_key(), home.path())
+            .args(["projects", "remove", "missing"])
+            .assert()
+            .failure()
+            .stderr(predicates::str::contains(
+                "project 'missing' is not registered",
+            ));
     }
 }

@@ -1199,6 +1199,11 @@ pub enum ProjectsAction {
         /// Registered project name.
         name: String,
     },
+    /// Remove a registered project and clear active selection if it matches.
+    Remove {
+        /// Registered project name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -5779,6 +5784,17 @@ mod subagent_cli_tests {
         match cli.command {
             Command::Projects {
                 action: ProjectsAction::Switch { name },
+            } => assert_eq!(name, "phoenix-iot"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_projects_remove() {
+        let cli = Cli::try_parse_from(["rune", "projects", "remove", "phoenix-iot"]).unwrap();
+        match cli.command {
+            Command::Projects {
+                action: ProjectsAction::Remove { name },
             } => assert_eq!(name, "phoenix-iot"),
             other => panic!("unexpected: {other:?}"),
         }
