@@ -34,6 +34,25 @@ fn current_state_version(state_version: &AtomicU64) -> u64 {
     state_version.load(Ordering::Relaxed)
 }
 
+
+fn method_changes_state(method: &str) -> bool {
+    matches!(
+        method,
+        "session.create"
+            | "session.send"
+            | "a2ui.form_submit"
+            | "a2ui.action"
+            | "agent.steer"
+            | "agent.kill"
+            | "skills.reload"
+            | "skills.enable"
+            | "skills.disable"
+            | "approvals.decide"
+            | "processes.kill"
+            | "doctor.run"
+    )
+}
+
 pub fn active_ws_connections() -> usize {
     ACTIVE_WS_CONNECTIONS.load(Ordering::Relaxed)
 }
@@ -410,13 +429,20 @@ where
                 _ => {
                     // Delegate to the RPC dispatcher.
                     match dispatcher.dispatch(&method, params).await {
-                        Ok(payload) => Some(encode_res(
-                            &id,
-                            true,
-                            Some(payload),
-                            None,
-                            current_state_version(state_version.as_ref()),
-                        )),
+                        Ok(payload) => {
+                            let next_version = if method_changes_state(&method) {
+                                next_state_version(state_version.as_ref())
+                            } else {
+                                current_state_version(state_version.as_ref())
+                            };
+                            Some(encode_res(
+                                &id,
+                                true,
+                                Some(payload),
+                                None,
+                                next_version,
+                            ))
+                        }
                         Err(rpc_err) => Some(encode_res(
                             &id,
                             false,
@@ -732,6 +758,60 @@ mod tests {
         assert!(decoded["error"]["data"].is_null());
         assert_eq!(decoded["stateVersion"], 9);
         assert_eq!(state_version.load(Ordering::Relaxed), 9);
+    }
+
+    #[test]
+    fn method_changes_state_flags_write_rpcs() {
+        assert!(method_changes_state("session.create"));
+        assert!(method_changes_state("session.send"));
+        assert!(method_changes_state("skills.reload"));
+        assert!(method_changes_state("approvals.decide"));
+        assert!(method_changes_state("processes.kill"));
+        assert!(!method_changes_state("session.list"));
+        assert!(!method_changes_state("status"));
+        assert!(!method_changes_state("doctor.results"));
+    }
+
+    #[tokio::test]
+    async fn state_changing_rpc_success_bumps_state_version_once() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({"created": true}));
+        let state_version = Arc::new(AtomicU64::new(21));
+
+        let reply = handle_text_message(
+            r#"{"type":"req","id":"write-1","method":"session.create","params":{}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["ok"], true);
+        assert_eq!(decoded["stateVersion"], 22);
+        assert_eq!(state_version.load(Ordering::Relaxed), 22);
+    }
+
+    #[tokio::test]
+    async fn read_only_rpc_success_keeps_state_version_stable() {
+        let mut conn = ConnState::new();
+        let dispatcher = ok_dispatcher(json!({"sessions": []}));
+        let state_version = Arc::new(AtomicU64::new(33));
+
+        let reply = handle_text_message(
+            r#"{"type":"req","id":"read-1","method":"session.list","params":{}}"#,
+            &mut conn,
+            &dispatcher,
+            &state_version,
+        )
+        .await
+        .unwrap();
+
+        let decoded: JsonValue = serde_json::from_str(&reply).unwrap();
+        assert_eq!(decoded["ok"], true);
+        assert_eq!(decoded["stateVersion"], 33);
+        assert_eq!(state_version.load(Ordering::Relaxed), 33);
     }
 
     #[tokio::test]
