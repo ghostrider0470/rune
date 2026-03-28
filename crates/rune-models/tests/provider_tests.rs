@@ -1266,7 +1266,7 @@ async fn routed_provider_falls_back_on_retriable_error() {
                     "error": { "message": "rate limited", "code": "rate_limit" }
                 })),
         )
-        .expect(1)
+        .expect(4)
         .mount(&primary_server)
         .await;
 
@@ -2548,4 +2548,50 @@ async fn openai_request_prepends_stable_prefix_messages() {
     assert_eq!(msgs[0]["role"], "system");
     assert_eq!(msgs[0]["content"], "Stable prefix");
     assert_eq!(msgs[1]["role"], "user");
+}
+
+#[tokio::test]
+async fn google_provider_streams_openai_compatible_sse() {
+    let server = MockServer::start().await;
+
+    let sse_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer test-google-key"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = rune_models::GoogleProvider::with_base_url(&server.uri(), "test-google-key");
+    let mut request = simple_request();
+    request.model = Some("gemini-2.0-flash".into());
+
+    let mut rx = provider.complete_stream(&request).await.unwrap();
+    let mut deltas = Vec::new();
+    let mut final_response = None;
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            rune_models::StreamEvent::TextDelta(delta) => deltas.push(delta),
+            rune_models::StreamEvent::Done(resp) => {
+                final_response = Some(resp);
+                break;
+            }
+        }
+    }
+
+    assert_eq!(deltas, vec!["Hello", " world"]);
+    let resp = final_response.expect("stream should yield final response");
+    assert_eq!(resp.content.as_deref(), Some("Hello world"));
+    assert_eq!(resp.finish_reason, Some(FinishReason::Stop));
+    assert_eq!(resp.usage.total_tokens, 6);
 }
