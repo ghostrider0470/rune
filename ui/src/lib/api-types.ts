@@ -497,3 +497,23 @@ export interface DoctorReport {
   backend_matrix: DoctorBackendMatrixEntry[];
   run_at: string;
 }
+
+
+export interface ConfigSchemaResponse {
+  title?: string;
+  description?: string;
+  type?: string | string[];
+  properties?: Record<string, ConfigSchemaResponse>;
+  items?: ConfigSchemaResponse | ConfigSchemaResponse[];
+  enum?: unknown[];
+  default?: unknown;
+  format?: string;
+  examples?: unknown[];
+  required?: string[];
+  additionalProperties?: boolean | ConfigSchemaResponse;
+  anyOf?: ConfigSchemaResponse[];
+  oneOf?: ConfigSchemaResponse[];
+  allOf?: ConfigSchemaResponse[];
+  definitions?: Record<string, ConfigSchemaResponse>;
+  $ref?: string;
+}

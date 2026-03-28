@@ -7,8 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useConfig, useDoctorResults, useDoctorRun, useUpdateConfig } from "@/hooks/use-system";
-import type { DoctorBackendMatrixEntry, DoctorCheck } from "@/lib/api-types";
+import { useConfig, useConfigSchema, useDoctorResults, useDoctorRun, useUpdateConfig } from "@/hooks/use-system";
+import type { ConfigSchemaResponse, DoctorBackendMatrixEntry, DoctorCheck } from "@/lib/api-types";
 import {
   Settings2,
   Save,
@@ -23,6 +23,8 @@ import {
   AlertTriangle,
   XCircle,
   Info,
+  GitCompareArrows,
+  Braces,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/config")({
@@ -175,9 +177,66 @@ function DoctorChecks({ checks }: { checks: DoctorCheck[] }) {
   );
 }
 
+
+function collectSchemaEntries(schema: ConfigSchemaResponse, prefix = ""): JsonEntry[] {
+  const entries: JsonEntry[] = [];
+  const currentKey = prefix || "(root)";
+
+  if (schema.type || schema.enum || schema.default !== undefined || schema.description || schema.$ref) {
+    const parts = [
+      schema.type ? `type=${Array.isArray(schema.type) ? schema.type.join(" | ") : schema.type}` : null,
+      schema.format ? `format=${schema.format}` : null,
+      schema.enum ? `enum=${schema.enum.map((value) => JSON.stringify(value)).join(", ")}` : null,
+      schema.default !== undefined ? `default=${JSON.stringify(schema.default)}` : null,
+      schema.$ref ? `ref=${schema.$ref}` : null,
+      schema.description ?? null,
+    ].filter(Boolean);
+
+    entries.push({
+      key: currentKey,
+      value: parts.join(" • ") || "schema node",
+      sensitive: false,
+      source: "json-schema",
+    });
+  }
+
+  if (schema.properties) {
+    for (const [key, value] of Object.entries(schema.properties)) {
+      const next = prefix ? `${prefix}.${key}` : key;
+      entries.push(...collectSchemaEntries(value, next));
+    }
+  }
+
+  if (schema.definitions) {
+    for (const [key, value] of Object.entries(schema.definitions)) {
+      entries.push(...collectSchemaEntries(value, `definitions.${key}`));
+    }
+  }
+
+  if (schema.items) {
+    if (Array.isArray(schema.items)) {
+      schema.items.forEach((item, index) => {
+        entries.push(...collectSchemaEntries(item, `${prefix}[]${index}`));
+      });
+    } else {
+      entries.push(...collectSchemaEntries(schema.items, `${prefix}[]`));
+    }
+  }
+
+  for (const [label, variants] of [["anyOf", schema.anyOf], ["oneOf", schema.oneOf], ["allOf", schema.allOf]] as const) {
+    variants?.forEach((variant, index) => {
+      const next = prefix ? `${prefix}.${label}[${index}]` : `${label}[${index}]`;
+      entries.push(...collectSchemaEntries(variant, next));
+    });
+  }
+
+  return entries;
+}
+
 function ConfigPage() {
   const { data: config, isLoading } = useConfig();
   const { data: doctor, isLoading: doctorLoading } = useDoctorResults();
+  const { data: schema, isLoading: schemaLoading } = useConfigSchema();
   const doctorRun = useDoctorRun();
   const updateConfig = useUpdateConfig();
   const [search, setSearch] = useState("");
@@ -200,6 +259,13 @@ function ConfigPage() {
       search ? entry.key.toLowerCase().includes(search.toLowerCase()) : true,
     );
   }, [config, search]);
+
+  const schemaEntries = useMemo(() => {
+    if (!schema) return [];
+    return collectSchemaEntries(schema).filter((entry) =>
+      search ? entry.key.toLowerCase().includes(search.toLowerCase()) || String(entry.value).toLowerCase().includes(search.toLowerCase()) : true,
+    );
+  }, [schema, search]);
 
   const rawJson = useMemo(
     () => (config ? JSON.stringify(config, null, 2) : ""),
@@ -267,9 +333,17 @@ function ConfigPage() {
             <Stethoscope className="mr-2 h-4 w-4" />
             Doctor results
           </TabsTrigger>
+          <TabsTrigger value="schema">
+            <Braces className="mr-2 h-4 w-4" />
+            Schema
+          </TabsTrigger>
           <TabsTrigger value="json">
             <FileJson className="mr-2 h-4 w-4" />
             JSON
+          </TabsTrigger>
+          <TabsTrigger value="diff">
+            <GitCompareArrows className="mr-2 h-4 w-4" />
+            Diff
           </TabsTrigger>
         </TabsList>
 
@@ -456,6 +530,80 @@ function ConfigPage() {
               </Card>
             </>
           )}
+        </TabsContent>
+
+
+        <TabsContent value="schema" className="space-y-6">
+          {schemaLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+          ) : !schema ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Schema unavailable.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base">Config schema overview</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Runtime JSON Schema for the effective Rune config. Use search to inspect field types, defaults, refs, and enum constraints.
+                    </p>
+                  </div>
+                  <Badge variant="outline">{schemaEntries.length} nodes</Badge>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {schemaEntries.map((entry) => (
+                      <div key={entry.key} className="rounded-lg border p-3">
+                        <p className="font-mono text-xs text-muted-foreground">{entry.key}</p>
+                        <p className="mt-1 text-sm">{String(entry.value)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Raw JSON Schema</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <pre className="overflow-x-auto rounded-md bg-muted p-4 text-sm">
+                    {JSON.stringify(schema, null, 2)}
+                  </pre>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="diff">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Current vs edited JSON</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Quick visual diff between the live effective config and the editor buffer. Enter edit mode to stage changes.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <div>
+                  <p className="mb-2 text-sm font-medium">Current</p>
+                  <pre className="min-h-[420px] overflow-x-auto rounded-md bg-muted p-4 text-sm">{rawJson}</pre>
+                </div>
+                <div>
+                  <p className="mb-2 text-sm font-medium">Editor buffer</p>
+                  <pre className="min-h-[420px] overflow-x-auto rounded-md bg-muted p-4 text-sm">{editMode ? editJson : rawJson}</pre>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="json">

@@ -10,6 +10,7 @@ import type {
   TtsStatusResponse,
   SttStatusResponse,
   DoctorReport,
+  ConfigSchemaResponse,
 } from "@/lib/api-types";
 
 export function useHealth() {
@@ -112,6 +113,14 @@ export function useConfig() {
   return useQuery({
     queryKey: ["config"],
     queryFn: () => api.get<Record<string, unknown>>("/config"),
+  });
+}
+
+
+export function useConfigSchema() {
+  return useQuery({
+    queryKey: ["config", "schema"],
+    queryFn: () => api.get<ConfigSchemaResponse>("/config/schema"),
   });
 }
 
