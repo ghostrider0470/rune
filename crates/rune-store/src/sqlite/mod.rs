@@ -502,7 +502,9 @@ impl TurnRepo for SqliteTurnRepo {
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    &format!("INSERT INTO turns ({TURN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
+                    &format!(
+                        "INSERT INTO turns ({TURN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+                    ),
                     rusqlite::params![
                         t.id.to_string(),
                         t.session_id.to_string(),
@@ -1456,30 +1458,40 @@ impl SqliteMemoryEmbeddingRepo {
 impl MemoryEmbeddingRepo for SqliteMemoryEmbeddingRepo {
     async fn upsert_chunk(
         &self,
+        project_id: Option<&str>,
         file_path: &str,
         chunk_index: i32,
         chunk_text: &str,
         _embedding: &[f32],
     ) -> Result<(), StoreError> {
+        let pid = project_id.map(str::to_string);
         let fp = file_path.to_string();
         let ct = chunk_text.to_string();
         self.conn.call(move |conn| {
             conn.execute(
-                "INSERT INTO memory_embeddings (id, file_path, chunk_index, chunk_text, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT (file_path, chunk_index)
+                "INSERT INTO memory_embeddings (id, project_id, file_path, chunk_index, chunk_text, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (project_id, file_path, chunk_index)
                  DO UPDATE SET chunk_text = excluded.chunk_text, created_at = excluded.created_at",
-                rusqlite::params![Uuid::now_v7().to_string(), fp, chunk_index, ct, to_rfc3339(&Utc::now())],
+                rusqlite::params![Uuid::now_v7().to_string(), pid, fp, chunk_index, ct, to_rfc3339(&Utc::now())],
             )?;
             Ok(())
         }).await.map_err(StoreError::from)
     }
 
-    async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError> {
+    async fn delete_by_file(
+        &self,
+        project_id: Option<&str>,
+        file_path: &str,
+    ) -> Result<usize, StoreError> {
+        let pid = project_id.map(str::to_string);
         let fp = file_path.to_string();
         self.conn
             .call(move |conn| {
-                conn.execute("DELETE FROM memory_embeddings WHERE file_path = ?1", [&fp])
+                conn.execute(
+                    "DELETE FROM memory_embeddings WHERE file_path = ?2 AND project_id IS ?1",
+                    rusqlite::params![pid, fp],
+                )
             })
             .await
             .map_err(StoreError::from)
@@ -1487,27 +1499,30 @@ impl MemoryEmbeddingRepo for SqliteMemoryEmbeddingRepo {
 
     async fn keyword_search(
         &self,
+        project_id: Option<&str>,
         query: &str,
         limit: i64,
     ) -> Result<Vec<KeywordSearchRow>, StoreError> {
+        let pid = project_id.map(str::to_string);
         let q = query.to_string();
         self.conn
             .call(move |conn| {
                 conn.prepare(
-                    "SELECT me.file_path, me.chunk_text, fts.rank AS score
+                    "SELECT me.project_id, me.file_path, me.chunk_text, fts.rank AS score
                  FROM memory_embeddings_fts fts
                  JOIN memory_embeddings me ON me.rowid = fts.rowid
-                 WHERE memory_embeddings_fts MATCH ?1
+                 WHERE me.project_id IS ?1 AND memory_embeddings_fts MATCH ?2
                  ORDER BY fts.rank
-                 LIMIT ?2",
+                 LIMIT ?3",
                 )?
-                .query_map(rusqlite::params![q, limit], |row| {
+                .query_map(rusqlite::params![pid, q, limit], |row| {
                     Ok(KeywordSearchRow {
-                        file_path: row.get(0)?,
-                        chunk_text: row.get(1)?,
+                        project_id: row.get(0)?,
+                        file_path: row.get(1)?,
+                        chunk_text: row.get(2)?,
                         // FTS5 rank is negative (lower = better). Negate for consistency with PG.
                         score: {
-                            let r: f64 = row.get(2)?;
+                            let r: f64 = row.get(3)?;
                             -r
                         },
                     })
@@ -1520,43 +1535,57 @@ impl MemoryEmbeddingRepo for SqliteMemoryEmbeddingRepo {
 
     async fn vector_search(
         &self,
+        _project_id: Option<&str>,
         _embedding: &[f32],
         _limit: i64,
     ) -> Result<Vec<VectorSearchRow>, StoreError> {
         Ok(vec![])
     }
 
-    async fn count(&self) -> Result<i64, StoreError> {
+    async fn count(&self, project_id: Option<&str>) -> Result<i64, StoreError> {
+        let pid = project_id.map(str::to_string);
         self.conn
             .call(move |conn| {
-                conn.query_row("SELECT COUNT(*) FROM memory_embeddings", [], |row| {
-                    row.get(0)
-                })
+                conn.query_row(
+                    "SELECT COUNT(*) FROM memory_embeddings WHERE project_id IS ?1",
+                    [pid],
+                    |row| row.get(0),
+                )
             })
             .await
             .map_err(StoreError::from)
     }
 
-    async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
+    async fn list_indexed_files(
+        &self,
+        project_id: Option<&str>,
+    ) -> Result<Vec<String>, StoreError> {
+        let pid = project_id.map(str::to_string);
         self.conn
             .call(move |conn| {
                 conn.prepare(
-                    "SELECT DISTINCT file_path FROM memory_embeddings ORDER BY file_path ASC",
+                    "SELECT DISTINCT file_path FROM memory_embeddings WHERE project_id IS ?1 ORDER BY file_path ASC",
                 )?
-                .query_map([], |row| row.get(0))?
+                .query_map([pid], |row| row.get(0))?
                 .collect::<Result<Vec<String>, _>>()
             })
             .await
             .map_err(StoreError::from)
     }
 
-    async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
+    async fn delete_chunk(
+        &self,
+        project_id: Option<&str>,
+        file_path: &str,
+        chunk_index: i32,
+    ) -> Result<bool, StoreError> {
+        let pid = project_id.map(str::to_string);
         let fp = file_path.to_string();
         self.conn
             .call(move |conn| {
                 let changed = conn.execute(
-                    "DELETE FROM memory_embeddings WHERE file_path = ?1 AND chunk_index = ?2",
-                    rusqlite::params![fp, chunk_index],
+                    "DELETE FROM memory_embeddings WHERE project_id IS ?1 AND file_path = ?2 AND chunk_index = ?3",
+                    rusqlite::params![pid, fp, chunk_index],
                 )?;
                 Ok(changed > 0)
             })
@@ -1564,10 +1593,14 @@ impl MemoryEmbeddingRepo for SqliteMemoryEmbeddingRepo {
             .map_err(StoreError::from)
     }
 
-    async fn delete_all(&self) -> Result<usize, StoreError> {
+    async fn delete_all(&self, project_id: Option<&str>) -> Result<usize, StoreError> {
+        let pid = project_id.map(str::to_string);
         self.conn
             .call(move |conn| {
-                let changed = conn.execute("DELETE FROM memory_embeddings", [])?;
+                let changed = conn.execute(
+                    "DELETE FROM memory_embeddings WHERE project_id IS ?1",
+                    [pid],
+                )?;
                 Ok(changed)
             })
             .await

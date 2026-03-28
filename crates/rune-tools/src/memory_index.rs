@@ -771,7 +771,7 @@ impl MemoryIndex {
         repo: &dyn MemoryEmbeddingRepo,
     ) -> Result<usize, MemoryIndexError> {
         let file_path = path.display().to_string();
-        repo.delete_by_file(&file_path).await.map_err(|err| {
+        repo.delete_by_file(None, &file_path).await.map_err(|err| {
             MemoryIndexError::Indexing(format!(
                 "failed to delete existing chunks for {file_path}: {err}"
             ))
@@ -789,6 +789,7 @@ impl MemoryIndex {
             })?;
 
             repo.upsert_chunk(
+                None,
                 &file_path,
                 chunk_index,
                 &embedded.chunk.chunk_text,
@@ -813,7 +814,7 @@ impl MemoryIndex {
         repo: &dyn MemoryEmbeddingRepo,
     ) -> Result<usize, MemoryIndexError> {
         let file_path = path.display().to_string();
-        repo.delete_by_file(&file_path).await.map_err(|err| {
+        repo.delete_by_file(None, &file_path).await.map_err(|err| {
             MemoryIndexError::Indexing(format!("failed to delete chunks for {file_path}: {err}"))
         })
     }
@@ -1258,7 +1259,7 @@ Delta echo foxtrot.
 
     struct WrongDimensionEmbeddingProvider;
 
-    type UpsertedChunk = (String, i32, String, Vec<f32>);
+    type UpsertedChunk = (Option<String>, String, i32, String, Vec<f32>);
 
     #[derive(Default)]
     struct RecordingMemoryEmbeddingRepo {
@@ -1270,12 +1271,14 @@ Delta echo foxtrot.
     impl MemoryEmbeddingRepo for RecordingMemoryEmbeddingRepo {
         async fn upsert_chunk(
             &self,
+            project_id: Option<&str>,
             file_path: &str,
             chunk_index: i32,
             chunk_text: &str,
             embedding: &[f32],
         ) -> Result<(), StoreError> {
             self.upserted_chunks.lock().unwrap().push((
+                project_id.map(str::to_string),
                 file_path.to_string(),
                 chunk_index,
                 chunk_text.to_string(),
@@ -1284,7 +1287,7 @@ Delta echo foxtrot.
             Ok(())
         }
 
-        async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError> {
+        async fn delete_by_file(&self, _project_id: Option<&str>, file_path: &str) -> Result<usize, StoreError> {
             self.deleted_files
                 .lock()
                 .unwrap()
@@ -1294,6 +1297,7 @@ Delta echo foxtrot.
 
         async fn keyword_search(
             &self,
+            _project_id: Option<&str>,
             _query: &str,
             _limit: i64,
         ) -> Result<Vec<KeywordSearchRow>, StoreError> {
@@ -1302,26 +1306,35 @@ Delta echo foxtrot.
 
         async fn vector_search(
             &self,
+            _project_id: Option<&str>,
             _embedding: &[f32],
             _limit: i64,
         ) -> Result<Vec<VectorSearchRow>, StoreError> {
             Ok(Vec::new())
         }
 
-        async fn count(&self) -> Result<i64, StoreError> {
+        async fn count(&self, _project_id: Option<&str>) -> Result<i64, StoreError> {
             Ok(0)
         }
 
-        async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
+        async fn list_indexed_files(&self, _project_id: Option<&str>) -> Result<Vec<String>, StoreError> {
             Ok(Vec::new())
         }
 
-        async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
-            self.deleted_files.lock().unwrap().push(format!("{}:{}", file_path, chunk_index));
+        async fn delete_chunk(
+            &self,
+            _project_id: Option<&str>,
+            file_path: &str,
+            chunk_index: i32,
+        ) -> Result<bool, StoreError> {
+            self.deleted_files
+                .lock()
+                .unwrap()
+                .push(format!("{}:{}", file_path, chunk_index));
             Ok(true)
         }
 
-        async fn delete_all(&self) -> Result<usize, StoreError> {
+        async fn delete_all(&self, _project_id: Option<&str>) -> Result<usize, StoreError> {
             Ok(0)
         }
     }
@@ -1461,10 +1474,11 @@ Delta echo foxtrot.
 
         let upserted = repo.upserted_chunks.lock().unwrap();
         assert_eq!(upserted.len(), 1);
-        assert_eq!(upserted[0].0, "memory/preferences.md");
-        assert_eq!(upserted[0].1, 0);
-        assert!(upserted[0].2.contains("Preferences"));
-        assert_eq!(upserted[0].3.len(), 4);
+        assert_eq!(upserted[0].0, None);
+        assert_eq!(upserted[0].1, "memory/preferences.md");
+        assert_eq!(upserted[0].2, 0);
+        assert!(upserted[0].3.contains("Preferences"));
+        assert_eq!(upserted[0].4.len(), 4);
     }
 
     #[tokio::test]

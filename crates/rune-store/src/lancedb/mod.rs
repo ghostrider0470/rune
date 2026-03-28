@@ -100,6 +100,7 @@ fn embedding_field(dims: i32) -> Field {
 pub(crate) fn embeddings_schema(dims: i32) -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("id", DataType::Utf8, false),
+        Field::new("project_id", DataType::Utf8, true),
         Field::new("file_path", DataType::Utf8, false),
         Field::new("chunk_index", DataType::Int32, false),
         Field::new("chunk_text", DataType::Utf8, false),
@@ -205,6 +206,7 @@ fn make_embedding_list(embedding: &[f32], dims: i32) -> Result<FixedSizeListArra
 pub(crate) fn embedding_batch(
     schema: &Arc<Schema>,
     id: &str,
+    project_id: Option<&str>,
     file_path: &str,
     chunk_index: i32,
     chunk_text: &str,
@@ -218,6 +220,7 @@ pub(crate) fn embedding_batch(
         schema.clone(),
         vec![
             Arc::new(StringArray::from(vec![id])),
+            Arc::new(StringArray::from(vec![project_id])),
             Arc::new(StringArray::from(vec![file_path])),
             Arc::new(Int32Array::from(vec![chunk_index])),
             Arc::new(StringArray::from(vec![chunk_text])),

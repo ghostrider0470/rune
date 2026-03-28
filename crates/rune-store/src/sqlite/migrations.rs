@@ -166,13 +166,15 @@ CREATE INDEX IF NOT EXISTS idx_pairing_requests_expires ON pairing_requests (exp
 -- Memory embeddings
 CREATE TABLE IF NOT EXISTS memory_embeddings (
     id          TEXT PRIMARY KEY,
+    project_id  TEXT,
     file_path   TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
     chunk_text  TEXT NOT NULL,
     created_at  TEXT NOT NULL,
-    UNIQUE (file_path, chunk_index)
+    UNIQUE (project_id, file_path, chunk_index)
 );
-CREATE INDEX IF NOT EXISTS idx_memory_embeddings_file_path ON memory_embeddings (file_path);
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_project_id ON memory_embeddings (project_id);
+CREATE INDEX IF NOT EXISTS idx_memory_embeddings_project_file_path ON memory_embeddings (project_id, file_path);
 
 -- FTS5 virtual table for keyword search
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings_fts
