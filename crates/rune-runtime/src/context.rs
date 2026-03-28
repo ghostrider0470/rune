@@ -88,6 +88,7 @@ impl ContextAssembler {
 
         messages.push(ChatMessage {
             role: Role::System,
+            attachments: Vec::new(),
             content: Some(system_content),
             name: None,
             tool_call_id: None,
@@ -139,6 +140,7 @@ impl ContextAssembler {
                 if !tool_calls.is_empty() {
                     messages.push(ChatMessage {
                         role: Role::Assistant,
+                        attachments: Vec::new(),
                         content: None,
                         name: None,
                         tool_call_id: None,
@@ -167,6 +169,7 @@ impl ContextAssembler {
                 }
                 Some(ChatMessage {
                     role: Role::User,
+                    attachments: message.attachments,
                     content: Some(message.content),
                     name: None,
                     tool_call_id: None,
@@ -179,6 +182,7 @@ impl ContextAssembler {
                 }
                 Some(ChatMessage {
                     role: Role::Assistant,
+                    attachments: Vec::new(),
                     content: Some(content),
                     name: None,
                     tool_call_id: None,
@@ -193,6 +197,7 @@ impl ContextAssembler {
                 ..
             } => Some(ChatMessage {
                 role: Role::Tool,
+                attachments: Vec::new(),
                 content: Some(output),
                 name: None,
                 tool_call_id: Some(tool_call_id.to_string()),
@@ -277,6 +282,7 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
                     j + offset,
                     ChatMessage {
                         role: Role::Tool,
+                        attachments: Vec::new(),
                         content: Some("[Tool call interrupted — no result available]".to_string()),
                         name: None,
                         tool_call_id: Some(id),
