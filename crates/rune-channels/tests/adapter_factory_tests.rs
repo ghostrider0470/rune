@@ -89,13 +89,29 @@ fn signal_adapter_requires_number() {
 }
 
 #[test]
-fn teams_adapter_requires_bot_token() {
-    let config = ChannelsConfig::default();
+fn teams_adapter_requires_app_id_when_no_legacy_fallback_is_present() {
+    let config = ChannelsConfig {
+        teams_bot_token: Some("legacy-token".into()),
+        ..ChannelsConfig::default()
+    };
     let err = match create_adapter("teams", &config) {
-        Ok(_) => panic!("teams should require bot token"),
+        Ok(_) => panic!("teams should require app id when only legacy token is set"),
         Err(err) => err,
     };
-    assert_provider_error(err, "teams_bot_token is required");
+    assert_provider_error(err, "teams_app_id or teams_bot_app_id is required");
+}
+
+#[test]
+fn teams_adapter_requires_app_password_when_no_legacy_fallback_is_present() {
+    let config = ChannelsConfig {
+        teams_app_id: Some("app-id".into()),
+        ..ChannelsConfig::default()
+    };
+    let err = match create_adapter("teams", &config) {
+        Ok(_) => panic!("teams should require app password when only app id is set"),
+        Err(err) => err,
+    };
+    assert_provider_error(err, "teams_app_password or teams_bot_token is required");
 }
 
 #[test]
