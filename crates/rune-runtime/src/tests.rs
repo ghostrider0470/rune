@@ -2145,6 +2145,57 @@ async fn enabled_skills_are_injected_into_system_prompt() {
 }
 
 #[tokio::test]
+async fn tool_loop_uses_workspace_name_for_default_project_permit_bucket() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let project_root = h.workspace_root.join("agents/phoenix");
+    std::fs::create_dir_all(&project_root).unwrap();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(project_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response(
+            "demo_tool",
+            r#"{"value":1}"#,
+        ),
+        FakeModelProvider::text_response("done"),
+    ]));
+    let tool_executor = Arc::new(FakeToolExecutor::new(vec!["ok".to_string()]));
+    let executor = h
+        .turn_executor(model, tool_executor, {
+            let mut registry = ToolRegistry::new();
+            registry.register(RtToolDefinition {
+                name: "demo_tool".to_string(),
+                description: "demo".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+                category: ToolCategory::External,
+                requires_approval: false,
+            });
+            registry
+        })
+        .with_lane_queue(Arc::new(crate::lane_queue::LaneQueue::with_limits(4, 8, 1024, 32, 1)));
+
+    executor.execute(session.id, "run tool", None).await.unwrap();
+
+    let stats = executor.lane_stats().unwrap();
+    assert_eq!(stats.tool_active, 0);
+
+    let acquired = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        Arc::new(crate::lane_queue::LaneQueue::with_limits(4, 8, 1024, 32, 1))
+            .acquire_tool(Some("phoenix")),
+    )
+    .await;
+    assert!(acquired.is_ok());
+}
+
+#[tokio::test]
 async fn selected_model_metadata_is_used_for_future_turns() {
     let h = TestHarness::new();
     let engine = h.session_engine();

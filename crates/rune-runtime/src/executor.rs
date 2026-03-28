@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -34,6 +34,13 @@ use crate::session_metadata::selected_model;
 use crate::skill::SkillRegistry;
 use crate::usage::UsageAccumulator;
 use crate::workspace::WorkspaceLoader;
+
+fn tool_project_key(workspace_root: &Path) -> Option<&str> {
+    workspace_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+}
 
 /// Maximum tool-call loop iterations before aborting.
 const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 200;
@@ -1006,6 +1013,12 @@ impl TurnExecutor {
                         tool_call_id: tool_call_id.clone(),
                         tool_name: tc.function.name.clone(),
                         arguments: args,
+                    };
+
+                    let _tool_permit = if let Some(ref lq) = self.lane_queue {
+                        Some(lq.acquire_tool(tool_project_key(&workspace_root)).await)
+                    } else {
+                        None
                     };
 
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
