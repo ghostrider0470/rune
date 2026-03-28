@@ -19,6 +19,7 @@ import {
   Wrench,
   Settings2,
   BrainCircuit,
+  Palette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -66,6 +67,7 @@ const adminItems: NavItem[] = [
   { label: "Agents", href: "/agents", icon: Bot, description: "Agent registry", match: "prefix" },
   { label: "Skills", href: "/skills", icon: Wrench, description: "Skill plugins", match: "prefix" },
   { label: "Usage", href: "/usage", icon: BarChart3, description: "Token usage and costs", match: "prefix" },
+  { label: "Design System", href: "/design-system", icon: Palette, description: "Theme tokens and component reference", match: "prefix" },
   { label: "Logs", href: "/logs", icon: ScrollText, description: "System log viewer", match: "prefix" },
   { label: "Config", href: "/config", icon: Settings2, description: "Runtime configuration", match: "prefix" },
   { label: "Reminders", href: "/reminders", icon: Bell, description: "Scheduled notifications", match: "prefix" },

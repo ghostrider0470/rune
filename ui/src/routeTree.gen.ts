@@ -20,6 +20,7 @@ import { Route as AdminModelsRouteImport } from './routes/_admin/models'
 import { Route as AdminMemoryRouteImport } from './routes/_admin/memory'
 import { Route as AdminLogsRouteImport } from './routes/_admin/logs'
 import { Route as AdminDiagnosticsRouteImport } from './routes/_admin/diagnostics'
+import { Route as AdminDesignSystemRouteImport } from './routes/_admin/design-system'
 import { Route as AdminDebugRouteImport } from './routes/_admin/debug'
 import { Route as AdminCronRouteImport } from './routes/_admin/cron'
 import { Route as AdminConfigRouteImport } from './routes/_admin/config'
@@ -83,6 +84,11 @@ const AdminDiagnosticsRoute = AdminDiagnosticsRouteImport.update({
   path: '/diagnostics',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminDesignSystemRoute = AdminDesignSystemRouteImport.update({
+  id: '/design-system',
+  path: '/design-system',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminDebugRoute = AdminDebugRouteImport.update({
   id: '/debug',
   path: '/debug',
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/config': typeof AdminConfigRoute
   '/cron': typeof AdminCronRoute
   '/debug': typeof AdminDebugRoute
+  '/design-system': typeof AdminDesignSystemRoute
   '/diagnostics': typeof AdminDiagnosticsRoute
   '/logs': typeof AdminLogsRoute
   '/memory': typeof AdminMemoryRoute
@@ -152,6 +159,7 @@ export interface FileRoutesByTo {
   '/config': typeof AdminConfigRoute
   '/cron': typeof AdminCronRoute
   '/debug': typeof AdminDebugRoute
+  '/design-system': typeof AdminDesignSystemRoute
   '/diagnostics': typeof AdminDiagnosticsRoute
   '/logs': typeof AdminLogsRoute
   '/memory': typeof AdminMemoryRoute
@@ -174,6 +182,7 @@ export interface FileRoutesById {
   '/_admin/config': typeof AdminConfigRoute
   '/_admin/cron': typeof AdminCronRoute
   '/_admin/debug': typeof AdminDebugRoute
+  '/_admin/design-system': typeof AdminDesignSystemRoute
   '/_admin/diagnostics': typeof AdminDiagnosticsRoute
   '/_admin/logs': typeof AdminLogsRoute
   '/_admin/memory': typeof AdminMemoryRoute
@@ -197,6 +206,7 @@ export interface FileRouteTypes {
     | '/config'
     | '/cron'
     | '/debug'
+    | '/design-system'
     | '/diagnostics'
     | '/logs'
     | '/memory'
@@ -216,6 +226,7 @@ export interface FileRouteTypes {
     | '/config'
     | '/cron'
     | '/debug'
+    | '/design-system'
     | '/diagnostics'
     | '/logs'
     | '/memory'
@@ -237,6 +248,7 @@ export interface FileRouteTypes {
     | '/_admin/config'
     | '/_admin/cron'
     | '/_admin/debug'
+    | '/_admin/design-system'
     | '/_admin/diagnostics'
     | '/_admin/logs'
     | '/_admin/memory'
@@ -333,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminDiagnosticsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/design-system': {
+      id: '/_admin/design-system'
+      path: '/design-system'
+      fullPath: '/design-system'
+      preLoaderRoute: typeof AdminDesignSystemRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/debug': {
       id: '/_admin/debug'
       path: '/debug'
@@ -412,6 +431,7 @@ interface AdminRouteChildren {
   AdminConfigRoute: typeof AdminConfigRoute
   AdminCronRoute: typeof AdminCronRoute
   AdminDebugRoute: typeof AdminDebugRoute
+  AdminDesignSystemRoute: typeof AdminDesignSystemRoute
   AdminDiagnosticsRoute: typeof AdminDiagnosticsRoute
   AdminLogsRoute: typeof AdminLogsRoute
   AdminMemoryRoute: typeof AdminMemoryRoute
@@ -432,6 +452,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminConfigRoute: AdminConfigRoute,
   AdminCronRoute: AdminCronRoute,
   AdminDebugRoute: AdminDebugRoute,
+  AdminDesignSystemRoute: AdminDesignSystemRoute,
   AdminDiagnosticsRoute: AdminDiagnosticsRoute,
   AdminLogsRoute: AdminLogsRoute,
   AdminMemoryRoute: AdminMemoryRoute,

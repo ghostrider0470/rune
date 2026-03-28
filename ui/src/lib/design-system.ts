@@ -1,4 +1,39 @@
 export const designSystem = {
+  color: {
+    palette: {
+      light: {
+        background: 'oklch(0.985 0.012 248)',
+        foreground: 'oklch(0.28 0.04 254)',
+        card: 'oklch(0.995 0.01 248)',
+        primary: 'oklch(0.65 0.25 35)',
+        secondary: 'oklch(0.955 0.02 250)',
+        accent: 'oklch(0.7 0.2 285)',
+        muted: 'oklch(0.94 0.018 248)',
+        border: 'oklch(0.9 0.02 250)',
+      },
+      dark: {
+        background: 'oklch(0.17 0.02 255)',
+        foreground: 'oklch(0.95 0.015 255)',
+        card: 'oklch(0.22 0.02 255)',
+        primary: 'oklch(0.75 0.22 35)',
+        secondary: 'oklch(0.32 0.03 258)',
+        accent: 'oklch(0.75 0.18 285)',
+        muted: 'oklch(0.27 0.02 255)',
+        border: 'oklch(1 0 0 / 14%)',
+      },
+      semantic: {
+        success: 'oklch(0.72 0.18 152)',
+        warning: 'oklch(0.82 0.17 84)',
+        error: 'oklch(0.64 0.24 25)',
+        info: 'oklch(0.7 0.15 245)',
+      },
+    },
+    gradients: {
+      brand: 'from-primary via-accent to-primary',
+      sunrise: 'from-primary/20 via-accent/15 to-background',
+      mesh: 'from-primary/12 via-background to-accent/12',
+    },
+  },
   typography: {
     display: {
       hero: 'text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl xl:text-7xl',
@@ -25,6 +60,20 @@ export const designSystem = {
     muted: 'text-muted-foreground',
   },
   spacing: {
+    scale: {
+      1: '0.25rem',
+      2: '0.5rem',
+      3: '0.75rem',
+      4: '1rem',
+      5: '1.25rem',
+      6: '1.5rem',
+      8: '2rem',
+      10: '2.5rem',
+      12: '3rem',
+      16: '4rem',
+      20: '5rem',
+      24: '6rem',
+    },
     page: {
       container: 'container mx-auto px-4 sm:px-6 lg:px-8',
       section: 'py-8 md:py-12',
@@ -83,6 +132,36 @@ export const designSystem = {
       accent: 'border border-primary/30 bg-primary/5 text-card-foreground',
       gradient: 'border border-primary/20 bg-gradient-to-br from-card to-primary/5 text-card-foreground',
       glass: 'border border-border/60 bg-background/70 text-card-foreground backdrop-blur',
+    },
+  },
+  components: {
+    button: {
+      base: 'inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-all',
+      emphasis: 'bg-primary text-primary-foreground hover:bg-primary/90',
+      subtle: 'border bg-background hover:bg-accent hover:text-accent-foreground',
+      ghost: 'hover:bg-accent/60 hover:text-accent-foreground',
+    },
+    card: {
+      base: 'rounded-xl border bg-card text-card-foreground shadow-sm',
+      interactive: 'transition-all hover:border-primary/30 hover:shadow-lg',
+      hero: 'rounded-2xl border border-primary/20 bg-gradient-to-br from-card to-primary/5 shadow-lg',
+    },
+    badge: {
+      neutral: 'border bg-background text-foreground',
+      emphasis: 'bg-primary text-primary-foreground',
+      subtle: 'bg-muted text-muted-foreground',
+    },
+    field: {
+      input: 'h-10 rounded-md border border-input bg-background px-3 text-sm',
+      textarea: 'min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm',
+      label: 'text-sm font-medium text-foreground',
+    },
+    modal: {
+      content: 'rounded-2xl border bg-card shadow-2xl',
+    },
+    table: {
+      shell: 'rounded-xl border bg-card',
+      rowInteractive: 'transition-colors hover:bg-muted/40',
     },
   },
   effects: {
