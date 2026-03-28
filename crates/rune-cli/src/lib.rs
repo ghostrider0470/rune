@@ -4053,6 +4053,61 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn projects_remove_updates_registry_and_clears_active_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path();
+
+        let mut registry = ProjectRegistry::new();
+        registry
+            .onboard(
+                "alpha",
+                "https://github.com/org/alpha.git",
+                workspace.join("alpha"),
+                workspace,
+                None,
+                None,
+            )
+            .unwrap();
+        registry
+            .onboard(
+                "beta",
+                "https://github.com/org/beta.git",
+                workspace.join("beta"),
+                workspace,
+                None,
+                None,
+            )
+            .unwrap();
+        registry.switch_active("beta").unwrap();
+
+        let removed = registry.remove("beta").unwrap();
+        registry.save(workspace).unwrap();
+
+        assert_eq!(removed.name, "beta");
+        let updated = ProjectRegistry::load(workspace).unwrap();
+        assert!(updated.get("beta").is_none());
+        assert!(updated.get("alpha").is_some());
+        assert_eq!(updated.active_project(), None);
+    }
+
+    #[test]
+    fn projects_remove_errors_for_missing_project() {
+        let _guard = crate::test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path();
+        let registry = ProjectRegistry::new();
+        registry.save(workspace).unwrap();
+
+        unsafe { std::env::set_var("RUNE_WORKSPACE", workspace); }
+        let err = handle_projects_remove("missing".to_string()).unwrap_err();
+        unsafe { std::env::remove_var("RUNE_WORKSPACE"); }
+
+        assert!(err.to_string().contains("project 'missing' is not registered"));
+    }
+
+    #[test]
     fn cli_setup_alias_supports_negative_quickstart_flags() {
         let cli = Cli::try_parse_from([
             "rune",
