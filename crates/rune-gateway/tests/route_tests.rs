@@ -4281,6 +4281,98 @@ async fn dashboard_models_lists_provider_inventory() {
     assert!(items.iter().any(|item| item["is_default"] == true));
 }
 
+
+#[tokio::test]
+async fn list_models_marks_configured_inventory_as_not_discovered() {
+    let mut config = AppConfig::default();
+    config.models.default_model = Some("openai/gpt-4.1-mini".to_string());
+    config.models.providers.push(ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.example".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1-mini".to_string())],
+    });
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(Request::get("/models").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["provider_name"], "openai");
+    assert_eq!(items[0]["discovered"], false);
+}
+
+#[tokio::test]
+async fn scan_models_uses_ollama_provider_discovery() {
+    use axum::{routing::get, Json, Router};
+    use serde_json::json;
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/api/tags",
+                get(|| async {
+                    Json(json!({
+                        "models": [
+                            {
+                                "name": "llama3.2:latest",
+                                "size": 12345,
+                                "modified_at": "2026-03-28T12:00:00Z"
+                            }
+                        ]
+                    }))
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.models.providers.push(ModelProviderConfig {
+        name: "local-ollama".to_string(),
+        kind: "ollama".to_string(),
+        base_url: format!("http://{addr}/v1"),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![],
+    });
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(Request::post("/models/scan").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    server.abort();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["provider"], "local-ollama");
+    assert_eq!(items[0]["models"][0]["name"], "llama3.2:latest");
+    assert_eq!(items[0]["models"][0]["size"], 12345);
+    assert_eq!(items[0]["models"][0]["modified_at"], "2026-03-28T12:00:00Z");
+}
+
 #[tokio::test]
 async fn dashboard_diagnostics_falls_back_to_status_notes() {
     let app = build_test_app(None);

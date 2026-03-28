@@ -289,21 +289,34 @@ Rune now ships a config-driven MCP client that can connect to external tool serv
 
 ### Phase 7 — Expanded LLM Providers (Backend)
 
-**New files in `crates/rune-models/src/`**
-- `google.rs` — Gemini
-- `ollama.rs` — Ollama local models + discovery
-- `bedrock.rs` — AWS Bedrock ConverseStream
-- `groq.rs` — Groq
-- `deepseek.rs` — DeepSeek
-- `mistral.rs` — Mistral
+Status: ✅ Completed 2026-03-28
 
-**Modify**
-- `crates/rune-config/src/lib.rs` — Extend provider kind enum
-- `crates/rune-models/src/lib.rs` — Register providers
+Rune already ships the expanded provider surface from this phase, including Gemini, Ollama, Bedrock, Groq, DeepSeek, and Mistral provider implementations, config wiring, and gateway model inventory endpoints. This pass closed the remaining roadmap bookkeeping gap by validating the current implementation and tightening the model scan route to reuse the provider-native Ollama discovery path.
 
-**Gateway routes**
-- `POST /models/scan`
-- `GET /models`
+**Landed work**
+- `crates/rune-models/src/provider/`
+  - `google.rs` — Gemini provider
+  - `ollama.rs` — Ollama OpenAI-compatible provider plus `/api/tags` discovery
+  - `bedrock.rs` — AWS Bedrock provider
+  - `groq.rs` — Groq provider
+  - `deepseek.rs` — DeepSeek provider
+  - `mistral.rs` — Mistral provider
+- `crates/rune-models/src/lib.rs`
+  - provider registration and config-driven provider factory coverage for the expanded backend set
+- `crates/rune-gateway/src/routes.rs`
+  - `GET /models` inventory listing
+  - `POST /models/scan` local model discovery using `rune_models::OllamaProvider::list_models()`
+  - explicit `discovered` flag on configured model inventory rows so configured-vs-discovered surfaces stay distinguishable
+- `crates/rune-gateway/tests/route_tests.rs`
+  - coverage for `GET /models`
+  - coverage for Ollama-backed `POST /models/scan`
+
+**Validation**
+- `cargo test -p rune-gateway list_models_marks_configured_inventory_as_not_discovered -- --nocapture`
+- `cargo test -p rune-gateway scan_models_uses_ollama_provider_discovery -- --nocapture`
+- `cargo check`
+
+Implementation note (2026-03-28): most of this phase was already present in the codebase. The shipped delta here was consolidating gateway-side Ollama scan behavior onto the model provider's native discovery implementation and updating the roadmap to reflect actual repo state.
 
 ---
 
