@@ -607,6 +607,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             "/config",
             get(routes::get_config).put(routes::update_config),
         )
+        .route("/config/schema", get(routes::get_config_schema))
         // Session parity routes
         .route("/api/sessions", get(routes::list_sessions))
         .route("/api/sessions/{id}", get(routes::get_session))

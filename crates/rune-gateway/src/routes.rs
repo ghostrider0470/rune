@@ -4227,6 +4227,12 @@ pub async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, Ga
 }
 
 /// `PUT /config` - replace the live configuration.
+/// `GET /config/schema` - return a JSON-schema-like shape for the current config.
+pub async fn get_config_schema(State(state): State<AppState>) -> Result<Json<Value>, GatewayError> {
+    let config = state.config.read().await;
+    Ok(Json(config.schema_value()))
+}
+
 pub async fn update_config(
     State(state): State<AppState>,
     Json(body): Json<Value>,

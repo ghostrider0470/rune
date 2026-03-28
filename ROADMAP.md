@@ -453,13 +453,27 @@ Implementation note (2026-03-28): the roadmap entry was stale relative to the re
 
 ### Phase 14 — Config Editor (Backend + UI)
 
-**Backend**
-- `GET /config`
-- `PUT /config`
-- `GET /config/schema`
+Status: ✅ Completed 2026-03-28
 
-**UI**
-- `ui/src/routes/_admin/config.tsx` — Form mode + raw JSON editor, search, diff view
+Rune already shipped the admin config surface with viewer/search, doctor integration, and raw JSON editing. This pass closes the remaining backend gap by exposing a typed config schema endpoint and wiring the UI hook/types for schema-aware editor follow-up work.
+
+**Landed work**
+- `crates/rune-gateway/src/routes.rs`
+  - `GET /config/schema` returns a JSON-schema-like view of the current redacted config shape
+- `crates/rune-gateway/src/server.rs`
+  - route registration for `/config/schema`
+- `crates/rune-config/src/lib.rs`
+  - config-derived schema generation from the redacted effective config
+- `ui/src/hooks/use-system.ts`
+  - `useConfigSchema()` React Query hook
+- `ui/src/lib/api-types.ts`
+  - config schema response types for UI consumers
+
+**Validation**
+- `cargo check`
+- `cd ui && npm run build`
+
+Implementation note (2026-03-28): the schema endpoint is currently a lightweight JSON-schema-like structure inferred from the live redacted config rather than a full hand-authored schema contract. That is enough to unblock schema-aware editor UX without exposing secrets, and can be hardened later if strict validation metadata becomes necessary.
 
 ---
 
