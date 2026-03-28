@@ -680,6 +680,8 @@ fn default_plugin_scan_interval() -> u64 {
 pub struct CommsConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default = "default_comms_transport")]
+    pub transport: String,
     #[serde(default)]
     pub comms_dir: Option<String>,
     #[serde(default = "default_comms_agent_id")]
@@ -688,6 +690,9 @@ pub struct CommsConfig {
     pub peer_id: String,
 }
 
+fn default_comms_transport() -> String {
+    "filesystem".to_string()
+}
 fn default_comms_agent_id() -> String {
     "rune".to_string()
 }
@@ -699,6 +704,7 @@ impl Default for CommsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            transport: default_comms_transport(),
             comms_dir: None,
             agent_id: default_comms_agent_id(),
             peer_id: default_comms_peer_id(),
