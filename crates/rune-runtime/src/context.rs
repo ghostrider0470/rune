@@ -309,17 +309,16 @@ fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Opt
     }
 
     for attachment in attachments {
-        let Some(url) = attachment.url.as_deref() else {
-            continue;
-        };
-        let mime = attachment.mime_type.as_deref().unwrap_or("");
-        if !mime.starts_with("image/") {
+        if !attachment_is_image(attachment) {
             continue;
         }
+
+        let Some(image_ref) = attachment_image_reference(attachment) else {
+            continue;
+        };
+
         parts.push(MessagePart::ImageUrl {
-            image_url: ImageUrlPart {
-                url: url.to_string(),
-            },
+            image_url: ImageUrlPart { url: image_ref },
         });
     }
 
@@ -328,6 +327,27 @@ fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Opt
     } else {
         Some(parts)
     }
+}
+
+fn attachment_is_image(attachment: &AttachmentRef) -> bool {
+    attachment
+        .mime_type
+        .as_deref()
+        .is_some_and(|mime| mime.starts_with("image/"))
+}
+
+fn attachment_image_reference(attachment: &AttachmentRef) -> Option<String> {
+    if !attachment_is_image(attachment) {
+        return None;
+    }
+
+    if let Some(url) = attachment.url.as_deref() {
+        return Some(url.to_string());
+    }
+
+    attachment.provider_file_id.as_ref().map(|provider_file_id| {
+        format!("provider-file:{}", provider_file_id)
+    })
 }
 
 fn render_user_message_content(content: &str, attachments: &[AttachmentRef]) -> String {
@@ -380,7 +400,7 @@ fn format_attachment_ref(attachment: &AttachmentRef) -> String {
 
 #[cfg(test)]
 mod attachment_prompt_tests {
-    use super::{build_user_message_parts, format_attachment_ref, render_user_message_content, ContextAssembler};
+    use super::{attachment_image_reference, build_user_message_parts, format_attachment_ref, render_user_message_content, ContextAssembler};
     use rune_core::{AttachmentRef, NormalizedMessage, TranscriptItem};
     use rune_models::{MessagePart, Role};
     use rune_store::models::TranscriptItemRow;
@@ -459,6 +479,22 @@ mod attachment_prompt_tests {
         assert_eq!(formatted, "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)");
     }
     #[test]
+    fn falls_back_to_provider_file_reference_for_image_without_url() {
+        let attachment = AttachmentRef {
+            name: "photo.jpg".into(),
+            mime_type: Some("image/jpeg".into()),
+            size_bytes: Some(42),
+            url: None,
+            provider_file_id: Some("file_456".into()),
+        };
+
+        assert_eq!(
+            attachment_image_reference(&attachment).as_deref(),
+            Some("provider-file:file_456")
+        );
+    }
+
+    #[test]
     fn builds_multimodal_parts_for_user_text_and_image_attachments() {
         let parts = build_user_message_parts(
             "Describe this image",
@@ -483,6 +519,25 @@ mod attachment_prompt_tests {
 
         assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
         assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg"));
+        assert_eq!(parts.len(), 2);
+    }
+
+    #[test]
+    fn builds_multimodal_parts_from_provider_file_id_when_url_missing() {
+        let parts = build_user_message_parts(
+            "Describe this image",
+            &[AttachmentRef {
+                name: "photo.jpg".into(),
+                mime_type: Some("image/jpeg".into()),
+                size_bytes: Some(42),
+                url: None,
+                provider_file_id: Some("file_789".into()),
+            }],
+        )
+        .expect("expected multimodal parts");
+
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
+        assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "provider-file:file_789"));
         assert_eq!(parts.len(), 2);
     }
 

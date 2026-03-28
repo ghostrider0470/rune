@@ -2746,6 +2746,104 @@ async fn openai_serializes_multimodal_user_content_parts() {
 }
 
 #[tokio::test]
+async fn openai_serializes_provider_file_image_reference_when_url_missing() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = OpenAiProvider::new(&server.uri(), "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Describe this image
+
+[Attachments]
+- photo.jpg (image/jpeg, provider_file_id=file_789)".into()),
+            content_parts: Some(vec![
+                MessagePart::Text {
+                    text: "Describe this image".into(),
+                },
+                MessagePart::ImageUrl {
+                    image_url: ImageUrlPart {
+                        url: "provider-file:file_789".into(),
+                    },
+                },
+            ]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = provider.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let content = body["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(content[1]["type"], "image_url");
+    assert_eq!(content[1]["image_url"]["url"], "provider-file:file_789");
+}
+
+#[tokio::test]
+async fn azure_serializes_provider_file_image_reference_when_url_missing() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Describe this image
+
+[Attachments]
+- photo.jpg (image/jpeg, provider_file_id=file_789)".into()),
+            content_parts: Some(vec![
+                MessagePart::Text {
+                    text: "Describe this image".into(),
+                },
+                MessagePart::ImageUrl {
+                    image_url: ImageUrlPart {
+                        url: "provider-file:file_789".into(),
+                    },
+                },
+            ]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = provider.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let content = body["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(content[1]["type"], "image_url");
+    assert_eq!(content[1]["image_url"]["url"], "provider-file:file_789");
+}
+
+#[tokio::test]
 async fn azure_serializes_multimodal_user_content_parts() {
     let server = MockServer::start().await;
 
