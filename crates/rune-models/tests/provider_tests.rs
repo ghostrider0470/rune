@@ -1402,7 +1402,7 @@ async fn routed_provider_does_not_fallback_on_non_retriable_error() {
         .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
             "error": { "message": "Invalid key", "code": "invalid_api_key" }
         })))
-        .expect(1)
+        .expect(4)
         .mount(&primary_server)
         .await;
 
