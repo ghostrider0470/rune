@@ -1842,6 +1842,9 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 4);
     assert_eq!(payload["lane_stats"]["subagent_active"], 0);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
+    assert_eq!(payload["lane_stats"]["tool_active"], 0);
+    assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
+    assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
 
     drop(main_permit);
 }
@@ -2086,6 +2089,8 @@ async fn status_reports_configured_lane_capacities() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 6);
     assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
+    assert_eq!(payload["lane_stats"]["tool_capacity"], 24);
+    assert_eq!(payload["lane_stats"]["project_tool_capacity"], 3);
 }
 
 #[tokio::test]
@@ -2108,7 +2113,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
-    let lane_queue = Arc::new(LaneQueue::with_capacities(2, 3, 4));
+    let lane_queue = Arc::new(LaneQueue::with_limits(2, 3, 4, 7, 2));
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
@@ -2192,6 +2197,9 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["tools"]["active"], 0);
+    assert_eq!(payload["lanes"]["tools"]["capacity"], 7);
+    assert_eq!(payload["lanes"]["tools"]["project_capacity"], 2);
 
     drop(main_permit);
     drop(subagent_permit);
