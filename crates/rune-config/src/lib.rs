@@ -630,6 +630,8 @@ pub struct RuntimeConfig {
     #[serde(default)]
     pub lanes: LaneQueueConfig,
     #[serde(default)]
+    pub tools: ToolConcurrencyConfig,
+    #[serde(default)]
     pub compaction: CompactionConfig,
 }
 
@@ -757,6 +759,22 @@ impl Default for LaneQueueConfig {
             main_capacity: 4,
             subagent_capacity: 8,
             cron_capacity: 1024,
+        }
+    }
+}
+
+/// Tool concurrency caps for background execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolConcurrencyConfig {
+    pub global_max_concurrent_tools: usize,
+    pub project_max_concurrent_tools: usize,
+}
+
+impl Default for ToolConcurrencyConfig {
+    fn default() -> Self {
+        Self {
+            global_max_concurrent_tools: 32,
+            project_max_concurrent_tools: 4,
         }
     }
 }
@@ -1956,6 +1974,8 @@ mod tests {
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
             std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
+            std::env::remove_var("RUNE_RUNTIME__TOOLS__PROJECT_MAX_CONCURRENT_TOOLS");
+            std::env::remove_var("RUNE_RUNTIME__TOOLS__GLOBAL_MAX_CONCURRENT_TOOLS");
         }
 
         let path = temp_config_path("file-override");
@@ -1975,6 +1995,10 @@ main_capacity = 6
 subagent_capacity = 9
 cron_capacity = 128
 
+[runtime.tools]
+global_max_concurrent_tools = 24
+project_max_concurrent_tools = 5
+
 [memory]
 level = "keyword"
 "#,
@@ -1989,6 +2013,8 @@ level = "keyword"
         assert_eq!(config.runtime.lanes.main_capacity, 6);
         assert_eq!(config.runtime.lanes.subagent_capacity, 9);
         assert_eq!(config.runtime.lanes.cron_capacity, 128);
+        assert_eq!(config.runtime.tools.global_max_concurrent_tools, 24);
+        assert_eq!(config.runtime.tools.project_max_concurrent_tools, 5);
         assert_eq!(config.memory.level, Some(MemoryLevel::Keyword));
         assert_eq!(config.memory.requested_level(), MemoryLevel::Keyword);
 
@@ -2015,18 +2041,21 @@ main_capacity = 4
         unsafe {
             std::env::set_var("RUNE_GATEWAY__PORT", "9090");
             std::env::set_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY", "12");
+            std::env::set_var("RUNE_RUNTIME__TOOLS__PROJECT_MAX_CONCURRENT_TOOLS", "7");
             std::env::set_var("RUNE_BROWSER__ENABLED", "true");
             std::env::set_var("RUNE_MEMORY__LEVEL", "file");
         }
         let config = AppConfig::load(Some(&path)).unwrap();
         assert_eq!(config.gateway.port, 9090);
         assert_eq!(config.runtime.lanes.main_capacity, 12);
+        assert_eq!(config.runtime.tools.project_max_concurrent_tools, 7);
         assert!(config.browser.enabled);
         assert_eq!(config.memory.level, Some(MemoryLevel::File));
         assert_eq!(config.memory.requested_level(), MemoryLevel::File);
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
             std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
+            std::env::remove_var("RUNE_RUNTIME__TOOLS__PROJECT_MAX_CONCURRENT_TOOLS");
             std::env::remove_var("RUNE_BROWSER__ENABLED");
             std::env::remove_var("RUNE_MEMORY__LEVEL");
         }

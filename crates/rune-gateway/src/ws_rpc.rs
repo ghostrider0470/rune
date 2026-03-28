@@ -954,7 +954,8 @@ impl RpcDispatcher {
 
     /// Current runtime lane utilisation and capacities.
     async fn runtime_lanes(&self) -> Result<Value, RpcError> {
-        let lane_stats = self.state.turn_executor.lane_stats().map(|stats| {
+        let stats = self.state.turn_executor.lane_stats();
+        let lane_stats = stats.as_ref().map(|stats| {
             json!({
                 "main": {
                     "active": stats.main_active,
@@ -970,10 +971,18 @@ impl RpcDispatcher {
                 },
             })
         });
+        let tool_stats = stats.as_ref().map(|stats| {
+            json!({
+                "active": stats.tool_active,
+                "capacity": stats.tool_capacity,
+                "project_capacity": stats.project_tool_capacity,
+            })
+        });
 
         Ok(json!({
             "enabled": lane_stats.is_some(),
             "lanes": lane_stats,
+            "tools": tool_stats,
         }))
     }
 

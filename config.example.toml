@@ -91,6 +91,15 @@ workspace = "/home/hamza/.openclaw/workspace"
 id = "fast"
 model = "oc-01-anthropic/claude-sonnet-4-6"
 
+[runtime.lanes]
+main_capacity = 4
+subagent_capacity = 8
+cron_capacity = 1024
+
+[runtime.tools]
+global_max_concurrent_tools = 32
+project_max_concurrent_tools = 4
+
 [logging]
 level = "info"
 json = true

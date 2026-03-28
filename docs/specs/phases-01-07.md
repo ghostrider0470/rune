@@ -588,7 +588,7 @@ pub trait RpcDispatch: Send + Sync {
 | `session.status` | `session_id` (required UUID) | Session status card JSON | `bad_request`, `not_found`, `internal` |
 | `cron.list` | `include_disabled?` (bool) | `[{id, name, enabled, ...}]` | `internal` |
 | `cron.status` | (none) | `{total_jobs, enabled_jobs, due_jobs}` | `internal` |
-| `runtime.lanes` | (none) | `{enabled, lanes: {main, subagent, cron}}` | (never fails) |
+| `runtime.lanes` | (none) | `{enabled, lanes: {main, subagent, cron}, tools}` | (never fails) |
 | `skills.list` | (none) | `[{name, description, enabled, source_dir, binary_path}]` | (never fails) |
 | `skills.reload` | (none) | `{success, discovered, loaded, removed}` | (never fails) |
 | `skills.enable` | `name` (required string) | `{name, enabled: true}` | `not_found` |
@@ -1120,6 +1120,11 @@ pub struct LaneQueueConfig {
     pub subagent_capacity: usize,   // default: 8
     pub cron_capacity: usize,       // default: 1024
 }
+
+pub struct ToolConcurrencyConfig {
+    pub global_max_concurrent_tools: usize,  // default: 32
+    pub project_max_concurrent_tools: usize, // default: 4
+}
 ```
 
 ### 4.3 Configuration
@@ -1131,6 +1136,10 @@ pub struct LaneQueueConfig {
 main_capacity = 4
 subagent_capacity = 8
 cron_capacity = 1024
+
+[runtime.tools]
+global_max_concurrent_tools = 32
+project_max_concurrent_tools = 4
 ```
 
 Environment overrides:
@@ -1138,6 +1147,8 @@ Environment overrides:
 RUNE_RUNTIME__LANES__MAIN_CAPACITY=6
 RUNE_RUNTIME__LANES__SUBAGENT_CAPACITY=12
 RUNE_RUNTIME__LANES__CRON_CAPACITY=2048
+RUNE_RUNTIME__TOOLS__GLOBAL_MAX_CONCURRENT_TOOLS=24
+RUNE_RUNTIME__TOOLS__PROJECT_MAX_CONCURRENT_TOOLS=6
 ```
 
 ### 4.4 Wire Protocol (existing — `runtime.lanes` RPC)
@@ -1160,7 +1171,8 @@ Response:
       "main": { "active": 2, "capacity": 4 },
       "subagent": { "active": 1, "capacity": 8 },
       "cron": { "active": 0, "capacity": 1024 }
-    }
+    },
+    "tools": { "active": 3, "capacity": 32, "project_capacity": 4 }
   }
 }
 ```
