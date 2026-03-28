@@ -4298,6 +4298,15 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(json["structured_errors_available"], false);
     let items = json["items"].as_array().unwrap();
     assert!(!items.is_empty());
+    let context_budget = &json["context_budget"];
+    assert_eq!(context_budget["max_tokens"], 128000);
+    assert_eq!(context_budget["warn_at_tokens"], 102400);
+    assert_eq!(context_budget["compress_after"], 50000);
+    assert_eq!(context_budget["reserved_system"], 5000);
+    assert_eq!(context_budget["reserved_task"], 10000);
+    assert_eq!(context_budget["usable_prompt_budget"], 113000);
+    assert_eq!(context_budget["auto_inject_project"], true);
+    assert_eq!(context_budget["memory_search_k"], 10);
 }
 
 #[tokio::test]
