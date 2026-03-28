@@ -409,6 +409,18 @@ export type A2uiEvent =
   | A2uiFormSubmitEvent
   | A2uiActionEvent;
 
+export interface A2uiFormSubmitRequest {
+  session_id: string;
+  callback_id: string;
+  data: Record<string, unknown>;
+}
+
+export interface A2uiActionRequest {
+  session_id: string;
+  component_id: string;
+  action_target: string;
+}
+
 // TTS/STT
 export interface TtsVoiceEntry {
   id: string;

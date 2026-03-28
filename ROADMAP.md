@@ -75,7 +75,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Heartbeat + Silent Eval | ✅ Done | HEARTBEAT_OK suppression works |
 | Sub-agents | ✅ Done | Session spawning + manager trait |
 | Semantic Browser Snapshots | ⚠️ 2026-03-16 | `rune-browser` now emits semantic snapshots, exposes a real `browse` tool, and is wired through gateway/config against the existing CDP snapshot path; Chromium launch/pool lifecycle and selector-aware extraction still need follow-up |
-| A2UI Protocol | ❌ Missing | No streaming UI components |
+| A2UI Protocol | ✅ 2026-03-28 | A2UI event bus, tool/RPC wiring, and admin UI renderers landed with inline/panel component rendering plus form/action callbacks |
 | TTS | ❌ Missing | No text-to-speech providers |
 | STT | ❌ Missing | No speech-to-text providers |
 | LLM Providers | ✅ Partial | Anthropic, OpenAI, Azure only — missing Google, Ollama, Bedrock, Groq, DeepSeek, Mistral |
@@ -486,14 +486,22 @@ Implementation note (2026-03-16): this checkpoint lands semantic snapshot format
 
 ### Phase 19 — A2UI Protocol (Backend + UI)
 
-**Backend**
-- `crates/rune-gateway/src/a2ui.rs`
-  - Streaming JSONL transport for declarative UI components
-  - Component types: chart, form, card, table, list
-  - `a2ui.push` and `a2ui.reset` events over WebSocket
+Status: ✅ Completed 2026-03-28
 
-**UI**
-- `ui/src/components/a2ui/` renderer components
+Rune now ships an end-to-end A2UI surface across the gateway WebSocket event bus and the admin chat UI. The backend exposes A2UI event types plus `a2ui_push`, `a2ui.form_submit`, and `a2ui.action` plumbing; the UI renders inline/panel components and sends callbacks back over WS RPC.
+
+**Landed work**
+- `crates/rune-gateway/src/a2ui.rs` — A2UI component/event model, broadcast helpers, and `a2ui_push` tool executor
+- `crates/rune-gateway/src/ws_rpc.rs` — `a2ui.form_submit` and `a2ui.action` RPC handlers
+- `ui/src/hooks/use-a2ui.ts` — session-scoped component state plus RPC callback helpers
+- `ui/src/components/a2ui/*.tsx` — card/table/list/form/chart/kv/progress/code renderers with graceful fallback
+- `ui/src/routes/_admin/chat.tsx` — inline/panel A2UI rendering integrated into the shipped chat workspace
+
+**Validation**
+- `cd ui && npm run build`
+- `cargo check`
+
+Implementation note (2026-03-28): the base A2UI skeleton already existed in-tree but did not satisfy the roadmap's interactive acceptance bar. This pass completed the missing UI interaction layer, added renderer coverage for the declared component set, and updated roadmap bookkeeping to reflect the shipped state.
 
 ---
 
