@@ -1008,6 +1008,11 @@ impl TurnExecutor {
                         arguments: args,
                     };
 
+                    let _tool_permit = match &self.lane_queue {
+                        Some(queue) => Some(queue.acquire_tool(call.project_key()).await),
+                        None => None,
+                    };
+
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,
                         Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
@@ -1086,6 +1091,13 @@ impl TurnExecutor {
                                     tool_call_id: call.tool_call_id.clone(),
                                     tool_name: call.tool_name.clone(),
                                     arguments: auto_args,
+                                };
+
+                                let _tool_permit = match &self.lane_queue {
+                                    Some(queue) => {
+                                        Some(queue.acquire_tool(auto_call.project_key()).await)
+                                    }
+                                    None => None,
                                 };
 
                                 match self.tool_executor.execute(auto_call).await {
