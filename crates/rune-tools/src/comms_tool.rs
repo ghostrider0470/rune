@@ -34,10 +34,7 @@ pub trait CommsOps: Send + Sync {
     ) -> Result<String, String>;
 
     /// Read messages from inbox. Returns summaries and optionally archives them.
-    async fn read_inbox(
-        &self,
-        mark_read: bool,
-    ) -> Result<Vec<CommsMessageSummary>, String>;
+    async fn read_inbox(&self, mark_read: bool) -> Result<Vec<CommsMessageSummary>, String>;
 }
 
 /// Tool executor for inter-agent comms (handles both comms_send and comms_read).
@@ -57,7 +54,9 @@ impl<C: CommsOps> ToolExecutor for CommsToolExecutor<C> {
         match call.tool_name.as_str() {
             "comms_send" => self.handle_send(call).await,
             "comms_read" => self.handle_read(call).await,
-            other => Err(ToolError::UnknownTool { name: other.to_string() }),
+            other => Err(ToolError::UnknownTool {
+                name: other.to_string(),
+            }),
         }
     }
 }
@@ -215,10 +214,7 @@ mod tests {
             Ok(format!("msg-test-{subject}"))
         }
 
-        async fn read_inbox(
-            &self,
-            _mark_read: bool,
-        ) -> Result<Vec<CommsMessageSummary>, String> {
+        async fn read_inbox(&self, _mark_read: bool) -> Result<Vec<CommsMessageSummary>, String> {
             Ok(vec![CommsMessageSummary {
                 id: "msg-001".to_string(),
                 from: "openclaw".to_string(),
@@ -241,10 +237,13 @@ mod tests {
     #[tokio::test]
     async fn send_returns_message_id() {
         let exec = CommsToolExecutor::new(Arc::new(MockComms));
-        let call = make_call("comms_send", serde_json::json!({
-            "subject": "hello",
-            "body": "test body"
-        }));
+        let call = make_call(
+            "comms_send",
+            serde_json::json!({
+                "subject": "hello",
+                "body": "test body"
+            }),
+        );
         let result = exec.execute(call).await.unwrap();
         assert!(!result.is_error);
         assert!(result.output.contains("Message sent:"));
@@ -253,10 +252,13 @@ mod tests {
     #[tokio::test]
     async fn empty_body_returns_error() {
         let exec = CommsToolExecutor::new(Arc::new(MockComms));
-        let call = make_call("comms_send", serde_json::json!({
-            "subject": "hello",
-            "body": ""
-        }));
+        let call = make_call(
+            "comms_send",
+            serde_json::json!({
+                "subject": "hello",
+                "body": ""
+            }),
+        );
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }
@@ -264,9 +266,12 @@ mod tests {
     #[tokio::test]
     async fn missing_body_returns_error() {
         let exec = CommsToolExecutor::new(Arc::new(MockComms));
-        let call = make_call("comms_send", serde_json::json!({
-            "subject": "hello"
-        }));
+        let call = make_call(
+            "comms_send",
+            serde_json::json!({
+                "subject": "hello"
+            }),
+        );
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }
@@ -274,9 +279,12 @@ mod tests {
     #[tokio::test]
     async fn defaults_are_applied() {
         let exec = CommsToolExecutor::new(Arc::new(MockComms));
-        let call = make_call("comms_send", serde_json::json!({
-            "body": "status update"
-        }));
+        let call = make_call(
+            "comms_send",
+            serde_json::json!({
+                "body": "status update"
+            }),
+        );
         let result = exec.execute(call).await.unwrap();
         assert!(!result.is_error);
     }
