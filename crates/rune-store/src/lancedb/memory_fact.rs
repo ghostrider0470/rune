@@ -1,5 +1,7 @@
 //! LanceDB implementation of [`MemoryFactRepo`].
 
+use std::collections::HashMap;
+
 use arrow_array::Array;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -240,7 +242,7 @@ impl MemoryFactRepo for LanceStore {
             .map_err(|e| StoreError::Database(format!("lancedb list_all: {e}")))?;
         let batches = collect_batches(stream).await?;
 
-        let mut results = Vec::new();
+        let mut latest_by_fact_id: HashMap<Uuid, MemoryFact> = HashMap::new();
         for batch in &batches {
             let fact_ids = str_col(batch, "fact_id");
             let facts = str_col(batch, "fact");
@@ -251,7 +253,7 @@ impl MemoryFactRepo for LanceStore {
             let access = i32_col(batch, "access_count");
 
             for i in 0..batch.num_rows() {
-                results.push(MemoryFact {
+                let memory = MemoryFact {
                     id: Uuid::parse_str(fact_ids.value(i))
                         .map_err(|e| StoreError::Serialization(e.to_string()))?,
                     fact: facts.value(i).to_string(),
@@ -271,9 +273,24 @@ impl MemoryFactRepo for LanceStore {
                         .map_err(|e| StoreError::Serialization(e.to_string()))?
                         .with_timezone(&Utc),
                     access_count: access.value(i),
-                });
+                };
+
+                match latest_by_fact_id.get(&memory.id) {
+                    Some(existing) if existing.updated_at >= memory.updated_at => {}
+                    _ => {
+                        latest_by_fact_id.insert(memory.id, memory);
+                    }
+                }
             }
         }
+
+        let mut results: Vec<_> = latest_by_fact_id.into_values().collect();
+        results.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.updated_at.cmp(&a.updated_at))
+                .then_with(|| b.id.cmp(&a.id))
+        });
         Ok(results)
     }
 
@@ -337,4 +354,67 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     }
     let d = na.sqrt() * nb.sqrt();
     if d == 0.0 { 0.0 } else { dot / d }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repos::MemoryFactRepo;
+
+    #[tokio::test]
+    async fn list_all_returns_latest_version_per_fact_id() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let store = LanceStore::new(temp.path().to_str().unwrap(), 2)
+            .await
+            .expect("lancedb store should initialize");
+
+        let id = Uuid::now_v7();
+        let created_at = Utc::now() - chrono::Duration::minutes(5);
+        let updated_at = created_at + chrono::Duration::minutes(1);
+
+        store
+            .insert(id, "original fact", "workflow", "[1.0,0.0]", None, created_at)
+            .await
+            .expect("insert should succeed");
+        store
+            .update(id, "updated fact", "operational", "[0.0,1.0]", updated_at)
+            .await
+            .expect("update should succeed");
+
+        let listed = store.list_all().await.expect("list_all should succeed");
+        assert_eq!(listed.len(), 1, "list_all should deduplicate append-only rows");
+        assert_eq!(listed[0].id, id);
+        assert_eq!(listed[0].fact, "updated fact");
+        assert_eq!(listed[0].category, "operational");
+        assert_eq!(listed[0].created_at, created_at);
+        assert_eq!(listed[0].updated_at, updated_at);
+    }
+
+    #[tokio::test]
+    async fn list_all_returns_all_distinct_fact_ids_in_created_order() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let store = LanceStore::new(temp.path().to_str().unwrap(), 2)
+            .await
+            .expect("lancedb store should initialize");
+
+        let older_id = Uuid::now_v7();
+        let newer_id = Uuid::now_v7();
+        let older_created = Utc::now() - chrono::Duration::minutes(10);
+        let newer_created = Utc::now() - chrono::Duration::minutes(1);
+
+        store
+            .insert(older_id, "older", "workflow", "[1.0,0.0]", None, older_created)
+            .await
+            .expect("older insert should succeed");
+        store
+            .insert(newer_id, "newer", "operational", "[0.0,1.0]", None, newer_created)
+            .await
+            .expect("newer insert should succeed");
+
+        let listed = store.list_all().await.expect("list_all should succeed");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id, newer_id, "newer fact should sort first");
+        assert_eq!(listed[1].id, older_id, "older fact should sort last");
+    }
 }
