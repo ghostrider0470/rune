@@ -119,6 +119,12 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
     let plugin_scan_interval_secs = services.config.plugins.scan_interval_secs;
     let plugins_config = services.config.plugins.clone();
     let comms_client = if services.config.comms.enabled {
+        if services.config.comms.transport != "filesystem" {
+            return Err(GatewayError::BadRequest(format!(
+                "unsupported comms transport: {}",
+                services.config.comms.transport
+            )));
+        }
         let comms_dir = services
             .config
             .comms

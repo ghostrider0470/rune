@@ -667,7 +667,9 @@ pub async fn branded_asset(Path(path): Path<String>) -> Result<Response, Gateway
         ),
         // Legacy aliases
         "hero.png" => ("image/png", include_bytes!("../../../assets/hero.png")),
-        "rune-logo-favicon.svg" | "rune-logo-icon.svg" | "rune-logo-wordmark.svg"
+        "rune-logo-favicon.svg"
+        | "rune-logo-icon.svg"
+        | "rune-logo-wordmark.svg"
         | "rune-logo-wordmark-dark.svg" => (
             "image/svg+xml",
             include_bytes!("../../../assets/core_rune_midnight.svg"),
@@ -1516,9 +1518,7 @@ pub async fn get_session_status(
     let mut unresolved = Vec::new();
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
     if approval_mode == "on-miss" {
-        unresolved.push(
-            rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string(),
-        );
+        unresolved.push(rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string());
     }
     if security_mode == "allowlist" {
         unresolved.push(
@@ -4070,10 +4070,17 @@ pub async fn get_dashboard_usage(
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 
     let total_estimated_cost = {
-        let cost: f64 = entries.iter().map(|e| {
-            estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
-        }).sum();
-        if cost > 0.0 { Some(format_cost(cost)) } else { None }
+        let cost: f64 = entries
+            .iter()
+            .map(|e| {
+                estimate_cost(&e.model, e.prompt_tokens, 0, e.completion_tokens).unwrap_or(0.0)
+            })
+            .sum();
+        if cost > 0.0 {
+            Some(format_cost(cost))
+        } else {
+            None
+        }
     };
 
     Ok(Json(UsageSummaryResponse {
