@@ -568,6 +568,7 @@ pub struct DashboardDiagnosticItem {
 pub struct DashboardDiagnosticsResponse {
     pub structured_errors_available: bool,
     pub items: Vec<DashboardDiagnosticItem>,
+    pub context_budget: ContextBudgetDiagnostics,
 }
 
 #[derive(Serialize)]
@@ -837,6 +838,7 @@ pub async fn dashboard_diagnostics(
     Ok(Json(DashboardDiagnosticsResponse {
         structured_errors_available: false,
         items,
+        context_budget,
     }))
 }
 
