@@ -182,20 +182,6 @@ impl fmt::Display for DoctorReport {
                 context.compaction_warn_at_tokens,
             )?;
         }
-        if let Some(context) = &self.context {
-            writeln!(
-                f,
-                "Context:  identity={}, task={}, project={}, shared={}, total={}, reserved_system={}, reserved_recent={}, target_tokens={}",
-                context.tiers.identity,
-                context.tiers.task,
-                context.tiers.project,
-                context.tiers.shared,
-                context.tiers.total,
-                context.compaction_reserved_system,
-                context.compaction_reserved_recent,
-                context.compaction_target_tokens
-            )?;
-        }
         if !self.backend_matrix.is_empty() {
             writeln!(f, "Backend Matrix:")?;
             for entry in &self.backend_matrix {
@@ -5371,6 +5357,19 @@ mod tests {
                 database: "memory".into(),
                 models: "local".into(),
                 search: "embedded".into(),
+            }),
+            context: Some(crate::output::DoctorContextSummary {
+                tiers: crate::output::DoctorContextTierBudgets {
+                    identity: 1000,
+                    task: 2000,
+                    project: 3000,
+                    shared: 4000,
+                    total: 10000,
+                },
+                compaction_reserved_system: 5000,
+                compaction_reserved_task: 10000,
+                compaction_context_window: 128000,
+                compaction_warn_at_tokens: 102400,
             }),
             backend_matrix: vec![crate::output::DoctorBackendMatrixEntry {
                 subsystem: "storage".into(),
