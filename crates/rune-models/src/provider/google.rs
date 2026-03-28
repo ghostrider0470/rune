@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use super::ModelProvider;
 use super::openai::OpenAiProvider;
 use crate::error::ModelError;
-use crate::types::{CompletionRequest, CompletionResponse};
+use crate::types::{CompletionRequest, CompletionResponse, StreamEvent};
 
 /// Default base URL for Google Gemini's OpenAI-compatible endpoint.
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
@@ -54,6 +54,13 @@ impl ModelProvider for GoogleProvider {
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
         self.inner.complete(request).await
+    }
+
+    async fn complete_stream(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ModelError> {
+        self.inner.complete_stream(request).await
     }
 }
 

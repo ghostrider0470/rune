@@ -3,8 +3,8 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
     AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
-    FunctionDefinition, ModelError, ModelProvider, OpenAiProvider, Role, RoutedModelProvider,
-    ToolDefinition, provider_from_config,
+    FunctionDefinition, GoogleProvider, ModelError, ModelProvider, OpenAiProvider, Role,
+    RoutedModelProvider, StreamEvent, ToolDefinition, provider_from_config,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -50,6 +50,57 @@ fn success_body() -> serde_json::Value {
             "total_tokens": 18
         }
     })
+}
+
+#[tokio::test]
+async fn google_complete_stream_passthroughs_openai_compatible_sse() {
+    let server = MockServer::start().await;
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = GoogleProvider::with_base_url(&server.uri(), "test-key");
+    let mut request = simple_request();
+    request.model = Some("gemini-2.5-pro".into());
+
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = stream.recv().await {
+        events.push(event);
+    }
+
+    assert_eq!(events.len(), 3);
+    assert!(matches!(&events[0], StreamEvent::TextDelta(delta) if delta == "Hello"));
+    assert!(matches!(&events[1], StreamEvent::TextDelta(delta) if delta == " world"));
+    match &events[2] {
+        StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Hello world"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+            assert_eq!(response.usage.total_tokens, 5);
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
+
+    let requests = server.received_requests().await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload.get("model"), Some(&serde_json::json!("gemini-2.5-pro")));
+    assert_eq!(payload.get("stream"), Some(&serde_json::json!(true)));
+    assert_eq!(
+        payload.get("stream_options"),
+        Some(&serde_json::json!({"include_usage": true}))
+    );
 }
 
 // --- Azure URL construction ---
