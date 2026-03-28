@@ -237,6 +237,7 @@ impl MemoryFactRepo for LanceStore {
                 "updated_at".into(),
                 "access_count".into(),
             ]))
+            .limit(i32::MAX as usize)
             .execute()
             .await
             .map_err(|e| StoreError::Database(format!("lancedb list_all: {e}")))?;
@@ -306,6 +307,7 @@ impl MemoryFactRepo for LanceStore {
                 "fact_id".into(),
                 "embedding".into(),
             ]))
+            .limit(i32::MAX as usize)
             .execute()
             .await
             .map_err(|e| StoreError::Database(format!("lancedb graph: {e}")))?;
