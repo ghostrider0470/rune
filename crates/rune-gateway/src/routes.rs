@@ -845,6 +845,9 @@ pub struct SessionsListQuery {
     /// Filter by parent/requester session ID (returns children of this session).
     pub parent: Option<Uuid>,
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub include_metadata: bool,
+    pub session_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1238,6 +1241,8 @@ pub struct SessionListItem {
     pub usage_completion_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// `GET /sessions` - list sessions.
@@ -1252,6 +1257,10 @@ pub async fn list_sessions(
     let channel_filter = query.channel.as_deref();
     let kind_filter = query.kind.as_deref();
     let parent_filter = query.parent;
+    let session_token_filter = query
+        .session_token
+        .as_deref()
+        .filter(|token| !token.is_empty());
 
     let rows = state
         .session_repo
@@ -1282,6 +1291,11 @@ pub async fn list_sessions(
                 .map(|parent_id| row.requester_session_id == Some(parent_id))
                 .unwrap_or(true)
         })
+        .filter(|row| {
+            session_token_filter
+                .map(|token| row.channel_ref.as_deref() == Some(&format!("webchat:{token}")))
+                .unwrap_or(true)
+        })
     {
         let turns = state
             .turn_repo
@@ -1289,7 +1303,7 @@ pub async fn list_sessions(
             .await
             .map_err(|e| GatewayError::Internal(e.to_string()))?;
         let aggregate = aggregate_turns(&turns);
-        items.push(SessionListItem {
+        let mut item = SessionListItem {
             id: row.id.to_string(),
             kind: row.kind,
             status: row.status,
@@ -1301,7 +1315,12 @@ pub async fn list_sessions(
             usage_prompt_tokens: aggregate.usage_prompt_tokens,
             usage_completion_tokens: aggregate.usage_completion_tokens,
             latest_model: aggregate.latest_model,
-        });
+            metadata: None,
+        };
+        if query.include_metadata {
+            item.metadata = Some(row.metadata);
+        }
+        items.push(item);
     }
 
     Ok(Json(items))

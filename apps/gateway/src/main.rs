@@ -52,7 +52,9 @@ use rune_spells_rust_patterns::{
     RustPatternsToolExecutor, rust_patterns_tool_definition,
     rust_patterns_validate_tool_definition,
 };
-use rune_spells_security_audit::security_audit_tool_definition;
+use rune_spells_security_audit::{
+    SecurityAuditToolExecutor, security_audit_tool_definition,
+};
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
 use rune_store::repos::{
     ApprovalRepo, MemoryEmbeddingRepo, SessionRepo, ToolApprovalPolicyRepo, ToolExecutionRepo,
@@ -1719,6 +1721,11 @@ impl ToolExecutor for AppToolExecutor {
             }
             "code_review" => {
                 CodeReviewToolExecutor::new(self.workspace_root.clone())
+                    .execute(call)
+                    .await
+            }
+            "security_audit" => {
+                SecurityAuditToolExecutor::new(self.workspace_root.clone())
                     .execute(call)
                     .await
             }
