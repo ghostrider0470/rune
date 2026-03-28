@@ -201,18 +201,29 @@ Implementation note (2026-03-16): the roadmap originally called for Discord Gate
 
 ### Phase 4 — LaneQueue Concurrency Model (Backend)
 
-Replace sequential per-session execution with lane-based FIFO queuing.
+Status: ✅ Completed 2026-03-28
 
-**New file**
+Rune already ships lane-based FIFO turn concurrency control via `LaneQueue`, wired through the runtime executor and surfaced through gateway diagnostics / WS RPC. This pass verified the implementation on current `main` and updated roadmap bookkeeping to match the shipped state.
+
+**Landed work**
 - `crates/rune-runtime/src/lane_queue.rs`
-  - `Lane` enum: `Main`, `Subagent`, `Cron`, `Nested`
-  - Per-lane semaphore caps: `Main=4`, `Subagent=8`, `Cron=independent`, `Nested=recursive`
-  - FIFO queue per lane using `tokio::sync::Semaphore` + `VecDeque`
-  - Task submission returning a handle/future
-  - Lane routing based on session kind
+  - lane classification for `Main`, `Subagent`, and `Cron` session kinds
+  - per-lane semaphore caps with FIFO waiter queues built on `tokio::sync::Semaphore` + `VecDeque`
+  - cancellation-safe waiter wakeup behavior and utilisation stats reporting
+  - project-scoped tool concurrency caps layered alongside lane limits
+- `crates/rune-runtime/src/executor.rs`
+  - turn execution routed through `LaneQueue` permits before model/tool work
+  - runtime lane stats exposed to diagnostics consumers
+- `apps/gateway/src/main.rs`
+  - runtime lane capacity configuration wiring from `config.runtime.lanes`
+- `crates/rune-gateway/src/ws_rpc.rs` + `crates/rune-gateway/src/routes.rs`
+  - `runtime.lanes` RPC and diagnostics response payload support
 
-**Modify**
-- `crates/rune-runtime/src/executor.rs` — Route turn execution through `LaneQueue`
+**Validation**
+- `cargo check -p rune-runtime`
+- `cargo test -p rune-runtime lane_queue -- --nocapture`
+
+Implementation note (2026-03-28): the historical roadmap text expected an additional `Nested` lane, but the current shipped design covers the active session kinds (`Direct`, `Channel`, `Subagent`, `Scheduled`) with three production lanes and separate project-scoped tool throttling. This bookkeeping update reflects the implemented architecture rather than preserving a stale pre-implementation sketch.
 
 ---
 
