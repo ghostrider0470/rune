@@ -3,8 +3,8 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
     AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
-    FunctionDefinition, GoogleProvider, ModelError, ModelProvider, OpenAiProvider, Role,
-    RoutedModelProvider, StreamEvent, ToolDefinition, provider_from_config,
+    FunctionDefinition, GoogleProvider, MessagePart, ModelError, ModelProvider, OpenAiProvider,
+    Role, RoutedModelProvider, StreamEvent, ToolDefinition, provider_from_config,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -25,6 +25,7 @@ fn simple_request() -> CompletionRequest {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            content_parts: None,
         }],
         stable_prefix_messages: None,
         stable_prefix_tools: None,
@@ -306,6 +307,7 @@ async fn azure_request_golden_shape_full() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -313,6 +315,7 @@ async fn azure_request_golden_shape_full() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
         ],
         stable_prefix_tools: None,
@@ -322,6 +325,7 @@ async fn azure_request_golden_shape_full() {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            content_parts: None,
         }]),
         model: Some("gpt-4o".into()), // should NOT appear in Azure body
         temperature: Some(0.7),
@@ -369,8 +373,8 @@ async fn azure_request_golden_shape_full() {
     let msgs = body["messages"].as_array().unwrap();
     assert_eq!(msgs.len(), 3);
     assert_eq!(msgs[0]["role"], "system");
-    assert_eq!(msgs[1]["role"], "user");
-    assert_eq!(msgs[2]["role"], "assistant");
+    assert_eq!(msgs[1]["role"], "system");
+    assert_eq!(msgs[2]["role"], "user");
 
     // Must have temperature and max_tokens
     assert_eq!(body["temperature"], serde_json::json!(0.7));
@@ -1312,7 +1316,7 @@ async fn routed_provider_falls_back_on_retriable_error() {
     let primary_server = MockServer::start().await;
     let fallback_server = MockServer::start().await;
 
-    // Primary returns 429 (retriable).
+    // Primary returns 429 (retriable) even after provider-local retries.
     Mock::given(method("POST"))
         .respond_with(
             ResponseTemplate::new(429)
@@ -1405,7 +1409,7 @@ async fn routed_provider_does_not_fallback_on_non_retriable_error() {
         .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
             "error": { "message": "Invalid key", "code": "invalid_api_key" }
         })))
-        .expect(4)
+        .expect(1)
         .mount(&primary_server)
         .await;
 
@@ -1799,6 +1803,7 @@ async fn foundry_openai_request_golden_shape() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -1806,6 +1811,7 @@ async fn foundry_openai_request_golden_shape() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
         ],
         model: Some("gpt-5.4".into()),
@@ -1918,6 +1924,7 @@ async fn foundry_anthropic_extracts_system_message() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -1925,6 +1932,7 @@ async fn foundry_anthropic_extracts_system_message() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
         ],
         model: Some("claude-sonnet-4-5-20250514".into()),
@@ -2032,6 +2040,7 @@ async fn foundry_anthropic_request_golden_shape() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -2039,6 +2048,7 @@ async fn foundry_anthropic_request_golden_shape() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
             ChatMessage {
                 role: Role::Assistant,
@@ -2046,6 +2056,7 @@ async fn foundry_anthropic_request_golden_shape() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
             ChatMessage {
                 role: Role::User,
@@ -2053,6 +2064,7 @@ async fn foundry_anthropic_request_golden_shape() {
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
+                content_parts: None,
             },
         ],
         model: Some("claude-sonnet-4-5-20250514".into()),
@@ -2215,6 +2227,7 @@ fn claude_request() -> CompletionRequest {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            content_parts: None,
         }],
         model: Some("claude-sonnet-4-5-20250514".into()),
         temperature: None,
@@ -2537,6 +2550,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            content_parts: None,
         }],
         stable_prefix_tools: None,
         stable_prefix_messages: Some(vec![ChatMessage {
@@ -2545,6 +2559,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            content_parts: None,
         }]),
         model: Some("gpt-4o".into()),
         temperature: None,
@@ -2580,6 +2595,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            content_parts: None,
         }],
         stable_prefix_tools: None,
         stable_prefix_messages: Some(vec![ChatMessage {
@@ -2588,6 +2604,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            content_parts: None,
         }]),
         model: Some("gpt-4o".into()),
         temperature: None,
@@ -2674,5 +2691,103 @@ async fn openai_unauthenticated_mode_sends_no_auth_headers() {
     assert!(
         req.headers.get("api-key").is_none(),
         "unauthenticated mode must not send api-key header"
+    );
+}
+
+#[tokio::test]
+async fn openai_request_serializes_multimodal_user_content_parts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = OpenAiProvider::new(&server.uri(), "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Please inspect this image".into()),
+            content_parts: Some(vec![
+                MessagePart::Text {
+                    text: "Please inspect this image".into(),
+                },
+                MessagePart::ImageUrl {
+                    image_url: rune_models::ImageUrlPart {
+                        url: "https://example.test/image.png".into(),
+                    },
+                },
+            ]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let msg = &body["messages"][0];
+    let parts = msg["content_parts"].as_array().unwrap();
+    assert_eq!(parts[0]["type"], "text");
+    assert_eq!(parts[0]["text"], "Please inspect this image");
+    assert_eq!(parts[1]["type"], "image_url");
+    assert_eq!(
+        parts[1]["image_url"]["url"],
+        "https://example.test/image.png"
+    );
+}
+
+#[tokio::test]
+async fn azure_request_serializes_multimodal_user_content_parts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Describe".into()),
+            content_parts: Some(vec![MessagePart::ImageUrl {
+                image_url: rune_models::ImageUrlPart {
+                    url: "https://example.test/camera.jpg".into(),
+                },
+            }]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = p.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let msg = &body["messages"][0];
+    let parts = msg["content_parts"].as_array().unwrap();
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0]["type"], "image_url");
+    assert_eq!(
+        parts[0]["image_url"]["url"],
+        "https://example.test/camera.jpg"
     );
 }

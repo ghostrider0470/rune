@@ -23,7 +23,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
 );
 
 use rune_core::{AttachmentRef, TranscriptItem};
-use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
+use rune_models::{ChatMessage, FunctionCall, ImageUrlPart, MessagePart, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
 
@@ -162,14 +162,15 @@ impl ContextAssembler {
     fn item_to_chat_message(&self, item: TranscriptItem) -> Option<ChatMessage> {
         match item {
             TranscriptItem::UserMessage { message } => {
-                let content = render_user_message_content(&message.content, &message.attachments);
-                if content.trim().is_empty() {
+                let (content, content_parts) =
+                    render_user_message_content(&message.content, &message.attachments);
+                if content.trim().is_empty() && content_parts.is_none() {
                     return None;
                 }
                 Some(ChatMessage {
                     role: Role::User,
                     content: Some(content),
-                    content_parts: None,
+                    content_parts,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -296,11 +297,13 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
     }
 }
 
-
-fn render_user_message_content(content: &str, attachments: &[AttachmentRef]) -> String {
+fn render_user_message_content(
+    content: &str,
+    attachments: &[AttachmentRef],
+) -> (String, Option<Vec<MessagePart>>) {
     let trimmed = content.trim();
     if attachments.is_empty() {
-        return trimmed.to_string();
+        return (trimmed.to_string(), None);
     }
 
     let mut rendered = String::new();
@@ -316,7 +319,34 @@ fn render_user_message_content(content: &str, attachments: &[AttachmentRef]) -> 
         rendered.push('\n');
     }
 
-    rendered.trim_end().to_string()
+    let mut content_parts = Vec::new();
+    if !trimmed.is_empty() {
+        content_parts.push(MessagePart::Text {
+            text: trimmed.to_string(),
+        });
+    }
+
+    for attachment in attachments {
+        if attachment
+            .mime_type
+            .as_deref()
+            .is_some_and(|mime| mime.starts_with("image/"))
+        {
+            if let Some(url) = attachment.url.as_ref() {
+                content_parts.push(MessagePart::ImageUrl {
+                    image_url: ImageUrlPart { url: url.clone() },
+                });
+            }
+        }
+    }
+
+    let content_parts = if content_parts.is_empty() {
+        None
+    } else {
+        Some(content_parts)
+    };
+
+    (rendered.trim_end().to_string(), content_parts)
 }
 
 fn format_attachment_ref(attachment: &AttachmentRef) -> String {
@@ -347,7 +377,7 @@ fn format_attachment_ref(attachment: &AttachmentRef) -> String {
 
 #[cfg(test)]
 mod attachment_prompt_tests {
-    use super::{format_attachment_ref, render_user_message_content, ContextAssembler};
+    use super::{ContextAssembler, format_attachment_ref, render_user_message_content};
     use rune_core::{AttachmentRef, NormalizedMessage, TranscriptItem};
     use rune_models::Role;
     use rune_store::models::TranscriptItemRow;
@@ -399,7 +429,7 @@ mod attachment_prompt_tests {
 
     #[test]
     fn appends_attachment_summary_after_text_content() {
-        let rendered = render_user_message_content(
+        let (rendered, content_parts) = render_user_message_content(
             "Please summarize this",
             &[AttachmentRef {
                 name: "notes.txt".into(),
@@ -411,6 +441,7 @@ mod attachment_prompt_tests {
         );
 
         assert!(rendered.starts_with("Please summarize this\n\n[Attachments]\n- notes.txt"));
+        assert!(content_parts.is_some());
     }
 
     #[test]
@@ -423,6 +454,9 @@ mod attachment_prompt_tests {
             provider_file_id: Some("abc".into()),
         });
 
-        assert_eq!(formatted, "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)");
+        assert_eq!(
+            formatted,
+            "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)"
+        );
     }
 }
