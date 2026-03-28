@@ -7,6 +7,7 @@ pub use comms::{
 };
 
 pub mod agent_registry;
+pub mod cancellation;
 pub mod claude_plugin;
 pub mod command_registry;
 mod compaction;
@@ -51,6 +52,7 @@ pub use engine::SessionEngine;
 pub use error::RuntimeError;
 pub use executor::TurnExecutor;
 pub use hooks::{HookEvent, HookHandler, HookRegistry};
+pub use cancellation::{TurnCancellationHandle, TurnCancellationRegistry};
 pub use lane_queue::{Lane, LanePermit, LaneQueue, LaneStats, ToolPermit};
 pub use mem0::Mem0Engine;
 pub use plugin::{PluginLoader, PluginManifest, PluginRegistry, PluginScanSummary};

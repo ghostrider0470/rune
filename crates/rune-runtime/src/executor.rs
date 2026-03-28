@@ -27,6 +27,7 @@ type UsageRecorderFn = Arc<
 >;
 use crate::error::RuntimeError;
 use crate::hooks::{HookEvent, HookRegistry};
+use crate::cancellation::TurnCancellationRegistry;
 use crate::lane_queue::{Lane, LaneQueue};
 use crate::mem0::Mem0Engine;
 use crate::memory::MemoryLoader;
@@ -57,6 +58,7 @@ pub struct TurnExecutor {
     default_model: Option<String>,
     max_tool_iterations: u32,
     lane_queue: Option<Arc<LaneQueue>>,
+    cancellation_registry: Arc<TurnCancellationRegistry>,
     skill_registry: Option<Arc<SkillRegistry>>,
     tool_approval_policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
     hook_registry: Option<Arc<HookRegistry>>,
@@ -120,6 +122,7 @@ impl TurnExecutor {
             default_model: None,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
             lane_queue: None,
+            cancellation_registry: Arc::new(TurnCancellationRegistry::new()),
             skill_registry: None,
             tool_approval_policy_repo: None,
             hook_registry: None,
@@ -177,6 +180,10 @@ impl TurnExecutor {
     /// Expose lane queue stats for operator surfaces when configured.
     pub fn lane_stats(&self) -> Option<crate::lane_queue::LaneStats> {
         self.lane_queue.as_ref().map(|queue| queue.stats())
+    }
+
+    pub fn cancellation_registry(&self) -> Arc<TurnCancellationRegistry> {
+        Arc::clone(&self.cancellation_registry)
     }
 
     /// Expose the turn repository for stale turn cleanup.
@@ -342,6 +349,11 @@ impl TurnExecutor {
 
         debug!(turn_id = %turn_id, "turn created");
 
+        let cancellation = self
+            .cancellation_registry
+            .register(session_id, turn.id)
+            .await;
+
         // 3. Persist user message to transcript
         let user_item = TranscriptItem::UserMessage {
             message: NormalizedMessage::new("user", user_message),
@@ -358,6 +370,7 @@ impl TurnExecutor {
                 effective_model.as_deref(),
                 &mut usage,
                 chunk_tx.as_ref(),
+                &cancellation,
             )
             .await;
 
@@ -681,6 +694,11 @@ impl TurnExecutor {
             .or_else(|| turn.model_ref.clone())
             .or_else(|| self.default_model.clone());
 
+        let cancellation = self
+            .cancellation_registry
+            .register(session_id, turn_uuid)
+            .await;
+
         let result = self
             .run_turn_loop(
                 session_id,
@@ -688,6 +706,7 @@ impl TurnExecutor {
                 effective_model.as_deref(),
                 &mut usage,
                 None,
+                &cancellation,
             )
             .await;
 
@@ -750,6 +769,7 @@ impl TurnExecutor {
         model_ref: Option<&str>,
         usage: &mut UsageAccumulator,
         chunk_tx: Option<&tokio::sync::mpsc::Sender<String>>,
+        cancellation: &crate::cancellation::TurnCancellationHandle,
     ) -> Result<TurnLoopOutcome, RuntimeError> {
         let session = self.session_repo.find_by_id(session_id).await?;
         let session_kind = parse_session_kind(&session.kind)?;
@@ -810,6 +830,7 @@ impl TurnExecutor {
         let mut iterations: u32 = 0;
 
         loop {
+            cancellation.checkpoint().await?;
             if iterations >= self.max_tool_iterations {
                 return Err(RuntimeError::MaxToolIterations(self.max_tool_iterations));
             }
@@ -1008,6 +1029,7 @@ impl TurnExecutor {
                         arguments: args,
                     };
 
+                    cancellation.checkpoint().await?;
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,
                         Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
@@ -1198,6 +1220,7 @@ impl TurnExecutor {
                     .await?;
             }
 
+            cancellation.checkpoint().await?;
             return Ok(TurnLoopOutcome::Completed);
         }
     }
