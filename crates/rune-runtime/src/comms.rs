@@ -4,6 +4,7 @@
 //! and archives processed messages. Implements the .comms/ protocol.
 
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -53,6 +54,31 @@ pub trait CommsTransport: Send + Sync {
     async fn send(&self, message: CommsMessage) -> Result<(), String>;
     async fn receive(&self, agent_id: &str) -> Result<Vec<(PathBuf, CommsMessage)>, String>;
     async fn ack(&self, path: &Path) -> Result<(), String>;
+}
+
+/// Built-in transport kinds for native inter-agent comms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommsTransportKind {
+    Filesystem,
+}
+
+impl CommsTransportKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Filesystem => "filesystem",
+        }
+    }
+}
+
+impl FromStr for CommsTransportKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "filesystem" | "fs" => Ok(Self::Filesystem),
+            other => Err(format!("unsupported comms transport: {other}")),
+        }
+    }
 }
 
 /// Filesystem-backed transport for the `.comms/` mailbox protocol.
@@ -155,6 +181,16 @@ impl CommsTransport for FsCommsTransport {
     }
 }
 
+
+pub fn build_comms_transport(
+    transport: CommsTransportKind,
+    comms_dir: impl Into<PathBuf>,
+) -> Arc<dyn CommsTransport> {
+    match transport {
+        CommsTransportKind::Filesystem => Arc::new(FsCommsTransport::new(comms_dir)),
+    }
+}
+
 /// The comms client — reads/writes messages using a configurable transport.
 #[derive(Clone)]
 pub struct CommsClient {
@@ -169,11 +205,16 @@ impl CommsClient {
         agent_id: impl Into<String>,
         peer_id: impl Into<String>,
     ) -> Self {
-        Self::with_transport(
-            Arc::new(FsCommsTransport::new(comms_dir)),
-            agent_id,
-            peer_id,
-        )
+        Self::with_transport_kind(CommsTransportKind::Filesystem, comms_dir, agent_id, peer_id)
+    }
+
+    pub fn with_transport_kind(
+        transport: CommsTransportKind,
+        comms_dir: impl Into<PathBuf>,
+        agent_id: impl Into<String>,
+        peer_id: impl Into<String>,
+    ) -> Self {
+        Self::with_transport(build_comms_transport(transport, comms_dir), agent_id, peer_id)
     }
 
     pub fn with_transport(
@@ -366,6 +407,13 @@ mod tests {
         let client = CommsClient::new(tmp.path(), "rune", "horizon-ai");
         let messages = client.read_inbox().await;
         assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn parse_transport_kind_aliases() {
+        assert_eq!(CommsTransportKind::from_str("filesystem").unwrap(), CommsTransportKind::Filesystem);
+        assert_eq!(CommsTransportKind::from_str("FS").unwrap(), CommsTransportKind::Filesystem);
+        assert!(CommsTransportKind::from_str("http").is_err());
     }
 
     #[tokio::test]

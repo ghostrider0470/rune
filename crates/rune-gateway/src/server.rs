@@ -125,7 +125,14 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
             .comms_dir
             .clone()
             .unwrap_or_else(|| ".comms".to_string());
-        Some(Arc::new(CommsClient::new(
+        let transport = services
+            .config
+            .comms
+            .transport
+            .parse()
+            .map_err(GatewayError::BadRequest)?;
+        Some(Arc::new(CommsClient::with_transport_kind(
+            transport,
             comms_dir,
             services.config.comms.agent_id.clone(),
             services.config.comms.peer_id.clone(),
