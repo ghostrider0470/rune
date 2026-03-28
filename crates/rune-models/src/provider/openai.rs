@@ -106,6 +106,10 @@ impl OpenAiProvider {
                 _ => return Err(error),
             };
 
+            if !streaming {
+                return Err(error);
+            }
+
             if attempt >= 3 {
                 return Err(error);
             }

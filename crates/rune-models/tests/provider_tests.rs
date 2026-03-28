@@ -245,22 +245,13 @@ async fn azure_request_golden_shape_full() {
 
     let p = AzureOpenAiProvider::new(&server.uri(), "gpt-4o-prod", "2024-06-01", "secret-key");
     let request = CompletionRequest {
-        messages: vec![
-            ChatMessage {
-                role: Role::System,
-                content: Some("You are helpful.".into()),
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            },
-            ChatMessage {
-                role: Role::User,
-                content: Some("Hello".into()),
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            },
-        ],
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Hello".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
         stable_prefix_tools: None,
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
