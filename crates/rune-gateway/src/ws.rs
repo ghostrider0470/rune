@@ -91,6 +91,10 @@ struct EventFrame {
     state_version: u64,
 }
 
+fn rpc_mutates_connection_state(method: &str) -> bool {
+    matches!(method, "subscribe" | "unsubscribe")
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 /// `GET /ws` -- upgrade to WebSocket for RPC and live event streaming.
@@ -410,20 +414,34 @@ where
                 _ => {
                     // Delegate to the RPC dispatcher.
                     match dispatcher.dispatch(&method, params).await {
-                        Ok(payload) => Some(encode_res(
-                            &id,
-                            true,
-                            Some(payload),
-                            None,
-                            current_state_version(state_version.as_ref()),
-                        )),
-                        Err(rpc_err) => Some(encode_res(
-                            &id,
-                            false,
-                            None,
-                            Some((&rpc_err.code, &rpc_err.message, rpc_err.data.as_ref())),
-                            current_state_version(state_version.as_ref()),
-                        )),
+                        Ok(payload) => {
+                            let current_state_version = if rpc_mutates_connection_state(&method) {
+                                next_state_version(state_version.as_ref())
+                            } else {
+                                current_state_version(state_version.as_ref())
+                            };
+                            Some(encode_res(
+                                &id,
+                                true,
+                                Some(payload),
+                                None,
+                                current_state_version,
+                            ))
+                        }
+                        Err(rpc_err) => {
+                            let current_state_version = if rpc_mutates_connection_state(&method) {
+                                next_state_version(state_version.as_ref())
+                            } else {
+                                current_state_version(state_version.as_ref())
+                            };
+                            Some(encode_res(
+                                &id,
+                                false,
+                                None,
+                                Some((&rpc_err.code, &rpc_err.message, rpc_err.data.as_ref())),
+                                current_state_version,
+                            ))
+                        }
                     }
                 }
             }
@@ -511,6 +529,15 @@ mod tests {
                 data: None,
             }),
         }
+    }
+
+
+    #[test]
+    fn rpc_mutates_connection_state_only_for_subscription_controls() {
+        assert!(rpc_mutates_connection_state("subscribe"));
+        assert!(rpc_mutates_connection_state("unsubscribe"));
+        assert!(!rpc_mutates_connection_state("session.list"));
+        assert!(!rpc_mutates_connection_state("health"));
     }
 
     #[test]
