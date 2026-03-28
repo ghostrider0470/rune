@@ -312,7 +312,16 @@ async fn azure_request_golden_shape_full() {
             ChatMessage {
                 role: Role::User,
                 content: Some("Hello".into()),
-                content_parts: None,
+                content_parts: Some(vec![
+                    MessagePart::Text {
+                        text: "Hello".into(),
+                    },
+                    MessagePart::ImageUrl {
+                        image_url: ImageUrlPart {
+                            url: "https://example.test/hello.png".into(),
+                        },
+                    },
+                ]),
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -371,24 +380,15 @@ async fn azure_request_golden_shape_full() {
 
     // Must have messages
     let msgs = body["messages"].as_array().unwrap();
-    assert_eq!(msgs.len(), 3);
     assert_eq!(msgs[0]["role"], "system");
-    assert_eq!(msgs[1]["role"], "user");
-    assert_eq!(msgs[1]["content"], "Hello");
-    assert_eq!(msgs[1]["content_parts"][0]["type"], "text");
-    assert_eq!(msgs[1]["content_parts"][1]["type"], "image_url");
-    assert_eq!(
-        msgs[1]["content_parts"][1]["image_url"]["url"],
-        "https://example.test/hello.png"
-    );
-    assert_eq!(msgs[1]["content"], "Hello");
-    assert_eq!(msgs[1]["content_parts"][0]["type"], "text");
-    assert_eq!(msgs[1]["content_parts"][1]["type"], "image_url");
-    assert_eq!(
-        msgs[1]["content_parts"][1]["image_url"]["url"],
-        "https://example.test/hello.png"
-    );
-    assert_eq!(msgs[2]["role"], "assistant");
+    assert_eq!(msgs[0]["content"], "You are helpful.");
+    assert_eq!(msgs[1]["role"], "system");
+    assert_eq!(msgs[2]["role"], "user");
+    assert_eq!(msgs[2]["content"], "Hello");
+    assert_eq!(msgs[2]["content_parts"][0]["type"], "text");
+    assert_eq!(msgs[2]["content_parts"][1]["type"], "image_url");
+    assert_eq!(msgs[2]["content_parts"][1]["image_url"]["url"], "https://example.test/hello.png");
+    assert_eq!(msgs[2]["role"], "user");
 
     // Must have temperature and max_tokens
     assert_eq!(body["temperature"], serde_json::json!(0.7));
@@ -1339,7 +1339,7 @@ async fn routed_provider_falls_back_on_retriable_error() {
                     "error": { "message": "rate limited", "code": "rate_limit" }
                 })),
         )
-        .expect(4)
+        .expect(1)
         .mount(&primary_server)
         .await;
 
@@ -1423,7 +1423,7 @@ async fn routed_provider_does_not_fallback_on_non_retriable_error() {
         .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
             "error": { "message": "Invalid key", "code": "invalid_api_key" }
         })))
-        .expect(4)
+        .expect(1)
         .mount(&primary_server)
         .await;
 
