@@ -2549,3 +2549,68 @@ async fn openai_request_prepends_stable_prefix_messages() {
     assert_eq!(msgs[0]["content"], "Stable prefix");
     assert_eq!(msgs[1]["role"], "user");
 }
+
+#[tokio::test]
+async fn google_streaming_passthrough_emits_text_and_done() {
+    let server = MockServer::start().await;
+
+    let sse = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer google-key"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gemini-2.0-flash",
+            "stream": true,
+            "stream_options": {"include_usage": true}
+        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let cfg = ModelProviderConfig {
+        name: "google".into(),
+        kind: "google".into(),
+        base_url: server.uri(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        api_key: Some("google-key".into()),
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+
+    let mut request = simple_request();
+    request.model = Some("gemini-2.0-flash".into());
+
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+    let first = stream.recv().await.expect("first stream event");
+    let second = stream.recv().await.expect("second stream event");
+    let done = stream.recv().await.expect("done event");
+
+    match first {
+        rune_models::StreamEvent::TextDelta(delta) => assert_eq!(delta, "Hello"),
+        other => panic!("expected first text delta, got {other:?}"),
+    }
+    match second {
+        rune_models::StreamEvent::TextDelta(delta) => assert_eq!(delta, " world"),
+        other => panic!("expected second text delta, got {other:?}"),
+    }
+    match done {
+        rune_models::StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Hello world"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+            assert_eq!(response.usage.total_tokens, 7);
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
+}
