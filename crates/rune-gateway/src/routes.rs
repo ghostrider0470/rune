@@ -3796,6 +3796,12 @@ pub async fn tts_synthesize(
     State(state): State<AppState>,
     Json(body): Json<TtsSynthesizeRequest>,
 ) -> Result<Response, GatewayError> {
+    if body.text.trim().is_empty() {
+        return Err(GatewayError::BadRequest(
+            "text is required for TTS synthesis".to_string(),
+        ));
+    }
+
     let engine_lock = state
         .tts_engine
         .as_ref()
@@ -3806,7 +3812,12 @@ pub async fn tts_synthesize(
         (Some(voice), Some(model)) => engine.convert_with(&body.text, voice, model).await,
         _ => engine.convert(&body.text).await,
     }
-    .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    .map_err(|e| match e {
+        rune_tts::TtsError::Disabled | rune_tts::TtsError::Config(_) => {
+            GatewayError::BadRequest(e.to_string())
+        }
+        other => GatewayError::Internal(other.to_string()),
+    })?;
 
     if body.channel.as_deref() == Some("telegram") {
         let chat_id = body.chat_id.as_deref().ok_or_else(|| {

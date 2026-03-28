@@ -7009,7 +7009,11 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
         .unwrap();
 
     let response = app
-        .oneshot(Request::get("/api/dashboard/usage").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/api/dashboard/usage")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -11840,4 +11844,29 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
     assert_eq!(entry["cached_tokens"], 0);
     assert_eq!(entry["uncached_tokens"], 10);
     assert_eq!(entry["cache_hit_ratio_percent"], 0.0);
+}
+
+#[tokio::test]
+async fn tts_synthesize_rejects_empty_text() {
+    let app = build_test_app(Some(TEST_AUTH_TOKEN.to_string()));
+
+    let response = app
+        .oneshot(
+            Request::post("/tts/synthesize")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_AUTH_TOKEN}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"text":"   "}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let parsed = body_json(response).await;
+    assert!(
+        parsed["message"]
+            .as_str()
+            .unwrap()
+            .contains("text is required")
+    );
 }

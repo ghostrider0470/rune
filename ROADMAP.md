@@ -320,23 +320,31 @@ Rune now ships a config-driven MCP client that can connect to external tool serv
 
 ### Phase 8 — TTS Backend + UI
 
-**New crate** `crates/rune-tts/`
-- `src/lib.rs` — TTS engine + provider trait
-- `src/openai.rs` — OpenAI TTS
-- `src/elevenlabs.rs` — ElevenLabs
-- `src/config.rs` — provider, voice, model, auto mode (`off|always|inbound|tagged`)
+Status: ✅ Completed 2026-03-28
 
-**Gateway routes**
-- `GET /tts/status`
-- `POST /tts/enable`
-- `POST /tts/disable`
-- `POST /tts/convert`
+Rune already ships the `rune-tts` backend crate, gateway status/synthesize/toggle routes, and the Settings UI controls for provider, voice, model, and auto-mode. This pass closed a remaining validation gap by hardening `POST /tts/synthesize` request validation so empty synthesis requests fail fast with a 400 instead of flowing deeper into provider execution.
 
-**Config**
-- Add `[tts]` to `AppConfig`
+**Landed work**
+- `crates/rune-tts/`
+  - provider trait, engine, config, OpenAI backend, and ElevenLabs backend
+- `crates/rune-gateway/src/routes.rs` + `crates/rune-gateway/src/server.rs`
+  - `GET /tts/status`
+  - `POST /tts/synthesize`
+  - `POST /tts/enable`
+  - `POST /tts/disable`
+  - request validation for empty synth payloads and better bad-request mapping for disabled/config errors
+- `ui/src/hooks/use-system.ts`
+  - runtime TTS status + enable/disable hooks
+- `ui/src/routes/_admin/settings.tsx`
+  - shipped Settings TTS control surface with provider/voice/model/auto-mode controls
+- `crates/rune-gateway/tests/route_tests.rs`
+  - regression test covering empty-text rejection on `/tts/synthesize`
 
-**UI**
-- TTS controls in settings page
+**Validation**
+- `cargo check`
+- `cargo test -p rune-gateway tts_synthesize_rejects_empty_text -- --nocapture`
+
+Implementation note (2026-03-28): the roadmap entry was stale. Core TTS backend + UI support were already landed; the unfinished slice in this pass was tightening operator-facing validation and updating roadmap bookkeeping to reflect actual shipped capability.
 
 ---
 
