@@ -16,6 +16,7 @@ use rune_store::repos::{
 };
 use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
+use crate::cancel_registry::{TurnCancelRegistry, TurnCancellation};
 use crate::compaction::CompactionStrategy;
 use crate::context::ContextAssembler;
 
@@ -56,6 +57,7 @@ pub struct TurnExecutor {
     compaction: Arc<dyn CompactionStrategy>,
     default_model: Option<String>,
     max_tool_iterations: u32,
+    cancel_registry: Option<Arc<TurnCancelRegistry>>,
     lane_queue: Option<Arc<LaneQueue>>,
     skill_registry: Option<Arc<SkillRegistry>>,
     tool_approval_policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
@@ -119,6 +121,7 @@ impl TurnExecutor {
             compaction,
             default_model: None,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
+            cancel_registry: None,
             lane_queue: None,
             skill_registry: None,
             tool_approval_policy_repo: None,
@@ -171,6 +174,11 @@ impl TurnExecutor {
     /// acquire a permit from the appropriate lane before proceeding.
     pub fn with_lane_queue(mut self, queue: Arc<LaneQueue>) -> Self {
         self.lane_queue = Some(queue);
+        self
+    }
+
+    pub fn with_cancel_registry(mut self, registry: Arc<TurnCancelRegistry>) -> Self {
+        self.cancel_registry = Some(registry);
         self
     }
 
@@ -300,6 +308,12 @@ impl TurnExecutor {
         let turn_id = TurnId::new();
         let now = Utc::now();
         let session = self.session_repo.find_by_id(session_id).await?;
+        let (_cancel_guard, cancellation) = if let Some(registry) = &self.cancel_registry {
+            let (guard, signal) = registry.register(turn_id.into_uuid()).await;
+            (Some(guard), Some(signal))
+        } else {
+            (None, None)
+        };
         let effective_model = model_ref
             .map(str::to_owned)
             .or_else(|| selected_model(&session).map(str::to_owned))
@@ -358,6 +372,7 @@ impl TurnExecutor {
                 effective_model.as_deref(),
                 &mut usage,
                 chunk_tx.as_ref(),
+                cancellation.as_ref(),
             )
             .await;
 
@@ -436,6 +451,17 @@ impl TurnExecutor {
         }
 
         Ok((final_turn, usage))
+    }
+
+    async fn throw_if_cancelled(cancellation: Option<&TurnCancellation>) -> Result<(), RuntimeError> {
+        if let Some(signal) = cancellation {
+            tokio::select! {
+                _ = signal.cancelled() => Err(RuntimeError::Aborted("turn cancelled".to_string())),
+                _ = tokio::task::yield_now() => Ok(()),
+            }
+        } else {
+            Ok(())
+        }
     }
 
     /// Resume a pending approval-backed tool execution and continue the blocked turn.
@@ -688,6 +714,7 @@ impl TurnExecutor {
                 effective_model.as_deref(),
                 &mut usage,
                 None,
+                None,
             )
             .await;
 
@@ -750,6 +777,7 @@ impl TurnExecutor {
         model_ref: Option<&str>,
         usage: &mut UsageAccumulator,
         chunk_tx: Option<&tokio::sync::mpsc::Sender<String>>,
+        cancellation: Option<&TurnCancellation>,
     ) -> Result<TurnLoopOutcome, RuntimeError> {
         let session = self.session_repo.find_by_id(session_id).await?;
         let session_kind = parse_session_kind(&session.kind)?;
@@ -810,6 +838,7 @@ impl TurnExecutor {
         let mut iterations: u32 = 0;
 
         loop {
+            Self::throw_if_cancelled(cancellation).await?;
             if iterations >= self.max_tool_iterations {
                 return Err(RuntimeError::MaxToolIterations(self.max_tool_iterations));
             }
@@ -908,15 +937,19 @@ impl TurnExecutor {
                 match self.model_provider.complete_stream(&request).await {
                     Ok(mut rx) => {
                         let mut final_response = None;
-                        while let Some(event) = rx.recv().await {
-                            match event {
-                                StreamEvent::TextDelta(delta) => {
-                                    let _ = tx.send(delta).await;
-                                }
-                                StreamEvent::Done(resp) => {
-                                    final_response = Some(resp);
-                                    break;
-                                }
+                        loop {
+                            Self::throw_if_cancelled(cancellation).await?;
+                            match rx.recv().await {
+                                Some(event) => match event {
+                                    StreamEvent::TextDelta(delta) => {
+                                        let _ = tx.send(delta).await;
+                                    }
+                                    StreamEvent::Done(resp) => {
+                                        final_response = Some(resp);
+                                        break;
+                                    }
+                                },
+                                None => break,
                             }
                         }
                         match final_response {
@@ -1007,6 +1040,8 @@ impl TurnExecutor {
                         tool_name: tc.function.name.clone(),
                         arguments: args,
                     };
+
+                    Self::throw_if_cancelled(cancellation).await?;
 
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,

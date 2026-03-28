@@ -7,6 +7,7 @@ pub use comms::{
 };
 
 pub mod agent_registry;
+pub mod cancel_registry;
 pub mod claude_plugin;
 pub mod command_registry;
 mod compaction;
@@ -40,6 +41,7 @@ pub mod workspace;
 
 pub use agent_registry::AgentRegistry;
 pub use command_registry::CommandRegistry;
+pub use cancel_registry::{TurnCancelGuard, TurnCancelRegistry, TurnCancellation};
 pub use compaction::{CompactionStrategy, NoOpCompaction, TokenBudgetCompaction};
 pub use context::ContextAssembler;
 pub use context_budget::{
