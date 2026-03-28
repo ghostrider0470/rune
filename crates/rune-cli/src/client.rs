@@ -4206,11 +4206,11 @@ pub fn validate_config(file: Option<&str>) -> ConfigValidationResult {
     }
 }
 
-/// Show resolved config as pretty-printed JSON.
+/// Show resolved config as pretty-printed JSON with secrets redacted.
 pub fn show_config() -> Result<String> {
     let config = rune_config::AppConfig::load(Some(local_config_path()))
         .context("failed to load configuration")?;
-    serde_json::to_string_pretty(&config).context("failed to serialize config")
+    serde_json::to_string_pretty(&config.redacted()).context("failed to serialize config")
 }
 
 #[cfg(test)]
