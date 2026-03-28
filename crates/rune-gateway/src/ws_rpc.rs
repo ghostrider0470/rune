@@ -1332,10 +1332,21 @@ impl RpcDispatcher {
     /// Memory subsystem status.
     async fn memory_status(&self) -> Result<Value, RpcError> {
         let config = self.state.config.read().await;
+        let compaction = &config.runtime.compaction;
         Ok(json!({
             "memory_mode": self.state.capabilities.memory_mode,
             "memory_dir": config.paths.memory_dir.display().to_string(),
             "pgvector": self.state.capabilities.pgvector,
+            "context_budget": {
+                "max_tokens": compaction.effective_max_tokens(),
+                "warn_at_tokens": compaction.effective_warn_at_tokens(),
+                "compress_after": compaction.effective_compress_after(),
+                "reserved_system": compaction.reserved_system,
+                "reserved_task": compaction.reserved_task,
+                "usable_prompt_budget": compaction.usable_prompt_budget(),
+                "auto_inject_project": compaction.auto_inject_project,
+                "memory_search_k": compaction.memory_search_k,
+            }
         }))
     }
 

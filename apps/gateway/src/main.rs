@@ -712,10 +712,19 @@ async fn build_services(
         tool_registry,
         ContextAssembler::new(&system_prompt),
         {
+            let compaction_cfg = &config.runtime.compaction;
             let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
                 TokenBudgetCompaction::new(
-                    config.runtime.compaction.context_window,
-                    config.runtime.compaction.preserve_tail,
+                    compaction_cfg.effective_max_tokens(),
+                    compaction_cfg.preserve_tail,
+                )
+                .with_budget_settings(
+                    compaction_cfg.effective_warn_at_tokens(),
+                    compaction_cfg.effective_compress_after(),
+                    compaction_cfg.reserved_system,
+                    compaction_cfg.reserved_task,
+                    compaction_cfg.auto_inject_project,
+                    compaction_cfg.memory_search_k,
                 )
                 .with_memory_flush(&workspace_root),
             );
