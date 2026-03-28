@@ -104,6 +104,11 @@ pub struct SpellFrontmatter {
     pub binary: Option<String>,
     pub parameters: Option<serde_json::Value>,
     pub enabled: Option<bool>,
+    pub model: Option<String>,
+    #[serde(rename = "allowed-tools")]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(rename = "user-invocable")]
+    pub user_invocable: Option<bool>,
 
     // #300 new fields
     pub namespace: Option<String>,
@@ -357,6 +362,22 @@ enabled: false
     fn parse_frontmatter_rejects_missing_closing_delimiter() {
         let content = "---\nname: broken\ndescription: nope\n";
         assert!(parse_spell_frontmatter(content).is_none());
+    }
+
+    #[test]
+    fn parse_frontmatter_supports_tool_metadata_fields() {
+        let content = r#"---
+name: shell-runner
+version: 0.2.0
+model: gpt-4.1-mini
+allowed-tools: ["exec", "read"]
+user-invocable: true
+---
+"#;
+        let fm = parse_spell_frontmatter(content).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("gpt-4.1-mini"));
+        assert_eq!(fm.allowed_tools, Some(vec!["exec".into(), "read".into()]));
+        assert_eq!(fm.user_invocable, Some(true));
     }
 
     #[test]
