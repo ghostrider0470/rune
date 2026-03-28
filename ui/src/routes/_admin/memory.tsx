@@ -85,6 +85,8 @@ function MemoryGraphPage() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sizeMode, setSizeMode] = useState<SizeMode>("access");
+  const [threshold, setThreshold] = useState(0.4);
+  const [neighbors, setNeighbors] = useState(8);
   const [enabledCategories, setEnabledCategories] = useState<Set<string>>(
     () => new Set(CATEGORIES.map((c) => c.name)),
   );
@@ -105,8 +107,9 @@ function MemoryGraphPage() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["memory-graph"],
-    queryFn: () => api.get<GraphResponse>("/api/memory/graph?threshold=0.4&neighbors=8"),
+    queryKey: ["memory-graph", threshold, neighbors],
+    queryFn: () =>
+      api.get<GraphResponse>(`/api/memory/graph?threshold=${threshold}&neighbors=${neighbors}`),
   });
 
   // ── Delete mutation ──────────────────────────────────────────
@@ -399,6 +402,40 @@ function MemoryGraphPage() {
           })}
         </div>
 
+        {/* Graph controls */}
+        <div className="flex max-w-xs flex-col gap-2 rounded-xl border border-border/50 bg-background/80 p-2 backdrop-blur-xl">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span>Similarity threshold</span>
+              <span>{threshold.toFixed(2)}</span>
+            </div>
+            <input
+              type="range"
+              min="0.1"
+              max="0.9"
+              step="0.05"
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span>Neighbors per node</span>
+              <span>{neighbors}</span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              value={neighbors}
+              onChange={(e) => setNeighbors(Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+        </div>
+
         {/* Size mode + controls */}
         <div className="flex items-center gap-1.5">
           <div className="flex items-center rounded-md border border-border/50 bg-background/80 backdrop-blur-xl p-0.5">
@@ -437,8 +474,12 @@ function MemoryGraphPage() {
             variant="ghost"
             size="icon"
             className="h-7 w-7 bg-background/80 backdrop-blur-xl border border-border/50"
-            onClick={() => refetch()}
-            title="Refresh data"
+            onClick={() => {
+              setThreshold(0.4);
+              setNeighbors(8);
+              void refetch();
+            }}
+            title="Reset graph controls"
           >
             <RefreshCw className="h-3 w-3" />
           </Button>
