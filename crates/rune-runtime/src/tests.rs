@@ -2623,8 +2623,18 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     let requests = model_handle.requests().await;
     assert!(requests.len() >= 2);
 
-    let first_system = requests[0].messages[0].content.clone().unwrap();
-    let second_system = requests[1].messages[0].content.clone().unwrap();
+    let first_system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .and_then(|messages| messages.first())
+        .and_then(|message| message.content.clone())
+        .unwrap();
+    let second_system = requests[1]
+        .stable_prefix_messages
+        .as_ref()
+        .and_then(|messages| messages.first())
+        .and_then(|message| message.content.clone())
+        .unwrap();
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
 }
