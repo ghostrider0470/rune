@@ -749,6 +749,10 @@ pub struct LaneQueueConfig {
     pub main_capacity: usize,
     pub subagent_capacity: usize,
     pub cron_capacity: usize,
+    #[serde(default = "default_global_tool_capacity")]
+    pub global_tool_capacity: usize,
+    #[serde(default = "default_project_tool_capacity")]
+    pub project_tool_capacity: usize,
 }
 
 impl Default for LaneQueueConfig {
@@ -757,8 +761,18 @@ impl Default for LaneQueueConfig {
             main_capacity: 4,
             subagent_capacity: 8,
             cron_capacity: 1024,
+            global_tool_capacity: default_global_tool_capacity(),
+            project_tool_capacity: default_project_tool_capacity(),
         }
     }
+}
+
+const fn default_global_tool_capacity() -> usize {
+    32
+}
+
+const fn default_project_tool_capacity() -> usize {
+    4
 }
 
 /// Provider inventory and routing aliases.

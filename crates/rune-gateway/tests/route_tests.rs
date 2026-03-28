@@ -1995,7 +1995,7 @@ async fn status_reports_configured_lane_capacities() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
-    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_capacities(6, 9, 128));
+    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_limits(6, 9, 128, 24, 5));
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
@@ -2023,6 +2023,8 @@ async fn status_reports_configured_lane_capacities() {
         main_capacity: 6,
         subagent_capacity: 9,
         cron_capacity: 128,
+        global_tool_capacity: 24,
+        project_tool_capacity: 5,
     };
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
