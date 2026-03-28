@@ -27,7 +27,7 @@ type UsageRecorderFn = Arc<
 >;
 use crate::error::RuntimeError;
 use crate::hooks::{HookEvent, HookRegistry};
-use crate::lane_queue::{Lane, LaneQueue};
+use crate::lane_queue::{Lane, LaneQueue, ToolPermit};
 use crate::mem0::Mem0Engine;
 use crate::memory::MemoryLoader;
 use crate::session_metadata::selected_model;
@@ -177,6 +177,16 @@ impl TurnExecutor {
     /// Expose lane queue stats for operator surfaces when configured.
     pub fn lane_stats(&self) -> Option<crate::lane_queue::LaneStats> {
         self.lane_queue.as_ref().map(|queue| queue.stats())
+    }
+
+    async fn acquire_tool_permit(
+        &self,
+        session_project_key: Option<&str>,
+        call: &ToolCall,
+    ) -> Option<ToolPermit> {
+        let queue = self.lane_queue.as_ref()?;
+        let project_key = call.project_key().or(session_project_key);
+        Some(queue.acquire_tool(project_key).await)
     }
 
     /// Expose the turn repository for stale turn cleanup.
@@ -758,6 +768,7 @@ impl TurnExecutor {
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
+        let project_key = session_project_key(&session);
         let workspace_context = WorkspaceLoader::new(&workspace_root, session_kind)
             .load()
             .await;
@@ -1008,6 +1019,9 @@ impl TurnExecutor {
                         arguments: args,
                     };
 
+                    let _tool_permit = self
+                        .acquire_tool_permit(project_key.as_deref(), &call)
+                        .await;
                     let tool_result = match self.tool_executor.execute(call.clone()).await {
                         Ok(result) => result,
                         Err(rune_tools::ToolError::ApprovalRequired { tool, details }) => {
@@ -1088,6 +1102,9 @@ impl TurnExecutor {
                                     arguments: auto_args,
                                 };
 
+                                let _auto_tool_permit = self
+                                    .acquire_tool_permit(project_key.as_deref(), &auto_call)
+                                    .await;
                                 match self.tool_executor.execute(auto_call).await {
                                     Ok(result) => result,
                                     Err(e) => {
@@ -1341,6 +1358,15 @@ impl TurnExecutor {
             .await?;
         Ok(())
     }
+}
+
+fn session_project_key(session: &rune_store::models::SessionRow) -> Option<String> {
+    session
+        .workspace_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn parse_session_kind(kind: &str) -> Result<SessionKind, RuntimeError> {

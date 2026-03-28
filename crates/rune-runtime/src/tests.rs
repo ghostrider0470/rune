@@ -2638,3 +2638,47 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
 }
+
+#[tokio::test]
+async fn turn_executor_acquires_tool_permit_from_session_workspace_project() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("demo_tool", "{}"),
+        FakeModelProvider::text_response("done"),
+    ]));
+    let tool_executor = Arc::new(FakeToolExecutor::new(vec!["ok".to_string()]));
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "demo_tool".to_string(),
+        description: "demo".to_string(),
+        parameters: serde_json::json!({"type":"object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: false,
+    });
+    let lane_queue = Arc::new(crate::lane_queue::LaneQueue::with_limits(2, 2, 2, 4, 1));
+    let blocker = lane_queue.acquire_tool(Some(&h.workspace_root.to_string_lossy())).await;
+    let executor = h
+        .turn_executor(model, tool_executor, registry)
+        .with_lane_queue(lane_queue.clone());
+
+    let execute = tokio::spawn({
+        let executor = executor.clone();
+        async move { executor.execute(session.id, "run the tool", None).await }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!execute.is_finished(), "turn should wait for per-project tool permit");
+
+    drop(blocker);
+    let (turn, _) = execute.await.unwrap().unwrap();
+    assert_eq!(turn.status, "completed");
+}
