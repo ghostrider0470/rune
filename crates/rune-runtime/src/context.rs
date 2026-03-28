@@ -23,7 +23,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
 );
 
 use rune_core::{AttachmentRef, TranscriptItem};
-use rune_models::{ChatMessage, FunctionCall, ImageUrlPart, MessagePart, Role, ToolCallRequest};
+use rune_models::{ChatMessage, FunctionCall, ImageFilePart, ImageUrlPart, MessagePart, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
 
@@ -309,13 +309,23 @@ fn build_user_message_parts(content: &str, attachments: &[AttachmentRef]) -> Opt
     }
 
     for attachment in attachments {
-        let Some(url) = attachment.url.as_deref() else {
-            continue;
-        };
         let mime = attachment.mime_type.as_deref().unwrap_or("");
         if !mime.starts_with("image/") {
             continue;
         }
+
+        if let Some(provider_file_id) = attachment.provider_file_id.as_deref() {
+            parts.push(MessagePart::ImageFile {
+                image_file: ImageFilePart {
+                    file_id: provider_file_id.to_string(),
+                },
+            });
+            continue;
+        }
+
+        let Some(url) = attachment.url.as_deref() else {
+            continue;
+        };
         parts.push(MessagePart::ImageUrl {
             image_url: ImageUrlPart {
                 url: url.to_string(),
@@ -483,6 +493,25 @@ mod attachment_prompt_tests {
 
         assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
         assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg"));
+        assert_eq!(parts.len(), 2);
+    }
+
+    #[test]
+    fn builds_multimodal_parts_from_provider_file_id_when_available() {
+        let parts = build_user_message_parts(
+            "Describe this image",
+            &[AttachmentRef {
+                name: "photo.jpg".into(),
+                mime_type: Some("image/jpeg".into()),
+                size_bytes: Some(42),
+                url: Some("telegram-file:abc123".into()),
+                provider_file_id: Some("abc123".into()),
+            }],
+        )
+        .expect("expected multimodal parts");
+
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
+        assert!(matches!(&parts[1], MessagePart::ImageFile { image_file } if image_file.file_id == "abc123"));
         assert_eq!(parts.len(), 2);
     }
 

@@ -18,8 +18,8 @@ pub use provider::ollama::OllamaProvider;
 pub use provider::openai::OpenAiProvider;
 pub use types::{
     ChatMessage, CompletionRequest, CompletionResponse, FinishReason, FunctionCall,
-    FunctionDefinition, ImageUrlPart, MessagePart, Role, StreamEvent, ToolCallRequest,
-    ToolDefinition, Usage,
+    FunctionDefinition, ImageFilePart, ImageUrlPart, MessagePart, Role, StreamEvent,
+    ToolCallRequest, ToolDefinition, Usage,
 };
 
 use rune_config::ModelProviderConfig;

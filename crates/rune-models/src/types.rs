@@ -10,12 +10,21 @@ pub enum MessagePart {
     ImageUrl {
         image_url: ImageUrlPart,
     },
+    ImageFile {
+        image_file: ImageFilePart,
+    },
 }
 
 /// OpenAI-compatible image URL content block.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageUrlPart {
     pub url: String,
+}
+
+/// Provider-native image file reference content block.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImageFilePart {
+    pub file_id: String,
 }
 
 /// Role of a message participant.
