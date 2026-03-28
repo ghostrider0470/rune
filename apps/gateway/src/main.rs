@@ -749,7 +749,6 @@ async fn build_services(
     turn_executor = turn_executor.with_approval_mode(config.approval.mode.as_str());
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
 
-
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
         match Mem0Engine::try_new(
@@ -1150,14 +1149,14 @@ async fn sync_workspace_memory_index(
 ) -> Result<()> {
     let memory_files = collect_workspace_memory_files(workspace_root).await?;
     let current_files: BTreeSet<String> = memory_files.iter().cloned().collect();
-    let indexed_files = repo.list_indexed_files().await?;
+    let indexed_files = repo.list_indexed_files(None).await?;
     let stale_files: Vec<String> = indexed_files
         .into_iter()
         .filter(|path| !current_files.contains(path))
         .collect();
 
     for stale_path in &stale_files {
-        repo.delete_by_file(stale_path).await?;
+        repo.delete_by_file(None, stale_path).await?;
     }
 
     let mut indexed_chunk_count = 0usize;
@@ -1167,7 +1166,7 @@ async fn sync_workspace_memory_index(
             .await
             .with_context(|| format!("failed to read memory file {}", full_path.display()))?;
 
-        repo.delete_by_file(relative_path).await?;
+        repo.delete_by_file(None, relative_path).await?;
 
         let embedded_chunks = index.index_file(Path::new(relative_path), &content).await?;
         indexed_chunk_count += embedded_chunks.len();
@@ -1180,6 +1179,7 @@ async fn sync_workspace_memory_index(
                 )
             })?;
             repo.upsert_chunk(
+                None,
                 relative_path,
                 chunk_index,
                 &embedded.chunk.chunk_text,
@@ -1741,9 +1741,7 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "evolve_status" => {
-                EvolverStatusExecutor.execute(call).await
-            }
+            "evolve_status" => EvolverStatusExecutor.execute(call).await,
             "security_audit" => {
                 SecurityAuditToolExecutor::new(self.workspace_root.clone())
                     .execute(call)

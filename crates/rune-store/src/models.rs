@@ -293,6 +293,7 @@ pub struct NewPairingRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEmbeddingRow {
     pub id: Uuid,
+    pub project_id: Option<String>,
     pub file_path: String,
     pub chunk_index: i32,
     pub chunk_text: String,
@@ -302,6 +303,7 @@ pub struct MemoryEmbeddingRow {
 /// Result row from keyword search raw SQL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeywordSearchRow {
+    pub project_id: Option<String>,
     pub file_path: String,
     pub chunk_text: String,
     pub score: f64,
@@ -310,6 +312,7 @@ pub struct KeywordSearchRow {
 /// Result row from vector search raw SQL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorSearchRow {
+    pub project_id: Option<String>,
     pub file_path: String,
     pub chunk_text: String,
     pub score: f64,

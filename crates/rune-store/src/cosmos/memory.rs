@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::cosmos::{collect_query, pk, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, pk};
 use crate::error::StoreError;
 use crate::models::{KeywordSearchRow, VectorSearchRow};
 use crate::repos::MemoryEmbeddingRepo;
@@ -16,6 +16,7 @@ struct MemoryEmbeddingDoc {
     pk: String,
     #[serde(rename = "type")]
     doc_type: String,
+    project_id: Option<String>,
     file_path: String,
     chunk_index: i32,
     chunk_text: String,
@@ -23,33 +24,30 @@ struct MemoryEmbeddingDoc {
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Helper to build the partition key for memory embedding docs.
-fn mem_pk(file_path: &str) -> String {
-    format!("mem:{}", file_path)
+fn mem_pk(project_id: Option<&str>, file_path: &str) -> String {
+    format!("mem:{}:{}", project_id.unwrap_or("default"), file_path)
 }
 
-/// Helper to build the document id for a memory embedding chunk.
-fn mem_id(file_path: &str, chunk_index: i32) -> String {
-    format!("{}:{}", file_path, chunk_index)
+fn mem_id(project_id: Option<&str>, file_path: &str, chunk_index: i32) -> String {
+    format!("{}:{}:{}", project_id.unwrap_or(""), file_path, chunk_index)
 }
 
-/// Deserialize helper for DISTINCT file_path query results.
 #[derive(Debug, Deserialize)]
 struct FilePathResult {
     file_path: String,
 }
 
-/// Deserialize helper for vector search results.
 #[derive(Debug, Deserialize)]
 struct VectorSearchResult {
+    project_id: Option<String>,
     file_path: String,
     chunk_text: String,
     score: f64,
 }
 
-/// Deserialize helper for keyword search results.
 #[derive(Debug, Deserialize)]
 struct KeywordSearchResult {
+    project_id: Option<String>,
     file_path: String,
     chunk_text: String,
 }
@@ -58,15 +56,17 @@ struct KeywordSearchResult {
 impl MemoryEmbeddingRepo for CosmosStore {
     async fn upsert_chunk(
         &self,
+        project_id: Option<&str>,
         file_path: &str,
         chunk_index: i32,
         chunk_text: &str,
         embedding: &[f32],
     ) -> Result<(), StoreError> {
         let doc = MemoryEmbeddingDoc {
-            id: mem_id(file_path, chunk_index),
-            pk: mem_pk(file_path),
+            id: mem_id(project_id, file_path, chunk_index),
+            pk: mem_pk(project_id, file_path),
             doc_type: "memory_embedding".to_string(),
+            project_id: project_id.map(str::to_string),
             file_path: file_path.to_string(),
             chunk_index,
             chunk_text: chunk_text.to_string(),
@@ -80,8 +80,12 @@ impl MemoryEmbeddingRepo for CosmosStore {
         Ok(())
     }
 
-    async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError> {
-        let pk_val = mem_pk(file_path);
+    async fn delete_by_file(
+        &self,
+        project_id: Option<&str>,
+        file_path: &str,
+    ) -> Result<usize, StoreError> {
+        let pk_val = mem_pk(project_id, file_path);
         let query = "SELECT c.id FROM c WHERE c.type = 'memory_embedding'";
         let stream = self
             .container()
@@ -102,20 +106,26 @@ impl MemoryEmbeddingRepo for CosmosStore {
 
     async fn keyword_search(
         &self,
+        project_id: Option<&str>,
         query: &str,
         limit: i64,
     ) -> Result<Vec<KeywordSearchRow>, StoreError> {
         let escaped = query.replace('\'', "''").to_lowercase();
+        let project_clause = match project_id {
+            Some(project_id) => format!(" AND c.project_id = '{}'", project_id.replace('\'', "''")),
+            None => String::new(),
+        };
         let sql = format!(
-            "SELECT TOP {} c.file_path, c.chunk_text FROM c \
-             WHERE c.type = 'memory_embedding' \
+            "SELECT TOP {} c.project_id, c.file_path, c.chunk_text FROM c \
+             WHERE c.type = 'memory_embedding'{} \
              AND CONTAINS(LOWER(c.chunk_text), '{}')",
-            limit, escaped
+            limit, project_clause, escaped
         );
         let results: Vec<KeywordSearchResult> = self.query_cross_partition(&sql).await?;
         Ok(results
             .into_iter()
             .map(|r| KeywordSearchRow {
+                project_id: r.project_id,
                 file_path: r.file_path,
                 chunk_text: r.chunk_text,
                 score: 1.0,
@@ -125,10 +135,11 @@ impl MemoryEmbeddingRepo for CosmosStore {
 
     async fn vector_search(
         &self,
+        project_id: Option<&str>,
         embedding: &[f32],
         limit: i64,
     ) -> Result<Vec<VectorSearchRow>, StoreError> {
-        let vec_str: String = format!(
+        let vec_str = format!(
             "[{}]",
             embedding
                 .iter()
@@ -136,17 +147,22 @@ impl MemoryEmbeddingRepo for CosmosStore {
                 .collect::<Vec<_>>()
                 .join(",")
         );
+        let project_clause = match project_id {
+            Some(project_id) => format!(" AND c.project_id = '{}'", project_id.replace('\'', "''")),
+            None => String::new(),
+        };
         let sql = format!(
-            "SELECT TOP {} c.file_path, c.chunk_text, \
+            "SELECT TOP {} c.project_id, c.file_path, c.chunk_text, \
              VectorDistance(c.embedding, {}) AS score \
-             FROM c WHERE c.type = 'memory_embedding' \
+             FROM c WHERE c.type = 'memory_embedding'{} \
              ORDER BY VectorDistance(c.embedding, {})",
-            limit, vec_str, vec_str
+            limit, vec_str, project_clause, vec_str
         );
         let results: Vec<VectorSearchResult> = self.query_cross_partition(&sql).await?;
         Ok(results
             .into_iter()
             .map(|r| VectorSearchRow {
+                project_id: r.project_id,
                 file_path: r.file_path,
                 chunk_text: r.chunk_text,
                 score: r.score,
@@ -154,26 +170,47 @@ impl MemoryEmbeddingRepo for CosmosStore {
             .collect())
     }
 
-    async fn count(&self) -> Result<i64, StoreError> {
-        let query = "SELECT VALUE COUNT(1) FROM c WHERE c.type = 'memory_embedding'";
-        let results: Vec<serde_json::Value> = self.query_cross_partition(query).await?;
-        if let Some(val) = results.into_iter().next() {
-            Ok(val.as_i64().unwrap_or(0))
-        } else {
-            Ok(0)
-        }
+    async fn count(&self, project_id: Option<&str>) -> Result<i64, StoreError> {
+        let project_clause = match project_id {
+            Some(project_id) => format!(" AND c.project_id = '{}'", project_id.replace('\'', "''")),
+            None => String::new(),
+        };
+        let query = format!(
+            "SELECT VALUE COUNT(1) FROM c WHERE c.type = 'memory_embedding'{}",
+            project_clause
+        );
+        let results: Vec<serde_json::Value> = self.query_cross_partition(&query).await?;
+        Ok(results
+            .into_iter()
+            .next()
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0))
     }
 
-    async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
-        let query =
-            "SELECT DISTINCT c.file_path FROM c WHERE c.type = 'memory_embedding'";
-        let results: Vec<FilePathResult> = self.query_cross_partition(query).await?;
+    async fn list_indexed_files(
+        &self,
+        project_id: Option<&str>,
+    ) -> Result<Vec<String>, StoreError> {
+        let project_clause = match project_id {
+            Some(project_id) => format!(" AND c.project_id = '{}'", project_id.replace('\'', "''")),
+            None => String::new(),
+        };
+        let query = format!(
+            "SELECT DISTINCT c.file_path FROM c WHERE c.type = 'memory_embedding'{}",
+            project_clause
+        );
+        let results: Vec<FilePathResult> = self.query_cross_partition(&query).await?;
         Ok(results.into_iter().map(|r| r.file_path).collect())
     }
 
-    async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
-        let pk_val = mem_pk(file_path);
-        let item_id = mem_id(file_path, chunk_index);
+    async fn delete_chunk(
+        &self,
+        project_id: Option<&str>,
+        file_path: &str,
+        chunk_index: i32,
+    ) -> Result<bool, StoreError> {
+        let pk_val = mem_pk(project_id, file_path);
+        let item_id = mem_id(project_id, file_path, chunk_index);
         match self
             .container()
             .delete_item(pk(&pk_val), &item_id, None)
@@ -191,10 +228,16 @@ impl MemoryEmbeddingRepo for CosmosStore {
         }
     }
 
-    async fn delete_all(&self) -> Result<usize, StoreError> {
-        let query =
-            "SELECT c.id, c.pk FROM c WHERE c.type = 'memory_embedding'";
-        let items: Vec<serde_json::Value> = self.query_cross_partition(query).await?;
+    async fn delete_all(&self, project_id: Option<&str>) -> Result<usize, StoreError> {
+        let project_clause = match project_id {
+            Some(project_id) => format!(" AND c.project_id = '{}'", project_id.replace('\'', "''")),
+            None => String::new(),
+        };
+        let query = format!(
+            "SELECT c.id, c.pk FROM c WHERE c.type = 'memory_embedding'{}",
+            project_clause
+        );
+        let items: Vec<serde_json::Value> = self.query_cross_partition(&query).await?;
         let mut count = 0usize;
         for val in &items {
             if let (Some(doc_id), Some(doc_pk)) = (

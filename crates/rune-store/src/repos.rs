@@ -288,9 +288,10 @@ pub trait ToolApprovalPolicyRepo: Send + Sync {
 /// Persistence contract for memory embedding chunks used by hybrid search.
 #[async_trait]
 pub trait MemoryEmbeddingRepo: Send + Sync {
-    /// Upsert a single embedded chunk (file_path + chunk_index is the natural key).
+    /// Upsert a single embedded chunk (project_id + file_path + chunk_index is the natural key).
     async fn upsert_chunk(
         &self,
+        project_id: Option<&str>,
         file_path: &str,
         chunk_index: i32,
         chunk_text: &str,
@@ -298,11 +299,16 @@ pub trait MemoryEmbeddingRepo: Send + Sync {
     ) -> Result<(), StoreError>;
 
     /// Delete all chunks for a given file.
-    async fn delete_by_file(&self, file_path: &str) -> Result<usize, StoreError>;
+    async fn delete_by_file(
+        &self,
+        project_id: Option<&str>,
+        file_path: &str,
+    ) -> Result<usize, StoreError>;
 
     /// Keyword search leg ordered by PostgreSQL `ts_rank` descending.
     async fn keyword_search(
         &self,
+        project_id: Option<&str>,
         query: &str,
         limit: i64,
     ) -> Result<Vec<KeywordSearchRow>, StoreError>;
@@ -310,21 +316,28 @@ pub trait MemoryEmbeddingRepo: Send + Sync {
     /// Vector search leg ordered by cosine similarity descending.
     async fn vector_search(
         &self,
+        project_id: Option<&str>,
         embedding: &[f32],
         limit: i64,
     ) -> Result<Vec<VectorSearchRow>, StoreError>;
 
     /// Count total indexed chunks.
-    async fn count(&self) -> Result<i64, StoreError>;
+    async fn count(&self, project_id: Option<&str>) -> Result<i64, StoreError>;
 
     /// List distinct indexed files.
-    async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError>;
+    async fn list_indexed_files(&self, project_id: Option<&str>)
+    -> Result<Vec<String>, StoreError>;
 
     /// Delete a single chunk by file path and chunk index.
-    async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError>;
+    async fn delete_chunk(
+        &self,
+        project_id: Option<&str>,
+        file_path: &str,
+        chunk_index: i32,
+    ) -> Result<bool, StoreError>;
 
     /// Delete all memory embeddings. Returns the count removed.
-    async fn delete_all(&self) -> Result<usize, StoreError>;
+    async fn delete_all(&self, project_id: Option<&str>) -> Result<usize, StoreError>;
 }
 
 // ── Tool execution repository ─────────────────────────────────────────

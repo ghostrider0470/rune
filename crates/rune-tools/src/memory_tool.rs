@@ -97,9 +97,13 @@ impl HybridMemorySearchBackend for PersistedKeywordMemorySearch {
         let limit = i64::try_from(max_results)
             .map_err(|_| ToolError::InvalidArgument("maxResults is too large".into()))?;
 
-        let keyword_hits = self.repo.keyword_search(query, limit).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("persisted memory keyword search failed: {e}"))
-        })?;
+        let keyword_hits = self
+            .repo
+            .keyword_search(None, query, limit)
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("persisted memory keyword search failed: {e}"))
+            })?;
 
         Ok(keyword_hits
             .into_iter()
@@ -121,9 +125,13 @@ impl HybridMemorySearchBackend for PersistedHybridMemorySearch {
         let limit = i64::try_from(max_results)
             .map_err(|_| ToolError::InvalidArgument("maxResults is too large".into()))?;
 
-        let keyword_hits = self.repo.keyword_search(query, limit).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("persisted memory keyword search failed: {e}"))
-        })?;
+        let keyword_hits = self
+            .repo
+            .keyword_search(None, query, limit)
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("persisted memory keyword search failed: {e}"))
+            })?;
 
         let query_embedding = self.index.embed_query(query).await.map_err(|e| {
             ToolError::ExecutionFailed(format!("persisted memory query embedding failed: {e}"))
@@ -131,7 +139,7 @@ impl HybridMemorySearchBackend for PersistedHybridMemorySearch {
 
         let vector_hits = self
             .repo
-            .vector_search(&query_embedding, limit)
+            .vector_search(None, &query_embedding, limit)
             .await
             .map_err(|e| {
                 ToolError::ExecutionFailed(format!("persisted memory vector search failed: {e}"))
@@ -526,6 +534,7 @@ mod tests {
     impl MemoryEmbeddingRepo for StubMemoryEmbeddingRepo {
         async fn upsert_chunk(
             &self,
+            _project_id: Option<&str>,
             _file_path: &str,
             _chunk_index: i32,
             _chunk_text: &str,
@@ -534,12 +543,13 @@ mod tests {
             unreachable!()
         }
 
-        async fn delete_by_file(&self, _file_path: &str) -> Result<usize, StoreError> {
+        async fn delete_by_file(&self, _project_id: Option<&str>, _file_path: &str) -> Result<usize, StoreError> {
             unreachable!()
         }
 
         async fn keyword_search(
             &self,
+            _project_id: Option<&str>,
             _query: &str,
             _limit: i64,
         ) -> Result<Vec<KeywordSearchRow>, StoreError> {
@@ -548,25 +558,31 @@ mod tests {
 
         async fn vector_search(
             &self,
+            _project_id: Option<&str>,
             _embedding: &[f32],
             _limit: i64,
         ) -> Result<Vec<VectorSearchRow>, StoreError> {
             Ok(self.vector_hits.clone())
         }
 
-        async fn count(&self) -> Result<i64, StoreError> {
+        async fn count(&self, _project_id: Option<&str>) -> Result<i64, StoreError> {
             Ok((self.keyword_hits.len().max(self.vector_hits.len())) as i64)
         }
 
-        async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
+        async fn list_indexed_files(&self, _project_id: Option<&str>) -> Result<Vec<String>, StoreError> {
             Ok(Vec::new())
         }
 
-        async fn delete_chunk(&self, _file_path: &str, _chunk_index: i32) -> Result<bool, StoreError> {
+        async fn delete_chunk(
+            &self,
+            _project_id: Option<&str>,
+            _file_path: &str,
+            _chunk_index: i32,
+        ) -> Result<bool, StoreError> {
             Ok(false)
         }
 
-        async fn delete_all(&self) -> Result<usize, StoreError> {
+        async fn delete_all(&self, _project_id: Option<&str>) -> Result<usize, StoreError> {
             Ok(0)
         }
     }
@@ -695,11 +711,13 @@ mod tests {
         let backend = PersistedHybridMemorySearch::new(
             Arc::new(StubMemoryEmbeddingRepo {
                 keyword_hits: vec![KeywordSearchRow {
+                    project_id: None,
                     file_path: "MEMORY.md".into(),
                     chunk_text: "Prefers dark mode and compact UI".into(),
                     score: 0.9,
                 }],
                 vector_hits: vec![VectorSearchRow {
+                    project_id: None,
                     file_path: "MEMORY.md".into(),
                     chunk_text: "Prefers dark mode and compact UI".into(),
                     score: 0.8,

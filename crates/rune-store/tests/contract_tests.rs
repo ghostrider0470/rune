@@ -243,7 +243,10 @@ async fn test_turn_crud(session_repo: &dyn SessionRepo, turn_repo: &dyn TurnRepo
     assert_eq!(updated.status, "completed");
     assert!(updated.ended_at.is_some());
 
-    let updated = turn_repo.update_usage(tid, 100, 50, Some(25)).await.unwrap();
+    let updated = turn_repo
+        .update_usage(tid, 100, 50, Some(25))
+        .await
+        .unwrap();
     assert_eq!(updated.usage_prompt_tokens, Some(100));
     assert_eq!(updated.usage_completion_tokens, Some(50));
     assert_eq!(updated.usage_cached_prompt_tokens, Some(25));
@@ -469,38 +472,78 @@ async fn test_tool_execution_crud(
 }
 
 async fn test_memory_embedding_crud(repo: &dyn MemoryEmbeddingRepo) {
+    let project = Some("project-a");
+    let other_project = Some("project-b");
+
     // Upsert
-    repo.upsert_chunk("test/file.md", 0, "hello world", &[])
+    repo.upsert_chunk(project, "test/file.md", 0, "hello world", &[])
         .await
         .unwrap();
-    repo.upsert_chunk("test/file.md", 1, "goodbye world", &[])
+    repo.upsert_chunk(project, "test/file.md", 1, "goodbye world", &[])
         .await
         .unwrap();
+    repo.upsert_chunk(
+        other_project,
+        "other/file.md",
+        0,
+        "other project hello",
+        &[],
+    )
+    .await
+    .unwrap();
 
-    // Count
-    let count = repo.count().await.unwrap();
-    assert!(count >= 2);
+    // Count is project-scoped
+    let count = repo.count(project).await.unwrap();
+    assert_eq!(count, 2);
+    let other_count = repo.count(other_project).await.unwrap();
+    assert_eq!(other_count, 1);
 
-    // List indexed files
-    let files = repo.list_indexed_files().await.unwrap();
-    assert!(files.contains(&"test/file.md".to_string()));
+    // List indexed files is project-scoped
+    let files = repo.list_indexed_files(project).await.unwrap();
+    assert_eq!(files, vec!["test/file.md".to_string()]);
 
-    // Keyword search
-    let results = repo.keyword_search("hello", 10).await.unwrap();
-    assert!(!results.is_empty());
+    // Keyword search is project-scoped
+    let results = repo.keyword_search(project, "hello", 10).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].project_id.as_deref(), project);
     assert_eq!(results[0].file_path, "test/file.md");
 
-    // Vector search (returns empty on SQLite)
-    let _vec_results = repo.vector_search(&[], 10).await.unwrap();
+    let other_results = repo
+        .keyword_search(other_project, "hello", 10)
+        .await
+        .unwrap();
+    assert_eq!(other_results.len(), 1);
+    assert_eq!(other_results[0].project_id.as_deref(), other_project);
+    assert_eq!(other_results[0].file_path, "other/file.md");
+
+    // Vector search (returns empty on SQLite; project scope still accepted)
+    let _vec_results = repo.vector_search(project, &[], 10).await.unwrap();
 
     // Upsert update (same key)
-    repo.upsert_chunk("test/file.md", 0, "updated text", &[])
+    repo.upsert_chunk(project, "test/file.md", 0, "updated text", &[])
         .await
         .unwrap();
 
-    // Delete by file
-    let deleted = repo.delete_by_file("test/file.md").await.unwrap();
-    assert_eq!(deleted, 2);
+    let updated_results = repo.keyword_search(project, "updated", 10).await.unwrap();
+    assert_eq!(updated_results.len(), 1);
+    assert_eq!(updated_results[0].file_path, "test/file.md");
+
+    // Delete single chunk in one project only
+    assert!(repo.delete_chunk(project, "test/file.md", 1).await.unwrap());
+    assert!(!repo.delete_chunk(project, "test/file.md", 1).await.unwrap());
+    assert_eq!(repo.count(project).await.unwrap(), 1);
+    assert_eq!(repo.count(other_project).await.unwrap(), 1);
+
+    // Delete by file in one project only
+    let deleted = repo.delete_by_file(project, "test/file.md").await.unwrap();
+    assert_eq!(deleted, 1);
+    assert_eq!(repo.count(project).await.unwrap(), 0);
+    assert_eq!(repo.count(other_project).await.unwrap(), 1);
+
+    // Delete all in remaining project only
+    let deleted_all = repo.delete_all(other_project).await.unwrap();
+    assert_eq!(deleted_all, 1);
+    assert_eq!(repo.count(other_project).await.unwrap(), 0);
 }
 
 async fn test_device_crud(repo: &dyn DeviceRepo) {
