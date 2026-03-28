@@ -22,7 +22,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
     "Cache padding block 57. Cache padding block 58. Cache padding block 59. Cache padding block 60.\n"
 );
 
-use rune_core::TranscriptItem;
+use rune_core::{AttachmentRef, TranscriptItem};
 use rune_models::{ChatMessage, FunctionCall, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
@@ -89,6 +89,7 @@ impl ContextAssembler {
         messages.push(ChatMessage {
             role: Role::System,
             content: Some(system_content),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -140,6 +141,7 @@ impl ContextAssembler {
                     messages.push(ChatMessage {
                         role: Role::Assistant,
                         content: None,
+                        content_parts: None,
                         name: None,
                         tool_call_id: None,
                         tool_calls: Some(tool_calls),
@@ -160,14 +162,14 @@ impl ContextAssembler {
     fn item_to_chat_message(&self, item: TranscriptItem) -> Option<ChatMessage> {
         match item {
             TranscriptItem::UserMessage { message } => {
-                // OpenAI rejects user messages with empty content.
-                // This can happen with media-only messages or commands.
-                if message.content.trim().is_empty() {
+                let content = render_user_message_content(&message.content, &message.attachments);
+                if content.trim().is_empty() {
                     return None;
                 }
                 Some(ChatMessage {
                     role: Role::User,
-                    content: Some(message.content),
+                    content: Some(content),
+                    content_parts: None,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -180,6 +182,7 @@ impl ContextAssembler {
                 Some(ChatMessage {
                     role: Role::Assistant,
                     content: Some(content),
+                    content_parts: None,
                     name: None,
                     tool_call_id: None,
                     tool_calls: None,
@@ -194,6 +197,7 @@ impl ContextAssembler {
             } => Some(ChatMessage {
                 role: Role::Tool,
                 content: Some(output),
+                content_parts: None,
                 name: None,
                 tool_call_id: Some(tool_call_id.to_string()),
                 tool_calls: None,
@@ -278,6 +282,7 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
                     ChatMessage {
                         role: Role::Tool,
                         content: Some("[Tool call interrupted — no result available]".to_string()),
+                        content_parts: None,
                         name: None,
                         tool_call_id: Some(id),
                         tool_calls: None,
@@ -288,5 +293,136 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
         } else {
             i = j;
         }
+    }
+}
+
+
+fn render_user_message_content(content: &str, attachments: &[AttachmentRef]) -> String {
+    let trimmed = content.trim();
+    if attachments.is_empty() {
+        return trimmed.to_string();
+    }
+
+    let mut rendered = String::new();
+    if !trimmed.is_empty() {
+        rendered.push_str(trimmed);
+        rendered.push_str("\n\n");
+    }
+
+    rendered.push_str("[Attachments]\n");
+    for attachment in attachments {
+        rendered.push_str("- ");
+        rendered.push_str(&format_attachment_ref(attachment));
+        rendered.push('\n');
+    }
+
+    rendered.trim_end().to_string()
+}
+
+fn format_attachment_ref(attachment: &AttachmentRef) -> String {
+    let mut line = attachment.name.clone();
+    let mut details = Vec::new();
+
+    if let Some(mime) = attachment.mime_type.as_deref() {
+        details.push(mime.to_string());
+    }
+    if let Some(size_bytes) = attachment.size_bytes {
+        details.push(format!("{} bytes", size_bytes));
+    }
+    if let Some(provider_file_id) = attachment.provider_file_id.as_deref() {
+        details.push(format!("provider_file_id={provider_file_id}"));
+    }
+    if let Some(url) = attachment.url.as_deref() {
+        details.push(format!("url={url}"));
+    }
+
+    if !details.is_empty() {
+        line.push_str(" (");
+        line.push_str(&details.join(", "));
+        line.push(')');
+    }
+
+    line
+}
+
+#[cfg(test)]
+mod attachment_prompt_tests {
+    use super::{format_attachment_ref, render_user_message_content, ContextAssembler};
+    use rune_core::{AttachmentRef, NormalizedMessage, TranscriptItem};
+    use rune_models::Role;
+    use rune_store::models::TranscriptItemRow;
+    use uuid::Uuid;
+
+    use crate::NoOpCompaction;
+
+    #[test]
+    fn formats_attachment_only_user_messages_into_prompt_content() {
+        let item = TranscriptItem::UserMessage {
+            message: NormalizedMessage {
+                channel_id: None,
+                sender_id: "user".into(),
+                sender_display_name: None,
+                message_id: Some("m1".into()),
+                reply_to_message_id: None,
+                content: String::new(),
+                attachments: vec![AttachmentRef {
+                    name: "invoice.pdf".into(),
+                    mime_type: Some("application/pdf".into()),
+                    size_bytes: Some(1234),
+                    url: Some("https://example.test/invoice.pdf".into()),
+                    provider_file_id: Some("file_123".into()),
+                }],
+                metadata: serde_json::Value::Null,
+            },
+        };
+        let row = TranscriptItemRow {
+            id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            turn_id: None,
+            seq: 1,
+            kind: "user_message".into(),
+            payload: serde_json::to_value(item).unwrap(),
+            created_at: chrono::Utc::now(),
+        };
+
+        let assembler = ContextAssembler::new("system");
+        let messages = assembler.assemble(&[row], &NoOpCompaction, None, None, &[]);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].role, Role::User);
+        let content = messages[1].content.as_deref().unwrap();
+        assert!(content.contains("[Attachments]"));
+        assert!(content.contains("invoice.pdf"));
+        assert!(content.contains("application/pdf"));
+        assert!(content.contains("provider_file_id=file_123"));
+    }
+
+    #[test]
+    fn appends_attachment_summary_after_text_content() {
+        let rendered = render_user_message_content(
+            "Please summarize this",
+            &[AttachmentRef {
+                name: "notes.txt".into(),
+                mime_type: Some("text/plain".into()),
+                size_bytes: None,
+                url: None,
+                provider_file_id: None,
+            }],
+        );
+
+        assert!(rendered.starts_with("Please summarize this\n\n[Attachments]\n- notes.txt"));
+    }
+
+    #[test]
+    fn formats_attachment_ref_compactly() {
+        let formatted = format_attachment_ref(&AttachmentRef {
+            name: "photo.jpg".into(),
+            mime_type: Some("image/jpeg".into()),
+            size_bytes: Some(42),
+            url: None,
+            provider_file_id: Some("abc".into()),
+        });
+
+        assert_eq!(formatted, "photo.jpg (image/jpeg, 42 bytes, provider_file_id=abc)");
     }
 }
