@@ -17,7 +17,10 @@ use std::time::Duration;
 use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
 
-use crate::output::{DoctorBackendMatrixEntry, DoctorPathSummary, DoctorReport, DoctorTopologySummary};
+use crate::output::{
+    DoctorBackendMatrixEntry, DoctorContextSummary, DoctorContextTierBudgets, DoctorPathSummary,
+    DoctorReport, DoctorTopologySummary,
+};
 
 /// Result of a single diagnostic check.
 #[derive(Clone, Debug, Serialize)]
@@ -1473,7 +1476,6 @@ mod tests {
     }
 }
 
-
 fn overall_status(checks: &[CheckResult]) -> String {
     if checks.iter().any(|check| check.status == CheckStatus::Fail) {
         "fail".into()
@@ -1530,27 +1532,67 @@ pub fn build_doctor_report(checks: &[CheckResult], config: &AppConfig) -> Doctor
         },
     };
 
+    let context_tiers = &config.runtime.context.tiers;
+    let context = DoctorContextSummary {
+        tiers: DoctorContextTierBudgets {
+            identity: context_tiers.identity,
+            task: context_tiers.task,
+            project: context_tiers.project,
+            shared: context_tiers.shared,
+            total: context_tiers.total(),
+        },
+        compaction_reserved_system: config.runtime.compaction.reserved_system,
+        compaction_reserved_task: config.runtime.compaction.reserved_task,
+        compaction_context_window: config.runtime.compaction.context_window,
+        compaction_warn_at_tokens: config.runtime.compaction.warn_at_tokens,
+    };
+
     let mut backend_matrix = Vec::new();
     backend_matrix.push(DoctorBackendMatrixEntry {
         subsystem: "storage".into(),
         backend: topology.database.clone(),
-        status: if config.database.database_url.is_some() { "configured" } else { "embedded" }.into(),
+        status: if config.database.database_url.is_some() {
+            "configured"
+        } else {
+            "embedded"
+        }
+        .into(),
         capability: format!("mode={}", paths.mode),
         fix_hint: None,
     });
     backend_matrix.push(DoctorBackendMatrixEntry {
         subsystem: "models".into(),
         backend: topology.models.clone(),
-        status: if config.models.providers.is_empty() { "missing" } else { "configured" }.into(),
+        status: if config.models.providers.is_empty() {
+            "missing"
+        } else {
+            "configured"
+        }
+        .into(),
         capability: "provider registry loaded".into(),
-        fix_hint: config.models.providers.is_empty().then(|| "Configure at least one model provider in config.toml".into()),
+        fix_hint: config
+            .models
+            .providers
+            .is_empty()
+            .then(|| "Configure at least one model provider in config.toml".into()),
     });
     backend_matrix.push(DoctorBackendMatrixEntry {
         subsystem: "memory".into(),
         backend: topology.search.clone(),
-        status: if config.memory.semantic_search_enabled { "enabled" } else { "degraded" }.into(),
-        capability: if config.memory.semantic_search_enabled { "semantic retrieval available" } else { "keyword-only retrieval" }.into(),
-        fix_hint: (!config.memory.semantic_search_enabled).then(|| "Enable memory.semantic_search_enabled for embedding-backed retrieval".into()),
+        status: if config.memory.semantic_search_enabled {
+            "enabled"
+        } else {
+            "degraded"
+        }
+        .into(),
+        capability: if config.memory.semantic_search_enabled {
+            "semantic retrieval available"
+        } else {
+            "keyword-only retrieval"
+        }
+        .into(),
+        fix_hint: (!config.memory.semantic_search_enabled)
+            .then(|| "Enable memory.semantic_search_enabled for embedding-backed retrieval".into()),
     });
 
     DoctorReport {
@@ -1558,6 +1600,7 @@ pub fn build_doctor_report(checks: &[CheckResult], config: &AppConfig) -> Doctor
         checks,
         paths: Some(paths),
         topology: Some(topology),
+        context: Some(context),
         backend_matrix,
         run_at: chrono::Utc::now().to_rfc3339(),
     }

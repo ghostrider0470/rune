@@ -5497,6 +5497,23 @@ pub struct DoctorTopologySummary {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct DoctorContextTierBudgets {
+    pub identity: usize,
+    pub task: usize,
+    pub project: usize,
+    pub shared: usize,
+    pub total: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DoctorContextSummary {
+    pub tiers: DoctorContextTierBudgets,
+    pub compaction_reserved_system: usize,
+    pub compaction_reserved_recent: usize,
+    pub compaction_target_tokens: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct DoctorBackendMatrixEntry {
     pub subsystem: &'static str,
     pub backend: String,
@@ -5512,6 +5529,7 @@ pub struct DoctorReport {
     pub checks: Vec<DoctorCheck>,
     pub paths: DoctorPathSummary,
     pub topology: DoctorTopologySummary,
+    pub context: DoctorContextSummary,
     pub backend_matrix: Vec<DoctorBackendMatrixEntry>,
     pub run_at: String,
 }
@@ -6006,6 +6024,18 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         auto_create_missing: resolved_mode == rune_config::RuntimeMode::Standalone,
     };
     let topology_summary = doctor_topology_summary(&config);
+    let context_summary = DoctorContextSummary {
+        tiers: DoctorContextTierBudgets {
+            identity: config.runtime.context.tiers.identity,
+            task: config.runtime.context.tiers.task,
+            project: config.runtime.context.tiers.project,
+            shared: config.runtime.context.tiers.shared,
+            total: config.runtime.context.tiers.total(),
+        },
+        compaction_reserved_system: config.runtime.compaction.reserved_system,
+        compaction_reserved_recent: 0,
+        compaction_target_tokens: config.runtime.compaction.max_tokens,
+    };
     let provider_ok = !config.models.providers.is_empty();
     checks.push(DoctorCheck {
         name: "model_providers".to_string(),
@@ -6104,6 +6134,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         checks,
         paths: paths_summary,
         topology: topology_summary,
+        context: context_summary,
         backend_matrix,
         run_at: Utc::now().to_rfc3339(),
     }))

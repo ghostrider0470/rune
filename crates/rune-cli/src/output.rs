@@ -105,6 +105,24 @@ pub struct DoctorTopologySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorContextTierBudgets {
+    pub identity: usize,
+    pub task: usize,
+    pub project: usize,
+    pub shared: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorContextSummary {
+    pub tiers: DoctorContextTierBudgets,
+    pub compaction_reserved_system: usize,
+    pub compaction_reserved_task: usize,
+    pub compaction_context_window: usize,
+    pub compaction_warn_at_tokens: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorBackendMatrixEntry {
     pub subsystem: String,
     pub backend: String,
@@ -123,6 +141,8 @@ pub struct DoctorReport {
     pub paths: Option<DoctorPathSummary>,
     #[serde(default)]
     pub topology: Option<DoctorTopologySummary>,
+    #[serde(default)]
+    pub context: Option<DoctorContextSummary>,
     #[serde(default)]
     pub backend_matrix: Vec<DoctorBackendMatrixEntry>,
     pub run_at: String,
@@ -145,6 +165,35 @@ impl fmt::Display for DoctorReport {
                 f,
                 "Paths:    profile={}, mode={}, auto_create_missing={}",
                 paths.profile, paths.mode, paths.auto_create_missing
+            )?;
+        }
+        if let Some(context) = &self.context {
+            writeln!(
+                f,
+                "Context:  identity={}, task={}, project={}, shared={}, total={}, reserved_system={}, reserved_task={}, context_window={}, warn_at_tokens={}",
+                context.tiers.identity,
+                context.tiers.task,
+                context.tiers.project,
+                context.tiers.shared,
+                context.tiers.total,
+                context.compaction_reserved_system,
+                context.compaction_reserved_task,
+                context.compaction_context_window,
+                context.compaction_warn_at_tokens,
+            )?;
+        }
+        if let Some(context) = &self.context {
+            writeln!(
+                f,
+                "Context:  identity={}, task={}, project={}, shared={}, total={}, reserved_system={}, reserved_recent={}, target_tokens={}",
+                context.tiers.identity,
+                context.tiers.task,
+                context.tiers.project,
+                context.tiers.shared,
+                context.tiers.total,
+                context.compaction_reserved_system,
+                context.compaction_reserved_recent,
+                context.compaction_target_tokens
             )?;
         }
         if !self.backend_matrix.is_empty() {
