@@ -4,7 +4,7 @@ use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
     AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
     FunctionDefinition, ModelError, ModelProvider, OpenAiProvider, Role, RoutedModelProvider,
-    ToolDefinition, provider_from_config,
+    StreamEvent, ToolDefinition, provider_from_config, GoogleProvider,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -2539,4 +2539,46 @@ async fn openai_request_prepends_stable_prefix_messages() {
     assert_eq!(msgs[0]["role"], "system");
     assert_eq!(msgs[0]["content"], "Stable prefix");
     assert_eq!(msgs[1]["role"], "user");
+}
+
+
+#[tokio::test]
+async fn google_complete_stream_passthroughs_openai_sse() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(concat!(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n",
+                    "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n",
+                    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+                    "data: [DONE]\n\n"
+                )),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = GoogleProvider::with_base_url(&server.uri(), "k");
+    let mut stream = provider.complete_stream(&simple_request()).await.unwrap();
+
+    match stream.recv().await.unwrap() {
+        StreamEvent::TextDelta(delta) => assert_eq!(delta, "Hello"),
+        other => panic!("expected first text delta, got {other:?}"),
+    }
+    match stream.recv().await.unwrap() {
+        StreamEvent::TextDelta(delta) => assert_eq!(delta, " world"),
+        other => panic!("expected second text delta, got {other:?}"),
+    }
+    match stream.recv().await.unwrap() {
+        StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Hello world"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+            assert_eq!(response.usage.prompt_tokens, 3);
+            assert_eq!(response.usage.completion_tokens, 2);
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
 }
