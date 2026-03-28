@@ -541,6 +541,7 @@ pub struct DashboardModelItem {
     pub model_id: String,
     pub raw_model: String,
     pub is_default: bool,
+    pub discovered: bool,
 }
 
 #[derive(Serialize)]
@@ -744,6 +745,7 @@ pub async fn dashboard_models(
                 model_id,
                 raw_model: entry.raw_model.to_string(),
                 is_default,
+                discovered: false,
             }
         })
         .collect::<Vec<_>>();
@@ -3313,8 +3315,10 @@ pub struct ScannedModel {
 
 /// `POST /models/scan` - discover models from local providers (e.g. Ollama).
 ///
-/// Scans any configured Ollama provider by calling `GET /api/tags` on its
-/// native API endpoint. Returns the list of locally available models.
+/// Scans configured providers that expose a local inventory API. Today that
+/// means Ollama via `GET /api/tags`. Returns discovered models grouped by
+/// provider so operators can compare configured inventory with runtime-discovered
+/// availability.
 pub async fn scan_models(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ScanModelsResponse>>, GatewayError> {
@@ -3328,74 +3332,37 @@ pub async fn scan_models(
             provider_cfg.kind.as_str()
         };
 
-        if kind.to_lowercase() != "ollama" {
-            continue;
-        }
+        match kind.to_lowercase().as_str() {
+            "ollama" => {
+                let provider = if provider_cfg.base_url.is_empty() {
+                    rune_models::OllamaProvider::new()
+                } else {
+                    rune_models::OllamaProvider::with_base_url(&provider_cfg.base_url)
+                };
+                let models = provider.list_models().await.map_err(|e| {
+                    GatewayError::Internal(format!(
+                        "failed to scan models for provider '{}': {e}",
+                        provider_cfg.name
+                    ))
+                })?;
 
-        let ollama_base = if provider_cfg.base_url.is_empty() {
-            "http://localhost:11434".to_string()
-        } else {
-            provider_cfg
-                .base_url
-                .trim_end_matches('/')
-                .strip_suffix("/v1")
-                .unwrap_or(&provider_cfg.base_url)
-                .to_string()
-        };
-
-        let url = format!("{ollama_base}/api/tags");
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .unwrap_or_default();
-
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                #[derive(serde::Deserialize)]
-                struct OllamaTagsResponse {
-                    models: Vec<OllamaModelEntry>,
-                }
-                #[derive(serde::Deserialize)]
-                struct OllamaModelEntry {
-                    name: String,
-                    #[serde(default)]
-                    size: u64,
-                    #[serde(default)]
-                    modified_at: String,
-                }
-
-                if let Ok(tags) = resp.json::<OllamaTagsResponse>().await {
-                    results.push(ScanModelsResponse {
-                        provider: provider_cfg.name.clone(),
-                        models: tags
-                            .models
-                            .into_iter()
-                            .map(|m| ScannedModel {
-                                name: m.name,
-                                size: if m.size > 0 { Some(m.size) } else { None },
-                                modified_at: if m.modified_at.is_empty() {
-                                    None
-                                } else {
-                                    Some(m.modified_at)
-                                },
-                            })
-                            .collect(),
-                    });
-                }
+                results.push(ScanModelsResponse {
+                    provider: provider_cfg.name.clone(),
+                    models: models
+                        .into_iter()
+                        .map(|m| ScannedModel {
+                            name: m.name,
+                            size: if m.size > 0 { Some(m.size) } else { None },
+                            modified_at: if m.modified_at.is_empty() {
+                                None
+                            } else {
+                                Some(m.modified_at)
+                            },
+                        })
+                        .collect(),
+                });
             }
-            Ok(resp) => {
-                let status = resp.status().as_u16();
-                return Err(GatewayError::Internal(format!(
-                    "Ollama /api/tags returned HTTP {status} for provider '{}'",
-                    provider_cfg.name
-                )));
-            }
-            Err(e) => {
-                return Err(GatewayError::Internal(format!(
-                    "failed to reach Ollama at {url} for provider '{}': {e}",
-                    provider_cfg.name
-                )));
-            }
+            _ => {}
         }
     }
 
