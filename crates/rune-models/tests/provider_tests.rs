@@ -3,8 +3,8 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
     AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
-    FunctionDefinition, ModelError, ModelProvider, OpenAiProvider, Role, RoutedModelProvider,
-    ToolDefinition, provider_from_config,
+    FunctionDefinition, GoogleProvider, ModelError, ModelProvider, OpenAiProvider, Role,
+    RoutedModelProvider, StreamEvent, ToolDefinition, provider_from_config,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -2548,4 +2548,56 @@ async fn openai_request_prepends_stable_prefix_messages() {
     assert_eq!(msgs[0]["role"], "system");
     assert_eq!(msgs[0]["content"], "Stable prefix");
     assert_eq!(msgs[1]["role"], "user");
+}
+
+#[tokio::test]
+async fn google_complete_stream_passthroughs_openai_compatible_sse() {
+    let server = MockServer::start().await;
+
+    let sse_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" from Gemini\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\n",
+        "data: [DONE]\n\n"
+    );
+
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer test-google-key"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gemini-2.5-flash",
+            "stream": true,
+            "stream_options": { "include_usage": true }
+        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_raw(sse_body, "text/event-stream"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = GoogleProvider::with_base_url(&server.uri(), "test-google-key");
+    let request = CompletionRequest {
+        model: Some("gemini-2.5-flash".into()),
+        ..simple_request()
+    };
+
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+    let mut text = String::new();
+    let mut done = None;
+
+    while let Some(event) = stream.recv().await {
+        match event {
+            StreamEvent::TextDelta(delta) => text.push_str(&delta),
+            StreamEvent::Done(response) => done = Some(response),
+        }
+    }
+
+    assert_eq!(text, "Hello from Gemini");
+
+    let done = done.expect("stream should end with final response");
+    assert_eq!(done.content.as_deref(), Some("Hello from Gemini"));
+    assert_eq!(done.finish_reason, Some(FinishReason::Stop));
+    assert_eq!(done.usage.total_tokens, 8);
 }
