@@ -377,7 +377,7 @@ impl SessionRepo for MemSessionRepo {
         Ok(sessions
             .iter()
             .filter(|s| {
-                s.kind == "Channel"
+                s.kind == "channel"
                     && s.channel_ref.is_some()
                     && !terminal.contains(&s.status.as_str())
             })
@@ -2013,10 +2013,16 @@ async fn direct_session_prompt_includes_workspace_and_memory_context() {
         ToolRegistry::new(),
     );
 
+    engine.mark_running(session.id).await.unwrap();
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .and_then(|msgs| msgs.first())
+        .and_then(|msg| msg.content.clone())
+        .unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("SOUL.md"));
     assert!(system.contains("USER.md"));
@@ -2051,10 +2057,16 @@ async fn channel_session_prompt_excludes_long_term_memory() {
         ToolRegistry::new(),
     );
 
+    engine.mark_running(session.id).await.unwrap();
     executor.execute(session.id, "ping", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .and_then(|msgs| msgs.first())
+        .and_then(|msg| msg.content.clone())
+        .unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("Today's Notes"));
     assert!(!system.contains("Long-term Memory"));
@@ -2132,10 +2144,16 @@ async fn enabled_skills_are_injected_into_system_prompt() {
         Some(skill_registry),
     );
 
+    engine.mark_running(session.id).await.unwrap();
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .and_then(|msgs| msgs.first())
+        .and_then(|msg| msg.content.clone())
+        .unwrap();
     assert!(system.contains("## Available Spells"));
     assert!(system.contains("skill-alpha"));
     assert!(system.contains("Alpha description"));
@@ -2637,6 +2655,7 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
         ToolRegistry::new(),
     );
 
+    engine.mark_running(session.id).await.unwrap();
     executor.execute(session.id, "hello", None).await.unwrap();
     executor
         .execute(session.id, "follow-up", None)
@@ -2646,8 +2665,18 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     let requests = model_handle.requests().await;
     assert!(requests.len() >= 2);
 
-    let first_system = requests[0].messages[0].content.clone().unwrap();
-    let second_system = requests[1].messages[0].content.clone().unwrap();
+    let first_system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .and_then(|msgs| msgs.first())
+        .and_then(|msg| msg.content.clone())
+        .unwrap();
+    let second_system = requests[1]
+        .stable_prefix_messages
+        .as_ref()
+        .and_then(|msgs| msgs.first())
+        .and_then(|msg| msg.content.clone())
+        .unwrap();
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
 }
@@ -2674,6 +2703,7 @@ async fn request_stable_prefix_is_split_from_variable_messages() {
         ToolRegistry::new(),
     );
 
+    engine.mark_running(session.id).await.unwrap();
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
@@ -2733,6 +2763,7 @@ async fn request_stable_prefix_excludes_tool_results_from_cached_prefix() {
         registry,
     );
 
+    engine.mark_running(session.id).await.unwrap();
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
@@ -2784,6 +2815,7 @@ async fn request_stable_prefix_keeps_tools_out_of_variable_tail() {
     let model_handle = model.clone();
     let executor = h.turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), registry);
 
+    engine.mark_running(session.id).await.unwrap();
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
