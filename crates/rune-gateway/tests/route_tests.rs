@@ -2023,6 +2023,8 @@ async fn status_reports_configured_lane_capacities() {
         main_capacity: 6,
         subagent_capacity: 9,
         cron_capacity: 128,
+        global_tool_capacity: 20,
+        project_tool_capacity: 5,
     };
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
@@ -2192,6 +2194,9 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["tools"]["active"], 0);
+    assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
+    assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
 
     drop(main_permit);
     drop(subagent_permit);
