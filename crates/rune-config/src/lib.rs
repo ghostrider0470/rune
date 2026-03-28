@@ -1113,6 +1113,12 @@ pub struct ChannelsConfig {
     /// Base URL of the signal-cli REST API daemon.
     #[serde(default)]
     pub signal_api_url: Option<String>,
+    /// Microsoft Teams Bot Framework bearer token.
+    #[serde(default)]
+    pub teams_bot_token: Option<String>,
+    /// Azure Bot / Microsoft App ID for outbound activities.
+    #[serde(default)]
+    pub teams_bot_app_id: Option<String>,
     /// Google Chat service account credentials JSON path or inline JSON.
     #[serde(default)]
     pub google_chat_service_account: Option<String>,

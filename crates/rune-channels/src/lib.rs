@@ -31,7 +31,7 @@ pub trait ChannelAdapter: Send + Sync {
 /// Create a channel adapter by provider name.
 ///
 /// Supported `kind` values: `"telegram"`, `"discord"`, `"slack"`, `"whatsapp"`,
-/// `"signal"`.
+/// `"signal"`, `"teams"`.
 ///
 /// The caller must ensure the relevant configuration fields are populated;
 /// missing required fields will return a [`ChannelError::Provider`].
@@ -135,24 +135,16 @@ pub fn create_adapter(
             Ok(Box::new(SignalAdapter::new(number, api_url)))
         }
         "teams" => {
-            let app_id = config
-                .teams_app_id
-                .as_deref()
-                .ok_or_else(|| ChannelError::Provider {
-                    message: "teams_app_id is required for the Teams adapter".into(),
-                })?;
-            let app_password =
+            let bot_token =
                 config
-                    .teams_app_password
+                    .teams_bot_token
                     .as_deref()
                     .ok_or_else(|| ChannelError::Provider {
-                        message: "teams_app_password is required for the Teams adapter".into(),
+                        message: "teams_bot_token is required for the Teams adapter".into(),
                     })?;
             Ok(Box::new(TeamsAdapter::new(
-                app_id,
-                app_password,
-                config.teams_tenant_id.as_deref(),
-                config.teams_listen_addr.clone(),
+                bot_token,
+                config.teams_bot_app_id.clone(),
             )))
         }
         other => Err(ChannelError::Provider {
