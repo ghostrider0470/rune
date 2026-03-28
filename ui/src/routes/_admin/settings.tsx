@@ -29,6 +29,8 @@ import {
   useTtsEnable,
   useTtsDisable,
   useSttStatus,
+  useSttEnable,
+  useSttDisable,
 } from "@/hooks/use-system";
 import { getToken } from "@/lib/auth";
 import {
@@ -63,6 +65,8 @@ function SettingsPage() {
   const updateConfig = useUpdateConfig();
   const ttsEnable = useTtsEnable();
   const ttsDisable = useTtsDisable();
+  const sttEnable = useSttEnable();
+  const sttDisable = useSttDisable();
 
   const token = getToken();
 
@@ -136,6 +140,14 @@ function SettingsPage() {
     const mutation = enabled ? ttsEnable : ttsDisable;
     mutation.mutate(undefined, {
       onSuccess: () => toast.success(`TTS ${enabled ? "enabled" : "disabled"}`),
+      onError: (error) => toast.error(error.message),
+    });
+  };
+
+  const handleSttToggle = (enabled: boolean) => {
+    const mutation = enabled ? sttEnable : sttDisable;
+    mutation.mutate(undefined, {
+      onSuccess: () => toast.success(`STT ${enabled ? "enabled" : "disabled"}`),
       onError: (error) => toast.error(error.message),
     });
   };
@@ -295,13 +307,26 @@ function SettingsPage() {
                 <Skeleton className="h-40 w-full" />
               ) : (
                 <>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={sttStatus?.available ? "outline" : "secondary"}>
-                      {sttStatus?.available ? "Available" : "Not configured"}
-                    </Badge>
-                    <Badge variant={sttStatus?.enabled ? "default" : "secondary"}>
-                      {sttStatus?.enabled ? "Enabled" : "Disabled"}
-                    </Badge>
+                  <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Engine status</span>
+                        <Badge variant={sttStatus?.available ? "outline" : "secondary"}>
+                          {sttStatus?.available ? "Available" : "Not configured"}
+                        </Badge>
+                        <Badge variant={sttStatus?.enabled ? "default" : "secondary"}>
+                          {sttStatus?.enabled ? "Enabled" : "Disabled"}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Configure provider defaults here, then toggle runtime transcription.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={sttStatus?.enabled ?? false}
+                      onCheckedChange={handleSttToggle}
+                      disabled={!sttStatus?.available || sttEnable.isPending || sttDisable.isPending}
+                    />
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">

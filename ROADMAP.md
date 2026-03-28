@@ -322,21 +322,30 @@ Rune now ships a config-driven MCP client that can connect to external tool serv
 
 ### Phase 9 — STT Backend + UI
 
-**New crate** `crates/rune-stt/`
-- `src/lib.rs` — STT engine + provider trait
-- `src/openai.rs` — Whisper transcription
-- `src/config.rs` — provider, api key, model
+Status: ✅ Completed 2026-03-28
 
-**Gateway routes**
-- `GET /stt/status`
-- `POST /stt/transcribe`
+Rune already had the STT backend crate, gateway status/transcribe/toggle routes, and runtime-side inbound audio transcription wiring in place. This pass closed the remaining operator-surface gap by shipping the missing Settings UI toggle hooks for runtime STT enable/disable so the page now matches the backend capability.
 
-**Integration**
-- Auto-transcribe audio attachments before processing
+**Landed work**
+- `crates/rune-stt/`
+  - provider trait, engine, config, and OpenAI transcription backend
+- `crates/rune-gateway/src/routes.rs` + `crates/rune-gateway/src/server.rs`
+  - `GET /stt/status`
+  - `POST /stt/transcribe`
+  - `POST /stt/enable`
+  - `POST /stt/disable`
+- `crates/rune-runtime/src/session_loop.rs`
+  - inbound audio attachment enrichment via STT before turn execution
+- `ui/src/hooks/use-system.ts`
+  - added `useSttEnable` and `useSttDisable` mutations
+- `ui/src/routes/_admin/settings.tsx`
+  - added runtime STT toggle control and status card parity with TTS
 
-**Config/UI**
-- Add `[stt]` to `AppConfig`
-- STT controls in settings page
+**Validation**
+- `cd ui && npm run build`
+- `cargo check`
+
+Implementation note (2026-03-28): the roadmap entry was partially stale. Backend STT and runtime transcription plumbing were already shipped; the unfinished slice was the admin Settings control surface for toggling STT at runtime. This pass shipped that missing UI layer and updated roadmap bookkeeping to reflect the actual delivered state.
 
 ---
 
