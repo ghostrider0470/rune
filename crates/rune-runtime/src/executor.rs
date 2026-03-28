@@ -288,11 +288,48 @@ impl TurnExecutor {
         .await
     }
 
+    /// Execute a turn with a fully normalized inbound message, preserving
+    /// attachment metadata for multimodal prompt assembly.
+    pub async fn execute_channel_message_streaming(
+        &self,
+        session_id: Uuid,
+        message: NormalizedMessage,
+        model_ref: Option<&str>,
+        chunk_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        self.execute_triggered_message(
+            session_id,
+            message,
+            model_ref,
+            TriggerKind::UserMessage,
+            Some(chunk_tx),
+        )
+        .await
+    }
+
     /// Execute a turn for the given session using an explicit trigger kind.
     pub async fn execute_triggered(
         &self,
         session_id: Uuid,
         user_message: &str,
+        model_ref: Option<&str>,
+        trigger_kind: TriggerKind,
+        chunk_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        self.execute_triggered_message(
+            session_id,
+            NormalizedMessage::new("user", user_message),
+            model_ref,
+            trigger_kind,
+            chunk_tx,
+        )
+        .await
+    }
+
+    pub async fn execute_triggered_message(
+        &self,
+        session_id: Uuid,
+        user_message: NormalizedMessage,
         model_ref: Option<&str>,
         trigger_kind: TriggerKind,
         chunk_tx: Option<tokio::sync::mpsc::Sender<String>>,
@@ -342,9 +379,11 @@ impl TurnExecutor {
 
         debug!(turn_id = %turn_id, "turn created");
 
+        let user_message_content = user_message.content.clone();
+
         // 3. Persist user message to transcript
         let user_item = TranscriptItem::UserMessage {
-            message: NormalizedMessage::new("user", user_message),
+            message: user_message,
         };
         self.append_transcript(session_id, Some(turn_id.into_uuid()), &user_item)
             .await?;
@@ -402,7 +441,7 @@ impl TurnExecutor {
         if let Some(ref mem0) = self.mem0 {
             if matches!(final_status, TurnStatus::Completed) {
                 let mem0 = mem0.clone();
-                let user_msg = user_message.to_string();
+                let user_msg = user_message_content.clone();
                 let sess_id = session_id;
 
                 // Grab the assistant's final response from transcript

@@ -259,7 +259,21 @@ impl SessionLoop {
 
                 let result = self
                     .turn_executor
-                    .execute_streaming(session.id, &final_text, None, chunk_tx)
+                    .execute_channel_message_streaming(
+                        session.id,
+                        rune_core::NormalizedMessage {
+                            channel_id: Some(msg.channel_id),
+                            sender_id: msg.sender.clone(),
+                            sender_display_name: None,
+                            message_id: Some(msg.provider_message_id.clone()),
+                            reply_to_message_id: None,
+                            content: final_text.clone(),
+                            attachments: msg.attachments.clone(),
+                            metadata: serde_json::Value::Null,
+                        },
+                        None,
+                        chunk_tx,
+                    )
                     .await;
 
                 // Wait for the progressive edit task to finish (it exits when
