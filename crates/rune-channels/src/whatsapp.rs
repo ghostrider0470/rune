@@ -465,6 +465,7 @@ impl WhatsAppAdapter {
                     mime_type: mime,
                     size_bytes: None,
                     url: None, // Media URLs require a separate download call.
+                    provider_file_id: Some(media_id.clone()),
                 };
 
                 Some(InboundEvent::Message(ChannelMessage {

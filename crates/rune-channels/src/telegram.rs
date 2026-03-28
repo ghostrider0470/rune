@@ -189,6 +189,7 @@ impl TelegramAdapter {
                 mime_type: doc.mime_type.clone(),
                 size_bytes: doc.file_size.map(|s| s as u64),
                 url: Some(format!("telegram-file:{}", doc.file_id)),
+                provider_file_id: Some(doc.file_id.clone()),
             });
         }
 
@@ -199,6 +200,7 @@ impl TelegramAdapter {
                     mime_type: Some("image/jpeg".into()),
                     size_bytes: largest.file_size.map(|s| s as u64),
                     url: Some(format!("telegram-file:{}", largest.file_id)),
+                    provider_file_id: Some(largest.file_id.clone()),
                 });
             }
         }
@@ -214,6 +216,7 @@ impl TelegramAdapter {
                 ),
                 size_bytes: voice.file_size.map(|s| s as u64),
                 url: Some(format!("telegram-file:{}", voice.file_id)),
+                provider_file_id: Some(voice.file_id.clone()),
             });
         }
 
@@ -228,6 +231,7 @@ impl TelegramAdapter {
                 ),
                 size_bytes: audio.file_size.map(|s| s as u64),
                 url: Some(format!("telegram-file:{}", audio.file_id)),
+                provider_file_id: Some(audio.file_id.clone()),
             });
         }
 
@@ -237,6 +241,7 @@ impl TelegramAdapter {
                 mime_type: Some("video/mp4".into()),
                 size_bytes: video_note.file_size.map(|s| s as u64),
                 url: Some(format!("telegram-file:{}", video_note.file_id)),
+                provider_file_id: Some(video_note.file_id.clone()),
             });
         }
 
@@ -251,6 +256,7 @@ impl TelegramAdapter {
                 ),
                 size_bytes: video.file_size.map(|s| s as u64),
                 url: Some(format!("telegram-file:{}", video.file_id)),
+                provider_file_id: Some(video.file_id.clone()),
             });
         }
 
