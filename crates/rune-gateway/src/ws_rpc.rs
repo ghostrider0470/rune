@@ -608,7 +608,7 @@ impl RpcDispatcher {
             vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
         if approval_mode == "on-miss" {
             unresolved.push(
-                rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string(),
+                "approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable".to_string(),
             );
         }
         if security_mode == "allowlist" {
