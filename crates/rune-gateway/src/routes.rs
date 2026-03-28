@@ -10,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use tracing::info;
 use uuid::Uuid;
@@ -580,6 +581,7 @@ pub struct ContextBudgetDiagnostics {
     pub usable_prompt_budget: usize,
     pub auto_inject_project: bool,
     pub memory_search_k: usize,
+    pub partition_targets: BTreeMap<&'static str, f32>,
 }
 
 // SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
@@ -804,13 +806,22 @@ pub async fn dashboard_diagnostics(
         usable_prompt_budget: compaction.usable_prompt_budget(),
         auto_inject_project: compaction.auto_inject_project,
         memory_search_k: compaction.memory_search_k,
+        partition_targets: [
+            ("objective", rune_runtime::Partition::Objective.target_pct()),
+            ("history", rune_runtime::Partition::History.target_pct()),
+            ("decision_log", rune_runtime::Partition::DecisionLog.target_pct()),
+            ("background", rune_runtime::Partition::Background.target_pct()),
+            ("reserve", rune_runtime::Partition::Reserve.target_pct()),
+        ]
+        .into_iter()
+        .collect(),
     };
 
     items.push(DashboardDiagnosticItem {
         level: "info",
         source: "context",
         message: format!(
-            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={}",
+            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={} partition_targets={:?}",
             context_budget.max_tokens,
             context_budget.warn_at_tokens,
             context_budget.compress_after,
@@ -819,6 +830,7 @@ pub async fn dashboard_diagnostics(
             context_budget.reserved_task,
             context_budget.auto_inject_project,
             context_budget.memory_search_k,
+            context_budget.partition_targets,
         ),
         observed_at: now.clone(),
     });

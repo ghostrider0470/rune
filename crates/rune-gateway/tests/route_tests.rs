@@ -11674,3 +11674,31 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
     assert_eq!(entry["uncached_tokens"], 10);
     assert_eq!(entry["cache_hit_ratio_percent"], 0.0);
 }
+
+#[tokio::test]
+async fn dashboard_diagnostics_exposes_context_partition_targets() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/diagnostics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json["items"].as_array().unwrap();
+    let context_item = items
+        .iter()
+        .find(|item| item["source"] == "context")
+        .expect("context diagnostics item");
+    let message = context_item["message"].as_str().unwrap();
+    assert!(message.contains("partition_targets"));
+    assert!(message.contains("objective"));
+    assert!(message.contains("history"));
+    assert!(message.contains("decision_log"));
+    assert!(message.contains("background"));
+    assert!(message.contains("reserve"));
+}
