@@ -62,7 +62,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 
 | Pillar | Status | Notes |
 |---|---|---|
-| WebSocket Gateway | ✅ Basic | Req/res/event framing, sequence numbering, gap detection, and RPC dispatch landed; broader parity work remains |
+| WebSocket Gateway | ✅ 2026-03-28 | Req/res/event framing, sequence numbering, gap detection, stateVersion tracking, and RPC dispatch landed; broader parity work remains |
 | Multi-channel Routing | ✅ 2026-03-16 | Telegram plus Discord/Slack/WhatsApp/Signal adapters landed with factory wiring, inbound normalization, outbound delivery flows, and adapter test coverage |
 | Device Pairing | ✅ 2026-03-16 | Ed25519 challenge-response pairing, PostgreSQL-backed device/request persistence, SHA-256 token storage, supervisor pruning, and route/integration coverage landed |
 | LaneQueue Concurrency | ✅ 2026-03-16 | LaneQueue implemented with per-lane caps, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
@@ -76,6 +76,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Sub-agents | ✅ Done | Session spawning + manager trait |
 | Semantic Browser Snapshots | ⚠️ 2026-03-16 | `rune-browser` now emits semantic snapshots, exposes a real `browse` tool, and is wired through gateway/config against the existing CDP snapshot path; Chromium launch/pool lifecycle and selector-aware extraction still need follow-up |
 | A2UI Protocol | ✅ 2026-03-28 | A2UI event bus, tool/RPC wiring, and admin UI renderers landed with inline/panel component rendering plus form/action callbacks |
+| WebSocket Gateway note | ✅ 2026-03-28 | Phase 2 WebSocket gateway RPC protocol slice tracked in #538 is shipped; issue checklist completed and verified on current main lineage |
 | TTS | ❌ Missing | No text-to-speech providers |
 | STT | ❌ Missing | No speech-to-text providers |
 | LLM Providers | ✅ Partial | Anthropic, OpenAI, Azure only — missing Google, Ollama, Bedrock, Groq, DeepSeek, Mistral |
