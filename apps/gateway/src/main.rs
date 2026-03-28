@@ -49,7 +49,8 @@ use rune_runtime::{
 };
 use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
 use rune_spells_rust_patterns::{
-    RustPatternsToolExecutor, rust_patterns_tool_definition, rust_patterns_validate_tool_definition,
+    RustPatternsToolExecutor, rust_patterns_tool_definition,
+    rust_patterns_validate_tool_definition,
 };
 use rune_spells_security_audit::security_audit_tool_definition;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
@@ -735,11 +736,7 @@ async fn build_services(
 
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-        match Mem0Engine::try_new(
-            &config.mem0,
-            model_provider.clone(),
-            repos.memory_fact_repo.clone(),
-        ) {
+        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");
@@ -1382,7 +1379,7 @@ impl CommsOps for CommsClientOps {
         let messages = self.client.read_inbox().await;
         let mut summaries = Vec::with_capacity(messages.len());
 
-        for (path, msg) in &messages {
+        for (path, msg) in messages {
             summaries.push(rune_tools::comms_tool::CommsMessageSummary {
                 id: msg.id.clone(),
                 from: msg.from.clone(),
@@ -1393,9 +1390,7 @@ impl CommsOps for CommsClientOps {
             });
 
             if mark_read {
-                if let Err(e) = self.client.archive(path).await {
-                    tracing::warn!(error = %e, "failed to archive comms message after read");
-                }
+                self.client.archive(&path).await?;
             }
         }
 
@@ -1727,10 +1722,10 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "comms_send" | "comms_read" => match &self.comms {
+            "comms_send" => match &self.comms {
                 Some(comms) => comms.execute(call).await,
                 None => Err(ToolError::UnknownTool {
-                    name: call.tool_name.clone(),
+                    name: "comms_send".to_string(),
                 }),
             },
             other if other.contains("__") => match &self.mcp {
@@ -2097,7 +2092,6 @@ struct TurnAggregate {
     latest_model: Option<String>,
     usage_prompt_tokens: u64,
     usage_completion_tokens: u64,
-    usage_cached_prompt_tokens: u64,
     last_turn_started_at: Option<String>,
     last_turn_ended_at: Option<String>,
 }
@@ -2112,8 +2106,6 @@ fn aggregate_turns(turns: &[TurnRow]) -> TurnAggregate {
         aggregate.usage_prompt_tokens += turn.usage_prompt_tokens.unwrap_or_default().max(0) as u64;
         aggregate.usage_completion_tokens +=
             turn.usage_completion_tokens.unwrap_or_default().max(0) as u64;
-        aggregate.usage_cached_prompt_tokens +=
-            turn.usage_cached_prompt_tokens.unwrap_or_default().max(0) as u64;
         aggregate.last_turn_started_at = Some(turn.started_at.to_rfc3339());
         aggregate.last_turn_ended_at = turn.ended_at.map(|ended| ended.to_rfc3339());
     }
@@ -2144,10 +2136,6 @@ fn serialize_session_summary(row: &SessionRow, aggregate: &TurnAggregate) -> ser
         "latest_model": aggregate.latest_model,
         "usage_prompt_tokens": aggregate.usage_prompt_tokens,
         "usage_completion_tokens": aggregate.usage_completion_tokens,
-        "usage_cached_prompt_tokens": aggregate.usage_cached_prompt_tokens,
-        "cache_hit_ratio": if aggregate.usage_prompt_tokens > 0 {
-            aggregate.usage_cached_prompt_tokens as f64 / aggregate.usage_prompt_tokens as f64
-        } else { 0.0 },
         "last_turn_started_at": aggregate.last_turn_started_at,
         "last_turn_ended_at": aggregate.last_turn_ended_at,
     })
@@ -2181,7 +2169,7 @@ fn render_session_status_card(
         vec!["cost posture is estimate-only; provider pricing is not wired yet".to_string()];
     if approval_mode == "on-miss" {
         unresolved.push(
-            rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string(),
+            "approval requests, operator-triggered resume, and restart-safe mid-resume continuation are durable".to_string(),
         );
     }
     if security_mode == "allowlist" {
@@ -2208,11 +2196,7 @@ fn render_session_status_card(
         "model_override": model_override,
         "prompt_tokens": aggregate.usage_prompt_tokens,
         "completion_tokens": aggregate.usage_completion_tokens,
-        "cached_prompt_tokens": aggregate.usage_cached_prompt_tokens,
         "total_tokens": aggregate.usage_prompt_tokens + aggregate.usage_completion_tokens,
-        "cache_hit_ratio": if aggregate.usage_prompt_tokens > 0 {
-            aggregate.usage_cached_prompt_tokens as f64 / aggregate.usage_prompt_tokens as f64
-        } else { 0.0 },
         "estimated_cost": "not available",
         "turn_count": aggregate.turn_count,
         "uptime_seconds": started_at.elapsed().as_secs(),
@@ -3915,7 +3899,8 @@ impl ModelProvider for EchoModelProvider {
                 prompt_tokens: latest_user.len() as u32,
                 completion_tokens: (latest_user.len() as u32) + 6,
                 total_tokens: (latest_user.len() as u32) * 2 + 6,
-                ..Default::default()
+                cached_prompt_tokens: None,
+                uncached_prompt_tokens: None,
             },
             finish_reason: Some(FinishReason::Stop),
             tool_calls: Vec::new(),
