@@ -5327,7 +5327,7 @@ mod tests {
                 subsystem: "storage".into(),
                 backend: "sqlite".into(),
                 status: "connected".into(),
-                capability: "mode=standalone".into(),
+                capability: "4 repo surfaces configured".into(),
                 fix_hint: None,
             }],
             run_at: "2026-03-20T09:30:00Z".into(),
@@ -5341,7 +5341,7 @@ mod tests {
             out.contains("Paths:    profile=default, mode=workspace, auto_create_missing=true")
         );
         assert!(out.contains("Backend Matrix:"));
-        assert!(out.contains("storage: sqlite (connected) — mode=standalone"));
+        assert!(out.contains("storage: sqlite (connected) — 4 repo surfaces configured"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
