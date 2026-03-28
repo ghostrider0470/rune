@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { ApprovalRequestResponse } from "../../api/api-types";
+import { useTheme } from "../../hooks/use-theme";
 
 interface ApprovalCardProps {
   approval: ApprovalRequestResponse;
@@ -25,9 +26,21 @@ function getSummary(approval: ApprovalRequestResponse): string {
   return approval.reason;
 }
 
+function getStatusLabel(approval: ApprovalRequestResponse): string {
+  if (approval.approval_status) {
+    return approval.approval_status.replace(/_/g, " ");
+  }
+  if (approval.decision) {
+    return approval.decision.replace(/_/g, " ");
+  }
+  return "pending";
+}
+
 export function ApprovalCard({ approval, busy = false, onApprove, onDeny }: ApprovalCardProps) {
+  const colors = useTheme();
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const summary = useMemo(() => getSummary(approval), [approval]);
+  const statusLabel = useMemo(() => getStatusLabel(approval), [approval]);
 
   return (
     <View
@@ -43,8 +56,8 @@ export function ApprovalCard({ approval, busy = false, onApprove, onDeny }: Appr
         }
       }}
       style={{
-        backgroundColor: "#fff",
-        borderColor: "#e5e7eb",
+        backgroundColor: colors.surface,
+        borderColor: colors.border,
         borderRadius: 16,
         borderWidth: 1,
         gap: 12,
@@ -52,14 +65,31 @@ export function ApprovalCard({ approval, busy = false, onApprove, onDeny }: Appr
       }}
     >
       <View style={{ gap: 6 }}>
-        <Text style={{ color: "#6b7280", fontSize: 12, fontWeight: "600", textTransform: "uppercase" }}>
-          {approval.subject_type.replace(/_/g, " ")}
-        </Text>
-        <Text style={{ color: "#111827", fontSize: 18, fontWeight: "700" }}>{approval.reason}</Text>
-        <Text style={{ color: "#374151", fontFamily: "monospace" }}>{summary}</Text>
+        <View style={{ alignItems: "center", flexDirection: "row", justifyContent: "space-between" }}>
+          <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: "600", textTransform: "uppercase" }}>
+            {approval.subject_type.replace(/_/g, " ")}
+          </Text>
+          <View
+            style={{
+              backgroundColor: colors.surfaceMuted,
+              borderRadius: 999,
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+            }}
+          >
+            <Text style={{ color: colors.text, fontSize: 12, fontWeight: "700", textTransform: "capitalize" }}>
+              {statusLabel}
+            </Text>
+          </View>
+        </View>
+        <Text style={{ color: colors.text, fontSize: 18, fontWeight: "700" }}>{approval.reason}</Text>
+        <Text style={{ color: colors.text, fontFamily: "monospace" }}>{summary}</Text>
+        {approval.resume_result_summary ? (
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>{approval.resume_result_summary}</Text>
+        ) : null}
       </View>
 
-      <Text style={{ color: "#9ca3af", fontSize: 12 }}>
+      <Text style={{ color: colors.textMuted, fontSize: 12 }}>
         Swipe right to approve • Swipe left to deny
       </Text>
 
@@ -69,26 +99,26 @@ export function ApprovalCard({ approval, busy = false, onApprove, onDeny }: Appr
           onPress={onDeny}
           style={{
             alignItems: "center",
-            backgroundColor: "#fee2e2",
+            backgroundColor: colors.surfaceMuted,
             borderRadius: 12,
             flex: 1,
             paddingVertical: 14,
           }}
         >
-          {busy ? <ActivityIndicator /> : <Text style={{ color: "#b91c1c", fontWeight: "700" }}>Deny</Text>}
+          {busy ? <ActivityIndicator color={colors.text} /> : <Text style={{ color: colors.danger, fontWeight: "700" }}>Deny</Text>}
         </Pressable>
         <Pressable
           disabled={busy}
           onPress={onApprove}
           style={{
             alignItems: "center",
-            backgroundColor: "#dcfce7",
+            backgroundColor: colors.primary,
             borderRadius: 12,
             flex: 1,
             paddingVertical: 14,
           }}
         >
-          {busy ? <ActivityIndicator /> : <Text style={{ color: "#15803d", fontWeight: "700" }}>Approve</Text>}
+          {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={{ color: colors.onPrimary, fontWeight: "700" }}>Approve</Text>}
         </Pressable>
       </View>
     </View>
