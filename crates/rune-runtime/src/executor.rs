@@ -394,6 +394,7 @@ impl TurnExecutor {
         let (final_status, ended_at) = match &result {
             Ok(TurnLoopOutcome::Completed) => (TurnStatus::Completed, Some(Utc::now())),
             Ok(TurnLoopOutcome::WaitingForApproval) => (TurnStatus::ToolExecuting, None),
+            Err(RuntimeError::Aborted(_)) => (TurnStatus::Cancelled, Some(Utc::now())),
             Err(_) => (TurnStatus::Failed, Some(Utc::now())),
         };
 
@@ -750,6 +751,12 @@ impl TurnExecutor {
                 None,
                 "waiting_for_approval",
                 Some("resumed turn encountered another approval gate".to_string()),
+            ),
+            Err(RuntimeError::Aborted(error)) => (
+                TurnStatus::Cancelled,
+                Some(Utc::now()),
+                "cancelled",
+                Some(format!("post-approval continuation cancelled: {error}")),
             ),
             Err(error) => (
                 TurnStatus::Failed,

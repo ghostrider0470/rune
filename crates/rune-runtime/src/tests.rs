@@ -2638,3 +2638,50 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
 }
+
+#[tokio::test]
+async fn cancelled_turn_is_persisted_as_cancelled() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model: Arc<dyn ModelProvider> = Arc::new(FailingModelProvider);
+    let cancel_registry = Arc::new(crate::cancel_registry::TurnCancelRegistry::new());
+    let executor = h
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )
+        .with_cancel_registry(cancel_registry.clone());
+
+    let run = tokio::spawn({
+        let executor = executor.clone();
+        async move { executor.execute(session.id, "cancel me", None).await }
+    });
+
+    let turn_id = loop {
+        let turns = h.turn_repo.list_by_session(session.id).await.unwrap();
+        if let Some(turn) = turns.first() {
+            break turn.id;
+        }
+        tokio::task::yield_now().await;
+    };
+
+    assert!(cancel_registry.cancel(turn_id).await);
+
+    let err = run.await.unwrap().unwrap_err();
+    assert!(matches!(err, crate::error::RuntimeError::Aborted(_)));
+
+    let persisted_turn = h.turn_repo.find_by_id(turn_id).await.unwrap();
+    assert_eq!(persisted_turn.status, "cancelled");
+    assert!(persisted_turn.ended_at.is_some());
+}
