@@ -87,12 +87,13 @@ async fn setup() -> Option<(PgPool, PgVectorStatus)> {
         }
     };
 
-    if let Err(err) = conn.batch_execute(
-        "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
+    if let Err(err) = conn
+        .batch_execute(
+            "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
          tool_executions, channel_deliveries, paired_devices, pairing_requests, \
          memory_embeddings CASCADE",
-    )
-    .await
+        )
+        .await
     {
         eprintln!("skipping rune-store pg integration tests: truncate failed: {err}");
         return None;

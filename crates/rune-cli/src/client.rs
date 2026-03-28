@@ -650,7 +650,9 @@ impl GatewayClient {
 
     /// Aggregate persisted session-turn token usage. Monetary cost is intentionally not derived yet.
     pub async fn gateway_usage_cost(&self) -> Result<GatewayUsageCostResponse> {
-        let sessions = self.sessions_list(None, None, None, None, 500).await?;
+        let sessions = self
+            .sessions_list(None, None, None, None, None, 500)
+            .await?;
         let mut total_turns = 0usize;
         let mut prompt_tokens = 0u64;
         let mut completion_tokens = 0u64;
@@ -2022,6 +2024,7 @@ impl GatewayClient {
         channel: Option<&str>,
         kind: Option<&str>,
         parent: Option<&str>,
+        project_id: Option<&str>,
         limit: u64,
     ) -> Result<SessionListResponse> {
         let mut query: Vec<(&str, String)> = vec![("limit", limit.to_string())];
@@ -2036,6 +2039,9 @@ impl GatewayClient {
         }
         if let Some(parent) = parent {
             query.push(("parent", parent.to_string()));
+        }
+        if let Some(project_id) = project_id {
+            query.push(("project_id", project_id.to_string()));
         }
 
         let resp = self
@@ -4859,7 +4865,7 @@ mod tests {
 
         let client = GatewayClient::new(&server.uri());
         let resp = client
-            .sessions_list(None, None, None, None, 100)
+            .sessions_list(None, None, None, None, None, 100)
             .await
             .unwrap();
         assert_eq!(resp.sessions.len(), 2);

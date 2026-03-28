@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{pk, CosmosStore};
+use crate::cosmos::{CosmosStore, pk};
 use crate::error::StoreError;
 use crate::models::{NewToolExecution, ToolExecutionRow};
 use crate::repos::ToolExecutionRepo;
@@ -97,7 +97,10 @@ fn tool_exec_row_to_doc(row: &ToolExecutionRow) -> ToolExecutionDoc {
 }
 
 /// Read a tool execution by ID. Cross-partition since we may not know session_id.
-async fn read_tool_execution(store: &CosmosStore, id: Uuid) -> Result<ToolExecutionDoc, StoreError> {
+async fn read_tool_execution(
+    store: &CosmosStore,
+    id: Uuid,
+) -> Result<ToolExecutionDoc, StoreError> {
     let query = format!(
         "SELECT * FROM c WHERE c.type = 'tool_execution' AND c.execution_id = '{}'",
         id

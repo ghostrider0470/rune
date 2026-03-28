@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{parse_doc, pk, CosmosStore};
+use crate::cosmos::{CosmosStore, parse_doc, pk};
 use crate::error::StoreError;
 use crate::models::{JobRow, NewJob};
 use crate::repos::JobRepo;
@@ -114,7 +114,10 @@ async fn read_job(store: &CosmosStore, id: Uuid) -> Result<JobDoc, StoreError> {
                 StoreError::Database(msg)
             }
         })?;
-    parse_doc(resp.into_model().map_err(|e| StoreError::Database(e.to_string()))?)
+    parse_doc(
+        resp.into_model()
+            .map_err(|e| StoreError::Database(e.to_string()))?,
+    )
 }
 
 #[async_trait]

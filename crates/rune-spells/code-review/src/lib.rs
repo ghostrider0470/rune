@@ -31,7 +31,11 @@ pub enum CodeReviewError {
 pub enum ReviewTarget {
     File(PathBuf),
     Diff(String),
-    PullRequest { owner: String, repo: String, number: u64 },
+    PullRequest {
+        owner: String,
+        repo: String,
+        number: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,7 +282,11 @@ fn parse_dimension(raw: &str) -> Option<Dimension> {
 
 fn parse_review_target(target_str: &str, workspace_root: &Path) -> Result<ReviewTarget, ToolError> {
     if let Some((owner, repo, number)) = parse_pr_target(target_str) {
-        return Ok(ReviewTarget::PullRequest { owner, repo, number });
+        return Ok(ReviewTarget::PullRequest {
+            owner,
+            repo,
+            number,
+        });
     }
 
     let candidate = Path::new(target_str);
@@ -290,9 +298,9 @@ fn parse_review_target(target_str: &str, workspace_root: &Path) -> Result<Review
             });
         }
 
-        let workspace_root = workspace_root.canonicalize().map_err(|e| {
-            ToolError::ExecutionFailed(format!("workspace root invalid: {e}"))
-        })?;
+        let workspace_root = workspace_root
+            .canonicalize()
+            .map_err(|e| ToolError::ExecutionFailed(format!("workspace root invalid: {e}")))?;
         let joined = workspace_root.join(candidate);
         if !joined.exists() {
             return Err(ToolError::InvalidArguments {
@@ -300,9 +308,9 @@ fn parse_review_target(target_str: &str, workspace_root: &Path) -> Result<Review
                 reason: "path does not exist".into(),
             });
         }
-        let resolved = joined.canonicalize().map_err(|e| {
-            ToolError::ExecutionFailed(format!("path resolution failed: {e}"))
-        })?;
+        let resolved = joined
+            .canonicalize()
+            .map_err(|e| ToolError::ExecutionFailed(format!("path resolution failed: {e}")))?;
         if !resolved.starts_with(&workspace_root) {
             return Err(ToolError::InvalidArguments {
                 tool: "code_review".to_string(),
@@ -330,7 +338,10 @@ fn parse_pr_target(raw: &str) -> Option<(String, String, u64)> {
     Some((owner.to_string(), repo.to_string(), number))
 }
 
-pub async fn code_review(target: &ReviewTarget, config: &ReviewConfig) -> Result<ReviewReport, CodeReviewError> {
+pub async fn code_review(
+    target: &ReviewTarget,
+    config: &ReviewConfig,
+) -> Result<ReviewReport, CodeReviewError> {
     let mut findings = Vec::new();
     let mut pass_results = Vec::new();
 
@@ -351,7 +362,10 @@ pub async fn code_review(target: &ReviewTarget, config: &ReviewConfig) -> Result
             }
 
             if config.enable_semantic {
-                info!("Semantic review stub: would call LLM on file {}", path.display());
+                info!(
+                    "Semantic review stub: would call LLM on file {}",
+                    path.display()
+                );
                 pass_results.push(PassResult {
                     pass: ReviewPass::Structure,
                     summary: "Semantic structure review placeholder".to_string(),
@@ -376,14 +390,24 @@ pub async fn code_review(target: &ReviewTarget, config: &ReviewConfig) -> Result
                 file: "<diff>".to_string(),
                 line: None,
                 title: "Diff review is currently semantic-only".to_string(),
-                explanation: "Mechanical AST checks require a file target in this initial implementation.".to_string(),
-                suggestion: Some("Review a workspace-relative file path for AST-backed checks.".to_string()),
+                explanation:
+                    "Mechanical AST checks require a file target in this initial implementation."
+                        .to_string(),
+                suggestion: Some(
+                    "Review a workspace-relative file path for AST-backed checks.".to_string(),
+                ),
             });
         }
-        ReviewTarget::PullRequest { owner, repo, number } => {
+        ReviewTarget::PullRequest {
+            owner,
+            repo,
+            number,
+        } => {
             pass_results.push(PassResult {
                 pass: ReviewPass::Structure,
-                summary: format!("PR target {owner}/{repo}#{number} queued for external diff fetch"),
+                summary: format!(
+                    "PR target {owner}/{repo}#{number} queued for external diff fetch"
+                ),
                 findings: 0,
             });
             findings.push(Finding {
@@ -424,7 +448,8 @@ fn mechanical_review(
     path: &Path,
     dimensions: &[Dimension],
 ) -> Result<Vec<Finding>, CodeReviewError> {
-    let syntax = syn::parse_file(content).map_err(|e| CodeReviewError::ParseError(e.to_string()))?;
+    let syntax =
+        syn::parse_file(content).map_err(|e| CodeReviewError::ParseError(e.to_string()))?;
     let review_file = path.display().to_string();
     let mut visitor = MechanicalVisitor::default();
     visitor.visit_file(&syntax);
@@ -439,8 +464,13 @@ fn mechanical_review(
                 file: review_file.clone(),
                 line: Some(line),
                 title: "unsafe block requires manual justification".to_string(),
-                explanation: "Unsafe Rust bypasses compiler guarantees and needs an explicit safety review.".to_string(),
-                suggestion: Some("Document the safety invariant and add focused tests around the unsafe block.".to_string()),
+                explanation:
+                    "Unsafe Rust bypasses compiler guarantees and needs an explicit safety review."
+                        .to_string(),
+                suggestion: Some(
+                    "Document the safety invariant and add focused tests around the unsafe block."
+                        .to_string(),
+                ),
             });
         }
     }
@@ -504,8 +534,13 @@ fn mechanical_review(
             file: review_file,
             line: None,
             title: "file has no inline test module".to_string(),
-            explanation: "The review engine did not detect a #[cfg(test)] mod tests block in this file.".to_string(),
-            suggestion: Some("Add focused unit tests for new logic or ensure coverage exists elsewhere.".to_string()),
+            explanation:
+                "The review engine did not detect a #[cfg(test)] mod tests block in this file."
+                    .to_string(),
+            suggestion: Some(
+                "Add focused unit tests for new logic or ensure coverage exists elsewhere."
+                    .to_string(),
+            ),
         });
     }
 
@@ -574,7 +609,10 @@ impl<'ast> Visit<'ast> for MechanicalVisitor {
                     .iter()
                     .map(|segment| segment.ident.to_string())
                     .collect::<Vec<_>>();
-                if segments == ["std", "thread", "sleep"] || segments == ["std", "fs", "read_to_string"] || segments == ["std", "fs", "read"] {
+                if segments == ["std", "thread", "sleep"]
+                    || segments == ["std", "fs", "read_to_string"]
+                    || segments == ["std", "fs", "read"]
+                {
                     self.blocking_async_lines.push(0);
                 }
             }
@@ -592,14 +630,15 @@ fn item_has_test_cfg(item: &syn::Item) -> bool {
 }
 
 fn attrs_have_test_cfg(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident("test") || attr.path().is_ident("cfg"))
+    attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("test") || attr.path().is_ident("cfg"))
 }
-
 
 #[cfg(test)]
 mod tests {
-    use rune_core::ToolCallId;
     use super::*;
+    use rune_core::ToolCallId;
     use tempfile::tempdir;
 
     fn tool_call(name: &str, arguments: serde_json::Value) -> ToolCall {
@@ -612,11 +651,15 @@ mod tests {
 
     #[test]
     fn parses_pr_target_with_owner_repo_number() {
-        let target = parse_review_target("ghostrider0470/rune#123", Path::new("."))
-            .expect("should parse");
+        let target =
+            parse_review_target("ghostrider0470/rune#123", Path::new(".")).expect("should parse");
 
         match target {
-            ReviewTarget::PullRequest { owner, repo, number } => {
+            ReviewTarget::PullRequest {
+                owner,
+                repo,
+                number,
+            } => {
                 assert_eq!(owner, "ghostrider0470");
                 assert_eq!(repo, "rune");
                 assert_eq!(number, 123);
@@ -669,7 +712,12 @@ async fn run(m: std::sync::Mutex<String>) {
 
         let target = ReviewTarget::File(file_path.clone());
         let config = ReviewConfig {
-            dimensions: vec![Dimension::Security, Dimension::Performance, Dimension::Correctness, Dimension::Maintainability],
+            dimensions: vec![
+                Dimension::Security,
+                Dimension::Performance,
+                Dimension::Correctness,
+                Dimension::Maintainability,
+            ],
             enable_mechanical: true,
             enable_semantic: false,
             ..ReviewConfig::default()
@@ -677,12 +725,42 @@ async fn run(m: std::sync::Mutex<String>) {
 
         let report = code_review(&target, &config).await.unwrap();
         assert!(report.blocks_merge);
-        assert!(report.findings.iter().any(|f| f.title.contains("unsafe block")));
-        assert!(report.findings.iter().any(|f| f.title.contains("unwrap() used")));
-        assert!(report.findings.iter().any(|f| f.title.contains("lock().unwrap()")));
-        assert!(report.findings.iter().any(|f| f.title.contains("blocking call inside async")));
-        assert!(report.findings.iter().any(|f| f.title.contains("clone() detected")));
-        assert!(report.pass_results.iter().any(|p| matches!(p.pass, ReviewPass::Detail)));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.title.contains("unsafe block"))
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.title.contains("unwrap() used"))
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.title.contains("lock().unwrap()"))
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.title.contains("blocking call inside async"))
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.title.contains("clone() detected"))
+        );
+        assert!(
+            report
+                .pass_results
+                .iter()
+                .any(|p| matches!(p.pass, ReviewPass::Detail))
+        );
     }
 
     #[tokio::test]
@@ -710,6 +788,11 @@ mod tests {
             ..ReviewConfig::default()
         };
         let report = code_review(&target, &config).await.unwrap();
-        assert!(!report.findings.iter().any(|f| f.title.contains("no inline test module")));
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.title.contains("no inline test module"))
+        );
     }
 }

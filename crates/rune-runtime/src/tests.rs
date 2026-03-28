@@ -1930,6 +1930,7 @@ async fn session_parent_linkage() {
             Some(parent.id),
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1944,6 +1945,7 @@ async fn session_parent_linkage() {
             None,
             None,
             Some("telegram".to_string()),
+            None,
             None,
         )
         .await
@@ -1960,6 +1962,7 @@ async fn session_parent_linkage() {
             None,
             Some("system:scheduled-main".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1969,6 +1972,7 @@ async fn session_parent_linkage() {
             SessionKind::Subagent,
             Some("/workspace".to_string()),
             Some(scheduled_main.id),
+            None,
             None,
             None,
         )
@@ -2036,6 +2040,7 @@ async fn channel_session_prompt_excludes_long_term_memory() {
             Some(h.workspace_root.to_string_lossy().to_string()),
             None,
             Some("telegram".to_string()),
+            None,
             None,
         )
         .await
@@ -2451,6 +2456,7 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
             None,
             Some("chat-2:user-2".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -2485,7 +2491,10 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
         .await;
 
     let sent = sent.lock().await.clone();
-    assert!(sent.is_empty(), "notice should not be sent for sessions that were not restored during startup");
+    assert!(
+        sent.is_empty(),
+        "notice should not be sent for sessions that were not restored during startup"
+    );
 }
 
 #[tokio::test]
@@ -2498,6 +2507,7 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
             Some(h.workspace_root.to_string_lossy().to_string()),
             None,
             Some("chat-1:user-1".to_string()),
+            None,
             None,
         )
         .await
@@ -2568,7 +2578,10 @@ async fn create_session_full_persists_mode_in_metadata() {
         .unwrap();
 
     assert_eq!(
-        session.metadata.get("mode").and_then(|value| value.as_str()),
+        session
+            .metadata
+            .get("mode")
+            .and_then(|value| value.as_str()),
         Some("architect")
     );
 }
@@ -2618,7 +2631,10 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     );
 
     executor.execute(session.id, "hello", None).await.unwrap();
-    executor.execute(session.id, "follow-up", None).await.unwrap();
+    executor
+        .execute(session.id, "follow-up", None)
+        .await
+        .unwrap();
 
     let requests = model_handle.requests().await;
     assert!(requests.len() >= 2);

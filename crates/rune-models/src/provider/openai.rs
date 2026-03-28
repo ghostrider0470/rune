@@ -175,7 +175,11 @@ impl ModelProvider for OpenAiProvider {
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
-            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
+            tools: &request
+                .stable_prefix_tools
+                .as_ref()
+                .or(request.tools.as_ref())
+                .cloned(),
             stream: false,
             stream_options: None,
         };
@@ -215,7 +219,11 @@ impl ModelProvider for OpenAiProvider {
             model: &request.model,
             temperature: &request.temperature,
             max_completion_tokens: request.max_tokens,
-            tools: &request.stable_prefix_tools.as_ref().or(request.tools.as_ref()).cloned(),
+            tools: &request
+                .stable_prefix_tools
+                .as_ref()
+                .or(request.tools.as_ref())
+                .cloned(),
             stream: true,
             stream_options: Some(StreamOptions {
                 include_usage: true,

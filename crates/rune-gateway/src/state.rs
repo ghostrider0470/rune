@@ -129,7 +129,11 @@ impl TokenMetricsStore {
                 }
             })
             .collect::<Vec<_>>();
-        rows.sort_by(|a, b| a.provider.cmp(&b.provider).then_with(|| a.model.cmp(&b.model)));
+        rows.sort_by(|a, b| {
+            a.provider
+                .cmp(&b.provider)
+                .then_with(|| a.model.cmp(&b.model))
+        });
         rows
     }
 }

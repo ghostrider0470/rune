@@ -196,10 +196,19 @@ impl SessionRepo for PgSessionRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                 RETURNING *",
                 &[
-                    &s.id, &s.kind, &s.status, &s.workspace_root, &s.channel_ref,
-                    &s.requester_session_id, &s.latest_turn_id,
-                    &s.runtime_profile, &s.policy_profile, &s.metadata,
-                    &s.created_at, &s.updated_at, &s.last_activity_at,
+                    &s.id,
+                    &s.kind,
+                    &s.status,
+                    &s.workspace_root,
+                    &s.channel_ref,
+                    &s.requester_session_id,
+                    &s.latest_turn_id,
+                    &s.runtime_profile,
+                    &s.policy_profile,
+                    &s.metadata,
+                    &s.created_at,
+                    &s.updated_at,
+                    &s.last_activity_at,
                 ],
             )
             .await
@@ -408,8 +417,15 @@ impl TurnRepo for PgTurnRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                 RETURNING *",
                 &[
-                    &t.id, &t.session_id, &t.trigger_kind, &t.status, &t.model_ref,
-                    &t.started_at, &t.ended_at, &t.usage_prompt_tokens, &t.usage_completion_tokens,
+                    &t.id,
+                    &t.session_id,
+                    &t.trigger_kind,
+                    &t.status,
+                    &t.model_ref,
+                    &t.started_at,
+                    &t.ended_at,
+                    &t.usage_prompt_tokens,
+                    &t.usage_completion_tokens,
                     &t.usage_cached_prompt_tokens,
                 ],
             )
@@ -491,7 +507,12 @@ impl TurnRepo for PgTurnRepo {
                 "UPDATE turns SET usage_prompt_tokens = $1, usage_completion_tokens = $2, \
                  usage_cached_prompt_tokens = $3 \
                  WHERE id = $4 RETURNING *",
-                &[&prompt_tokens, &completion_tokens, &cached_prompt_tokens, &id],
+                &[
+                    &prompt_tokens,
+                    &completion_tokens,
+                    &cached_prompt_tokens,
+                    &id,
+                ],
             )
             .await
             .map_err(StoreError::from)?
@@ -583,8 +604,13 @@ impl TranscriptRepo for PgTranscriptRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7)
                 RETURNING *",
                 &[
-                    &item.id, &item.session_id, &item.turn_id, &item.seq,
-                    &item.kind, &item.payload, &item.created_at,
+                    &item.id,
+                    &item.session_id,
+                    &item.turn_id,
+                    &item.seq,
+                    &item.kind,
+                    &item.payload,
+                    &item.created_at,
                 ],
             )
             .await
@@ -650,9 +676,19 @@ impl JobRepo for PgJobRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                 RETURNING *",
                 &[
-                    &j.id, &j.job_type, &j.schedule, &j.due_at, &j.enabled,
-                    &None::<DateTime<Utc>>, &j.next_run_at, &j.payload_kind, &j.delivery_mode,
-                    &j.payload, &j.created_at, &j.updated_at, &None::<DateTime<Utc>>,
+                    &j.id,
+                    &j.job_type,
+                    &j.schedule,
+                    &j.due_at,
+                    &j.enabled,
+                    &None::<DateTime<Utc>>,
+                    &j.next_run_at,
+                    &j.payload_kind,
+                    &j.delivery_mode,
+                    &j.payload,
+                    &j.created_at,
+                    &j.updated_at,
+                    &None::<DateTime<Utc>>,
                 ],
             )
             .await
@@ -732,8 +768,15 @@ impl JobRepo for PgJobRepo {
                  payload=$5, updated_at=$6, last_run_at=$7, next_run_at=$8 \
                  WHERE id=$9 RETURNING *",
                 &[
-                    &enabled, &due_at, &payload_kind, &delivery_mode,
-                    &payload, &updated_at, &last_run_at, &next_run_at, &id,
+                    &enabled,
+                    &due_at,
+                    &payload_kind,
+                    &delivery_mode,
+                    &payload,
+                    &updated_at,
+                    &last_run_at,
+                    &next_run_at,
+                    &id,
                 ],
             )
             .await
@@ -804,10 +847,7 @@ impl JobRepo for PgJobRepo {
             )"
         );
         client
-            .execute(
-                &update_sql,
-                &[&now, &job_type, &stale_before, &limit],
-            )
+            .execute(&update_sql, &[&now, &job_type, &stale_before, &limit])
             .await
             .map_err(StoreError::from)?;
 
@@ -827,10 +867,7 @@ impl JobRepo for PgJobRepo {
     async fn release_claim(&self, id: Uuid) -> Result<(), StoreError> {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         client
-            .execute(
-                "UPDATE jobs SET claimed_at = NULL WHERE id = $1",
-                &[&id],
-            )
+            .execute("UPDATE jobs SET claimed_at = NULL WHERE id = $1", &[&id])
             .await
             .map_err(StoreError::from)?;
         Ok(())
@@ -866,8 +903,14 @@ impl JobRunRepo for PgJobRunRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
                 RETURNING *",
                 &[
-                    &r.id, &r.job_id, &r.started_at, &r.finished_at,
-                    &r.trigger_kind, &r.status, &r.output, &r.created_at,
+                    &r.id,
+                    &r.job_id,
+                    &r.started_at,
+                    &r.finished_at,
+                    &r.trigger_kind,
+                    &r.status,
+                    &r.output,
+                    &r.created_at,
                 ],
             )
             .await
@@ -954,9 +997,17 @@ impl ApprovalRepo for PgApprovalRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                 RETURNING *",
                 &[
-                    &a.id, &a.subject_type, &a.subject_id, &a.reason,
-                    &None::<String>, &None::<String>, &None::<DateTime<Utc>>,
-                    &a.presented_payload, &a.created_at, &a.handle_ref, &a.host_ref,
+                    &a.id,
+                    &a.subject_type,
+                    &a.subject_id,
+                    &a.reason,
+                    &None::<String>,
+                    &None::<String>,
+                    &None::<DateTime<Utc>>,
+                    &a.presented_payload,
+                    &a.created_at,
+                    &a.handle_ref,
+                    &a.host_ref,
                 ],
             )
             .await
@@ -1135,9 +1186,17 @@ impl ToolApprovalPolicyRepo for PgToolApprovalPolicyRepo {
                     decided_at, presented_payload, created_at, handle_ref, host_ref
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
                 &[
-                    &id, &TOOL_POLICY_SUBJECT_TYPE, &tool_policy_subject_id(),
-                    &tool_name, &decision, &"cli", &now,
-                    &payload, &now, &None::<String>, &None::<String>,
+                    &id,
+                    &TOOL_POLICY_SUBJECT_TYPE,
+                    &tool_policy_subject_id(),
+                    &tool_name,
+                    &decision,
+                    &"cli",
+                    &now,
+                    &payload,
+                    &now,
+                    &None::<String>,
+                    &None::<String>,
                 ],
             )
             .await
@@ -1192,11 +1251,19 @@ impl ToolExecutionRepo for PgToolExecutionRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                 RETURNING *",
                 &[
-                    &e.id, &e.tool_call_id, &e.session_id, &e.turn_id,
-                    &e.tool_name, &e.arguments, &e.status,
-                    &None::<String>, &None::<String>,
-                    &e.started_at, &None::<DateTime<Utc>>,
-                    &e.approval_id, &e.execution_mode,
+                    &e.id,
+                    &e.tool_call_id,
+                    &e.session_id,
+                    &e.turn_id,
+                    &e.tool_name,
+                    &e.arguments,
+                    &e.status,
+                    &None::<String>,
+                    &None::<String>,
+                    &e.started_at,
+                    &None::<DateTime<Utc>>,
+                    &e.approval_id,
+                    &e.execution_mode,
                 ],
             )
             .await
@@ -1284,9 +1351,17 @@ impl ProcessHandleRepo for PgProcessHandleRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                 RETURNING *",
                 &[
-                    &h.process_id, &h.tool_call_id, &h.session_id, &h.command, &h.cwd,
-                    &h.status, &None::<i32>, &h.started_at, &None::<DateTime<Utc>>,
-                    &h.execution_mode, &h.tool_execution_id,
+                    &h.process_id,
+                    &h.tool_call_id,
+                    &h.session_id,
+                    &h.command,
+                    &h.cwd,
+                    &h.status,
+                    &None::<i32>,
+                    &h.started_at,
+                    &None::<DateTime<Utc>>,
+                    &h.execution_mode,
+                    &h.tool_execution_id,
                 ],
             )
             .await
@@ -1333,10 +1408,7 @@ impl ProcessHandleRepo for PgProcessHandleRepo {
         Ok(row_to_process_handle(&row))
     }
 
-    async fn list_by_session(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<ProcessHandleRow>, StoreError> {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         let rows = client
             .query(
@@ -1423,9 +1495,16 @@ impl DeviceRepo for PgDeviceRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                 RETURNING *",
                 &[
-                    &d.id, &d.name, &d.public_key, &d.role, &d.scopes,
-                    &d.token_hash, &d.token_expires_at, &d.paired_at,
-                    &None::<DateTime<Utc>>, &d.created_at,
+                    &d.id,
+                    &d.name,
+                    &d.public_key,
+                    &d.role,
+                    &d.scopes,
+                    &d.token_hash,
+                    &d.token_expires_at,
+                    &d.paired_at,
+                    &None::<DateTime<Utc>>,
+                    &d.created_at,
                 ],
             )
             .await
@@ -1479,10 +1558,7 @@ impl DeviceRepo for PgDeviceRepo {
     async fn list_devices(&self) -> Result<Vec<PairedDeviceRow>, StoreError> {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         let rows = client
-            .query(
-                "SELECT * FROM paired_devices ORDER BY paired_at ASC",
-                &[],
-            )
+            .query("SELECT * FROM paired_devices ORDER BY paired_at ASC", &[])
             .await
             .map_err(StoreError::from)?;
         Ok(rows.iter().map(row_to_paired_device).collect())
@@ -1574,8 +1650,12 @@ impl DeviceRepo for PgDeviceRepo {
                 ) VALUES ($1,$2,$3,$4,$5,$6)
                 RETURNING *",
                 &[
-                    &r.id, &r.device_name, &r.public_key, &r.challenge,
-                    &r.created_at, &r.expires_at,
+                    &r.id,
+                    &r.device_name,
+                    &r.public_key,
+                    &r.challenge,
+                    &r.created_at,
+                    &r.expires_at,
                 ],
             )
             .await
@@ -2042,10 +2122,7 @@ impl MemoryFactRepo for PgMemoryFactRepo {
     async fn delete(&self, id: &str) -> Result<(), StoreError> {
         let client = self.pool.get().await.map_err(StoreError::from)?;
         client
-            .execute(
-                "DELETE FROM rune_memories WHERE id = $1::uuid",
-                &[&id],
-            )
+            .execute("DELETE FROM rune_memories WHERE id = $1::uuid", &[&id])
             .await
             .map_err(StoreError::from)?;
         Ok(())

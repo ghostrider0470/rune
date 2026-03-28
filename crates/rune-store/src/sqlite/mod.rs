@@ -502,7 +502,9 @@ impl TurnRepo for SqliteTurnRepo {
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    &format!("INSERT INTO turns ({TURN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
+                    &format!(
+                        "INSERT INTO turns ({TURN_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+                    ),
                     rusqlite::params![
                         t.id.to_string(),
                         t.session_id.to_string(),

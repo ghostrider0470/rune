@@ -60,7 +60,6 @@ pub struct Spell {
     pub user_invocable: bool,
 
     // ── #300 SPELL.md manifest fields ───────────────────────────────
-
     /// Dotted namespace, e.g. `"horizon.security-audit"`.
     #[serde(default)]
     pub namespace: Option<String>,

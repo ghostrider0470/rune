@@ -1316,8 +1316,15 @@ Delta echo foxtrot.
             Ok(Vec::new())
         }
 
-        async fn delete_chunk(&self, file_path: &str, chunk_index: i32) -> Result<bool, StoreError> {
-            self.deleted_files.lock().unwrap().push(format!("{}:{}", file_path, chunk_index));
+        async fn delete_chunk(
+            &self,
+            file_path: &str,
+            chunk_index: i32,
+        ) -> Result<bool, StoreError> {
+            self.deleted_files
+                .lock()
+                .unwrap()
+                .push(format!("{}:{}", file_path, chunk_index));
             Ok(true)
         }
 

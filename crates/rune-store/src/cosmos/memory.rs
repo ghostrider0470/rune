@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::cosmos::{collect_query, pk, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, pk};
 use crate::error::StoreError;
 use crate::models::{KeywordSearchRow, VectorSearchRow};
 use crate::repos::MemoryEmbeddingRepo;
@@ -165,8 +165,7 @@ impl MemoryEmbeddingRepo for CosmosStore {
     }
 
     async fn list_indexed_files(&self) -> Result<Vec<String>, StoreError> {
-        let query =
-            "SELECT DISTINCT c.file_path FROM c WHERE c.type = 'memory_embedding'";
+        let query = "SELECT DISTINCT c.file_path FROM c WHERE c.type = 'memory_embedding'";
         let results: Vec<FilePathResult> = self.query_cross_partition(query).await?;
         Ok(results.into_iter().map(|r| r.file_path).collect())
     }
@@ -192,8 +191,7 @@ impl MemoryEmbeddingRepo for CosmosStore {
     }
 
     async fn delete_all(&self) -> Result<usize, StoreError> {
-        let query =
-            "SELECT c.id, c.pk FROM c WHERE c.type = 'memory_embedding'";
+        let query = "SELECT c.id, c.pk FROM c WHERE c.type = 'memory_embedding'";
         let items: Vec<serde_json::Value> = self.query_cross_partition(query).await?;
         let mut count = 0usize;
         for val in &items {
