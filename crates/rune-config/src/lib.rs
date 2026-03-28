@@ -600,12 +600,34 @@ impl Default for DatabaseConfig {
 /// Compaction controls for context window management.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompactionConfig {
-    /// Model context window size in tokens. Default: 128000.
+    /// Hard token ceiling for the active model context. Default: 128000.
     #[serde(default = "default_context_window")]
     pub context_window: usize,
     /// Number of recent messages to always preserve verbatim. Default: 20.
     #[serde(default = "default_preserve_tail")]
     pub preserve_tail: usize,
+    /// Configurable alias for the total usable context budget. Defaults to the
+    /// same value as `context_window` so existing configs remain compatible.
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: usize,
+    /// Tokens reserved for system/identity instructions. Default: 5000.
+    #[serde(default = "default_reserved_system")]
+    pub reserved_system: usize,
+    /// Tokens reserved for active task instructions. Default: 10000.
+    #[serde(default = "default_reserved_task")]
+    pub reserved_task: usize,
+    /// Whether project memory should be auto-injected when available. Default: true.
+    #[serde(default = "default_true")]
+    pub auto_inject_project: bool,
+    /// Maximum number of memory search results considered for injection. Default: 10.
+    #[serde(default = "default_memory_search_k")]
+    pub memory_search_k: usize,
+    /// Threshold at which compaction should trigger. Defaults to 50000 tokens.
+    #[serde(default = "default_compress_after")]
+    pub compress_after: usize,
+    /// Warn once usage crosses this token threshold. Defaults to 80% of max_tokens.
+    #[serde(default = "default_warn_at_tokens")]
+    pub warn_at_tokens: usize,
 }
 
 fn default_context_window() -> usize {
@@ -614,13 +636,94 @@ fn default_context_window() -> usize {
 fn default_preserve_tail() -> usize {
     20
 }
+fn default_max_tokens() -> usize {
+    default_context_window()
+}
+fn default_reserved_system() -> usize {
+    5_000
+}
+fn default_reserved_task() -> usize {
+    10_000
+}
+fn default_memory_search_k() -> usize {
+    10
+}
+fn default_compress_after() -> usize {
+    50_000
+}
+fn default_warn_at_tokens() -> usize {
+    (default_max_tokens() as f32 * 0.80).round() as usize
+}
+
+impl CompactionConfig {
+    /// Effective total budget used by runtime budget accounting.
+    pub fn effective_max_tokens(&self) -> usize {
+        self.max_tokens.max(self.context_window)
+    }
+
+    /// Effective warning threshold, clamped to the total budget.
+    pub fn effective_warn_at_tokens(&self) -> usize {
+        self.warn_at_tokens.min(self.effective_max_tokens())
+    }
+
+    /// Effective compaction threshold, clamped to the total budget.
+    pub fn effective_compress_after(&self) -> usize {
+        self.compress_after.min(self.effective_max_tokens())
+    }
+
+    /// Remaining capacity after reserved system/task allocations.
+    pub fn usable_prompt_budget(&self) -> usize {
+        self.effective_max_tokens()
+            .saturating_sub(self.reserved_system.saturating_add(self.reserved_task))
+    }
+}
 
 impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
             context_window: default_context_window(),
             preserve_tail: default_preserve_tail(),
+            max_tokens: default_max_tokens(),
+            reserved_system: default_reserved_system(),
+            reserved_task: default_reserved_task(),
+            auto_inject_project: default_true(),
+            memory_search_k: default_memory_search_k(),
+            compress_after: default_compress_after(),
+            warn_at_tokens: default_warn_at_tokens(),
         }
+    }
+}
+
+#[cfg(test)]
+mod compaction_config_tests {
+    use super::CompactionConfig;
+
+    #[test]
+    fn default_compaction_budget_matches_story_defaults() {
+        let cfg = CompactionConfig::default();
+        assert_eq!(cfg.max_tokens, 128_000);
+        assert_eq!(cfg.reserved_system, 5_000);
+        assert_eq!(cfg.reserved_task, 10_000);
+        assert!(cfg.auto_inject_project);
+        assert_eq!(cfg.memory_search_k, 10);
+        assert_eq!(cfg.compress_after, 50_000);
+        assert_eq!(cfg.warn_at_tokens, 102_400);
+        assert_eq!(cfg.usable_prompt_budget(), 113_000);
+    }
+
+    #[test]
+    fn effective_thresholds_are_clamped_to_capacity() {
+        let cfg = CompactionConfig {
+            context_window: 64_000,
+            max_tokens: 32_000,
+            warn_at_tokens: 96_000,
+            compress_after: 80_000,
+            ..CompactionConfig::default()
+        };
+
+        assert_eq!(cfg.effective_max_tokens(), 64_000);
+        assert_eq!(cfg.effective_warn_at_tokens(), 64_000);
+        assert_eq!(cfg.effective_compress_after(), 64_000);
     }
 }
 
