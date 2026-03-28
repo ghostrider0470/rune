@@ -95,7 +95,10 @@ async fn google_complete_stream_passthroughs_openai_compatible_sse() {
 
     let requests = server.received_requests().await.unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
-    assert_eq!(payload.get("model"), Some(&serde_json::json!("gemini-2.5-pro")));
+    assert_eq!(
+        payload.get("model"),
+        Some(&serde_json::json!("gemini-2.5-pro"))
+    );
     assert_eq!(payload.get("stream"), Some(&serde_json::json!(true)));
     assert_eq!(
         payload.get("stream_options"),
@@ -2646,4 +2649,30 @@ async fn google_provider_streams_openai_compatible_sse() {
     assert_eq!(resp.content.as_deref(), Some("Hello world"));
     assert_eq!(resp.finish_reason, Some(FinishReason::Stop));
     assert_eq!(resp.usage.total_tokens, 6);
+}
+
+#[tokio::test]
+async fn openai_unauthenticated_mode_sends_no_auth_headers() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let p = OpenAiProvider::unauthenticated(&server.uri());
+    let resp = p.complete(&simple_request()).await.unwrap();
+    assert_eq!(resp.content.as_deref(), Some("Hello! How can I help?"));
+
+    let requests = server.received_requests().await.unwrap();
+    let req = &requests[0];
+    assert!(
+        req.headers.get("authorization").is_none(),
+        "unauthenticated mode must not send Authorization header"
+    );
+    assert!(
+        req.headers.get("api-key").is_none(),
+        "unauthenticated mode must not send api-key header"
+    );
 }
