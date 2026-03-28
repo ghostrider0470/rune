@@ -79,7 +79,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | TTS | ❌ Missing | No text-to-speech providers |
 | STT | ❌ Missing | No speech-to-text providers |
 | LLM Providers | ✅ Partial | Anthropic, OpenAI, Azure only — missing Google, Ollama, Bedrock, Groq, DeepSeek, Mistral |
-| Admin UI | ✅ Basic | Shell + basic pages exist, missing chat, usage, debug, config, logs, agents, skills |
+| Admin UI | ✅ 2026-03-28 | Admin shell now includes shipped chat, usage, debug, config, logs, agents, and skills pages; broader UX polish and deeper parity still remain |
 | Agent Modes | ❌ Missing | No Orchestrator/Architect/Coder/Debugger modes — beyond OpenClaw |
 | Git Worktree Isolation | ❌ Missing | No isolated agent execution environments — beyond OpenClaw |
 | Context Compression | ❌ Missing | No intelligent context windowing or priority-based assembly — beyond OpenClaw |
@@ -125,28 +125,29 @@ Core architectural pillars to recreate:
 
 ### Phase 1 — Chat Page (UI only, backend exists)
 
-Highest-impact missing UI feature. Backend already has `POST /sessions/{id}/messages`, `GET /sessions/{id}/transcript`, and WebSocket event streaming.
+Status: ✅ Completed 2026-03-28
 
-**New files**
-- `ui/src/routes/_admin/chat.tsx` — Chat page with session selector + message thread + sidebar
-- `ui/src/components/chat/ChatThread.tsx` — Message list with role-based grouping
-- `ui/src/components/chat/ChatMessage.tsx` — Message bubble with markdown rendering
-- `ui/src/components/chat/ChatInput.tsx` — Enter to send, Shift+Enter newline, image paste
-- `ui/src/components/chat/ToolCard.tsx` — Inline tool call/result display, collapsible
-- `ui/src/components/chat/ThinkingBlock.tsx` — Collapsible `<thinking>` block extraction
-- `ui/src/components/chat/MarkdownRenderer.tsx` — `marked` + `DOMPurify` sanitized rendering
-- `ui/src/components/chat/ChatSidebar.tsx` — Resizable split panel for long tool outputs (0.4–0.7 ratio)
-- `ui/src/components/chat/CopyMarkdown.tsx` — Copy-as-markdown with feedback state
-- `ui/src/components/chat/ImageAttachment.tsx` — Clipboard paste preview
-- `ui/src/hooks/use-chat.ts` — Transcript polling, send message, WS subscription
+The admin chat page and its supporting component set are now shipped in the UI, backed by the existing session message/transcript APIs and WebSocket event stream.
 
-**NPM deps**
-- `marked`
-- `dompurify`
-- `@types/dompurify`
+**Landed work**
+- `ui/src/routes/_admin/chat.tsx` — chat workspace with session selector, live transcript state, inspector panel, mobile drawer handling, and A2UI integration
+- `ui/src/components/chat/ChatThread.tsx` — grouped transcript rendering with tool inspection hooks
+- `ui/src/components/chat/ChatMessage.tsx` — role-aware message bubbles with markdown and thinking/tool affordances
+- `ui/src/components/chat/ChatInput.tsx` — send UX with multiline compose and attachment handling
+- `ui/src/components/chat/ToolCard.tsx` — collapsible inline tool call/result cards with inspector selection
+- `ui/src/components/chat/ThinkingBlock.tsx` — collapsible thinking block extraction and rendering
+- `ui/src/components/chat/MarkdownRenderer.tsx` — sanitized markdown rendering via `marked` + `DOMPurify`
+- `ui/src/components/chat/ChatSidebar.tsx` — resizable side inspector for tool details
+- `ui/src/components/chat/CopyMarkdown.tsx` — copy-as-markdown affordance
+- `ui/src/components/chat/ImageAttachment.tsx` — attachment preview support
+- `ui/src/hooks/use-chat.ts` — chat session loading, transcript merge logic, send mutation, and WS subscription plumbing
+- `ui/src/components/layout/AdminNavbar.tsx` + `AdminBottomNav.tsx` — Chat promoted as the first primary navigation destination
 
-**Nav**
-- Add `Chat` as first item in `AdminNavbar` + `AdminBottomNav`
+**Validation**
+- `cd ui && npm run build`
+- `cargo check`
+
+Implementation note (2026-03-28): the roadmap entry was stale relative to the codebase. This pass verified the shipped UI surface, validated the build, and updated roadmap bookkeeping to reflect reality rather than re-implementing already-landed chat functionality.
 
 ---
 
