@@ -846,6 +846,8 @@ pub struct SessionsListQuery {
     pub kind: Option<String>,
     /// Filter by parent/requester session ID (returns children of this session).
     pub parent: Option<Uuid>,
+    /// Filter by project ID stored in session metadata.
+    pub project: Option<String>,
     pub limit: Option<usize>,
     #[serde(default)]
     pub include_metadata: bool,
@@ -1208,6 +1210,8 @@ pub struct SessionResponse {
     pub kind: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requester_session_id: Option<Uuid>,
@@ -1232,6 +1236,8 @@ pub struct SessionListItem {
     pub id: String,
     pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1259,6 +1265,7 @@ pub async fn list_sessions(
     let channel_filter = query.channel.as_deref();
     let kind_filter = query.kind.as_deref();
     let parent_filter = query.parent;
+    let project_filter = query.project.as_deref();
     let session_token_filter = query
         .session_token
         .as_deref()
@@ -1294,6 +1301,13 @@ pub async fn list_sessions(
                 .unwrap_or(true)
         })
         .filter(|row| {
+            project_filter
+                .map(|project| {
+                    metadata_string(&row.metadata, "project_id").as_deref() == Some(project)
+                })
+                .unwrap_or(true)
+        })
+        .filter(|row| {
             session_token_filter
                 .map(|token| row.channel_ref.as_deref() == Some(&format!("webchat:{token}")))
                 .unwrap_or(true)
@@ -1309,6 +1323,7 @@ pub async fn list_sessions(
             id: row.id.to_string(),
             kind: row.kind,
             status: row.status,
+            project_id: metadata_string(&row.metadata, "project_id"),
             mode: metadata_string(&row.metadata, "mode"),
             requester_session_id: row.requester_session_id.map(|id| id.to_string()),
             channel: row.channel_ref,
@@ -1366,6 +1381,7 @@ pub async fn create_session(
             id: row.id,
             kind: row.kind,
             status: row.status,
+            project_id: metadata_string(&row.metadata, "project_id"),
             mode: metadata_string(&row.metadata, "mode"),
             requester_session_id: row.requester_session_id,
             channel_ref: row.channel_ref,
@@ -1455,6 +1471,7 @@ pub async fn get_session(
         id: row.id,
         kind: row.kind,
         status: row.status,
+        project_id: metadata_string(&row.metadata, "project_id"),
         mode: metadata_string(&row.metadata, "mode"),
         requester_session_id: row.requester_session_id,
         channel_ref: row.channel_ref,
@@ -1728,6 +1745,7 @@ pub async fn patch_session(
         id: row.id,
         kind: row.kind,
         status: row.status,
+        project_id: metadata_string(&row.metadata, "project_id"),
         mode: metadata_string(&row.metadata, "mode"),
         requester_session_id: row.requester_session_id,
         channel_ref: row.channel_ref,

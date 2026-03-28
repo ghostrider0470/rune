@@ -191,6 +191,7 @@ pub struct SessionSummary {
     pub kind: String,
     pub status: String,
     pub channel: Option<String>,
+    pub project_id: Option<String>,
     pub requester_session_id: Option<String>,
     pub created_at: Option<String>,
     pub turn_count: Option<u32>,
@@ -256,6 +257,7 @@ pub struct SessionDetailResponse {
     pub kind: String,
     pub status: String,
     pub channel: Option<String>,
+    pub project_id: Option<String>,
     pub requester_session_id: Option<String>,
     pub created_at: Option<String>,
     pub turn_count: Option<u32>,
@@ -273,6 +275,9 @@ impl fmt::Display for SessionDetailResponse {
         writeln!(f, "  Status:  {}", self.status)?;
         if let Some(ref ch) = self.channel {
             writeln!(f, "  Channel: {ch}")?;
+        }
+        if let Some(ref project_id) = self.project_id {
+            writeln!(f, "  Project: {project_id}")?;
         }
         if let Some(ref parent) = self.requester_session_id {
             writeln!(f, "  Parent:  {parent}")?;

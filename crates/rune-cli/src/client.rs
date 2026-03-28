@@ -650,7 +650,9 @@ impl GatewayClient {
 
     /// Aggregate persisted session-turn token usage. Monetary cost is intentionally not derived yet.
     pub async fn gateway_usage_cost(&self) -> Result<GatewayUsageCostResponse> {
-        let sessions = self.sessions_list(None, None, None, None, 500).await?;
+        let sessions = self
+            .sessions_list(None, None, None, None, None, 500)
+            .await?;
         let mut total_turns = 0usize;
         let mut prompt_tokens = 0u64;
         let mut completion_tokens = 0u64;
@@ -2022,6 +2024,7 @@ impl GatewayClient {
         channel: Option<&str>,
         kind: Option<&str>,
         parent: Option<&str>,
+        project: Option<&str>,
         limit: u64,
     ) -> Result<SessionListResponse> {
         let mut query: Vec<(&str, String)> = vec![("limit", limit.to_string())];
@@ -2036,6 +2039,9 @@ impl GatewayClient {
         }
         if let Some(parent) = parent {
             query.push(("parent", parent.to_string()));
+        }
+        if let Some(project) = project {
+            query.push(("project", project.to_string()));
         }
 
         let resp = self
@@ -2058,6 +2064,7 @@ impl GatewayClient {
                     kind: v["kind"].as_str().unwrap_or("direct").to_string(),
                     status: v["status"].as_str().unwrap_or("unknown").to_string(),
                     channel: v["channel"].as_str().map(String::from),
+                    project_id: v["project_id"].as_str().map(String::from),
                     requester_session_id: v["requester_session_id"].as_str().map(String::from),
                     created_at: v["created_at"].as_str().map(String::from),
                     turn_count: v["turn_count"].as_u64().map(|n| n as u32),
@@ -2092,6 +2099,7 @@ impl GatewayClient {
                 kind: v["kind"].as_str().unwrap_or("direct").to_string(),
                 status: v["status"].as_str().unwrap_or("unknown").to_string(),
                 channel: v["channel_ref"].as_str().map(String::from),
+                project_id: v["project_id"].as_str().map(String::from),
                 requester_session_id: v["requester_session_id"].as_str().map(String::from),
                 created_at: v["created_at"].as_str().map(String::from),
                 turn_count: v["turn_count"].as_u64().map(|n| n as u32),
@@ -2130,6 +2138,7 @@ impl GatewayClient {
                     .as_str()
                     .map(String::from)
                     .or_else(|| v["channel_ref"].as_str().map(String::from)),
+                project_id: v["project_id"].as_str().map(String::from),
                 requester_session_id: v["requester_session_id"].as_str().map(String::from),
                 created_at: v["created_at"].as_str().map(String::from),
                 turn_count: v["turn_count"].as_u64().map(|n| n as u32),

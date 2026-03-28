@@ -2218,7 +2218,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             let gateway = client.status().await?;
             let health = client.health().await?;
             let cron = client.cron_status().await?;
-            let sessions = client.sessions_list(None, None, None, None, 5).await?;
+            let sessions = client
+                .sessions_list(None, None, None, None, None, 5)
+                .await?;
             let channels = channel_details();
             let models = model_provider_details();
             let memory = memory::status().await?;
@@ -2864,6 +2866,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                         channel.as_deref(),
                         kind.as_deref(),
                         parent.as_deref(),
+                        None,
                         limit,
                     )
                     .await?;
@@ -2946,7 +2949,7 @@ pub async fn run(cli: Cli) -> Result<()> {
 
                 // List sessions matching the filters.
                 let list = client
-                    .sessions_list(older_than_minutes, None, kind.as_deref(), None, limit)
+                    .sessions_list(older_than_minutes, None, kind.as_deref(), None, None, limit)
                     .await?;
 
                 // Apply client-side status filter (gateway list endpoint doesn't filter by status).
@@ -3031,7 +3034,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             AgentsAction::Tree { limit } => {
                 let sessions = client
-                    .sessions_list(None, None, Some("subagent"), None, limit)
+                    .sessions_list(None, None, Some("subagent"), None, None, limit)
                     .await?;
                 let root = sessions
                     .sessions
