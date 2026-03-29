@@ -4119,6 +4119,33 @@ async fn health_returns_200() {
 }
 
 #[tokio::test]
+async fn instance_health_returns_capability_manifest() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["service"], "rune-gateway");
+    assert!(json["load"].is_object());
+    assert_eq!(json["load"]["session_count"], 0);
+    assert_eq!(json["load"]["ws_connections"], 0);
+    assert!(json["capabilities"].is_object());
+    assert_eq!(json["capabilities"]["instance_id"], "test-instance");
+    assert_eq!(json["capabilities"]["instance_name"], "test-instance");
+    assert_eq!(json["capabilities"]["peer_count"], 0);
+    assert_eq!(json["capabilities"]["configured_models"], serde_json::json!([]));
+    assert_eq!(json["capabilities"]["active_projects"], serde_json::json!([]));
+}
+
+#[tokio::test]
 async fn status_returns_correct_shape() {
     let app = build_test_app(None);
     let response = app

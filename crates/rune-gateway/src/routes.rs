@@ -61,6 +61,23 @@ pub struct HealthResponse {
 }
 
 #[derive(Serialize)]
+pub struct InstanceHealthResponse {
+    pub status: &'static str,
+    pub service: &'static str,
+    pub version: &'static str,
+    pub uptime_seconds: u64,
+    pub load: InstanceLoadResponse,
+    pub capabilities: CapabilitiesResponse,
+}
+
+#[derive(Serialize)]
+pub struct InstanceLoadResponse {
+    pub session_count: usize,
+    pub ws_subscribers: usize,
+    pub ws_connections: usize,
+}
+
+#[derive(Serialize)]
 pub struct TokenMetricsResponse {
     pub entries: Vec<TokenMetricsSnapshot>,
 }
@@ -93,6 +110,47 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         ws_connections: active_ws_connections(),
         mode: state.capabilities.mode.as_str(),
         storage_backend: state.capabilities.storage_backend.clone(),
+    }))
+}
+
+pub async fn instance_health(
+    State(state): State<AppState>,
+) -> Result<Json<InstanceHealthResponse>, GatewayError> {
+    let sessions = state
+        .session_repo
+        .list(i64::MAX / 4, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(Json(InstanceHealthResponse {
+        status: "ok",
+        service: "rune-gateway",
+        version: env!("CARGO_PKG_VERSION"),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        load: InstanceLoadResponse {
+            session_count: sessions.len(),
+            ws_subscribers: state.event_tx.receiver_count(),
+            ws_connections: active_ws_connections(),
+        },
+        capabilities: CapabilitiesResponse {
+            mode: state.capabilities.mode.as_str(),
+            storage_backend: state.capabilities.storage_backend.clone(),
+            pgvector: state.capabilities.pgvector,
+            memory_mode: state.capabilities.memory_mode.clone(),
+            browser: state.capabilities.browser,
+            mcp_servers: state.capabilities.mcp_servers,
+            tts: state.capabilities.tts,
+            stt: state.capabilities.stt,
+            channels: state.capabilities.channels.clone(),
+            approval_mode: state.capabilities.approval_mode.clone(),
+            security_posture: state.capabilities.security_posture.clone(),
+            instance_id: state.capabilities.instance_id.clone(),
+            instance_name: state.capabilities.instance_name.clone(),
+            peer_count: state.capabilities.peer_count,
+            configured_models: state.capabilities.configured_models.clone(),
+            active_projects: state.capabilities.active_projects.clone(),
+            comms_transport: state.capabilities.comms_transport.clone(),
+        },
     }))
 }
 
