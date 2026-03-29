@@ -202,18 +202,27 @@ Implementation note (2026-03-16): the roadmap originally called for Discord Gate
 
 ### Phase 4 — LaneQueue Concurrency Model (Backend)
 
-Replace sequential per-session execution with lane-based FIFO queuing.
+Status: ✅ Completed 2026-03-29
 
-**New file**
+Rune already ships lane-based FIFO concurrency control in the runtime. This pass verified the implementation on current `main` and updated roadmap bookkeeping to reflect the code that is already landed rather than re-implementing it.
+
+**Landed work**
 - `crates/rune-runtime/src/lane_queue.rs`
-  - `Lane` enum: `Main`, `Subagent`, `Cron`, `Nested`
-  - Per-lane semaphore caps: `Main=4`, `Subagent=8`, `Cron=independent`, `Nested=recursive`
-  - FIFO queue per lane using `tokio::sync::Semaphore` + `VecDeque`
-  - Task submission returning a handle/future
-  - Lane routing based on session kind
+  - `Lane` enum with `Main`, `Subagent`, and `Cron` routing derived from `SessionKind`
+  - per-lane semaphore caps with FIFO waiter queues implemented via `tokio::sync::Semaphore` + `VecDeque`
+  - fair permit acquisition/release flow plus lane utilization stats
+  - global and per-project tool concurrency controls via `ToolConcurrencyQueue`
+- `crates/rune-runtime/src/executor.rs`
+  - turn execution and approval resume paths acquire lane permits before running
+  - operator-facing lane stats surfaced when a `LaneQueue` is attached
+- `crates/rune-runtime/src/lib.rs`
+  - public re-exports for lane queue types
 
-**Modify**
-- `crates/rune-runtime/src/executor.rs` — Route turn execution through `LaneQueue`
+**Validation**
+- `cargo check -p rune-runtime`
+- `cargo test -p rune-runtime lane_queue -- --nocapture`
+
+Implementation note (2026-03-29): the original roadmap text mentioned a `Nested` lane and explicit task-handle submission API. The shipped implementation instead uses lane permits integrated directly into `TurnExecutor`, with main/subagent/cron lanes plus dedicated tool concurrency controls. The roadmap is now aligned to repo reality.
 
 ---
 
