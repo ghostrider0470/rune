@@ -202,18 +202,29 @@ Implementation note (2026-03-16): the roadmap originally called for Discord Gate
 
 ### Phase 4 — LaneQueue Concurrency Model (Backend)
 
-Replace sequential per-session execution with lane-based FIFO queuing.
+Status: ✅ Completed 2026-03-29
 
-**New file**
+Rune already ships the lane-based FIFO concurrency model described by this roadmap item. This pass verified the implementation on current `main`, confirmed executor integration plus operator visibility, and updated roadmap bookkeeping to match shipped reality.
+
+**Landed work**
 - `crates/rune-runtime/src/lane_queue.rs`
-  - `Lane` enum: `Main`, `Subagent`, `Cron`, `Nested`
-  - Per-lane semaphore caps: `Main=4`, `Subagent=8`, `Cron=independent`, `Nested=recursive`
-  - FIFO queue per lane using `tokio::sync::Semaphore` + `VecDeque`
-  - Task submission returning a handle/future
-  - Lane routing based on session kind
+  - `Lane` enum implemented for `Main`, `Subagent`, and `Cron` session execution classes
+  - per-lane FIFO semaphore queueing using `tokio::sync::Semaphore` + `VecDeque` waiter lists
+  - configurable capacities via `LaneQueue::with_capacities` / `with_limits` with defaults `main=4`, `subagent=8`, `cron=1024`
+  - cancellation-safe wakeup handling plus lane/tool utilisation stats
+  - project-scoped tool concurrency limits layered on the same fair queue primitive
+- `crates/rune-runtime/src/executor.rs`
+  - turn execution and approval resume paths both acquire lane permits before running
+  - `with_lane_queue()` wiring plus `lane_stats()` exposure for operator surfaces
+- `crates/rune-gateway/src/ws_rpc.rs`
+  - `runtime.lanes` RPC method exposes current lane utilisation to the gateway/admin surface
 
-**Modify**
-- `crates/rune-runtime/src/executor.rs` — Route turn execution through `LaneQueue`
+**Validation**
+- `cargo test -p rune-runtime lane_queue -- --nocapture`
+- `cargo test -p rune-gateway ws_rpc_runtime_lanes_reports_lane_queue_stats -- --nocapture`
+- `cargo check`
+
+Implementation note (2026-03-29): the earlier roadmap text was stale and described an unshipped `Nested` lane variant that does not exist in the current architecture. The shipped design uses `Main`, `Subagent`, and `Cron` lanes, with tool concurrency handled separately through project-scoped permits. This pass updates the roadmap to reflect the real implementation rather than re-planning already-landed code.
 
 ---
 
