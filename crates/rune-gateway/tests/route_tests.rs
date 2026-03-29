@@ -11256,6 +11256,10 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
             .unwrap()
             .contains("l2_recall_hits=")
     );
+    assert_eq!(body["memory_hierarchy"]["prompt_cache_rows"], 0);
+    assert_eq!(body["memory_hierarchy"]["cached_tokens"], 0);
+    assert_eq!(body["memory_hierarchy"]["total_input_tokens"], 0);
+    assert_eq!(body["memory_hierarchy"]["cache_hit_ratio_percent"], 0.0);
     assert_eq!(body["memory_hierarchy"]["l2_recall_hits"], 0);
     assert_eq!(body["memory_hierarchy"]["l2_hot_memories"], 0);
     assert_eq!(body["memory_hierarchy"]["l2_total_memories"], 0);

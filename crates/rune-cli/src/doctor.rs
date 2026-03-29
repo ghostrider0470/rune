@@ -1353,6 +1353,10 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             } else {
                 "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".to_string()
             },
+            prompt_cache_rows: 0,
+            cached_tokens: 0,
+            total_input_tokens: 0,
+            cache_hit_ratio_percent: 0.0,
             l2_recall_hits: 0,
             l2_hot_memories: 0,
             l2_total_memories: 0,
