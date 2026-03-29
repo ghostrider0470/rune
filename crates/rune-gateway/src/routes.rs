@@ -233,9 +233,6 @@ pub struct PeerHealthResponse {
     pub comms_transport: Option<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
-    pub capabilities_version: Option<u32>,
-    pub capability_hash: Option<String>,
-    pub comms_transport: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -710,9 +707,6 @@ async fn collect_peer_health(
                     comms_transport: None,
                     configured_models: Vec::new(),
                     active_projects: Vec::new(),
-                    capabilities_version: None,
-                    capability_hash: None,
-                    comms_transport: None,
                 })
                 .collect();
         }
@@ -750,11 +744,6 @@ async fn collect_peer_health(
                         comms_transport: Some(payload.capabilities.comms_transport),
                         configured_models: payload.capabilities.configured_models,
                         active_projects: payload.capabilities.active_projects,
-                        capabilities_version: Some(
-                            payload.capabilities.identity.capabilities_version,
-                        ),
-                        capability_hash: Some(payload.capabilities.identity.capability_hash),
-                        comms_transport: Some(payload.capabilities.comms_transport),
                     },
                     Err(error) => PeerHealthResponse {
                         id: peer.id.clone(),
@@ -772,9 +761,6 @@ async fn collect_peer_health(
                         comms_transport: None,
                         configured_models: Vec::new(),
                         active_projects: Vec::new(),
-                        capabilities_version: None,
-                        capability_hash: None,
-                        comms_transport: None,
                     },
                 }
             }
@@ -794,9 +780,6 @@ async fn collect_peer_health(
                 comms_transport: None,
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
-                capabilities_version: None,
-                capability_hash: None,
-                comms_transport: None,
             },
         };
         results.push(item);

@@ -352,6 +352,18 @@ pub struct DelegationResultContractSummary {
     pub artifact_field: String,
     pub error_field: String,
     pub finished_at_field: String,
+    pub accepted_at_field: String,
+    pub started_at_field: String,
+    pub task_id_field: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationCapabilityMatch {
+    pub compatible: bool,
+    pub missing_roles: Vec<String>,
+    pub missing_projects: Vec<String>,
+    pub model_overlap: Vec<String>,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,6 +373,7 @@ pub struct DelegationPlanResponse {
     pub candidates: Vec<PeerSummary>,
     pub detail: String,
     pub task_contract: DelegationTaskContract,
+    pub capability_match: DelegationCapabilityMatch,
     pub sender: Option<DelegationEndpointSummary>,
     pub receiver: Option<DelegationEndpointSummary>,
     pub routing: Option<DelegationRoutingSummary>,
@@ -550,6 +563,17 @@ pub struct DoctorTopologySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorContextTierCounter {
+    pub kind: String,
+    pub token_budget: u64,
+    pub estimated_tokens: u64,
+    pub priority: u64,
+    pub staleness_policy: String,
+    pub loaded: bool,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorMemoryHierarchySummary {
     pub l0: String,
     pub l1: String,
@@ -571,7 +595,25 @@ pub struct DoctorMemoryHierarchySummary {
     #[serde(default)]
     pub l2_hot_memories: u64,
     #[serde(default)]
+    pub l2_warm_memories: u64,
+    #[serde(default)]
     pub l2_total_memories: u64,
+    #[serde(default)]
+    pub context_total_budget: u64,
+    #[serde(default)]
+    pub context_total_estimated_tokens: u64,
+    #[serde(default)]
+    pub context_compaction_trigger_tokens: u64,
+    #[serde(default)]
+    pub context_over_budget: bool,
+    #[serde(default)]
+    pub context_over_compaction_threshold: bool,
+    #[serde(default)]
+    pub context_compaction_required: bool,
+    #[serde(default)]
+    pub loaded_tier_count: u64,
+    #[serde(default)]
+    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

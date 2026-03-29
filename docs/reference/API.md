@@ -114,6 +114,7 @@ Due jobs and reminders are claimed atomically before execution via a `claimed_at
 | `project_id` | string? | Optional project-scoped context selector |
 | `delegation_context` | object? | Preloaded context slice for a subagent |
 | `shared_scratchpad_path` | string? | Stable handoff file path shared by orchestrator and subagent |
+| `delegation_plan` | object? | Optional upstream sender/receiver/routing contract embedded into subagent handoff metadata |
 
 ### Delegation context intent
 
@@ -148,7 +149,12 @@ Typical `delegation_context` contents:
       }
     ]
   },
-  "shared_scratchpad_path": "agents/acme/scratchpads/retry-fix.md"
+  "shared_scratchpad_path": "agents/acme/scratchpads/retry-fix.md",
+  "delegation_plan": {
+    "strategy": "named",
+    "sender": { "instance_id": "origin-a" },
+    "receiver": { "instance_id": "peer-b" }
+  }
 }
 ```
 
@@ -157,6 +163,7 @@ Typical `delegation_context` contents:
 - Delegation metadata sections are currently rendered into subagent system context.
 - This ships the context-handoff substrate for delegated sessions.
 - Subagent creation also persists `shared_scratchpad_path` even when no explicit `delegation_context` payload is supplied; Rune stores an empty object for `delegation_context` in that case so prompt assembly has a stable metadata shape.
+- `delegation_plan` can be supplied alongside `delegation_context`; Rune embeds it under `delegation_context.delegation_plan` so delegated sessions retain the upstream sender/receiver/routing contract.
 - Shared scratchpad support is path-level metadata today; higher-level bidirectional scratchpad workflows can build on top of it.
 
 ## Further detail still missing
