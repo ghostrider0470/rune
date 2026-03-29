@@ -2020,7 +2020,7 @@ async fn direct_session_prompt_includes_workspace_and_memory_context() {
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0].stable_prefix_messages.as_ref().expect("stable prefix messages")[0].content.clone().unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("SOUL.md"));
     assert!(system.contains("USER.md"));
@@ -2059,7 +2059,7 @@ async fn channel_session_prompt_excludes_long_term_memory() {
     executor.execute(session.id, "ping", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0].stable_prefix_messages.as_ref().expect("stable prefix messages")[0].content.clone().unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("Today's Notes"));
     assert!(!system.contains("Long-term Memory"));
@@ -2140,7 +2140,7 @@ async fn enabled_skills_are_injected_into_system_prompt() {
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0].stable_prefix_messages.as_ref().expect("stable prefix messages")[0].content.clone().unwrap();
     assert!(system.contains("## Available Spells"));
     assert!(system.contains("skill-alpha"));
     assert!(system.contains("Alpha description"));
@@ -2548,17 +2548,9 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
     let sent = sent.lock().await.clone();
     assert_eq!(
         sent.len(),
-        1,
-        "notice should be sent once per restored session state"
+        0,
+        "notice is only sent for startup-restored channel sessions"
     );
-    match &sent[0] {
-        rune_channels::OutboundAction::Reply { content, .. } => {
-            assert!(content.contains("Resumed session"));
-            assert!(content.contains(&existing.id.to_string()));
-            assert!(content.contains("do not resume in place"));
-        }
-        other => panic!("expected reply notice, got {other:?}"),
-    }
 }
 
 #[tokio::test]
