@@ -1335,6 +1335,7 @@ pub struct DashboardMemoryHierarchyDiagnostics {
     pub context_over_budget: bool,
     pub context_over_compaction_threshold: bool,
     pub context_compaction_required: bool,
+    pub l3_cold_storage_enabled: bool,
     pub loaded_tier_count: u64,
     pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
@@ -1597,6 +1598,7 @@ pub async fn dashboard_diagnostics(
         context_over_compaction_threshold: memory_hierarchy_summary
             .context_over_compaction_threshold,
         context_compaction_required: memory_hierarchy_summary.context_compaction_required,
+        l3_cold_storage_enabled: memory_hierarchy_summary.l3_cold_storage_enabled,
         loaded_tier_count: memory_hierarchy_summary.loaded_tier_count,
         context_tier_counters: memory_hierarchy_summary.context_tier_counters.clone(),
     };
@@ -6404,6 +6406,7 @@ pub struct DoctorMemoryHierarchySummary {
     pub context_over_budget: bool,
     pub context_over_compaction_threshold: bool,
     pub context_compaction_required: bool,
+    pub l3_cold_storage_enabled: bool,
     pub loaded_tier_count: u64,
     pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
@@ -6667,6 +6670,7 @@ async fn doctor_memory_hierarchy(
     let context_over_budget = context_report.over_budget;
     let context_over_compaction_threshold = context_report.over_compaction_threshold;
     let context_compaction_required = context_report.compaction_required;
+    let l3_cold_storage_enabled = context_report.l3_cold_storage_enabled;
     let loaded_tier_count = context_report.tiers.len() as u64;
     let context_tier_counters = context_report
         .tiers
@@ -6705,8 +6709,13 @@ async fn doctor_memory_hierarchy(
             l2_hot_memories,
             l2_total_memories
         ),
-        l3: "durable session logs in transcript/session storage (ready for compaction handoff)"
-            .to_string(),
+        l3: if l3_cold_storage_enabled {
+            "durable session logs in transcript/session storage (ready for compaction handoff)"
+                .to_string()
+        } else {
+            "durable session logs in transcript/session storage (available, compaction handoff disabled)"
+                .to_string()
+        },
         promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions"
             .to_string(),
         demotion: format!(
@@ -6714,7 +6723,7 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_warm_memories={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_warm_memories={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}, l3_cold_storage_enabled={}",
             prompt_cache_rows.len(),
             cached_tokens,
             total_input_tokens,
@@ -6729,7 +6738,8 @@ async fn doctor_memory_hierarchy(
             context_compaction_trigger_tokens,
             context_over_budget,
             context_over_compaction_threshold,
-            context_compaction_required
+            context_compaction_required,
+            l3_cold_storage_enabled
         ),
         prompt_cache_rows: prompt_cache_rows.len() as u64,
         cached_tokens,
@@ -6745,6 +6755,7 @@ async fn doctor_memory_hierarchy(
         context_over_budget,
         context_over_compaction_threshold,
         context_compaction_required,
+        l3_cold_storage_enabled,
         loaded_tier_count,
         context_tier_counters,
     }

@@ -11781,6 +11781,7 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
             .unwrap()
             .contains("ready for compaction handoff")
     );
+    assert_eq!(body["memory_hierarchy"]["l3_cold_storage_enabled"], true);
     assert!(
         body["memory_hierarchy"]["promotion"]
             .as_str()
@@ -11804,6 +11805,12 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
             .as_str()
             .unwrap()
             .contains("l2_recall_hits=")
+    );
+    assert!(
+        body["memory_hierarchy"]["metrics"]
+            .as_str()
+            .unwrap()
+            .contains("l3_cold_storage_enabled=true")
     );
     assert_eq!(body["memory_hierarchy"]["prompt_cache_rows"], 1);
     assert_eq!(body["memory_hierarchy"]["cached_tokens"], 0);
