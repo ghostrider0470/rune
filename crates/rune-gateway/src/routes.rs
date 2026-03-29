@@ -1239,6 +1239,7 @@ pub struct DashboardMemoryHierarchyDiagnostics {
     pub total_input_tokens: u64,
     pub cache_hit_ratio_percent: f64,
     pub l2_recall_hits: u64,
+    pub l2_warm_memories: u64,
     pub l2_hot_memories: u64,
     pub l2_total_memories: u64,
     pub context_total_budget: u64,
@@ -1498,6 +1499,7 @@ pub async fn dashboard_diagnostics(
         total_input_tokens: memory_hierarchy_summary.total_input_tokens,
         cache_hit_ratio_percent: memory_hierarchy_summary.cache_hit_ratio_percent,
         l2_recall_hits: memory_hierarchy_summary.l2_recall_hits,
+        l2_warm_memories: memory_hierarchy_summary.l2_warm_memories,
         l2_hot_memories: memory_hierarchy_summary.l2_hot_memories,
         l2_total_memories: memory_hierarchy_summary.l2_total_memories,
         context_total_budget: memory_hierarchy_summary.context_total_budget,
@@ -1535,10 +1537,11 @@ pub async fn dashboard_diagnostics(
         level: if memory_hierarchy.context_compaction_required { "warn" } else { "info" },
         source: "memory_hierarchy",
         message: format!(
-            "Memory hierarchy: prompt_cache_rows={} cache_hit_ratio_percent={:.1} l2_recall_hits={} l2_hot_memories={} l2_total_memories={} loaded_tiers={} context_estimated_tokens={} compaction_trigger={} over_budget={} compaction_required={}",
+            "Memory hierarchy: prompt_cache_rows={} cache_hit_ratio_percent={:.1} l2_recall_hits={} l2_warm_memories={} l2_hot_memories={} l2_total_memories={} loaded_tiers={} context_estimated_tokens={} compaction_trigger={} over_budget={} compaction_required={}",
             memory_hierarchy.prompt_cache_rows,
             memory_hierarchy.cache_hit_ratio_percent,
             memory_hierarchy.l2_recall_hits,
+            memory_hierarchy.l2_warm_memories,
             memory_hierarchy.l2_hot_memories,
             memory_hierarchy.l2_total_memories,
             memory_hierarchy.loaded_tier_count,
@@ -6301,6 +6304,7 @@ pub struct DoctorMemoryHierarchySummary {
     pub total_input_tokens: u64,
     pub cache_hit_ratio_percent: f64,
     pub l2_recall_hits: u64,
+    pub l2_warm_memories: u64,
     pub l2_hot_memories: u64,
     pub l2_total_memories: u64,
     pub context_total_budget: u64,
@@ -6547,22 +6551,23 @@ async fn doctor_memory_hierarchy(
         "keyword/file fallback"
     };
 
-    let (l2_recall_hits, l2_hot_memories, l2_total_memories) = if let Some(mem0) =
+    let (l2_recall_hits, l2_warm_memories, l2_hot_memories, l2_total_memories) = if let Some(mem0) =
         state.turn_executor.mem0()
     {
         match mem0.memory_hierarchy_metrics().await {
             Ok(metrics) => (
                 metrics.recall_hits,
+                metrics.warm_memories,
                 metrics.hot_memories,
                 metrics.total_memories,
             ),
             Err(error) => {
                 tracing::debug!(error = %error, "doctor: failed to load mem0 hierarchy metrics");
-                (0, 0, 0)
+                (0, 0, 0, 0)
             }
         }
     } else {
-        (0, 0, 0)
+        (0, 0, 0, 0)
     };
 
     let context_total_budget = context_report.total_budget as u64;
@@ -6601,10 +6606,11 @@ async fn doctor_memory_hierarchy(
             cache_ratio
         ),
         l2: format!(
-            "{} memory retrieval ({}; recall_hits={}, hot_memories={}, total_memories={})",
+            "{} memory retrieval ({}; recall_hits={}, warm_memories={}, hot_memories={}, total_memories={})",
             vector_backend,
             capabilities.memory_mode,
             l2_recall_hits,
+            l2_warm_memories,
             l2_hot_memories,
             l2_total_memories
         ),
@@ -6617,12 +6623,13 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_warm_memories={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}",
             prompt_cache_rows.len(),
             cached_tokens,
             total_input_tokens,
             cache_ratio,
             l2_recall_hits,
+            l2_warm_memories,
             l2_hot_memories,
             l2_total_memories,
             loaded_tier_count,
@@ -6638,6 +6645,7 @@ async fn doctor_memory_hierarchy(
         total_input_tokens,
         cache_hit_ratio_percent: cache_ratio,
         l2_recall_hits,
+        l2_warm_memories,
         l2_hot_memories,
         l2_total_memories,
         context_total_budget,

@@ -42,6 +42,7 @@ pub struct MemoryCaptureMetadata {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MemoryHierarchyMetrics {
     pub recall_hits: u64,
+    pub warm_memories: u64,
     pub hot_memories: u64,
     pub total_memories: u64,
 }
@@ -299,9 +300,13 @@ impl Mem0Engine {
     ) -> Result<MemoryHierarchyMetrics, rune_store::StoreError> {
         let memories = self.repo.list_all().await?;
         let total_memories = memories.len() as u64;
-        let hot_memories = memories
+        let warm_memories = memories
             .iter()
             .filter(|memory| memory.access_count > 0)
+            .count() as u64;
+        let hot_memories = memories
+            .iter()
+            .filter(|memory| memory.access_count >= 3)
             .count() as u64;
         let recall_hits = memories
             .iter()
@@ -310,6 +315,7 @@ impl Mem0Engine {
 
         Ok(MemoryHierarchyMetrics {
             recall_hits,
+            warm_memories,
             hot_memories,
             total_memories,
         })

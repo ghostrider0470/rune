@@ -9,8 +9,8 @@ use tracing::debug;
 
 use crate::error::ModelError;
 use crate::provider::ModelProvider;
-use crate::types::{CompletionRequest, CompletionResponse, FinishReason, MessagePart, Usage};
 use crate::provider::response::map_anthropic_error_response;
+use crate::types::{CompletionRequest, CompletionResponse, FinishReason, MessagePart, Usage};
 
 /// Anthropic API mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +115,6 @@ struct AnthropicUsage {
     cache_creation_input_tokens: Option<u32>,
 }
 
-
 #[async_trait]
 impl ModelProvider for AnthropicProvider {
     async fn complete(
@@ -218,7 +217,8 @@ fn anthropic_content_blocks(msg: &crate::types::ChatMessage) -> Option<Vec<Anthr
                     }
                 }
                 MessagePart::ImageUrl { image_url } => {
-                    let Some((media_type, data)) = parse_anthropic_image_source(&image_url.url) else {
+                    let Some((media_type, data)) = parse_anthropic_image_source(&image_url.url)
+                    else {
                         continue;
                     };
                     blocks.push(AnthropicContentBlock::Image {
@@ -239,7 +239,11 @@ fn anthropic_content_blocks(msg: &crate::types::ChatMessage) -> Option<Vec<Anthr
     msg.content
         .as_ref()
         .filter(|content| !content.is_empty())
-        .map(|content| vec![AnthropicContentBlock::Text { text: content.clone() }])
+        .map(|content| {
+            vec![AnthropicContentBlock::Text {
+                text: content.clone(),
+            }]
+        })
 }
 
 fn parse_anthropic_image_source(url: &str) -> Option<(String, String)> {
@@ -306,7 +310,9 @@ mod tests {
 
         let blocks = anthropic_content_blocks(&message).unwrap();
         assert_eq!(blocks.len(), 1);
-        assert!(matches!(&blocks[0], AnthropicContentBlock::Text { text } if text == "Describe this image"));
+        assert!(
+            matches!(&blocks[0], AnthropicContentBlock::Text { text } if text == "Describe this image")
+        );
     }
 
     #[test]
@@ -331,6 +337,8 @@ mod tests {
 
         let blocks = anthropic_content_blocks(&message).unwrap();
         assert_eq!(blocks.len(), 2);
-        assert!(matches!(&blocks[1], AnthropicContentBlock::Image { source } if source.media_type == "image/png" && source.data == "QUJDRA=="));
+        assert!(
+            matches!(&blocks[1], AnthropicContentBlock::Image { source } if source.media_type == "image/png" && source.data == "QUJDRA==")
+        );
     }
 }

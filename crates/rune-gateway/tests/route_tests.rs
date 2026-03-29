@@ -4701,10 +4701,12 @@ async fn delegation_plan_exposes_full_task_contract_fields() {
             "finished_at"
         ])
     );
-    assert!(json["routing"]["detail"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("no healthy peers available"));
+    assert!(
+        json["routing"]["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("no healthy peers available")
+    );
     assert_eq!(json["receiver"], serde_json::Value::Null);
 }
 
@@ -11650,7 +11652,9 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
         false
     );
     assert_eq!(body["memory_hierarchy"]["loaded_tier_count"], 5);
-    let tiers = body["memory_hierarchy"]["context_tier_counters"].as_array().unwrap();
+    let tiers = body["memory_hierarchy"]["context_tier_counters"]
+        .as_array()
+        .unwrap();
     assert_eq!(tiers.len(), 5);
     assert_eq!(tiers[0]["kind"], "identity");
     assert_eq!(tiers[0]["token_budget"], 1000);

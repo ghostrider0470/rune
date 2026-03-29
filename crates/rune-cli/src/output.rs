@@ -534,6 +534,8 @@ pub struct DoctorMemoryHierarchySummary {
     #[serde(default)]
     pub l2_recall_hits: u64,
     #[serde(default)]
+    pub l2_warm_memories: u64,
+    #[serde(default)]
     pub l2_hot_memories: u64,
     #[serde(default)]
     pub l2_total_memories: u64,
@@ -637,8 +639,9 @@ impl fmt::Display for DoctorReport {
             )?;
             writeln!(
                 f,
-                "  L2 Counters: recall_hits={}, hot_memories={}, total_memories={}",
+                "  L2 Counters: recall_hits={}, warm_memories={}, hot_memories={}, total_memories={}",
                 memory_hierarchy.l2_recall_hits,
+                memory_hierarchy.l2_warm_memories,
                 memory_hierarchy.l2_hot_memories,
                 memory_hierarchy.l2_total_memories
             )?;
@@ -5860,6 +5863,7 @@ mod tests {
                 total_input_tokens: 0,
                 cache_hit_ratio_percent: 0.0,
                 l2_recall_hits: 0,
+                l2_warm_memories: 0,
                 l2_hot_memories: 0,
                 l2_total_memories: 0,
                 context_total_budget: 36_000,
@@ -5869,6 +5873,7 @@ mod tests {
                 context_over_compaction_threshold: false,
                 context_compaction_required: false,
                 loaded_tier_count: 4,
+                context_tier_counters: vec![],
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
