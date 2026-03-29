@@ -2515,6 +2515,26 @@ mod tests {
             health_url: "http://10.0.0.6:8787/api/v1/instance/health".to_string(),
         }];
 
+        config.models.providers = vec![ModelProviderConfig {
+            name: "openai".to_string(),
+            kind: "openai".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: None,
+            deployment_name: None,
+            api_version: None,
+            api_key_env: Some("OPENAI_API_KEY".to_string()),
+            model_alias: None,
+            models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
+        }];
+        config.agents.list = vec![AgentConfig {
+            id: "main".to_string(),
+            default: Some(true),
+            model: None,
+            workspace: Some("/workspace/rune".to_string()),
+            system_prompt: None,
+        }];
+        config.comms.transport = "http".to_string();
+
         let capabilities =
             Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 7);
         assert_eq!(capabilities.identity.id, "node-a");
@@ -2527,8 +2547,11 @@ mod tests {
             capabilities.identity.roles,
             vec!["gateway".to_string(), "scheduler".to_string()]
         );
-        assert_eq!(capabilities.identity.capabilities_version, 1);
+        assert_eq!(capabilities.identity.capabilities_version, 7);
         assert_eq!(capabilities.peer_count, 1);
+        assert_eq!(capabilities.configured_models, vec!["gpt-4.1".to_string()]);
+        assert_eq!(capabilities.active_projects, vec!["/workspace/rune".to_string()]);
+        assert_eq!(capabilities.comms_transport, "http");
     }
 
     #[test]

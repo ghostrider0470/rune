@@ -70,7 +70,7 @@ peers = [
 ]
 ```
 
-That endpoint returns instance identity, capability manifest, live load counters, and peer health snapshots so operators can verify discovery wiring before delegation lands.
+That endpoint returns instance identity, a hashed/versioned capability manifest (roles, advertised address, configured models, active project workspaces, comms transport), live load counters, and peer health snapshots so operators can verify discovery wiring before delegation lands.
 
 Then open `http://127.0.0.1:8787/webchat` for browser chat or `http://127.0.0.1:8787/dashboard` for the admin UI. The legacy `/chat` path redirects into WebChat so old bookmarks keep working.
 

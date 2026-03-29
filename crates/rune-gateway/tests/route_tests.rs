@@ -16,7 +16,7 @@ use uuid::Uuid;
 use chrono::Timelike;
 
 use rune_config::{
-    AppConfig, Capabilities, ConfiguredModel, InstanceIdentity, LaneQueueConfig,
+    AgentConfig, AppConfig, Capabilities, ConfiguredModel, InstanceIdentity, LaneQueueConfig,
     ModelProviderConfig, RuntimeMode,
 };
 use rune_models::{
@@ -4145,6 +4145,25 @@ async fn health_returns_200() {
     config.instance.name = "test-instance".to_string();
     config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
     config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    config.models.providers = vec![ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("OPENAI_API_KEY".to_string()),
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
+    }];
+    config.agents.list = vec![AgentConfig {
+        id: "main".to_string(),
+        default: Some(true),
+        model: None,
+        workspace: Some("/workspace/rune".to_string()),
+        system_prompt: None,
+    }];
+    config.comms.transport = "http".to_string();
     let app = build_test_app_with_config(config, None);
     let response = app
         .oneshot(Request::get("/health").body(Body::empty()).unwrap())
@@ -4180,11 +4199,17 @@ async fn capabilities_detect_computes_capability_version_from_advertised_feature
         model_alias: None,
         models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
     }];
-    config.agents.defaults.workspace = Some("/workspace/rune".to_string());
+    config.agents.list = vec![AgentConfig {
+        id: "main".to_string(),
+        default: Some(true),
+        model: None,
+        workspace: Some("/workspace/rune".to_string()),
+        system_prompt: None,
+    }];
     config.comms.transport = "http".to_string();
 
     let capabilities = Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 0);
-    assert_eq!(capabilities.identity.capabilities_version, 6);
+    assert_eq!(capabilities.identity.capabilities_version, 7);
 }
 
 #[tokio::test]
@@ -4194,6 +4219,25 @@ async fn instance_health_returns_capability_manifest() {
     config.instance.name = "test-instance".to_string();
     config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
     config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    config.models.providers = vec![ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("OPENAI_API_KEY".to_string()),
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
+    }];
+    config.agents.list = vec![AgentConfig {
+        id: "main".to_string(),
+        default: Some(true),
+        model: None,
+        workspace: Some("/workspace/rune".to_string()),
+        system_prompt: None,
+    }];
+    config.comms.transport = "http".to_string();
     let app = build_test_app_with_config(config, None);
     let response = app
         .oneshot(
@@ -4231,19 +4275,12 @@ async fn instance_health_returns_capability_manifest() {
             .as_array()
             .is_some_and(|roles| roles.iter().any(|role| role == "gateway"))
     );
-    assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 4);
+    assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 6);
     assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
     assert_eq!(json["capabilities"]["peer_count"], 0);
-    assert!(json["capabilities"]["configured_models"].is_array());
-    assert!(
-        json["capabilities"]["configured_models"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|model| model.is_string())
-    );
-    assert!(json["capabilities"]["active_projects"].is_array());
-    assert_eq!(json["capabilities"]["comms_transport"], "filesystem");
+    assert_eq!(json["capabilities"]["configured_models"], serde_json::json!(["gpt-4.1"]));
+    assert_eq!(json["capabilities"]["active_projects"], serde_json::json!(["/workspace/rune"]));
+    assert_eq!(json["capabilities"]["comms_transport"], "http");
 }
 
 #[tokio::test]
@@ -4682,7 +4719,13 @@ async fn delegation_plan_reports_capability_match_for_selected_peer() {
         model_alias: None,
         models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
     }];
-    config.agents.defaults.workspace = Some("/workspace/rune".to_string());
+    config.agents.list = vec![AgentConfig {
+        id: "main".to_string(),
+        default: Some(true),
+        model: None,
+        workspace: Some("/workspace/rune".to_string()),
+        system_prompt: None,
+    }];
 
     let (app, _state) = build_test_app_parts(config, None);
     let response = app
