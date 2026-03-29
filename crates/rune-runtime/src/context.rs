@@ -281,7 +281,7 @@ impl ContextAssembler {
             ContextTierSpec::new(ContextTierKind::ActiveTask, 10_000),
             ContextTierSpec::new(ContextTierKind::Project, 20_000),
             ContextTierSpec::new(ContextTierKind::Shared, 5_000),
-            ContextTierSpec::new(ContextTierKind::Historical, 0),
+            ContextTierSpec::new(ContextTierKind::Historical, 8_000),
         ]
     }
 
@@ -318,7 +318,7 @@ impl ContextAssembler {
             },
             ContextTierSpec {
                 kind: ContextTierKind::Historical,
-                token_budget: 0,
+                token_budget: config.historical,
                 priority: config.historical_priority,
                 staleness_policy: parse_staleness_policy(&config.historical_staleness_policy)
                     .unwrap_or(ContextTierKind::Historical.default_staleness_policy()),
@@ -339,7 +339,7 @@ impl ContextAssembler {
             ContextTierSpec::new(ContextTierKind::ActiveTask, active_task),
             ContextTierSpec::new(ContextTierKind::Project, project),
             ContextTierSpec::new(ContextTierKind::Shared, shared),
-            ContextTierSpec::new(ContextTierKind::Historical, 0),
+            ContextTierSpec::new(ContextTierKind::Historical, 8_000),
         ];
         self
     }
@@ -1034,7 +1034,7 @@ mod context_tier_tests {
         );
         assert_eq!(
             specs[4],
-            ContextTierSpec::new(ContextTierKind::Historical, 0)
+            ContextTierSpec::new(ContextTierKind::Historical, 8_000)
         );
     }
 
@@ -1053,6 +1053,7 @@ mod context_tier_tests {
             shared: 444,
             shared_priority: 6,
             shared_staleness_policy: "on_demand".into(),
+            historical: 555,
             historical_priority: 5,
             historical_staleness_policy: "retrieval_only".into(),
         };
@@ -1079,7 +1080,7 @@ mod context_tier_tests {
         assert_eq!(specs[3].token_budget, 444);
         assert_eq!(specs[3].priority, 6);
         assert_eq!(specs[3].staleness_policy, ContextStalenessPolicy::OnDemand);
-        assert_eq!(specs[4].token_budget, 0);
+        assert_eq!(specs[4].token_budget, 555);
         assert_eq!(specs[4].priority, 5);
         assert_eq!(
             specs[4].staleness_policy,
@@ -1098,7 +1099,7 @@ mod context_tier_tests {
         assert_eq!(specs[1].token_budget, 8_000);
         assert_eq!(specs[2].token_budget, 16_000);
         assert_eq!(specs[3].token_budget, 2_500);
-        assert_eq!(specs[4].token_budget, 0);
+        assert_eq!(specs[4].token_budget, 8_000);
     }
 
     #[test]
@@ -1120,7 +1121,7 @@ mod context_tier_tests {
         );
 
         assert!(report.total_estimated_tokens > 0);
-        assert_eq!(report.total_budget, 36_000);
+        assert_eq!(report.total_budget, 44_000);
         assert!(!report.over_budget);
         assert_eq!(report.compaction_trigger_tokens, 50_000);
         assert!(!report.over_compaction_threshold);
@@ -1149,8 +1150,13 @@ mod context_budget_tests {
 
     #[test]
     fn analyze_context_usage_marks_over_budget_when_tier_sum_exceeded() {
-        let assembler =
-            ContextAssembler::new("Identity instructions").with_tier_budgets(1, 1, 1, 1);
+        let assembler = ContextAssembler::new("Identity instructions").with_tier_specs(vec![
+            ContextTierSpec::new(ContextTierKind::Identity, 1),
+            ContextTierSpec::new(ContextTierKind::ActiveTask, 1),
+            ContextTierSpec::new(ContextTierKind::Project, 1),
+            ContextTierSpec::new(ContextTierKind::Shared, 1),
+            ContextTierSpec::new(ContextTierKind::Historical, 0),
+        ]);
         let workspace = WorkspaceContext {
             files: vec![("AGENTS.md".into(), "project rules".into())],
         };

@@ -366,7 +366,11 @@ pub async fn delegation_plan(
 
     let capability_match = evaluate_capability_match(&state.capabilities, selected_peer.as_ref());
 
-    let detail = match (&selected_peer, strategy.as_str(), capability_match.compatible) {
+    let detail = match (
+        &selected_peer,
+        strategy.as_str(),
+        capability_match.compatible,
+    ) {
         (Some(peer), "named", true) => format!("selected named peer '{}'", peer.id),
         (Some(peer), "named", false) => format!(
             "selected named peer '{}' with capability mismatch: {}",
