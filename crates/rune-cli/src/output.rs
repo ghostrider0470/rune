@@ -36,6 +36,12 @@ pub struct StatusResponse {
     pub status: String,
     pub version: Option<String>,
     pub uptime_seconds: Option<u64>,
+    pub instance_id: Option<String>,
+    pub instance_name: Option<String>,
+    pub instance_roles: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
+    pub advertised_addr: Option<String>,
 }
 
 impl fmt::Display for StatusResponse {
@@ -47,6 +53,24 @@ impl fmt::Display for StatusResponse {
         if let Some(u) = self.uptime_seconds {
             write!(f, "\nUptime: {u}s")?;
         }
+        if let Some(ref instance_id) = self.instance_id {
+            write!(f, "\nInstance ID: {instance_id}")?;
+        }
+        if let Some(ref instance_name) = self.instance_name {
+            write!(f, "\nInstance name: {instance_name}")?;
+        }
+        if !self.instance_roles.is_empty() {
+            write!(f, "\nRoles: {}", self.instance_roles.join(", "))?;
+        }
+        if let Some(version) = self.capabilities_version {
+            write!(f, "\nCapabilities version: {version}")?;
+        }
+        if let Some(ref capability_hash) = self.capability_hash {
+            write!(f, "\nCapability hash: {capability_hash}")?;
+        }
+        if let Some(ref advertised_addr) = self.advertised_addr {
+            write!(f, "\nAdvertised address: {advertised_addr}")?;
+        }
         Ok(())
     }
 }
@@ -56,6 +80,628 @@ impl fmt::Display for StatusResponse {
 pub struct HealthResponse {
     pub healthy: bool,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceLoadSummary {
+    pub session_count: usize,
+    pub ws_subscribers: usize,
+    pub ws_connections: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerSummary {
+    pub id: String,
+    pub health_url: String,
+    pub status: String,
+    pub detail: String,
+    pub checked_at: Option<String>,
+    pub latency_ms: Option<u128>,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
+    pub comms_transport: Option<String>,
+    pub load: Option<InstanceLoadSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayInstanceHealthResponse {
+    pub status: String,
+    pub version: Option<String>,
+    pub uptime_seconds: Option<u64>,
+    pub instance_id: Option<String>,
+    pub instance_name: Option<String>,
+    pub advertised_addr: Option<String>,
+    pub instance_roles: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
+    pub peer_count: usize,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+    pub comms_transport: Option<String>,
+    pub load: Option<InstanceLoadSummary>,
+    pub peers: Vec<PeerSummary>,
+}
+
+impl fmt::Display for GatewayInstanceHealthResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Instance health: {}", self.status)?;
+        if let Some(ref version) = self.version {
+            write!(
+                f,
+                "
+Version: {version}"
+            )?;
+        }
+        if let Some(uptime) = self.uptime_seconds {
+            write!(
+                f,
+                "
+Uptime: {uptime}s"
+            )?;
+        }
+        if let Some(ref instance_id) = self.instance_id {
+            write!(
+                f,
+                "
+Instance ID: {instance_id}"
+            )?;
+        }
+        if let Some(ref instance_name) = self.instance_name {
+            write!(
+                f,
+                "
+Instance name: {instance_name}"
+            )?;
+        }
+        if let Some(version) = self.capabilities_version {
+            write!(
+                f,
+                "
+Capabilities version: {version}"
+            )?;
+        }
+        if let Some(ref capability_hash) = self.capability_hash {
+            write!(
+                f,
+                "
+Capability hash: {capability_hash}"
+            )?;
+        }
+        if let Some(ref advertised_addr) = self.advertised_addr {
+            write!(
+                f,
+                "
+Advertised address: {advertised_addr}"
+            )?;
+        }
+        if !self.instance_roles.is_empty() {
+            write!(
+                f,
+                "
+Roles: {}",
+                self.instance_roles.join(", ")
+            )?;
+        }
+        if let Some(ref comms_transport) = self.comms_transport {
+            write!(
+                f,
+                "
+Comms transport: {comms_transport}"
+            )?;
+        }
+        if !self.configured_models.is_empty() {
+            write!(
+                f,
+                "
+Configured models: {}",
+                self.configured_models.join(", ")
+            )?;
+        }
+        if !self.active_projects.is_empty() {
+            write!(
+                f,
+                "
+Active projects: {}",
+                self.active_projects.join(", ")
+            )?;
+        }
+        if let Some(ref load) = self.load {
+            write!(
+                f,
+                "
+Load: sessions={}, ws_subscribers={}, ws_connections={}",
+                load.session_count, load.ws_subscribers, load.ws_connections
+            )?;
+        }
+        write!(
+            f,
+            "
+Peers: {}",
+            self.peer_count
+        )?;
+        for peer in &self.peers {
+            write!(
+                f,
+                "
+  - {} [{}]",
+                peer.id, peer.status
+            )?;
+            write!(
+                f,
+                "
+    Health URL: {}",
+                peer.health_url
+            )?;
+            write!(
+                f,
+                "
+    Detail: {}",
+                peer.detail
+            )?;
+            if let Some(ref checked_at) = peer.checked_at {
+                write!(
+                    f,
+                    "
+    Checked at: {checked_at}"
+                )?;
+            }
+            if let Some(latency_ms) = peer.latency_ms {
+                write!(
+                    f,
+                    "
+    Latency: {latency_ms}ms"
+                )?;
+            }
+            if let Some(ref advertised_addr) = peer.advertised_addr {
+                write!(
+                    f,
+                    "
+    Advertised address: {advertised_addr}"
+                )?;
+            }
+            if !peer.roles.is_empty() {
+                write!(
+                    f,
+                    "
+    Roles: {}",
+                    peer.roles.join(", ")
+                )?;
+            }
+            if !peer.configured_models.is_empty() {
+                write!(
+                    f,
+                    "
+    Models: {}",
+                    peer.configured_models.join(", ")
+                )?;
+            }
+            if !peer.active_projects.is_empty() {
+                write!(
+                    f,
+                    "
+    Projects: {}",
+                    peer.active_projects.join(", ")
+                )?;
+            }
+            if let Some(ref load) = peer.load {
+                write!(
+                    f,
+                    "
+    Load: sessions={}, ws_subscribers={}, ws_connections={}",
+                    load.session_count, load.ws_subscribers, load.ws_connections
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationTaskContract {
+    pub protocol_version: u32,
+    pub submission_modes: Vec<String>,
+    pub lifecycle: Vec<String>,
+    pub timeout_handling: Vec<String>,
+    pub conflict_prevention: Vec<String>,
+    pub required_fields: Vec<String>,
+    pub optional_fields: Vec<String>,
+    pub result_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationCapabilityMatch {
+    pub compatible: bool,
+    pub missing_roles: Vec<String>,
+    pub missing_projects: Vec<String>,
+    pub model_overlap: Vec<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationEndpointSummary {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub transport: String,
+    pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationRoutingSummary {
+    pub mode: String,
+    pub detail: String,
+    pub peer_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationConflictCapabilitySummary {
+    pub required: bool,
+    pub mechanism: String,
+    pub enforced_by: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationTaskStatusSummary {
+    pub states: Vec<String>,
+    pub terminal_states: Vec<String>,
+    pub sender_visibility: String,
+    pub timeout_behavior: String,
+    pub failure_behavior: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationResultContractSummary {
+    pub status_field: String,
+    pub artifact_field: String,
+    pub error_field: String,
+    pub finished_at_field: String,
+    pub accepted_at_field: String,
+    pub started_at_field: String,
+    pub task_id_field: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationPlanResponse {
+    pub strategy: String,
+    pub selected_peer: Option<PeerSummary>,
+    pub candidates: Vec<PeerSummary>,
+    pub detail: String,
+    pub task_contract: DelegationTaskContract,
+    pub capability_match: DelegationCapabilityMatch,
+    pub sender: Option<DelegationEndpointSummary>,
+    pub receiver: Option<DelegationEndpointSummary>,
+    pub routing: Option<DelegationRoutingSummary>,
+    pub branch_reservation: Option<DelegationConflictCapabilitySummary>,
+    pub file_locks: Option<DelegationConflictCapabilitySummary>,
+    pub task_status: Option<DelegationTaskStatusSummary>,
+    pub result: Option<DelegationResultContractSummary>,
+}
+
+impl fmt::Display for DelegationPlanResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Delegation strategy: {}", self.strategy)?;
+        write!(
+            f,
+            "
+Detail: {}",
+            self.detail
+        )?;
+        match &self.selected_peer {
+            Some(peer) => write!(
+                f,
+                "
+Selected peer: {} [{}]",
+                peer.id, peer.status
+            )?,
+            None => write!(
+                f,
+                "
+Selected peer: none"
+            )?,
+        }
+        write!(
+            f,
+            "
+Candidates: {}",
+            self.candidates.len()
+        )?;
+        write!(
+            f,
+            "
+Protocol v{}",
+            self.task_contract.protocol_version
+        )?;
+        if !self.task_contract.submission_modes.is_empty() {
+            write!(
+                f,
+                "
+Submission modes: {}",
+                self.task_contract.submission_modes.join(", ")
+            )?;
+        }
+        if !self.task_contract.lifecycle.is_empty() {
+            write!(
+                f,
+                "
+Lifecycle: {}",
+                self.task_contract.lifecycle.join(" → ")
+            )?;
+        }
+        if !self.task_contract.timeout_handling.is_empty() {
+            write!(
+                f,
+                "
+Timeout handling: {}",
+                self.task_contract.timeout_handling.join("; ")
+            )?;
+        }
+        if !self.task_contract.conflict_prevention.is_empty() {
+            write!(
+                f,
+                "
+Conflict prevention: {}",
+                self.task_contract.conflict_prevention.join("; ")
+            )?;
+        }
+        write!(
+            f,
+            "
+Capability match: {}",
+            if self.capability_match.compatible {
+                "compatible"
+            } else {
+                "mismatch"
+            }
+        )?;
+        write!(
+            f,
+            "
+Capability detail: {}",
+            self.capability_match.detail
+        )?;
+        if !self.capability_match.model_overlap.is_empty() {
+            write!(
+                f,
+                "
+Model overlap: {}",
+                self.capability_match.model_overlap.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_roles.is_empty() {
+            write!(
+                f,
+                "
+Missing roles: {}",
+                self.capability_match.missing_roles.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_projects.is_empty() {
+            write!(
+                f,
+                "
+Missing projects: {}",
+                self.capability_match.missing_projects.join(", ")
+            )?;
+        }
+        if let Some(sender) = &self.sender {
+            write!(
+                f,
+                "
+Sender: {} ({})",
+                sender.instance_name, sender.instance_id
+            )?;
+            write!(
+                f,
+                "
+  Transport: {}",
+                sender.transport
+            )?;
+            if let Some(health_url) = &sender.health_url {
+                write!(
+                    f,
+                    "
+  Health URL: {health_url}"
+                )?;
+            }
+            if let Some(submit_url) = &sender.submit_url {
+                write!(
+                    f,
+                    "
+  Submit URL: {submit_url}"
+                )?;
+            }
+            if let Some(result_url) = &sender.result_url {
+                write!(
+                    f,
+                    "
+  Result URL: {result_url}"
+                )?;
+            }
+        }
+        if let Some(receiver) = &self.receiver {
+            write!(
+                f,
+                "
+Receiver: {} ({})",
+                receiver.instance_name, receiver.instance_id
+            )?;
+            write!(
+                f,
+                "
+  Transport: {}",
+                receiver.transport
+            )?;
+            if let Some(health_url) = &receiver.health_url {
+                write!(
+                    f,
+                    "
+  Health URL: {health_url}"
+                )?;
+            }
+            if let Some(submit_url) = &receiver.submit_url {
+                write!(
+                    f,
+                    "
+  Submit URL: {submit_url}"
+                )?;
+            }
+            if let Some(result_url) = &receiver.result_url {
+                write!(
+                    f,
+                    "
+  Result URL: {result_url}"
+                )?;
+            }
+        }
+        if let Some(routing) = &self.routing {
+            write!(
+                f,
+                "
+Routing: {}",
+                routing.mode
+            )?;
+            write!(
+                f,
+                "
+Routing detail: {}",
+                routing.detail
+            )?;
+            write!(
+                f,
+                "
+Routing peer count: {}",
+                routing.peer_count
+            )?;
+        }
+        if let Some(branch_reservation) = &self.branch_reservation {
+            write!(
+                f,
+                "
+Branch reservation: {} via {} ({})",
+                if branch_reservation.required {
+                    "required"
+                } else {
+                    "optional"
+                },
+                branch_reservation.mechanism,
+                branch_reservation.enforced_by
+            )?;
+            write!(
+                f,
+                "
+  {}",
+                branch_reservation.detail
+            )?;
+        }
+        if let Some(file_locks) = &self.file_locks {
+            write!(
+                f,
+                "
+File locks: {} via {} ({})",
+                if file_locks.required {
+                    "required"
+                } else {
+                    "optional"
+                },
+                file_locks.mechanism,
+                file_locks.enforced_by
+            )?;
+            write!(
+                f,
+                "
+  {}",
+                file_locks.detail
+            )?;
+        }
+        if let Some(task_status) = &self.task_status {
+            write!(
+                f,
+                "
+Task states: {}",
+                task_status.states.join(" → ")
+            )?;
+            write!(
+                f,
+                "
+Terminal states: {}",
+                task_status.terminal_states.join(", ")
+            )?;
+            write!(
+                f,
+                "
+Sender visibility: {}",
+                task_status.sender_visibility
+            )?;
+            write!(
+                f,
+                "
+Timeout behavior: {}",
+                task_status.timeout_behavior
+            )?;
+            write!(
+                f,
+                "
+Failure behavior: {}",
+                task_status.failure_behavior
+            )?;
+        }
+        if let Some(result) = &self.result {
+            write!(
+                f,
+                "
+Result status field: {}",
+                result.status_field
+            )?;
+            write!(
+                f,
+                "
+Result artifact field: {}",
+                result.artifact_field
+            )?;
+            write!(
+                f,
+                "
+Result error field: {}",
+                result.error_field
+            )?;
+            write!(
+                f,
+                "
+Result task id field: {}",
+                result.task_id_field
+            )?;
+            write!(
+                f,
+                "
+Result timestamps: accepted={}, started={}, finished={}",
+                result.accepted_at_field, result.started_at_field, result.finished_at_field
+            )?;
+        }
+        for peer in &self.candidates {
+            write!(
+                f,
+                "
+  - {} [{}]",
+                peer.id, peer.status
+            )?;
+            if let Some(ref load) = peer.load {
+                write!(
+                    f,
+                    " sessions={}, ws={}, latency={}ms",
+                    load.session_count,
+                    load.ws_connections,
+                    peer.latency_ms.unwrap_or_default()
+                )?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for HealthResponse {
@@ -105,6 +751,17 @@ pub struct DoctorTopologySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorContextTierCounter {
+    pub kind: String,
+    pub token_budget: u64,
+    pub estimated_tokens: u64,
+    pub priority: u8,
+    pub staleness_policy: String,
+    pub loaded: bool,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorMemoryHierarchySummary {
     pub l0: String,
     pub l1: String,
@@ -113,6 +770,38 @@ pub struct DoctorMemoryHierarchySummary {
     pub promotion: String,
     pub demotion: String,
     pub metrics: String,
+    #[serde(default)]
+    pub prompt_cache_rows: u64,
+    #[serde(default)]
+    pub cached_tokens: u64,
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    #[serde(default)]
+    pub cache_hit_ratio_percent: f64,
+    #[serde(default)]
+    pub l2_recall_hits: u64,
+    #[serde(default)]
+    pub l2_warm_memories: u64,
+    #[serde(default)]
+    pub l2_hot_memories: u64,
+    #[serde(default)]
+    pub l2_total_memories: u64,
+    #[serde(default)]
+    pub context_total_budget: u64,
+    #[serde(default)]
+    pub context_total_estimated_tokens: u64,
+    #[serde(default)]
+    pub context_compaction_trigger_tokens: u64,
+    #[serde(default)]
+    pub context_over_budget: bool,
+    #[serde(default)]
+    pub context_over_compaction_threshold: bool,
+    #[serde(default)]
+    pub context_compaction_required: bool,
+    #[serde(default)]
+    pub loaded_tier_count: u64,
+    #[serde(default)]
+    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +876,49 @@ impl fmt::Display for DoctorReport {
             writeln!(f, "  Promotion: {}", memory_hierarchy.promotion)?;
             writeln!(f, "  Demotion: {}", memory_hierarchy.demotion)?;
             writeln!(f, "  Metrics: {}", memory_hierarchy.metrics)?;
+            writeln!(
+                f,
+                "  L1 Counters: prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}",
+                memory_hierarchy.prompt_cache_rows,
+                memory_hierarchy.cached_tokens,
+                memory_hierarchy.total_input_tokens,
+                memory_hierarchy.cache_hit_ratio_percent
+            )?;
+            writeln!(
+                f,
+                "  L2 Counters: recall_hits={}, warm_memories={}, hot_memories={}, total_memories={}",
+                memory_hierarchy.l2_recall_hits,
+                memory_hierarchy.l2_warm_memories,
+                memory_hierarchy.l2_hot_memories,
+                memory_hierarchy.l2_total_memories
+            )?;
+            writeln!(
+                f,
+                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}",
+                memory_hierarchy.loaded_tier_count,
+                memory_hierarchy.context_total_budget,
+                memory_hierarchy.context_total_estimated_tokens,
+                memory_hierarchy.context_compaction_trigger_tokens,
+                memory_hierarchy.context_over_budget,
+                memory_hierarchy.context_over_compaction_threshold,
+                memory_hierarchy.context_compaction_required
+            )?;
+            if !memory_hierarchy.context_tier_counters.is_empty() {
+                writeln!(f, "  Context Tier Details:")?;
+                for tier in &memory_hierarchy.context_tier_counters {
+                    writeln!(
+                        f,
+                        "    - {}: loaded={}, budget={}, estimated_tokens={}, priority={}, staleness_policy={}, source={}",
+                        tier.kind,
+                        tier.loaded,
+                        tier.token_budget,
+                        tier.estimated_tokens,
+                        tier.priority,
+                        tier.staleness_policy,
+                        tier.source
+                    )?;
+                }
+            }
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
@@ -5281,6 +6013,12 @@ mod tests {
             status: "running".into(),
             version: Some("0.1.0".into()),
             uptime_seconds: Some(120),
+            instance_id: None,
+            instance_name: None,
+            instance_roles: vec![],
+            capabilities_version: None,
+            capability_hash: None,
+            advertised_addr: None,
         };
         let out = render(&s, OutputFormat::Human);
         assert!(out.contains("Status: running"));
@@ -5294,6 +6032,12 @@ mod tests {
             status: "running".into(),
             version: None,
             uptime_seconds: None,
+            instance_id: None,
+            instance_name: None,
+            instance_roles: vec![],
+            capabilities_version: None,
+            capability_hash: None,
+            advertised_addr: None,
         };
         let out = render(&s, OutputFormat::Json);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -5354,13 +6098,29 @@ mod tests {
                 fix_hint: None,
             }],
             memory_hierarchy: Some(crate::output::DoctorMemoryHierarchySummary {
-                l0: "current context window".into(),
-                l1: "prompt cache".into(),
-                l2: "semantic retrieval".into(),
-                l3: "session log archive".into(),
-                promotion: "reuse hot facts".into(),
-                demotion: "compact stale context".into(),
-                metrics: "prompt_cache_rows=1".into(),
+                l0: "current turn context window (active transcript + system/task/project context)".into(),
+                l1: "prompt cache via provider prefixes (offline doctor cannot inspect live cache metrics)".into(),
+                l2: "semantic retrieval (semantic-hybrid)".into(),
+                l3: "durable session logs in transcript/session storage".into(),
+                promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
+                demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
+                metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
+                prompt_cache_rows: 0,
+                cached_tokens: 0,
+                total_input_tokens: 0,
+                cache_hit_ratio_percent: 0.0,
+                l2_recall_hits: 0,
+                l2_warm_memories: 0,
+                l2_hot_memories: 0,
+                l2_total_memories: 0,
+                context_total_budget: 36_000,
+                context_total_estimated_tokens: 0,
+                context_compaction_trigger_tokens: 96_000,
+                context_over_budget: false,
+                context_over_compaction_threshold: false,
+                context_compaction_required: false,
+                loaded_tier_count: 4,
+                context_tier_counters: vec![],
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
@@ -5375,7 +6135,9 @@ mod tests {
         assert!(out.contains("Backend Matrix:"));
         assert!(out.contains("storage: sqlite (connected) — 4 repo surfaces configured"));
         assert!(out.contains("Memory Hierarchy:"));
-        assert!(out.contains("L1: prompt cache"));
+        assert!(out.contains("L1: prompt cache via provider prefixes"));
+        assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
+        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
@@ -5930,6 +6692,169 @@ mod tests {
     }
 
     #[test]
+    fn render_instance_health() {
+        let response = GatewayInstanceHealthResponse {
+            status: "ok".into(),
+            version: Some("0.1.0".into()),
+            uptime_seconds: Some(12),
+            instance_id: Some("inst-a".into()),
+            instance_name: Some("desktop".into()),
+            advertised_addr: Some("http://127.0.0.1:8787".into()),
+            instance_roles: vec!["gateway".into(), "scheduler".into()],
+            capabilities_version: Some(1),
+            capability_hash: Some("cap-inst-a".into()),
+            peer_count: 1,
+            configured_models: vec!["gpt-4.1".into()],
+            active_projects: vec!["/workspace/rune".into()],
+            comms_transport: Some("filesystem".into()),
+            load: Some(InstanceLoadSummary {
+                session_count: 3,
+                ws_subscribers: 1,
+                ws_connections: 2,
+            }),
+            peers: vec![PeerSummary {
+                id: "peer-a".into(),
+                health_url: "http://peer-a:8787/api/v1/instance/health".into(),
+                status: "healthy".into(),
+                detail: "200 OK".into(),
+                checked_at: Some("2026-03-29T03:00:00Z".into()),
+                latency_ms: Some(15),
+                advertised_addr: Some("http://peer-a:8787".into()),
+                roles: vec!["gateway".into()],
+                configured_models: vec!["claude-3-7-sonnet".into()],
+                active_projects: vec!["/workspace/peer".into()],
+                load: Some(InstanceLoadSummary {
+                    session_count: 1,
+                    ws_subscribers: 0,
+                    ws_connections: 1,
+                }),
+            }],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Instance health: ok"));
+        assert!(out.contains("Peers: 1"));
+        assert!(out.contains("peer-a [healthy]"));
+    }
+
+    #[test]
+    fn render_delegation_plan() {
+        let response = DelegationPlanResponse {
+            strategy: "least_busy".into(),
+            selected_peer: Some(PeerSummary {
+                id: "peer-a".into(),
+                health_url: "http://peer-a:8787/api/v1/instance/health".into(),
+                status: "healthy".into(),
+                detail: "200 OK".into(),
+                checked_at: Some("2026-03-29T03:00:00Z".into()),
+                latency_ms: Some(10),
+                advertised_addr: None,
+                roles: vec!["gateway".into()],
+                configured_models: vec![],
+                active_projects: vec![],
+                load: Some(InstanceLoadSummary {
+                    session_count: 1,
+                    ws_subscribers: 0,
+                    ws_connections: 1,
+                }),
+            }),
+            candidates: vec![],
+            detail: "selected least-busy healthy peer 'peer-a'".into(),
+            task_contract: DelegationTaskContract {
+                protocol_version: 1,
+                submission_modes: vec!["named".into(), "least_busy".into()],
+                lifecycle: vec![
+                    "submitted".into(),
+                    "accepted".into(),
+                    "running".into(),
+                    "completed".into(),
+                    "failed".into(),
+                    "timeout".into(),
+                ],
+                timeout_handling: vec!["sender supplies timeout_secs per task".into()],
+                conflict_prevention: vec![
+                    "agents must reserve branch names before execution".into(),
+                ],
+                required_fields: vec!["task".into()],
+                optional_fields: vec!["target_peer_id".into()],
+                result_fields: vec!["status".into()],
+            },
+            capability_match: DelegationCapabilityMatch {
+                compatible: true,
+                missing_roles: vec![],
+                missing_projects: vec![],
+                model_overlap: vec!["gpt-4.1".into()],
+                detail: "receiver matches advertised roles/projects with 1 overlapping model(s)"
+                    .into(),
+            },
+            sender: Some(DelegationEndpointSummary {
+                instance_id: "sender-a".into(),
+                instance_name: "Sender A".into(),
+                transport: "filesystem".into(),
+                health_url: Some("http://sender-a/api/v1/instance/health".into()),
+                submit_url: Some("http://sender-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://sender-a/api/v1/instance/delegations/{task_id}".into()),
+            }),
+            receiver: Some(DelegationEndpointSummary {
+                instance_id: "peer-a".into(),
+                instance_name: "Peer A".into(),
+                transport: "http".into(),
+                health_url: Some("http://peer-a/api/v1/instance/health".into()),
+                submit_url: Some("http://peer-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://peer-a/api/v1/instance/delegations/{task_id}".into()),
+            }),
+            routing: Some(DelegationRoutingSummary {
+                mode: "least_busy".into(),
+                detail: "selected least-busy healthy peer 'peer-a'".into(),
+                peer_count: 1,
+            }),
+            branch_reservation: Some(DelegationConflictCapabilitySummary {
+                required: true,
+                mechanism: "branch_reservation".into(),
+                enforced_by: "orchestrator".into(),
+                detail: "reserve branch names".into(),
+            }),
+            file_locks: Some(DelegationConflictCapabilitySummary {
+                required: true,
+                mechanism: "file_locks".into(),
+                enforced_by: "orchestrator".into(),
+                detail: "acquire file locks".into(),
+            }),
+            task_status: Some(DelegationTaskStatusSummary {
+                states: vec![
+                    "submitted".into(),
+                    "accepted".into(),
+                    "running".into(),
+                    "completed".into(),
+                    "failed".into(),
+                    "timeout".into(),
+                ],
+                terminal_states: vec!["completed".into(), "failed".into(), "timeout".into()],
+                sender_visibility: "tracked".into(),
+                timeout_behavior: "timeout".into(),
+                failure_behavior: "failed".into(),
+            }),
+            result: Some(DelegationResultContractSummary {
+                status_field: "status".into(),
+                artifact_field: "artifacts".into(),
+                error_field: "error".into(),
+                finished_at_field: "finished_at".into(),
+                accepted_at_field: "accepted_at".into(),
+                started_at_field: "started_at".into(),
+                task_id_field: "task_id".into(),
+            }),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Delegation strategy: least_busy"));
+        assert!(out.contains("Selected peer: peer-a [healthy]"));
+        assert!(out.contains("Protocol v1"));
+        assert!(
+            out.contains(
+                "Lifecycle: submitted → accepted → running → completed → failed → timeout"
+            )
+        );
+    }
+
+    #[test]
     fn render_gateway_config() {
         let response = GatewayConfigResponse {
             action: "current".into(),
@@ -6287,6 +7212,12 @@ mod tests {
                 status: "running".into(),
                 version: Some("0.1.0".into()),
                 uptime_seconds: Some(42),
+                instance_id: None,
+                instance_name: None,
+                instance_roles: vec![],
+                capabilities_version: None,
+                capability_hash: None,
+                advertised_addr: None,
             },
             health: HealthResponse {
                 healthy: true,

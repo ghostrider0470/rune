@@ -49,15 +49,197 @@ use crate::{SupervisorDeps, run_job_lifecycle};
 /// Response for `GET /health` and `GET /ready`.
 #[derive(Serialize)]
 pub struct HealthResponse {
-    pub status: &'static str,
-    pub service: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub service: String,
+    pub version: String,
     pub uptime_seconds: u64,
     pub session_count: usize,
     pub ws_subscribers: usize,
     pub ws_connections: usize,
     pub mode: &'static str,
     pub storage_backend: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct InstanceHealthResponse {
+    pub status: String,
+    pub service: String,
+    pub version: String,
+    pub uptime_seconds: u64,
+    pub load: InstanceLoadResponse,
+    pub capabilities: CapabilitiesResponse,
+    pub peers: Vec<PeerHealthResponse>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationArtifactResponse {
+    pub name: String,
+    pub kind: String,
+    pub uri: Option<String>,
+    pub content_type: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskPayload {
+    pub task: String,
+    pub constraints: Vec<String>,
+    pub expected_output: String,
+    pub timeout_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_peer_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_reservation: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_locks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<DelegationArtifactResponse>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskRequest {
+    pub task_id: String,
+    pub protocol_version: u32,
+    pub submitted_at: String,
+    pub sender: DelegationEndpointResponse,
+    pub task: DelegationTaskPayload,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationErrorResponse {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskResultResponse {
+    pub task_id: String,
+    pub status: String,
+    pub accepted_at: String,
+    pub started_at: Option<String>,
+    pub output: Option<String>,
+    #[serde(default)]
+    pub artifacts: Vec<DelegationArtifactResponse>,
+    pub error: Option<DelegationErrorResponse>,
+    pub finished_at: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskStatusEnvelope {
+    pub receiver: DelegationEndpointResponse,
+    pub result: DelegationTaskResultResponse,
+}
+
+#[derive(Clone, Serialize)]
+pub struct DelegationTaskContractResponse {
+    pub protocol_version: u32,
+    pub submission_modes: Vec<&'static str>,
+    pub lifecycle: Vec<&'static str>,
+    pub timeout_handling: Vec<&'static str>,
+    pub conflict_prevention: Vec<&'static str>,
+    pub required_fields: Vec<&'static str>,
+    pub optional_fields: Vec<&'static str>,
+    pub result_fields: Vec<&'static str>,
+    pub example_request: DelegationTaskRequest,
+    pub example_result: DelegationTaskResultResponse,
+}
+
+#[derive(Serialize)]
+pub struct DelegationPlanResponse {
+    pub strategy: String,
+    pub selected_peer: Option<PeerHealthResponse>,
+    pub candidates: Vec<PeerHealthResponse>,
+    pub detail: String,
+    pub task_contract: DelegationTaskContractResponse,
+    pub sender: DelegationEndpointResponse,
+    pub receiver: Option<DelegationEndpointResponse>,
+    pub routing: DelegationRoutingResponse,
+    pub branch_reservation: DelegationConflictCapabilityResponse,
+    pub file_locks: DelegationConflictCapabilityResponse,
+    pub task_status: DelegationTaskStatusResponse,
+    pub result: DelegationResultContractResponse,
+    pub capability_match: DelegationCapabilityMatchResponse,
+}
+
+#[derive(Serialize)]
+pub struct DelegationCapabilityMatchResponse {
+    pub compatible: bool,
+    pub missing_roles: Vec<String>,
+    pub missing_projects: Vec<String>,
+    pub model_overlap: Vec<String>,
+    pub detail: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationEndpointResponse {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub transport: String,
+    pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct DelegationRoutingResponse {
+    pub mode: &'static str,
+    pub detail: String,
+    pub peer_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct DelegationConflictCapabilityResponse {
+    pub required: bool,
+    pub mechanism: &'static str,
+    pub enforced_by: &'static str,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
+pub struct DelegationTaskStatusResponse {
+    pub states: Vec<&'static str>,
+    pub terminal_states: Vec<&'static str>,
+    pub sender_visibility: &'static str,
+    pub timeout_behavior: &'static str,
+    pub failure_behavior: &'static str,
+}
+
+#[derive(Serialize)]
+pub struct DelegationResultContractResponse {
+    pub status_field: &'static str,
+    pub artifact_field: &'static str,
+    pub error_field: &'static str,
+    pub finished_at_field: &'static str,
+    pub accepted_at_field: &'static str,
+    pub started_at_field: &'static str,
+    pub task_id_field: &'static str,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PeerHealthResponse {
+    pub id: String,
+    pub name: String,
+    pub health_url: String,
+    pub status: String,
+    pub detail: String,
+    pub checked_at: String,
+    pub latency_ms: Option<u128>,
+    pub load: Option<InstanceLoadResponse>,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub capability_hash: Option<String>,
+    pub capabilities_version: Option<u32>,
+    pub comms_transport: Option<String>,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct InstanceLoadResponse {
+    pub session_count: usize,
+    pub ws_subscribers: usize,
+    pub ws_connections: usize,
 }
 
 #[derive(Serialize)]
@@ -67,9 +249,9 @@ pub struct TokenMetricsResponse {
 
 #[derive(Serialize)]
 pub struct ReadinessResponse {
-    pub status: &'static str,
-    pub service: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub service: String,
+    pub version: String,
     pub mode: &'static str,
     pub storage_backend: String,
     pub checks: Vec<DoctorCheck>,
@@ -84,9 +266,9 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
     Ok(Json(HealthResponse {
-        status: "ok",
-        service: "rune-gateway",
-        version: env!("CARGO_PKG_VERSION"),
+        status: "ok".to_string(),
+        service: "rune-gateway".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         session_count: sessions.len(),
         ws_subscribers: state.event_tx.receiver_count(),
@@ -94,6 +276,516 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         mode: state.capabilities.mode.as_str(),
         storage_backend: state.capabilities.storage_backend.clone(),
     }))
+}
+
+pub async fn instance_health(
+    State(state): State<AppState>,
+) -> Result<Json<InstanceHealthResponse>, GatewayError> {
+    let sessions = state
+        .session_repo
+        .list(i64::MAX / 4, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+
+    Ok(Json(InstanceHealthResponse {
+        status: "ok".to_string(),
+        service: "rune-gateway".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime_seconds: state.started_at.elapsed().as_secs(),
+        load: InstanceLoadResponse {
+            session_count: sessions.len(),
+            ws_subscribers: state.event_tx.receiver_count(),
+            ws_connections: active_ws_connections(),
+        },
+        capabilities: CapabilitiesResponse {
+            mode: state.capabilities.mode.as_str().to_string(),
+            updated_at: state.capabilities.updated_at.clone(),
+            storage_backend: state.capabilities.storage_backend.clone(),
+            pgvector: state.capabilities.pgvector,
+            memory_mode: state.capabilities.memory_mode.clone(),
+            browser: state.capabilities.browser,
+            mcp_servers: state.capabilities.mcp_servers,
+            tts: state.capabilities.tts,
+            stt: state.capabilities.stt,
+            channels: state.capabilities.channels.clone(),
+            approval_mode: state.capabilities.approval_mode.clone(),
+            security_posture: state.capabilities.security_posture.clone(),
+            identity: InstanceIdentityResponse {
+                id: state.capabilities.identity.id.clone(),
+                name: state.capabilities.identity.name.clone(),
+                advertised_addr: state.capabilities.identity.advertised_addr.clone(),
+                roles: state.capabilities.identity.roles.clone(),
+                capabilities_version: state.capabilities.identity.capabilities_version,
+                capability_hash: state.capabilities.identity.capability_hash.clone(),
+            },
+            instance_id: state.capabilities.identity.id.clone(),
+            instance_name: state.capabilities.identity.name.clone(),
+            peer_count: state.capabilities.peer_count,
+            configured_models: state.capabilities.configured_models.clone(),
+            active_projects: state.capabilities.active_projects.clone(),
+            comms_transport: state.capabilities.comms_transport.clone(),
+        },
+        peers,
+    }))
+}
+
+pub async fn delegation_plan(
+    State(state): State<AppState>,
+    Query(query): Query<DelegationPlanQuery>,
+) -> Result<Json<DelegationPlanResponse>, GatewayError> {
+    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+    let strategy = query
+        .strategy
+        .clone()
+        .unwrap_or_else(|| "least_busy".to_string());
+
+    let selected_peer = match strategy.as_str() {
+        "named" => {
+            let target = query.peer_id.as_deref().ok_or_else(|| {
+                GatewayError::BadRequest("peer_id is required when strategy=named".to_string())
+            })?;
+            peers.iter().find(|peer| peer.id == target).cloned()
+        }
+        "least_busy" => select_least_busy_peer(&peers),
+        other => {
+            return Err(GatewayError::BadRequest(format!(
+                "unsupported delegation strategy '{other}' (expected 'least_busy' or 'named')"
+            )));
+        }
+    };
+
+    let capability_match = evaluate_capability_match(&state.capabilities, selected_peer.as_ref());
+
+    let detail = match (&selected_peer, strategy.as_str(), capability_match.compatible) {
+        (Some(peer), "named", true) => format!("selected named peer '{}'", peer.id),
+        (Some(peer), "named", false) => format!(
+            "selected named peer '{}' with capability mismatch: {}",
+            peer.id, capability_match.detail
+        ),
+        (Some(peer), "least_busy", true) => {
+            format!("selected least-busy healthy peer '{}'", peer.id)
+        }
+        (Some(peer), "least_busy", false) => format!(
+            "selected least-busy healthy peer '{}' with capability mismatch: {}",
+            peer.id, capability_match.detail
+        ),
+        (None, "named", _) => format!(
+            "named peer '{}' was not found or is unavailable",
+            query.peer_id.as_deref().unwrap_or_default()
+        ),
+        (None, _, _) => "no healthy peers available for delegation".to_string(),
+        (Some(peer), _, true) => format!("selected peer '{}'", peer.id),
+        (Some(peer), _, false) => format!(
+            "selected peer '{}' with capability mismatch: {}",
+            peer.id, capability_match.detail
+        ),
+    };
+
+    let receiver = selected_peer
+        .as_ref()
+        .map(|peer| DelegationEndpointResponse {
+            instance_id: peer.id.clone(),
+            instance_name: peer.name.clone(),
+            transport: "http".to_string(),
+            health_url: Some(peer.health_url.clone()),
+            submit_url: Some(format!(
+                "{}/api/v1/instance/delegations",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
+            result_url: Some(format!(
+                "{}/api/v1/instance/delegations/{{task_id}}",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
+        });
+
+    let routing = DelegationRoutingResponse {
+        mode: if strategy == "named" {
+            "named"
+        } else {
+            "least_busy"
+        },
+        detail: detail.clone(),
+        peer_count: peers.len(),
+    };
+
+    Ok(Json(DelegationPlanResponse {
+        strategy: strategy.clone(),
+        selected_peer: selected_peer.clone(),
+        candidates: peers,
+        detail,
+        task_contract: delegation_task_contract(),
+        sender: DelegationEndpointResponse {
+            instance_id: state.capabilities.identity.id.clone(),
+            instance_name: state.capabilities.identity.name.clone(),
+            transport: state.capabilities.comms_transport.clone(),
+            health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+            }),
+            submit_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+            }),
+            result_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
+            }),
+        },
+        receiver,
+        routing,
+        branch_reservation: DelegationConflictCapabilityResponse {
+            required: true,
+            mechanism: "branch_reservation",
+            enforced_by: "orchestrator",
+            detail: "delegated coding tasks must reserve a branch name before execution to avoid cross-instance branch collisions".to_string(),
+        },
+        file_locks: DelegationConflictCapabilityResponse {
+            required: true,
+            mechanism: "file_locks",
+            enforced_by: "orchestrator",
+            detail: "delegated coding tasks must acquire orchestrator file locks before mutating overlapping repo paths".to_string(),
+        },
+        task_status: DelegationTaskStatusResponse {
+            states: vec!["submitted", "accepted", "running", "completed", "failed", "timeout"],
+            terminal_states: vec!["completed", "failed", "timeout"],
+            sender_visibility: "sender tracks lifecycle via structured status transitions and terminal result envelope",
+            timeout_behavior: "deadline expiry transitions the task to timeout and returns structured error detail to the sender",
+            failure_behavior: "execution failures preserve terminal status, error detail, and any declared artifacts",
+        },
+        result: DelegationResultContractResponse {
+            status_field: "status",
+            artifact_field: "artifacts",
+            error_field: "error",
+            finished_at_field: "finished_at",
+            accepted_at_field: "accepted_at",
+            started_at_field: "started_at",
+            task_id_field: "task_id",
+        },
+        capability_match,
+    }))
+}
+
+fn evaluate_capability_match(
+    capabilities: &rune_config::Capabilities,
+    selected_peer: Option<&PeerHealthResponse>,
+) -> DelegationCapabilityMatchResponse {
+    let Some(peer) = selected_peer else {
+        return DelegationCapabilityMatchResponse {
+            compatible: false,
+            missing_roles: Vec::new(),
+            missing_projects: Vec::new(),
+            model_overlap: Vec::new(),
+            detail: "no receiver selected; capability compatibility unavailable".to_string(),
+        };
+    };
+
+    let missing_roles = capabilities
+        .identity
+        .roles
+        .iter()
+        .filter(|role| !peer.roles.iter().any(|candidate| candidate == *role))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let missing_projects = capabilities
+        .active_projects
+        .iter()
+        .filter(|project| {
+            !peer
+                .active_projects
+                .iter()
+                .any(|candidate| candidate == *project)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let model_overlap = capabilities
+        .configured_models
+        .iter()
+        .filter(|model| {
+            peer.configured_models
+                .iter()
+                .any(|candidate| candidate == *model)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let compatible = missing_roles.is_empty() && missing_projects.is_empty();
+    let detail = if compatible {
+        if model_overlap.is_empty() {
+            "receiver matches advertised roles/projects but no configured model overlap was declared"
+                .to_string()
+        } else {
+            format!(
+                "receiver matches advertised roles/projects with {} overlapping model(s)",
+                model_overlap.len()
+            )
+        }
+    } else {
+        let mut reasons = Vec::new();
+        if !missing_roles.is_empty() {
+            reasons.push(format!("missing roles: {}", missing_roles.join(", ")));
+        }
+        if !missing_projects.is_empty() {
+            reasons.push(format!("missing projects: {}", missing_projects.join(", ")));
+        }
+        format!("receiver capability mismatch ({})", reasons.join("; "))
+    };
+
+    DelegationCapabilityMatchResponse {
+        compatible,
+        missing_roles,
+        missing_projects,
+        model_overlap,
+        detail,
+    }
+}
+
+fn delegation_task_contract() -> DelegationTaskContractResponse {
+    let sender = DelegationEndpointResponse {
+        instance_id: "rune-hamza-desktop".to_string(),
+        instance_name: "Hamza Desktop".to_string(),
+        transport: "http".to_string(),
+        health_url: Some("http://rune-hamza-desktop:18790/api/v1/instance/health".to_string()),
+        submit_url: Some("http://rune-hamza-desktop:18790/api/v1/instance/delegations".to_string()),
+        result_url: Some(
+            "http://rune-hamza-desktop:18790/api/v1/instance/delegations/{task_id}".to_string(),
+        ),
+    };
+
+    let example_request = DelegationTaskRequest {
+        task_id: "delegation-123".to_string(),
+        protocol_version: 1,
+        submitted_at: "2026-03-29T00:00:00Z".to_string(),
+        sender: sender.clone(),
+        task: DelegationTaskPayload {
+            task: "Implement issue #421 acceptance-test shim".to_string(),
+            constraints: vec![
+                "Run cargo check before returning".to_string(),
+                "Do not touch unrelated crates".to_string(),
+            ],
+            expected_output: "Commit SHA plus summary of changed files".to_string(),
+            timeout_secs: 1800,
+            target_peer_id: Some("rune-hamza-laptop".to_string()),
+            branch_reservation: Some("agent/rune/delegation-421".to_string()),
+            file_locks: vec![
+                "crates/rune-gateway/src/routes.rs".to_string(),
+                "crates/rune-runtime/src/orchestrator.rs".to_string(),
+            ],
+            artifacts: vec![DelegationArtifactResponse {
+                name: "patch.diff".to_string(),
+                kind: "diff".to_string(),
+                uri: None,
+                content_type: Some("text/x-diff".to_string()),
+                description: Some("Optional diff artifact returned on failure".to_string()),
+            }],
+        },
+    };
+
+    let example_result = DelegationTaskResultResponse {
+        task_id: "delegation-123".to_string(),
+        status: "completed".to_string(),
+        accepted_at: "2026-03-29T00:00:05Z".to_string(),
+        started_at: Some("2026-03-29T00:00:10Z".to_string()),
+        output: Some(
+            "Committed agent/rune/delegation-421 at abc1234 and uploaded verification log"
+                .to_string(),
+        ),
+        artifacts: vec![DelegationArtifactResponse {
+            name: "cargo-check.log".to_string(),
+            kind: "log".to_string(),
+            uri: Some("artifact://cargo-check.log".to_string()),
+            content_type: Some("text/plain".to_string()),
+            description: Some("Verification output captured by receiver".to_string()),
+        }],
+        error: None,
+        finished_at: Some("2026-03-29T00:02:00Z".to_string()),
+    };
+
+    DelegationTaskContractResponse {
+        protocol_version: 1,
+        submission_modes: vec!["named", "least_busy"],
+        lifecycle: vec![
+            "submitted",
+            "accepted",
+            "running",
+            "completed",
+            "failed",
+            "timeout",
+        ],
+        timeout_handling: vec![
+            "sender supplies timeout_secs per task",
+            "runtime treats deadline expiry as timeout",
+            "timeout yields terminal status and structured error detail",
+        ],
+        conflict_prevention: vec![
+            "agents must reserve branch names before execution",
+            "agents must acquire orchestrator file locks before mutating repo paths",
+            "conflicts fail fast with lock metadata for operator retry",
+        ],
+        required_fields: vec!["task", "constraints", "expected_output", "timeout_secs"],
+        optional_fields: vec![
+            "target_peer_id",
+            "branch_reservation",
+            "file_locks",
+            "artifacts",
+        ],
+        result_fields: vec![
+            "task_id",
+            "status",
+            "accepted_at",
+            "started_at",
+            "output",
+            "artifacts",
+            "error",
+            "finished_at",
+        ],
+        example_request,
+        example_result,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DelegationPlanQuery {
+    pub strategy: Option<String>,
+    pub peer_id: Option<String>,
+}
+
+fn select_least_busy_peer(peers: &[PeerHealthResponse]) -> Option<PeerHealthResponse> {
+    peers
+        .iter()
+        .filter(|peer| peer.status == "healthy")
+        .min_by_key(|peer| {
+            let session_count = peer
+                .load
+                .as_ref()
+                .map(|load| load.session_count)
+                .unwrap_or(usize::MAX);
+            let ws_connections = peer
+                .load
+                .as_ref()
+                .map(|load| load.ws_connections)
+                .unwrap_or(usize::MAX);
+            let latency = peer.latency_ms.unwrap_or(u128::MAX);
+            (session_count, ws_connections, latency, peer.id.as_str())
+        })
+        .cloned()
+}
+
+async fn collect_peer_health(
+    peers: Vec<rune_config::PeerCapabilityTarget>,
+) -> Vec<PeerHealthResponse> {
+    if peers.is_empty() {
+        return Vec::new();
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            let checked_at = Utc::now().to_rfc3339();
+            return peers
+                .into_iter()
+                .map(|peer| PeerHealthResponse {
+                    id: peer.id.clone(),
+                    name: peer.id,
+                    health_url: peer.health_url,
+                    status: "degraded".to_string(),
+                    detail: format!("client init failed: {error}"),
+                    checked_at: checked_at.clone(),
+                    latency_ms: None,
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                })
+                .collect();
+        }
+    };
+
+    let mut results = Vec::with_capacity(peers.len());
+    for peer in peers {
+        let started = Instant::now();
+        let checked_at = Utc::now().to_rfc3339();
+        let item = match client.get(&peer.health_url).send().await {
+            Ok(response) => {
+                let latency_ms = Some(started.elapsed().as_millis());
+                let status_code = response.status();
+                let payload = response.json::<InstanceHealthResponse>().await;
+                match payload {
+                    Ok(payload) => PeerHealthResponse {
+                        id: peer.id,
+                        name: payload.capabilities.identity.name.clone(),
+                        health_url: peer.health_url,
+                        status: if status_code.is_success() {
+                            "healthy".to_string()
+                        } else {
+                            "degraded".to_string()
+                        },
+                        detail: status_code.to_string(),
+                        checked_at,
+                        latency_ms,
+                        load: Some(payload.load),
+                        advertised_addr: payload.capabilities.identity.advertised_addr,
+                        roles: payload.capabilities.identity.roles,
+                        capability_hash: Some(payload.capabilities.identity.capability_hash),
+                        capabilities_version: Some(
+                            payload.capabilities.identity.capabilities_version,
+                        ),
+                        comms_transport: Some(payload.capabilities.comms_transport),
+                        configured_models: payload.capabilities.configured_models,
+                        active_projects: payload.capabilities.active_projects,
+                    },
+                    Err(error) => PeerHealthResponse {
+                        id: peer.id.clone(),
+                        name: peer.id,
+                        health_url: peer.health_url,
+                        status: "degraded".to_string(),
+                        detail: format!("{} (invalid health payload: {error})", status_code),
+                        checked_at,
+                        latency_ms,
+                        load: None,
+                        advertised_addr: None,
+                        roles: Vec::new(),
+                        capability_hash: None,
+                        capabilities_version: None,
+                        comms_transport: None,
+                        configured_models: Vec::new(),
+                        active_projects: Vec::new(),
+                    },
+                }
+            }
+            Err(error) => PeerHealthResponse {
+                id: peer.id.clone(),
+                name: peer.id,
+                health_url: peer.health_url,
+                status: "unreachable".to_string(),
+                detail: error.to_string(),
+                checked_at,
+                latency_ms: None,
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
+            },
+        };
+        results.push(item);
+    }
+
+    results
 }
 
 /// Prompt cache token metrics grouped by provider/model.
@@ -112,9 +804,9 @@ pub async fn ready(State(state): State<AppState>) -> Result<Response, GatewayErr
     let failing = checks.iter().any(|check| check.status == "fail");
     let status = if failing { "degraded" } else { "ok" };
     let body = ReadinessResponse {
-        status,
-        service: "rune-gateway",
-        version: env!("CARGO_PKG_VERSION"),
+        status: status.to_string(),
+        service: "rune-gateway".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         mode: state.capabilities.mode.as_str(),
         storage_backend: state.capabilities.storage_backend.clone(),
         checks,
@@ -173,9 +865,10 @@ pub struct UpdateStatusResponse {
     pub detail: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CapabilitiesResponse {
-    pub mode: &'static str,
+    pub mode: String,
+    pub updated_at: String,
     pub storage_backend: String,
     pub pgvector: bool,
     pub memory_mode: String,
@@ -186,6 +879,23 @@ pub struct CapabilitiesResponse {
     pub channels: Vec<String>,
     pub approval_mode: String,
     pub security_posture: String,
+    pub identity: InstanceIdentityResponse,
+    pub instance_id: String,
+    pub instance_name: String,
+    pub peer_count: usize,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+    pub comms_transport: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct InstanceIdentityResponse {
+    pub id: String,
+    pub name: String,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub capabilities_version: u32,
+    pub capability_hash: String,
 }
 
 #[derive(Serialize)]
@@ -203,6 +913,9 @@ pub struct LaneStatsResponse {
     pub subagent_capacity: usize,
     pub cron_active: usize,
     pub cron_capacity: usize,
+    pub tool_active: usize,
+    pub tool_capacity: usize,
+    pub project_tool_capacity: usize,
 }
 
 #[derive(Serialize)]
@@ -333,7 +1046,8 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             logs_dir: config.paths.logs_dir.display().to_string(),
         },
         capabilities: CapabilitiesResponse {
-            mode: state.capabilities.mode.as_str(),
+            mode: state.capabilities.mode.as_str().to_string(),
+            updated_at: state.capabilities.updated_at.clone(),
             storage_backend: state.capabilities.storage_backend.clone(),
             pgvector: state.capabilities.pgvector,
             memory_mode: state.capabilities.memory_mode.clone(),
@@ -344,6 +1058,20 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             channels: state.capabilities.channels.clone(),
             approval_mode: state.capabilities.approval_mode.clone(),
             security_posture: state.capabilities.security_posture.clone(),
+            identity: InstanceIdentityResponse {
+                id: state.capabilities.identity.id.clone(),
+                name: state.capabilities.identity.name.clone(),
+                advertised_addr: state.capabilities.identity.advertised_addr.clone(),
+                roles: state.capabilities.identity.roles.clone(),
+                capabilities_version: state.capabilities.identity.capabilities_version,
+                capability_hash: state.capabilities.identity.capability_hash.clone(),
+            },
+            instance_id: state.capabilities.identity.id.clone(),
+            instance_name: state.capabilities.identity.name.clone(),
+            peer_count: state.capabilities.peer_count,
+            configured_models: state.capabilities.configured_models.clone(),
+            active_projects: state.capabilities.active_projects.clone(),
+            comms_transport: state.capabilities.comms_transport.clone(),
         },
     }))
 }
@@ -570,6 +1298,8 @@ pub struct DashboardDiagnosticsResponse {
     pub structured_errors_available: bool,
     pub items: Vec<DashboardDiagnosticItem>,
     pub context_budget: ContextBudgetDiagnostics,
+    pub context_tiers: ContextTierDiagnostics,
+    pub memory_hierarchy: DashboardMemoryHierarchyDiagnostics,
 }
 
 #[derive(Serialize)]
@@ -582,6 +1312,48 @@ pub struct ContextBudgetDiagnostics {
     pub usable_prompt_budget: usize,
     pub auto_inject_project: bool,
     pub memory_search_k: usize,
+    pub total_tier_budget: usize,
+    pub exceeds_usable_budget: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ContextTierDiagnostics {
+    pub identity: usize,
+    pub task: usize,
+    pub project: usize,
+    pub shared: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DoctorContextTierCounter {
+    pub kind: String,
+    pub token_budget: u64,
+    pub estimated_tokens: u64,
+    pub priority: u8,
+    pub staleness_policy: String,
+    pub loaded: bool,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DashboardMemoryHierarchyDiagnostics {
+    pub prompt_cache_rows: u64,
+    pub cached_tokens: u64,
+    pub total_input_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
+    pub l2_recall_hits: u64,
+    pub l2_warm_memories: u64,
+    pub l2_hot_memories: u64,
+    pub l2_total_memories: u64,
+    pub context_total_budget: u64,
+    pub context_total_estimated_tokens: u64,
+    pub context_compaction_trigger_tokens: u64,
+    pub context_over_budget: bool,
+    pub context_over_compaction_threshold: bool,
+    pub context_compaction_required: bool,
+    pub l3_cold_storage_enabled: bool,
+    pub loaded_tier_count: u64,
+    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 // SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
@@ -798,22 +1570,60 @@ pub async fn dashboard_diagnostics(
     }
 
     let compaction = &config.runtime.compaction;
+    let total_tier_budget = config.context.identity
+        + config.context.task
+        + config.context.project
+        + config.context.shared;
+    let usable_prompt_budget = compaction.usable_prompt_budget();
     let context_budget = ContextBudgetDiagnostics {
         max_tokens: compaction.effective_max_tokens(),
         warn_at_tokens: compaction.effective_warn_at_tokens(),
         compress_after: compaction.effective_compress_after(),
         reserved_system: compaction.reserved_system,
         reserved_task: compaction.reserved_task,
-        usable_prompt_budget: compaction.usable_prompt_budget(),
+        usable_prompt_budget,
         auto_inject_project: compaction.auto_inject_project,
         memory_search_k: compaction.memory_search_k,
+        total_tier_budget,
+        exceeds_usable_budget: total_tier_budget > usable_prompt_budget,
+    };
+
+    let context_tiers = ContextTierDiagnostics {
+        identity: config.context.identity,
+        task: config.context.task,
+        project: config.context.project,
+        shared: config.context.shared,
+    };
+
+    let memory_hierarchy_summary =
+        doctor_memory_hierarchy(&state, &config, &state.capabilities, &state.token_metrics).await;
+    let memory_hierarchy = DashboardMemoryHierarchyDiagnostics {
+        prompt_cache_rows: memory_hierarchy_summary.prompt_cache_rows,
+        cached_tokens: memory_hierarchy_summary.cached_tokens,
+        total_input_tokens: memory_hierarchy_summary.total_input_tokens,
+        cache_hit_ratio_percent: memory_hierarchy_summary.cache_hit_ratio_percent,
+        l2_recall_hits: memory_hierarchy_summary.l2_recall_hits,
+        l2_warm_memories: memory_hierarchy_summary.l2_warm_memories,
+        l2_hot_memories: memory_hierarchy_summary.l2_hot_memories,
+        l2_total_memories: memory_hierarchy_summary.l2_total_memories,
+        context_total_budget: memory_hierarchy_summary.context_total_budget,
+        context_total_estimated_tokens: memory_hierarchy_summary.context_total_estimated_tokens,
+        context_compaction_trigger_tokens: memory_hierarchy_summary
+            .context_compaction_trigger_tokens,
+        context_over_budget: memory_hierarchy_summary.context_over_budget,
+        context_over_compaction_threshold: memory_hierarchy_summary
+            .context_over_compaction_threshold,
+        context_compaction_required: memory_hierarchy_summary.context_compaction_required,
+        l3_cold_storage_enabled: memory_hierarchy_summary.l3_cold_storage_enabled,
+        loaded_tier_count: memory_hierarchy_summary.loaded_tier_count,
+        context_tier_counters: memory_hierarchy_summary.context_tier_counters.clone(),
     };
 
     items.push(DashboardDiagnosticItem {
         level: "info",
         source: "context",
         message: format!(
-            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={}",
+            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={} tier_total={} exceeds_usable_budget={}",
             context_budget.max_tokens,
             context_budget.warn_at_tokens,
             context_budget.compress_after,
@@ -822,6 +1632,28 @@ pub async fn dashboard_diagnostics(
             context_budget.reserved_task,
             context_budget.auto_inject_project,
             context_budget.memory_search_k,
+            context_budget.total_tier_budget,
+            context_budget.exceeds_usable_budget,
+        ),
+        observed_at: now.clone(),
+    });
+
+    items.push(DashboardDiagnosticItem {
+        level: if memory_hierarchy.context_compaction_required { "warn" } else { "info" },
+        source: "memory_hierarchy",
+        message: format!(
+            "Memory hierarchy: prompt_cache_rows={} cache_hit_ratio_percent={:.1} l2_recall_hits={} l2_warm_memories={} l2_hot_memories={} l2_total_memories={} loaded_tiers={} context_estimated_tokens={} compaction_trigger={} over_budget={} compaction_required={}",
+            memory_hierarchy.prompt_cache_rows,
+            memory_hierarchy.cache_hit_ratio_percent,
+            memory_hierarchy.l2_recall_hits,
+            memory_hierarchy.l2_warm_memories,
+            memory_hierarchy.l2_hot_memories,
+            memory_hierarchy.l2_total_memories,
+            memory_hierarchy.loaded_tier_count,
+            memory_hierarchy.context_total_estimated_tokens,
+            memory_hierarchy.context_compaction_trigger_tokens,
+            memory_hierarchy.context_over_budget,
+            memory_hierarchy.context_compaction_required,
         ),
         observed_at: now.clone(),
     });
@@ -841,6 +1673,8 @@ pub async fn dashboard_diagnostics(
         structured_errors_available: false,
         items,
         context_budget,
+        context_tiers,
+        memory_hierarchy,
     }))
 }
 
@@ -1242,6 +2076,17 @@ pub struct CreateSessionRequest {
     pub channel_ref: Option<String>,
     /// Optional agent mode hint stored in session metadata.
     pub mode: Option<String>,
+    /// Optional project identifier for project-scoped context loading.
+    pub project_id: Option<String>,
+    /// Optional preloaded delegation context for subagent handoff.
+    #[serde(default)]
+    pub delegation_context: Option<serde_json::Value>,
+    /// Optional shared scratchpad path used by parent and subagent.
+    #[serde(default)]
+    pub shared_scratchpad_path: Option<String>,
+    /// Optional upstream delegation plan metadata captured from a parent instance.
+    #[serde(default)]
+    pub delegation_plan: Option<serde_json::Value>,
 }
 
 fn default_kind() -> String {
@@ -1395,17 +2240,48 @@ pub async fn create_session(
 ) -> Result<(StatusCode, Json<SessionResponse>), GatewayError> {
     let kind = parse_session_kind(&body.kind)?;
 
-    let row = state
-        .session_engine
-        .create_session_full(
-            kind,
-            body.workspace_root,
-            body.requester_session_id,
-            body.channel_ref,
-            body.mode,
-        )
-        .await
-        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let row = if kind == SessionKind::Subagent
+        && (body.delegation_context.is_some()
+            || body.shared_scratchpad_path.is_some()
+            || body.delegation_plan.is_some())
+    {
+        let mut delegation_context = body.delegation_context.unwrap_or(serde_json::json!({}));
+        if let Some(plan) = body.delegation_plan {
+            if let Some(context) = delegation_context.as_object_mut() {
+                context.insert("delegation_plan".to_string(), plan);
+            } else {
+                delegation_context = serde_json::json!({
+                    "value": delegation_context,
+                    "delegation_plan": plan,
+                });
+            }
+        }
+        state
+            .session_engine
+            .create_subagent_session_with_context(
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                delegation_context,
+                body.shared_scratchpad_path,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    } else {
+        state
+            .session_engine
+            .create_session_full(
+                kind,
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                body.project_id,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    };
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: row.id.to_string(),
@@ -1969,6 +2845,13 @@ pub async fn agent_steer(
         .await
         .map_err(|_| GatewayError::SessionNotFound(format!("agent session {id} not found")))?;
 
+    if session.kind != "subagent" {
+        return Err(GatewayError::BadRequest(format!(
+            "agent controls require a subagent session; found kind {}",
+            session.kind
+        )));
+    }
+
     let now = chrono::Utc::now();
     let note = format!("[steer] operator instruction injected: {}", body.message);
 
@@ -2029,6 +2912,13 @@ pub async fn agent_kill(
         .find_by_id(id)
         .await
         .map_err(|_| GatewayError::SessionNotFound(format!("agent session {id} not found")))?;
+
+    if session.kind != "subagent" {
+        return Err(GatewayError::BadRequest(format!(
+            "agent controls require a subagent session; found kind {}",
+            session.kind
+        )));
+    }
 
     let now = chrono::Utc::now();
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
@@ -2350,6 +3240,9 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
         subagent_capacity: stats.subagent_capacity,
         cron_active: stats.cron_active,
         cron_capacity: stats.cron_capacity,
+        tool_active: stats.tool_active,
+        tool_capacity: stats.tool_capacity,
+        project_tool_capacity: stats.project_tool_capacity,
     }
 }
 
@@ -3178,6 +4071,7 @@ pub async fn telegram_webhook(
                     workspace,
                     None,
                     Some(routing_key.clone()),
+                    None,
                     None,
                 )
                 .await
@@ -5017,14 +5911,30 @@ pub struct MemorySearchQuery {
     pub _limit: Option<usize>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct MemorySearchResult {
+    pub source: String,
+    pub file_path: String,
+    pub line: usize,
+    pub snippet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_name: Option<String>,
+    pub remote: bool,
+}
+
 #[derive(Serialize)]
 pub struct MemorySearchResponse {
     pub query: String,
-    pub results: Vec<Value>,
+    pub results: Vec<MemorySearchResult>,
     pub message: String,
+    pub local_results: usize,
+    pub remote_results: usize,
+    pub remote_pending: usize,
 }
 
-pub(crate) fn parse_memory_search_output(output: &str) -> Vec<Value> {
+pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
     output
         .split("\n---\n")
         .filter_map(|chunk| {
@@ -5034,13 +5944,120 @@ pub(crate) fn parse_memory_search_output(output: &str) -> Vec<Value> {
             }
 
             let (source_line, snippet) = chunk.split_once("\n")?;
-            let source = source_line.strip_prefix("Source: ")?.trim();
-            Some(json!({
-                "source": source,
-                "snippet": snippet.trim(),
-            }))
+            let source = source_line.strip_prefix("Source: ")?.trim().to_string();
+            let (file_path, line) = parse_memory_source(&source);
+            Some(MemorySearchResult {
+                source,
+                file_path,
+                line,
+                snippet: snippet.trim().to_string(),
+                instance_id: None,
+                instance_name: None,
+                remote: false,
+            })
         })
         .collect()
+}
+
+
+#[derive(Serialize, Deserialize)]
+struct RemoteMemorySearchResponse {
+    pub query: String,
+    #[serde(default)]
+    pub results: Vec<MemorySearchResult>,
+    #[serde(default)]
+    pub message: String,
+}
+
+async fn federated_memory_search(
+    state: &AppState,
+    query: &str,
+    limit: usize,
+    local_results: Vec<MemorySearchResult>,
+) -> (Vec<MemorySearchResult>, usize) {
+    let peers = {
+        let config = state.config.read().await;
+        config.instance.peers.clone()
+    };
+
+    if peers.is_empty() {
+        return (local_results, 0);
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(750))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return (local_results, peers.len()),
+    };
+
+    let mut merged = Vec::new();
+    let mut remote_pending = 0usize;
+
+    for peer in peers {
+        let base = peer
+            .health_url
+            .trim_end_matches("/api/v1/instance/health")
+            .trim_end_matches('/');
+        let endpoint = format!(
+            "{base}/api/memory/search?q={}&limit={limit}",
+            urlencoding::encode(query),
+        );
+
+        let response = match client.get(&endpoint).send().await {
+            Ok(response) => response,
+            Err(_) => {
+                remote_pending += 1;
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            remote_pending += 1;
+            continue;
+        }
+
+        let payload = match response.json::<RemoteMemorySearchResponse>().await {
+            Ok(payload) => payload,
+            Err(_) => {
+                remote_pending += 1;
+                continue;
+            }
+        };
+
+        let mut peer_results = payload
+            .results
+            .into_iter()
+            .map(|mut result| {
+                result.remote = true;
+                if result.instance_id.is_none() {
+                    result.instance_id = Some(peer.id.clone());
+                }
+                if result.instance_name.is_none() {
+                    result.instance_name = Some(peer.id.clone());
+                }
+                result
+            })
+            .collect::<Vec<_>>();
+        merged.append(&mut peer_results);
+    }
+
+    let local_count = local_results.len();
+    let mut combined = local_results;
+    combined.extend(merged);
+    combined.truncate(limit.max(local_count));
+    (combined, remote_pending)
+}
+
+fn parse_memory_source(source: &str) -> (String, usize) {
+    if let Some((file_path, line)) = source.rsplit_once('#') {
+        if let Ok(line) = line.parse::<usize>() {
+            return (file_path.to_string(), line);
+        }
+    }
+
+    (source.to_string(), 0)
 }
 
 /// `GET /api/memory/status` - memory subsystem status.
@@ -5092,9 +6109,19 @@ pub async fn memory_search(
         .execute(call)
         .await
         .map_err(|error| GatewayError::Internal(error.to_string()))?;
-    let results = parse_memory_search_output(&result.output);
+    let local_results = parse_memory_search_output(&result.output);
+    let local_count = local_results.len();
+    let (results, remote_pending) = federated_memory_search(&state, &q, limit, local_results).await;
+    let remote_results = results.iter().filter(|result| result.remote).count();
     let message = if results.is_empty() {
         format!("No results found for query: {q}")
+    } else if remote_results > 0 {
+        format!(
+            "Found {} memory result(s) ({} local, {} remote)",
+            results.len(),
+            local_count,
+            remote_results
+        )
     } else {
         format!("Found {} memory result(s)", results.len())
     };
@@ -5103,6 +6130,9 @@ pub async fn memory_search(
         query: q,
         results,
         message,
+        local_results: local_count,
+        remote_results,
+        remote_pending,
     }))
 }
 
@@ -5390,6 +6420,31 @@ pub async fn v1_memory_delete(
     Ok(Json(json!({"deleted": true, "id": id})))
 }
 
+/// `POST /api/v1/memory/vault/sync` — full vault sync: re-export all memories
+/// as `.md` files with `[[wikilinks]]`, pruning orphaned files.
+pub async fn v1_memory_vault_sync(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    let start = std::time::Instant::now();
+    let report = mem0
+        .vault_full_sync()
+        .await
+        .map_err(|e| GatewayError::Internal(format!("vault sync failed: {e}")))?;
+
+    Ok(Json(json!({
+        "created": report.created,
+        "updated": report.updated,
+        "deleted": report.deleted,
+        "errors": report.errors,
+        "duration_ms": start.elapsed().as_millis() as u64,
+    })))
+}
+
 // ── Logs ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -5489,7 +6544,6 @@ pub struct DoctorBackendMatrixEntry {
     pub fix_hint: Option<String>,
 }
 
-
 #[derive(Clone, Serialize)]
 pub struct DoctorMemoryHierarchySummary {
     pub l0: String,
@@ -5499,6 +6553,23 @@ pub struct DoctorMemoryHierarchySummary {
     pub promotion: String,
     pub demotion: String,
     pub metrics: String,
+    pub prompt_cache_rows: u64,
+    pub cached_tokens: u64,
+    pub total_input_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
+    pub l2_recall_hits: u64,
+    pub l2_warm_memories: u64,
+    pub l2_hot_memories: u64,
+    pub l2_total_memories: u64,
+    pub context_total_budget: u64,
+    pub context_total_estimated_tokens: u64,
+    pub context_compaction_trigger_tokens: u64,
+    pub context_over_budget: bool,
+    pub context_over_compaction_threshold: bool,
+    pub context_compaction_required: bool,
+    pub l3_cold_storage_enabled: bool,
+    pub loaded_tier_count: u64,
+    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 #[derive(Serialize)]
@@ -5696,19 +6767,30 @@ fn doctor_topology_summary(config: &rune_config::AppConfig) -> DoctorTopologySum
 }
 
 async fn doctor_memory_hierarchy(
+    state: &AppState,
     config: &rune_config::AppConfig,
     capabilities: &rune_config::Capabilities,
     token_metrics: &TokenMetricsStore,
 ) -> DoctorMemoryHierarchySummary {
+    let context_report = rune_runtime::ContextAssembler::new("Rune doctor identity context")
+        .with_context_config(&config.context)
+        .analyze_context_usage(
+            None,
+            None,
+            &[],
+            config.runtime.compaction.compress_after,
+            true,
+        );
     let prompt_cache_rows = token_metrics.snapshot().await;
-    let (cached_tokens, total_input_tokens) = prompt_cache_rows
-        .iter()
-        .fold((0_u64, 0_u64), |(cached, total), row| {
-            (
-                cached.saturating_add(row.cached_tokens),
-                total.saturating_add(row.total_input_tokens),
-            )
-        });
+    let (cached_tokens, total_input_tokens) =
+        prompt_cache_rows
+            .iter()
+            .fold((0_u64, 0_u64), |(cached, total), row| {
+                (
+                    cached.saturating_add(row.cached_tokens),
+                    total.saturating_add(row.total_input_tokens),
+                )
+            });
     let cache_ratio = if total_input_tokens == 0 {
         0.0
     } else {
@@ -5724,19 +6806,77 @@ async fn doctor_memory_hierarchy(
         "keyword/file fallback"
     };
 
+    let (l2_recall_hits, l2_warm_memories, l2_hot_memories, l2_total_memories) = if let Some(mem0) =
+        state.turn_executor.mem0()
+    {
+        match mem0.memory_hierarchy_metrics().await {
+            Ok(metrics) => (
+                metrics.recall_hits,
+                metrics.warm_memories,
+                metrics.hot_memories,
+                metrics.total_memories,
+            ),
+            Err(error) => {
+                tracing::debug!(error = %error, "doctor: failed to load mem0 hierarchy metrics");
+                (0, 0, 0, 0)
+            }
+        }
+    } else {
+        (0, 0, 0, 0)
+    };
+
+    let context_total_budget = context_report.total_budget as u64;
+    let context_total_estimated_tokens = context_report.total_estimated_tokens as u64;
+    let context_compaction_trigger_tokens = context_report.compaction_trigger_tokens as u64;
+    let context_over_budget = context_report.over_budget;
+    let context_over_compaction_threshold = context_report.over_compaction_threshold;
+    let context_compaction_required = context_report.compaction_required;
+    let l3_cold_storage_enabled = context_report.l3_cold_storage_enabled;
+    let loaded_tier_count = context_report.tiers.len() as u64;
+    let context_tier_counters = context_report
+        .tiers
+        .iter()
+        .map(|tier| DoctorContextTierCounter {
+            kind: format!("{:?}", tier.kind).to_lowercase(),
+            token_budget: tier.token_budget as u64,
+            estimated_tokens: tier.estimated_tokens as u64,
+            priority: tier.priority,
+            staleness_policy: serde_json::to_value(&tier.staleness_policy)
+                .ok()
+                .and_then(|value| value.as_str().map(ToOwned::to_owned))
+                .unwrap_or_else(|| format!("{:?}", tier.staleness_policy).to_lowercase()),
+            loaded: tier.loaded,
+            source: tier.source.to_string(),
+        })
+        .collect::<Vec<_>>();
+
     DoctorMemoryHierarchySummary {
-        l0: "current turn context window (active transcript + system/task/project context)"
-            .to_string(),
+        l0: format!(
+            "current turn context window (active transcript + system/task/project context, warn_at={} tokens, compress_after={} tokens)",
+            config.runtime.compaction.warn_at_tokens,
+            config.runtime.compaction.compress_after
+        ),
         l1: format!(
             "prompt cache via provider prefixes ({} metric row(s), {:.1}% cached input tokens)",
             prompt_cache_rows.len(),
             cache_ratio
         ),
         l2: format!(
-            "{} memory retrieval ({})",
-            vector_backend, capabilities.memory_mode
+            "{} memory retrieval ({}; recall_hits={}, warm_memories={}, hot_memories={}, total_memories={})",
+            vector_backend,
+            capabilities.memory_mode,
+            l2_recall_hits,
+            l2_warm_memories,
+            l2_hot_memories,
+            l2_total_memories
         ),
-        l3: "durable session logs in transcript/session storage".to_string(),
+        l3: if l3_cold_storage_enabled {
+            "durable session logs in transcript/session storage (ready for compaction handoff)"
+                .to_string()
+        } else {
+            "durable session logs in transcript/session storage (available, compaction handoff disabled)"
+                .to_string()
+        },
         promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions"
             .to_string(),
         demotion: format!(
@@ -5744,11 +6884,41 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_warm_memories={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}, l3_cold_storage_enabled={}",
             prompt_cache_rows.len(),
             cached_tokens,
-            total_input_tokens
+            total_input_tokens,
+            cache_ratio,
+            l2_recall_hits,
+            l2_warm_memories,
+            l2_hot_memories,
+            l2_total_memories,
+            loaded_tier_count,
+            context_total_budget,
+            context_total_estimated_tokens,
+            context_compaction_trigger_tokens,
+            context_over_budget,
+            context_over_compaction_threshold,
+            context_compaction_required,
+            l3_cold_storage_enabled
         ),
+        prompt_cache_rows: prompt_cache_rows.len() as u64,
+        cached_tokens,
+        total_input_tokens,
+        cache_hit_ratio_percent: cache_ratio,
+        l2_recall_hits,
+        l2_warm_memories,
+        l2_hot_memories,
+        l2_total_memories,
+        context_total_budget,
+        context_total_estimated_tokens,
+        context_compaction_trigger_tokens,
+        context_over_budget,
+        context_over_compaction_threshold,
+        context_compaction_required,
+        l3_cold_storage_enabled,
+        loaded_tier_count,
+        context_tier_counters,
     }
 }
 
@@ -6086,7 +7256,8 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     });
     checks.extend(storage_path_checks(&config));
     let backend_matrix = doctor_backend_matrix(&config, &state.capabilities, provider_ok, auth_ok);
-    let memory_hierarchy = doctor_memory_hierarchy(&config, &state.capabilities, &state.token_metrics).await;
+    let memory_hierarchy =
+        doctor_memory_hierarchy(&state, &config, &state.capabilities, &state.token_metrics).await;
     drop(config);
 
     let session_check = state.session_repo.list(1, 0).await;
@@ -6696,4 +7867,74 @@ mod tests {
 
 pub fn storage_path_checks_for_tests(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     storage_path_checks(config)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DelegationTaskStatusPath {
+    pub task_id: String,
+}
+
+pub async fn submit_delegation_task(
+    State(_state): State<AppState>,
+    Json(request): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
+    let now = Utc::now().to_rfc3339();
+    let result = DelegationTaskResultResponse {
+        task_id: request.task_id.clone(),
+        status: "accepted".to_string(),
+        accepted_at: now,
+        started_at: None,
+        output: None,
+        artifacts: request.task.artifacts.clone(),
+        error: None,
+        finished_at: None,
+    };
+
+    let receiver = DelegationEndpointResponse {
+        instance_id: request
+            .task
+            .target_peer_id
+            .clone()
+            .unwrap_or_else(|| "local-instance".to_string()),
+        instance_name: request
+            .task
+            .target_peer_id
+            .clone()
+            .unwrap_or_else(|| "Local Instance".to_string()),
+        transport: request.sender.transport.clone(),
+        health_url: None,
+        submit_url: None,
+        result_url: request.sender.result_url.clone(),
+    };
+
+    Ok((
+        StatusCode::CREATED,
+        Json(DelegationTaskStatusEnvelope { receiver, result }),
+    ))
+}
+
+pub async fn delegation_task_status(
+    Path(path): Path<DelegationTaskStatusPath>,
+) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
+    let now = Utc::now().to_rfc3339();
+    Ok(Json(DelegationTaskStatusEnvelope {
+        receiver: DelegationEndpointResponse {
+            instance_id: "local-instance".to_string(),
+            instance_name: "Local Instance".to_string(),
+            transport: "http".to_string(),
+            health_url: None,
+            submit_url: None,
+            result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
+        },
+        result: DelegationTaskResultResponse {
+            task_id: path.task_id,
+            status: "accepted".to_string(),
+            accepted_at: now,
+            started_at: None,
+            output: None,
+            artifacts: Vec::new(),
+            error: None,
+            finished_at: None,
+        },
+    }))
 }

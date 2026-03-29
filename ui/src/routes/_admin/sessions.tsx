@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSessions, useCreateSession } from "@/hooks/use-sessions";
+import { useSessions, useCreateSession, useDeleteSession } from "@/hooks/use-sessions";
 import type { CreateSessionRequest, SessionListItem } from "@/lib/api-types";
 import {
   Plus,
@@ -19,6 +19,9 @@ import {
   Filter,
   Workflow,
   Radio,
+  Trash2,
+  Tag,
+  FolderKanban,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/sessions")({
@@ -40,7 +43,7 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat().format(value);
 }
 
-function SessionCard({ session }: { session: SessionListItem }) {
+function SessionCard({ session, onDelete }: { session: SessionListItem; onDelete: (session: SessionListItem) => void }) {
   const totalTokens = session.usage_prompt_tokens + session.usage_completion_tokens;
 
   return (
@@ -55,6 +58,8 @@ function SessionCard({ session }: { session: SessionListItem }) {
               <Badge variant="outline">{session.kind}</Badge>
               <Badge variant={session.status === "active" ? "default" : "secondary"}>{session.status}</Badge>
               {session.channel && <Badge variant="secondary">{session.channel}</Badge>}
+              {session.project_id && <Badge variant="outline">project:{session.project_id}</Badge>}
+              {session.mode && <Badge variant="outline">mode:{session.mode}</Badge>}
             </div>
             <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
               <span className="inline-flex items-center gap-1">
@@ -70,16 +75,40 @@ function SessionCard({ session }: { session: SessionListItem }) {
             </CardDescription>
           </div>
 
-          <Button asChild size="sm" variant="outline">
-            <Link to="/sessions/$id" params={{ id: session.id }}>
-              Open
-              <ArrowRight className="ml-1 h-4 w-4" />
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/sessions/$id" params={{ id: session.id }}>
+                Open
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
+            <Button size="icon" variant="outline" onClick={() => onDelete(session)} aria-label="Delete session">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
 
       <CardContent>
+        <div className="mb-3 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <Tag className="h-3.5 w-3.5" />
+              Project / mode
+            </div>
+            <div className="text-sm font-medium">{session.project_id ?? "—"}</div>
+            <div className="text-xs text-muted-foreground">{session.mode ?? "—"}</div>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <FolderKanban className="h-3.5 w-3.5" />
+              Channel / parent
+            </div>
+            <div className="truncate text-sm font-medium">{session.channel ?? "—"}</div>
+            <div className="truncate text-xs text-muted-foreground">{session.requester_session_id ? `parent ${session.requester_session_id.slice(0, 12)}...` : "root session"}</div>
+          </div>
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border bg-muted/20 p-3">
             <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
@@ -125,6 +154,7 @@ function SessionsPage() {
 
   const { data: sessions, isLoading } = useSessions();
   const createSession = useCreateSession();
+  const deleteSession = useDeleteSession();
 
   const filteredSessions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -168,6 +198,11 @@ function SessionsPage() {
       subagent: source.filter((session) => session.kind === "subagent").length,
     };
   }, [sessions]);
+
+  const handleDeleteSession = (session: SessionListItem) => {
+    if (!window.confirm(`Delete session ${session.id}? This removes transcript history too.`)) return;
+    deleteSession.mutate(session.id);
+  };
 
   const handleCreateSession = () => {
     createSession.mutate({
@@ -339,7 +374,7 @@ function SessionsPage() {
             </CardContent>
           </Card>
         ) : (
-          filteredSessions.map((session) => <SessionCard key={session.id} session={session} />)
+          filteredSessions.map((session) => <SessionCard key={session.id} session={session} onDelete={handleDeleteSession} />)
         )}
       </div>
     </div>

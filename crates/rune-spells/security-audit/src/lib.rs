@@ -172,12 +172,11 @@ impl ToolExecutor for SecurityAuditToolExecutor {
             severity_threshold: Option<String>,
         }
 
-        let args: RawArgs = serde_json::from_value(call.arguments).map_err(|e| {
-            ToolError::InvalidArguments {
+        let args: RawArgs =
+            serde_json::from_value(call.arguments).map_err(|e| ToolError::InvalidArguments {
                 tool: call.tool_name.clone(),
                 reason: format!("invalid security_audit arguments: {e}"),
-            }
-        })?;
+            })?;
 
         let target = self.resolve_target(args.target.as_deref())?;
         let threshold = match args.severity_threshold.as_deref() {
@@ -188,7 +187,7 @@ impl ToolExecutor for SecurityAuditToolExecutor {
                 return Err(ToolError::InvalidArguments {
                     tool: call.tool_name.clone(),
                     reason: format!("unsupported severity_threshold: {other}"),
-                })
+                });
             }
         };
 
@@ -303,7 +302,10 @@ fn scan_open_ports() -> Vec<AuditFinding> {
                 check: "open_ports".into(),
                 severity,
                 status: "observed".into(),
-                summary: format!("Detected {} listening socket entries via {cmd}", ports.len()),
+                summary: format!(
+                    "Detected {} listening socket entries via {cmd}",
+                    ports.len()
+                ),
                 detail: if ports.is_empty() {
                     format!("{cmd} returned no listening sockets")
                 } else {
@@ -418,13 +420,21 @@ fn scan_ssh_config() -> Vec<AuditFinding> {
     if let Ok(meta) = fs::metadata(&ssh_dir) {
         let mode = meta.permissions().mode() & 0o777;
         if mode != 0o700 {
-            issues.push(format!("{} mode {:o}; expected 700", ssh_dir.display(), mode));
+            issues.push(format!(
+                "{} mode {:o}; expected 700",
+                ssh_dir.display(),
+                mode
+            ));
         }
     }
     if let Ok(meta) = fs::metadata(&config) {
         let mode = meta.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
-            issues.push(format!("{} mode {:o}; expected 600", config.display(), mode));
+            issues.push(format!(
+                "{} mode {:o}; expected 600",
+                config.display(),
+                mode
+            ));
         }
     }
     if let Ok(contents) = fs::read_to_string(&config) {
@@ -582,8 +592,7 @@ fn secret_patterns() -> Vec<SecretPattern> {
         SecretPattern {
             name: "slack_token",
             severity: Severity::Critical,
-            regex: Regex::new(r"xox[bpoas]-[A-Za-z0-9-]+")
-                .expect("valid slack regex"),
+            regex: Regex::new(r"xox[bpoas]-[A-Za-z0-9-]+").expect("valid slack regex"),
         },
         SecretPattern {
             name: "openai_key",
@@ -593,8 +602,7 @@ fn secret_patterns() -> Vec<SecretPattern> {
         SecretPattern {
             name: "jwt_token",
             severity: Severity::Warning,
-            regex: Regex::new(r"eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.")
-                .expect("valid jwt regex"),
+            regex: Regex::new(r"eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.").expect("valid jwt regex"),
         },
         SecretPattern {
             name: "private_key",
@@ -666,7 +674,9 @@ fn walk(path: &Path, exclude_patterns: &[String], out: &mut Vec<PathBuf>, sensit
 
 fn should_skip(path: &Path, exclude_patterns: &[String]) -> bool {
     let rendered = path.to_string_lossy();
-    exclude_patterns.iter().any(|pattern| rendered.contains(pattern))
+    exclude_patterns
+        .iter()
+        .any(|pattern| rendered.contains(pattern))
 }
 
 fn is_sensitive_path(path: &Path) -> bool {
@@ -758,7 +768,11 @@ mod tests {
         .unwrap();
 
         let findings = scan_secrets(dir.path(), &[]);
-        assert!(findings.iter().any(|f| f.summary.contains("aws_access_key")));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.summary.contains("aws_access_key"))
+        );
         assert!(findings.iter().any(|f| f.summary.contains("openai_key")));
     }
 
@@ -794,7 +808,11 @@ mod tests {
     #[tokio::test]
     async fn tool_executor_runs_workspace_relative_scan() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("secrets.env"), "token=ghp_123456789012345678901234567890123456").unwrap();
+        fs::write(
+            dir.path().join("secrets.env"),
+            "token=ghp_123456789012345678901234567890123456",
+        )
+        .unwrap();
         let executor = SecurityAuditToolExecutor::new(dir.path());
 
         let result = executor

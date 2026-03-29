@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -132,8 +132,8 @@ fn normalize_http_base_url(base_url: String) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("http comms base url cannot be empty".to_string());
     }
-    let url = reqwest::Url::parse(trimmed)
-        .map_err(|e| format!("invalid HTTP comms base url: {e}"))?;
+    let url =
+        reqwest::Url::parse(trimmed).map_err(|e| format!("invalid HTTP comms base url: {e}"))?;
     match url.scheme() {
         "http" | "https" => Ok(trimmed.to_string()),
         scheme => Err(format!("unsupported HTTP comms scheme: {scheme}")),
@@ -351,14 +351,15 @@ impl CommsTransport for FsCommsTransport {
     }
 }
 
-
 pub fn build_comms_transport(
     transport: CommsTransportKind,
     comms_dir: impl Into<PathBuf>,
 ) -> Arc<dyn CommsTransport> {
     match transport {
         CommsTransportKind::Filesystem => Arc::new(FsCommsTransport::new(comms_dir)),
-        CommsTransportKind::Http => panic!("http transport requires explicit HttpCommsTransport configuration"),
+        CommsTransportKind::Http => {
+            panic!("http transport requires explicit HttpCommsTransport configuration")
+        }
     }
 }
 
@@ -395,7 +396,11 @@ impl CommsClient {
         agent_id: impl Into<String>,
         peer_id: impl Into<String>,
     ) -> Self {
-        Self::with_transport(build_comms_transport(transport, comms_dir), agent_id, peer_id)
+        Self::with_transport(
+            build_comms_transport(transport, comms_dir),
+            agent_id,
+            peer_id,
+        )
     }
 
     pub fn with_transport(
@@ -594,10 +599,22 @@ mod tests {
 
     #[tokio::test]
     async fn parse_transport_kind_aliases() {
-        assert_eq!(CommsTransportKind::from_str("filesystem").unwrap(), CommsTransportKind::Filesystem);
-        assert_eq!(CommsTransportKind::from_str("FS").unwrap(), CommsTransportKind::Filesystem);
-        assert_eq!(CommsTransportKind::from_str("http").unwrap(), CommsTransportKind::Http);
-        assert_eq!(CommsTransportKind::from_str("HTTPS").unwrap(), CommsTransportKind::Http);
+        assert_eq!(
+            CommsTransportKind::from_str("filesystem").unwrap(),
+            CommsTransportKind::Filesystem
+        );
+        assert_eq!(
+            CommsTransportKind::from_str("FS").unwrap(),
+            CommsTransportKind::Filesystem
+        );
+        assert_eq!(
+            CommsTransportKind::from_str("http").unwrap(),
+            CommsTransportKind::Http
+        );
+        assert_eq!(
+            CommsTransportKind::from_str("HTTPS").unwrap(),
+            CommsTransportKind::Http
+        );
     }
 
     #[tokio::test]
@@ -631,7 +648,9 @@ mod tests {
                 "body": "done",
                 "priority": "p1"
             })))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id":"remote-send"})))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"id":"remote-send"})),
+            )
             .mount(&server)
             .await;
 
@@ -639,14 +658,16 @@ mod tests {
             .and(path("/api/comms/inbox"))
             .and(query_param("mark_read", "false"))
             .and(header("authorization", "Bearer shared-secret"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(vec![serde_json::json!({
-                "id": "msg-123",
-                "from": "openclaw",
-                "subject": "directive",
-                "body": "ship code",
-                "priority": "p0",
-                "created_at": "2026-03-28T07:00:00Z"
-            })]))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(vec![serde_json::json!({
+                    "id": "msg-123",
+                    "from": "openclaw",
+                    "subject": "directive",
+                    "body": "ship code",
+                    "priority": "p0",
+                    "created_at": "2026-03-28T07:00:00Z"
+                })]),
+            )
             .mount(&server)
             .await;
 
@@ -666,7 +687,10 @@ mod tests {
         )
         .unwrap();
 
-        client.send("status", "ship it", "done", "p1").await.unwrap();
+        client
+            .send("status", "ship it", "done", "p1")
+            .await
+            .unwrap();
 
         let messages = client.read_inbox().await;
         assert_eq!(messages.len(), 1);
@@ -696,14 +720,16 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/api/comms/inbox"))
             .and(query_param("mark_read", "false"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(vec![serde_json::json!({
-                "id": "msg-999",
-                "from": "openclaw",
-                "subject": "status",
-                "body": "merged",
-                "priority": "p2",
-                "created_at": null
-            })]))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(vec![serde_json::json!({
+                    "id": "msg-999",
+                    "from": "openclaw",
+                    "subject": "status",
+                    "body": "merged",
+                    "priority": "p2",
+                    "created_at": null
+                })]),
+            )
             .mount(&server)
             .await;
 
@@ -714,7 +740,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = CommsClient::with_http_transport(server.uri(), None, "rune", "horizon-ai").unwrap();
+        let client =
+            CommsClient::with_http_transport(server.uri(), None, "rune", "horizon-ai").unwrap();
         let summaries = client.read_inbox_summary(true).await.unwrap();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].id, "msg-999");

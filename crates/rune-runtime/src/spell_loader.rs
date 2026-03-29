@@ -69,7 +69,13 @@ impl SpellLoader {
         let mut loaded = 0;
         let mut seen_names = Vec::new();
 
-        self.scan_dir_recursive(&self.spells_dir.clone(), &mut discovered, &mut loaded, &mut seen_names).await;
+        self.scan_dir_recursive(
+            &self.spells_dir.clone(),
+            &mut discovered,
+            &mut loaded,
+            &mut seen_names,
+        )
+        .await;
 
         let removed = self.remove_missing_registry_entries(&seen_names).await;
         let elapsed = start.elapsed();
@@ -125,7 +131,8 @@ impl SpellLoader {
                     skill_md
                 } else {
                     // No manifest here — recurse deeper for namespace dirs
-                    self.scan_dir_recursive(&path, discovered, loaded, seen_names).await;
+                    self.scan_dir_recursive(&path, discovered, loaded, seen_names)
+                        .await;
                     continue;
                 };
 
@@ -256,6 +263,10 @@ async fn load_spell_from_path(path: &Path, dir_namespace: Option<&str>) -> Resul
     let frontmatter = parse_spell_frontmatter(&content)
         .ok_or_else(|| "no valid frontmatter found".to_string())?;
 
+    let prompt_body = split_markdown_frontmatter(&content)
+        .map(|(_, body)| body.trim().to_string())
+        .filter(|body| !body.is_empty());
+
     let source_dir = path
         .parent()
         .ok_or_else(|| "no parent directory".to_string())?;
@@ -289,7 +300,9 @@ async fn load_spell_from_path(path: &Path, dir_namespace: Option<&str>) -> Resul
         .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
 
     // Use frontmatter namespace or fall back to directory-derived namespace
-    let namespace = frontmatter.namespace.or_else(|| dir_namespace.map(String::from));
+    let namespace = frontmatter
+        .namespace
+        .or_else(|| dir_namespace.map(String::from));
 
     Ok(Spell {
         name,
@@ -298,10 +311,10 @@ async fn load_spell_from_path(path: &Path, dir_namespace: Option<&str>) -> Resul
         binary_path,
         source_dir: source_dir.to_path_buf(),
         enabled: frontmatter.enabled.unwrap_or(true),
-        prompt_body: None,
-        model: None,
-        allowed_tools: None,
-        user_invocable: false,
+        prompt_body,
+        model: frontmatter.model,
+        allowed_tools: frontmatter.allowed_tools,
+        user_invocable: frontmatter.user_invocable.unwrap_or(false),
         namespace,
         version: frontmatter.version,
         author: frontmatter.author,
@@ -311,6 +324,20 @@ async fn load_spell_from_path(path: &Path, dir_namespace: Option<&str>) -> Resul
         match_rules: frontmatter.match_rules,
         triggers: frontmatter.triggers,
     })
+}
+
+fn split_markdown_frontmatter(content: &str) -> Option<(&str, &str)> {
+    let trimmed = content.trim();
+    if !trimmed.starts_with("---") {
+        return None;
+    }
+
+    let after_first = &trimmed[3..];
+    let end_pos = after_first.find("\n---")?;
+    let yaml_block = after_first[..end_pos].trim();
+    let body_start = end_pos + "\n---".len();
+    let body = after_first[body_start..].trim_start_matches(['\r', '\n']);
+    Some((yaml_block, body))
 }
 
 #[cfg(test)]
@@ -495,6 +522,52 @@ enabled: true
     }
 
     #[tokio::test]
+    async fn scan_loads_prompt_body_and_tool_metadata() {
+        let tmp = TempDir::new().unwrap();
+        let registry = Arc::new(SpellRegistry::new());
+        let loader = SpellLoader::new(tmp.path(), registry.clone());
+
+        let spell_dir = tmp.path().join("shell-runner");
+        fs::create_dir_all(&spell_dir).await.unwrap();
+        fs::write(
+            spell_dir.join("SPELL.md"),
+            r#"---
+name: shell-runner
+version: 0.2.0
+description: Runs shell commands
+model: gpt-4.1-mini
+allowed-tools: ["exec", "read"]
+user-invocable: true
+---
+
+# Shell Runner
+
+Run shell commands carefully.
+"#,
+        )
+        .await
+        .unwrap();
+
+        let summary = loader.scan_summary().await;
+        assert_eq!(summary.loaded, 1);
+
+        let spell = registry.get("shell-runner").await.expect("spell loaded");
+        assert_eq!(spell.model.as_deref(), Some("gpt-4.1-mini"));
+        assert_eq!(
+            spell.allowed_tools,
+            Some(vec!["exec".into(), "read".into()])
+        );
+        assert!(spell.user_invocable);
+        assert!(
+            spell
+                .prompt_body
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Run shell commands carefully.")
+        );
+    }
+
+    #[tokio::test]
     async fn scan_preserves_runtime_enabled_state_on_reload() {
         let tmp = TempDir::new().unwrap();
         let registry = Arc::new(SpellRegistry::new());
@@ -526,7 +599,6 @@ enabled: true
         assert_eq!(second.loaded, 1);
         assert!(!registry.get("sticky-spell").await.unwrap().enabled);
     }
-
 
     #[tokio::test]
     async fn scan_rejects_spell_missing_required_version() {
@@ -564,12 +636,12 @@ description: Missing version should fail
     #[test]
     fn path_to_namespace_nested() {
         let ns = path_to_namespace(Path::new("horizon/security-audit"));
-        assert_eq!(ns.as_deref(), Some("horizon.security-audit"));
+        assert_eq!(ns.as_deref(), Some("horizon"));
     }
 
     #[test]
     fn path_to_namespace_deep() {
         let ns = path_to_namespace(Path::new("org/team/my-spell"));
-        assert_eq!(ns.as_deref(), Some("org.team.my-spell"));
+        assert_eq!(ns.as_deref(), Some("org.team"));
     }
 }

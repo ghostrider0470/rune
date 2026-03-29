@@ -633,7 +633,14 @@ async fn run_heartbeat(
 
     let (_turn, _usage) = deps
         .turn_executor
-        .execute_triggered(session.id, prompt, None, TriggerKind::Heartbeat, None)
+        .execute_triggered(
+            session.id,
+            prompt,
+            Vec::new(),
+            None,
+            TriggerKind::Heartbeat,
+            None,
+        )
         .await?;
 
     // Read the last assistant message from transcript
@@ -694,6 +701,7 @@ async fn run_agent_turn(
                     Some(parent.id),
                     None,
                     None,
+                    None,
                 )
                 .await?;
             execute_in_session(deps, &session, message, model, true, TriggerKind::CronJob).await
@@ -721,6 +729,7 @@ async fn run_reminder(
                     SessionKind::Subagent,
                     deps.workspace_root.clone(),
                     Some(parent.id),
+                    None,
                     None,
                     None,
                 )
@@ -758,6 +767,7 @@ async fn get_or_create_heartbeat_session(
             None,
             Some(HEARTBEAT_CHANNEL_REF.to_string()),
             None,
+            None,
         )
         .await?;
 
@@ -785,6 +795,7 @@ async fn get_or_create_main_scheduled_session(
             None,
             Some(MAIN_SCHEDULED_CHANNEL_REF.to_string()),
             None,
+            None,
         )
         .await?;
 
@@ -808,7 +819,7 @@ async fn execute_in_session(
 
     let (_turn, _usage) = deps
         .turn_executor
-        .execute_triggered(session.id, message, model, trigger_kind, None)
+        .execute_triggered(session.id, message, Vec::new(), model, trigger_kind, None)
         .await?;
 
     let items = deps
@@ -843,7 +854,6 @@ mod tests {
     use super::*;
     use rune_core::JobId;
     use rune_runtime::scheduler::{Job, JobPayload, JobRunStatus, Schedule, SessionTarget};
-
 
     #[tokio::test]
     async fn supervisor_starts_and_stops_cleanly() {

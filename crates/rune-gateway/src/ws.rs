@@ -34,7 +34,6 @@ fn current_state_version(state_version: &AtomicU64) -> u64 {
     state_version.load(Ordering::Relaxed)
 }
 
-
 fn method_changes_state(method: &str) -> bool {
     matches!(
         method,
@@ -435,13 +434,7 @@ where
                             } else {
                                 current_state_version(state_version.as_ref())
                             };
-                            Some(encode_res(
-                                &id,
-                                true,
-                                Some(payload),
-                                None,
-                                next_version,
-                            ))
+                            Some(encode_res(&id, true, Some(payload), None, next_version))
                         }
                         Err(rpc_err) => Some(encode_res(
                             &id,

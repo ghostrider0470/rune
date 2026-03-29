@@ -141,15 +141,16 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
                 )
             }
             rune_runtime::CommsTransportKind::Http => {
-                let http = services
-                    .config
-                    .comms
-                    .http
-                    .clone()
-                    .ok_or_else(|| GatewayError::BadRequest("comms.http config is required for HTTP transport".to_string()))?;
-                let base_url = http
-                    .base_url
-                    .ok_or_else(|| GatewayError::BadRequest("comms.http.base_url is required for HTTP transport".to_string()))?;
+                let http = services.config.comms.http.clone().ok_or_else(|| {
+                    GatewayError::BadRequest(
+                        "comms.http config is required for HTTP transport".to_string(),
+                    )
+                })?;
+                let base_url = http.base_url.ok_or_else(|| {
+                    GatewayError::BadRequest(
+                        "comms.http.base_url is required for HTTP transport".to_string(),
+                    )
+                })?;
                 CommsClient::with_http_transport(
                     base_url,
                     http.auth_token,
@@ -177,7 +178,17 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
                 if services.config.media.tts.provider == "elevenlabs" {
                     Box::new(ElevenLabsTts::new(key))
                 } else {
-                    Box::new(OpenAiTts::new(key))
+                    Box::new(OpenAiTts::new(
+                        key,
+                        services
+                            .config
+                            .media
+                            .tts
+                            .base_url
+                            .clone()
+                            .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+                        services.config.media.tts.api_version.clone(),
+                    ))
                 };
             Arc::new(RwLock::new(TtsEngine::new(
                 provider,
@@ -427,6 +438,19 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
     let public_routes = Router::new()
         .route("/health", get(routes::health))
         .route("/ready", get(routes::ready))
+        .route("/api/v1/instance/health", get(routes::instance_health))
+        .route(
+            "/api/v1/instance/delegation-plan",
+            get(routes::delegation_plan),
+        )
+        .route(
+            "/api/v1/instance/delegations",
+            post(routes::submit_delegation_task),
+        )
+        .route(
+            "/api/v1/instance/delegations/{task_id}",
+            get(routes::delegation_task_status),
+        )
         .route("/chat", get(webchat::legacy_chat_redirect))
         .route("/webchat", get(webchat::webchat_handler))
         .route("/assets/{path}", get(routes::branded_asset))
@@ -663,6 +687,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/v1/memory/store", post(routes::v1_memory_store))
         .route("/api/v1/memory/list", get(routes::v1_memory_list))
         .route("/api/v1/memory/{id}", delete(routes::v1_memory_delete))
+        .route(
+            "/api/v1/memory/vault/sync",
+            post(routes::v1_memory_vault_sync),
+        )
         // Log routes
         .route("/api/logs", get(routes::query_logs))
         // Doctor routes

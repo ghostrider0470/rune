@@ -20,6 +20,7 @@ pub mod heartbeat;
 pub mod hooks;
 pub mod lane_queue;
 pub mod mem0;
+pub mod mem0_vault;
 pub mod memory;
 pub mod merge_queue;
 pub mod orchestrator;
@@ -41,7 +42,10 @@ pub mod workspace;
 pub use agent_registry::AgentRegistry;
 pub use command_registry::CommandRegistry;
 pub use compaction::{CompactionStrategy, NoOpCompaction, TokenBudgetCompaction};
-pub use context::ContextAssembler;
+pub use context::{
+    ContextAssembler, ContextAssemblyReport, ContextStalenessPolicy, ContextTierKind,
+    ContextTierSpec, ContextTierUsage,
+};
 pub use context_budget::{
     BudgetItem, BudgetReport, Checkpoint, CheckpointStore, GcResult, Partition, PartitionBudget,
     PartitionReport, TokenBudget, heartbeat_gc, persist_checkpoint, recover_checkpoint,

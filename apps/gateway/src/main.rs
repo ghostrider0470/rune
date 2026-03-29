@@ -49,8 +49,7 @@ use rune_runtime::{
 };
 use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
 use rune_spells_rust_patterns::{
-    RustPatternsToolExecutor, rust_patterns_tool_definition,
-    rust_patterns_validate_tool_definition,
+    RustPatternsToolExecutor, rust_patterns_tool_definition, rust_patterns_validate_tool_definition,
 };
 use rune_spells_security_audit::security_audit_tool_definition;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
@@ -697,6 +696,13 @@ async fn build_services(
         .unwrap_or("You are Rune, a Rust-powered AI assistant built for speed and reliability.")
         .to_string();
 
+    let context_assembler = ContextAssembler::new(&system_prompt).with_tier_budgets(
+        config.context.identity,
+        config.context.task,
+        config.context.project,
+        config.context.shared,
+    );
+
     let mut turn_executor = TurnExecutor::new(
         session_repo.clone(),
         turn_repo.clone(),
@@ -705,12 +711,20 @@ async fn build_services(
         model_provider.clone(),
         tool_executor,
         tool_registry,
-        ContextAssembler::new(&system_prompt),
+        context_assembler,
         {
             let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
                 TokenBudgetCompaction::new(
                     config.runtime.compaction.context_window,
                     config.runtime.compaction.preserve_tail,
+                )
+                .with_budget_settings(
+                    config.runtime.compaction.effective_warn_at_tokens(),
+                    config.runtime.compaction.effective_compress_after(),
+                    config.runtime.compaction.reserved_system,
+                    config.runtime.compaction.reserved_task,
+                    config.runtime.compaction.auto_inject_project,
+                    config.runtime.compaction.memory_search_k,
                 )
                 .with_memory_flush(&workspace_root),
             );
@@ -736,7 +750,25 @@ async fn build_services(
 
     // Mem0 auto-capture/recall memory engine
     if config.mem0.enabled {
-        match Mem0Engine::try_new(&config.mem0, model_provider.clone(), repos.memory_fact_repo.clone()) {
+        let vault_dir = if config.mem0.vault_enabled {
+            Some(
+                config
+                    .mem0
+                    .vault_dir
+                    .clone()
+                    .unwrap_or_else(|| config.paths.memory_dir.join("vault")),
+            )
+        } else {
+            None
+        };
+        match Mem0Engine::try_new(
+            &config.mem0,
+            model_provider.clone(),
+            repos.memory_fact_repo.clone(),
+            vault_dir,
+        )
+        .await
+        {
             Some(engine) => {
                 turn_executor = turn_executor.with_mem0(engine);
                 info!("mem0 auto-capture/recall memory engine enabled");
@@ -1373,8 +1405,22 @@ impl CommsOps for CommsClientOps {
         self.client.send(msg_type, subject, body, priority).await
     }
 
-    async fn read_inbox(&self, mark_read: bool) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
-        self.client.read_inbox_summary(mark_read).await.map(|msgs| msgs.into_iter().map(|msg| rune_tools::comms_tool::CommsMessageSummary { id: msg.id, from: msg.from, subject: msg.subject, body: msg.body, priority: msg.priority, created_at: msg.created_at, }).collect())
+    async fn read_inbox(
+        &self,
+        mark_read: bool,
+    ) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
+        self.client.read_inbox_summary(mark_read).await.map(|msgs| {
+            msgs.into_iter()
+                .map(|msg| rune_tools::comms_tool::CommsMessageSummary {
+                    id: msg.id,
+                    from: msg.from,
+                    subject: msg.subject,
+                    body: msg.body,
+                    priority: msg.priority,
+                    created_at: msg.created_at,
+                })
+                .collect()
+        })
     }
 }
 
@@ -2398,6 +2444,7 @@ impl SessionSpawner for LiveSessionSpawner {
                 rune_core::SessionKind::Subagent,
                 Some(self.workspace_root.display().to_string()),
                 requester_session_id,
+                None,
                 None,
                 None,
             )

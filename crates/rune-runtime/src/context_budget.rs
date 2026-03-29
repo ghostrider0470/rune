@@ -266,7 +266,10 @@ impl From<&TokenBudget> for BudgetReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GcResult {
     NoAction,
-    Compacted { freed_tokens: usize },
+    Compacted {
+        freed_tokens: usize,
+        persisted_checkpoint: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,6 +325,7 @@ pub fn heartbeat_gc(
         checkpoint,
         GcResult::Compacted {
             freed_tokens: freed,
+            persisted_checkpoint: false,
         },
     )
 }
@@ -375,7 +379,13 @@ mod tests {
 
         let (_checkpoint, gc) = heartbeat_gc(&mut budget, "busy", vec![], "continue");
         match gc {
-            GcResult::Compacted { freed_tokens } => assert!(freed_tokens >= 45),
+            GcResult::Compacted {
+                freed_tokens,
+                persisted_checkpoint,
+            } => {
+                assert!(freed_tokens >= 45);
+                assert!(!persisted_checkpoint);
+            }
             GcResult::NoAction => panic!("expected compaction"),
         }
         assert_eq!(budget.partitions[&Partition::History].items.len(), 5);

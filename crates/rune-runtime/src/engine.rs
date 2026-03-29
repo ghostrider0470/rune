@@ -8,13 +8,14 @@ use rune_store::StoreError;
 use rune_store::models::{NewSession, SessionRow};
 use rune_store::repos::{SessionRepo, TranscriptRepo};
 
+use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
-use crate::session_metadata::set_session_mode;
-
+use crate::session_metadata::{set_context_tiers, set_project_id, set_session_mode};
 /// Creates and manages session lifecycle. Persists state via store repo traits.
 pub struct SessionEngine {
     session_repo: Arc<dyn SessionRepo>,
     transcript_repo: Option<Arc<dyn TranscriptRepo>>,
+    context_assembler: ContextAssembler,
 }
 
 impl SessionEngine {
@@ -22,6 +23,7 @@ impl SessionEngine {
         Self {
             session_repo,
             transcript_repo: None,
+            context_assembler: ContextAssembler::new(""),
         }
     }
 
@@ -35,6 +37,11 @@ impl SessionEngine {
         self
     }
 
+    pub fn with_context_assembler(mut self, context_assembler: ContextAssembler) -> Self {
+        self.context_assembler = context_assembler;
+        self
+    }
+
     /// Create a new session with the given kind, optional workspace root,
     /// optional parent (requester) session, and optional channel reference.
     pub async fn create_session(
@@ -42,7 +49,7 @@ impl SessionEngine {
         kind: SessionKind,
         workspace_root: Option<String>,
     ) -> Result<SessionRow, RuntimeError> {
-        self.create_session_full(kind, workspace_root, None, None, None)
+        self.create_session_full(kind, workspace_root, None, None, None, None)
             .await
     }
 
@@ -57,6 +64,7 @@ impl SessionEngine {
         requester_session_id: Option<Uuid>,
         channel_ref: Option<String>,
         mode: Option<String>,
+        project_id: Option<String>,
     ) -> Result<SessionRow, RuntimeError> {
         let id = SessionId::new();
         let now = Utc::now();
@@ -65,6 +73,11 @@ impl SessionEngine {
             .as_deref()
             .map(|mode| set_session_mode(&serde_json::json!({}), mode))
             .unwrap_or_else(|| serde_json::json!({}));
+        let metadata = project_id
+            .as_deref()
+            .map(|project_id| set_project_id(&metadata, project_id))
+            .unwrap_or(metadata);
+        let metadata = seed_context_tier_metadata(metadata, &self.context_assembler);
 
         let new_session = NewSession {
             id: id.into_uuid(),
@@ -93,6 +106,44 @@ impl SessionEngine {
             .update_status(row.id, SessionStatus::Ready.as_str(), Utc::now())
             .await?;
         Ok(row)
+    }
+
+    /// Create a subagent session preloaded with delegation context and scratchpad metadata.
+    ///
+    /// The context payload is stored in session metadata under `delegation_context` so an
+    /// orchestrator can inject an objective/history/background slice without forcing the
+    /// subagent to rediscover the same files. An optional `shared_scratchpad_path` gives both
+    /// orchestrator and subagent a stable handoff location for incremental findings.
+    pub async fn create_subagent_session_with_context(
+        &self,
+        workspace_root: Option<String>,
+        requester_session_id: Option<Uuid>,
+        channel_ref: Option<String>,
+        mode: Option<String>,
+        delegation_context: serde_json::Value,
+        shared_scratchpad_path: Option<String>,
+    ) -> Result<SessionRow, RuntimeError> {
+        let session = self
+            .create_session_full(
+                SessionKind::Subagent,
+                workspace_root,
+                requester_session_id,
+                channel_ref,
+                mode,
+                None,
+            )
+            .await?;
+
+        let mut patch = serde_json::json!({
+            "delegation_context": delegation_context,
+        });
+        if let Some(path) = shared_scratchpad_path {
+            patch["shared_scratchpad"] = serde_json::json!({
+                "path": path,
+            });
+        }
+
+        self.patch_metadata(session.id, patch).await
     }
 
     /// Transition a session to Ready status. Idempotent: if already ready, returns Ok.
@@ -248,4 +299,12 @@ fn merge_json(target: &mut serde_json::Value, patch: serde_json::Value) {
             *target_slot = patch_value;
         }
     }
+}
+
+fn seed_context_tier_metadata(
+    metadata: serde_json::Value,
+    context_assembler: &ContextAssembler,
+) -> serde_json::Value {
+    let report = context_assembler.analyze_context_usage(None, None, &[], 0, false);
+    set_context_tiers(&metadata, &report)
 }

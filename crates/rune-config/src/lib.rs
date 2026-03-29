@@ -1,6 +1,7 @@
 #![doc = "Layered application configuration for Rune."]
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -21,6 +22,8 @@ pub use rune_tts::{TtsAutoMode, TtsConfig};
 pub struct AppConfig {
     #[serde(default)]
     pub mode: RuntimeMode,
+    #[serde(default)]
+    pub instance: InstanceConfig,
     pub gateway: GatewayConfig,
     pub database: DatabaseConfig,
     #[serde(default)]
@@ -33,6 +36,8 @@ pub struct AppConfig {
     pub agents: AgentsConfig,
     #[serde(default)]
     pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub context: ContextConfig,
     #[serde(default)]
     pub mcp_servers: Vec<McpServerConfig>,
     pub memory: MemoryConfig,
@@ -106,7 +111,6 @@ impl AppConfig {
         out
     }
 
-
     /// Return a lightweight JSON schema-like shape for the redacted config.
     ///
     /// This is intentionally derived from the current redacted config value so the
@@ -122,7 +126,10 @@ impl AppConfig {
                 Value::Number(v) => serde_json::json!({"type": "number", "default": v}),
                 Value::String(v) => serde_json::json!({"type": "string", "default": v}),
                 Value::Array(items) => {
-                    let item_schema = items.first().map(infer_schema).unwrap_or_else(|| serde_json::json!({}));
+                    let item_schema = items
+                        .first()
+                        .map(infer_schema)
+                        .unwrap_or_else(|| serde_json::json!({}));
                     serde_json::json!({"type": "array", "items": item_schema, "default": value})
                 }
                 Value::Object(map) => {
@@ -373,6 +380,7 @@ fn probe_dir_writable(dir: &Path) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Capabilities {
     pub mode: RuntimeMode,
+    pub updated_at: String,
     pub storage_backend: String,
     pub pgvector: bool,
     pub memory_mode: String,
@@ -384,6 +392,168 @@ pub struct Capabilities {
     pub channels: Vec<String>,
     pub approval_mode: String,
     pub security_posture: String,
+    pub identity: InstanceIdentity,
+    pub peer_count: usize,
+    pub peers: Vec<PeerCapabilityTarget>,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+    pub comms_transport: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstanceIdentity {
+    pub id: String,
+    pub name: String,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub capabilities_version: u32,
+    pub capability_hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstanceConfig {
+    #[serde(default = "default_instance_id")]
+    pub id: String,
+    #[serde(default = "default_instance_name")]
+    pub name: String,
+    #[serde(default)]
+    pub advertised_addr: Option<String>,
+    #[serde(default = "default_instance_roles")]
+    pub roles: Vec<String>,
+    #[serde(default)]
+    pub peers: Vec<PeerConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerConfig {
+    pub id: String,
+    pub health_url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerCapabilityTarget {
+    pub id: String,
+    pub health_url: String,
+}
+
+impl Default for InstanceConfig {
+    fn default() -> Self {
+        Self {
+            id: default_instance_id(),
+            name: default_instance_name(),
+            advertised_addr: None,
+            roles: default_instance_roles(),
+            peers: Vec::new(),
+        }
+    }
+}
+
+fn default_instance_id() -> String {
+    load_or_create_persisted_instance_id().unwrap_or_else(fallback_instance_id)
+}
+
+fn fallback_instance_id() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "rune-local".to_string())
+}
+
+fn capability_hash_from_config(config: &AppConfig) -> String {
+    use sha2::{Digest, Sha256};
+
+    let fingerprint = serde_json::json!({
+        "mode": config.mode.as_str(),
+        "database": {
+            "backend": format!("{:?}", config.database.backend),
+            "database_url_configured": config.database.database_url.is_some(),
+            "sqlite_path": config.database.sqlite_path,
+            "cosmos_endpoint_configured": config.database.cosmos_endpoint.is_some(),
+        },
+        "vector": {
+            "backend": format!("{:?}", config.vector.backend),
+            "lancedb_uri": config.vector.lancedb_uri,
+            "embedding_dims": config.vector.embedding_dims,
+        },
+        "memory": {
+            "level": format!("{:?}", config.memory.level),
+            "semantic_search_enabled": config.memory.semantic_search_enabled,
+        },
+        "mem0": {
+            "enabled": config.mem0.enabled,
+            "postgres_configured": config
+                .mem0
+                .postgres_url
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty()),
+        },
+        "browser": config.browser.enabled,
+        "tts": config.media.tts.enabled,
+        "stt": config.media.stt.enabled,
+        "channels": config.channels.enabled,
+        "approval_mode": config.approval.mode.as_str(),
+        "security_posture": config.security.posture().to_string(),
+        "instance": {
+            "id": config.instance.id,
+            "name": config.instance.name,
+            "advertised_addr": config.instance.advertised_addr,
+            "roles": config.instance.roles,
+            "peer_ids": config
+                .instance
+                .peers
+                .iter()
+                .map(|peer| peer.id.clone())
+                .collect::<Vec<_>>(),
+        },
+        "models": config
+            .models
+            .providers
+            .iter()
+            .flat_map(|provider| provider.models.iter().map(|model| model.id().to_string()))
+            .collect::<Vec<_>>(),
+        "projects": config
+            .agents
+            .list
+            .iter()
+            .filter_map(|agent| config.agents.effective_workspace(agent).map(str::to_string))
+            .collect::<Vec<_>>(),
+        "comms_transport": config.comms.transport,
+    });
+
+    let encoded = serde_json::to_vec(&fingerprint).unwrap_or_default();
+    let digest = Sha256::digest(encoded);
+    hex::encode(digest)
+}
+
+fn persisted_instance_id_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".rune").join("instance-id"))
+}
+
+fn load_or_create_persisted_instance_id() -> Option<String> {
+    let path = persisted_instance_id_path()?;
+
+    if let Ok(existing) = fs::read_to_string(&path) {
+        let id = existing.trim();
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+
+    let parent = path.parent()?;
+    fs::create_dir_all(parent).ok()?;
+
+    let id = uuid::Uuid::new_v4().to_string();
+    fs::write(&path, format!("{id}\n")).ok()?;
+    Some(id)
+}
+
+fn default_instance_name() -> String {
+    default_instance_id()
+}
+
+fn default_instance_roles() -> Vec<String> {
+    vec!["gateway".to_string()]
 }
 
 impl Capabilities {
@@ -410,9 +580,22 @@ impl Capabilities {
             .api_key
             .as_deref()
             .is_some_and(|k| !k.is_empty());
+        let configured_models = config
+            .models
+            .providers
+            .iter()
+            .flat_map(|provider| provider.models.iter().map(|model| model.id().to_string()))
+            .collect();
+        let active_projects = config
+            .agents
+            .list
+            .iter()
+            .filter_map(|agent| config.agents.effective_workspace(agent).map(str::to_string))
+            .collect();
 
         Self {
             mode: resolved_mode,
+            updated_at: chrono::Utc::now().to_rfc3339(),
             storage_backend: backend_name.to_string(),
             pgvector: pgvector_available,
             memory_mode: memory_mode.to_string(),
@@ -424,6 +607,27 @@ impl Capabilities {
             channels,
             approval_mode: config.approval.mode.as_str().to_string(),
             security_posture: config.security.posture().to_string(),
+            identity: InstanceIdentity {
+                id: config.instance.id.clone(),
+                name: config.instance.name.clone(),
+                advertised_addr: config.instance.advertised_addr.clone(),
+                roles: config.instance.roles.clone(),
+                capabilities_version: 1,
+                capability_hash: capability_hash_from_config(config),
+            },
+            peer_count: config.instance.peers.len(),
+            peers: config
+                .instance
+                .peers
+                .iter()
+                .map(|peer| PeerCapabilityTarget {
+                    id: peer.id.clone(),
+                    health_url: peer.health_url.clone(),
+                })
+                .collect(),
+            configured_models,
+            active_projects,
+            comms_transport: config.comms.transport.clone(),
         }
     }
 }
@@ -641,6 +845,127 @@ impl Default for DatabaseConfig {
             cosmos_endpoint: None,
             cosmos_key: None,
         }
+    }
+}
+
+/// Context tier budgets and loading priorities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextConfig {
+    #[serde(default = "default_context_identity_tokens")]
+    pub identity: usize,
+    #[serde(default = "default_context_identity_priority")]
+    pub identity_priority: u8,
+    #[serde(default = "default_context_identity_staleness_policy")]
+    pub identity_staleness_policy: String,
+    #[serde(default = "default_context_task_tokens")]
+    pub task: usize,
+    #[serde(default = "default_context_task_priority")]
+    pub task_priority: u8,
+    #[serde(default = "default_context_task_staleness_policy")]
+    pub task_staleness_policy: String,
+    #[serde(default = "default_context_project_tokens")]
+    pub project: usize,
+    #[serde(default = "default_context_project_priority")]
+    pub project_priority: u8,
+    #[serde(default = "default_context_project_staleness_policy")]
+    pub project_staleness_policy: String,
+    #[serde(default = "default_context_shared_tokens")]
+    pub shared: usize,
+    #[serde(default = "default_context_shared_priority")]
+    pub shared_priority: u8,
+    #[serde(default = "default_context_shared_staleness_policy")]
+    pub shared_staleness_policy: String,
+    #[serde(default = "default_context_historical_priority")]
+    pub historical_priority: u8,
+    #[serde(default = "default_context_historical_staleness_policy")]
+    pub historical_staleness_policy: String,
+}
+
+fn default_context_identity_tokens() -> usize {
+    1_000
+}
+fn default_context_task_tokens() -> usize {
+    10_000
+}
+fn default_context_project_tokens() -> usize {
+    20_000
+}
+fn default_context_shared_tokens() -> usize {
+    5_000
+}
+fn default_context_identity_priority() -> u8 {
+    0
+}
+fn default_context_task_priority() -> u8 {
+    1
+}
+fn default_context_project_priority() -> u8 {
+    2
+}
+fn default_context_shared_priority() -> u8 {
+    3
+}
+fn default_context_historical_priority() -> u8 {
+    4
+}
+fn default_context_identity_staleness_policy() -> String {
+    "always_fresh".to_string()
+}
+fn default_context_task_staleness_policy() -> String {
+    "per_turn".to_string()
+}
+fn default_context_project_staleness_policy() -> String {
+    "per_session".to_string()
+}
+fn default_context_shared_staleness_policy() -> String {
+    "on_demand".to_string()
+}
+fn default_context_historical_staleness_policy() -> String {
+    "retrieval_only".to_string()
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            identity: default_context_identity_tokens(),
+            identity_priority: default_context_identity_priority(),
+            identity_staleness_policy: default_context_identity_staleness_policy(),
+            task: default_context_task_tokens(),
+            task_priority: default_context_task_priority(),
+            task_staleness_policy: default_context_task_staleness_policy(),
+            project: default_context_project_tokens(),
+            project_priority: default_context_project_priority(),
+            project_staleness_policy: default_context_project_staleness_policy(),
+            shared: default_context_shared_tokens(),
+            shared_priority: default_context_shared_priority(),
+            shared_staleness_policy: default_context_shared_staleness_policy(),
+            historical_priority: default_context_historical_priority(),
+            historical_staleness_policy: default_context_historical_staleness_policy(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod context_config_tests {
+    use super::ContextConfig;
+
+    #[test]
+    fn default_context_tier_budgets_match_story_defaults() {
+        let cfg = ContextConfig::default();
+        assert_eq!(cfg.identity, 1_000);
+        assert_eq!(cfg.identity_priority, 0);
+        assert_eq!(cfg.identity_staleness_policy, "always_fresh");
+        assert_eq!(cfg.task, 10_000);
+        assert_eq!(cfg.task_priority, 1);
+        assert_eq!(cfg.task_staleness_policy, "per_turn");
+        assert_eq!(cfg.project, 20_000);
+        assert_eq!(cfg.project_priority, 2);
+        assert_eq!(cfg.project_staleness_policy, "per_session");
+        assert_eq!(cfg.shared, 5_000);
+        assert_eq!(cfg.shared_priority, 3);
+        assert_eq!(cfg.shared_staleness_policy, "on_demand");
+        assert_eq!(cfg.historical_priority, 4);
+        assert_eq!(cfg.historical_staleness_policy, "retrieval_only");
     }
 }
 
@@ -1882,6 +2207,18 @@ pub struct Mem0Config {
     /// the routing provider.  If empty, defaults to "gpt-5.4".
     #[serde(default = "Mem0Config::default_extraction_model")]
     pub extraction_model: String,
+
+    /// Enable Obsidian-compatible markdown vault sync (one-way: vector → markdown).
+    #[serde(default)]
+    pub vault_enabled: bool,
+
+    /// Directory for the vault. Defaults to `{memory_dir}/vault/`.
+    #[serde(default)]
+    pub vault_dir: Option<PathBuf>,
+
+    /// Cosine similarity threshold for wikilink generation between facts.
+    #[serde(default = "Mem0Config::default_vault_link_threshold")]
+    pub vault_link_threshold: f64,
 }
 
 /// `Eq` is required because `AppConfig` derives `Eq`. Configuration
@@ -1899,6 +2236,9 @@ impl PartialEq for Mem0Config {
             && self.similarity_threshold.to_bits() == other.similarity_threshold.to_bits()
             && self.dedup_threshold.to_bits() == other.dedup_threshold.to_bits()
             && self.extraction_model == other.extraction_model
+            && self.vault_enabled == other.vault_enabled
+            && self.vault_dir == other.vault_dir
+            && self.vault_link_threshold.to_bits() == other.vault_link_threshold.to_bits()
     }
 }
 impl Eq for Mem0Config {}
@@ -1925,6 +2265,9 @@ impl Mem0Config {
     fn default_extraction_model() -> String {
         "gpt-5.4".to_string()
     }
+    fn default_vault_link_threshold() -> f64 {
+        0.45
+    }
 }
 
 impl Default for Mem0Config {
@@ -1941,6 +2284,9 @@ impl Default for Mem0Config {
             similarity_threshold: Self::default_similarity_threshold(),
             dedup_threshold: Self::default_dedup_threshold(),
             extraction_model: Self::default_extraction_model(),
+            vault_enabled: false,
+            vault_dir: None,
+            vault_link_threshold: Self::default_vault_link_threshold(),
         }
     }
 }
@@ -2093,6 +2439,72 @@ mod tests {
             .expect("time went backwards")
             .as_nanos();
         std::env::temp_dir().join(format!("rune-config-{name}-{nanos}.toml"))
+    }
+
+    #[test]
+    fn instance_config_defaults_include_gateway_role() {
+        let config = AppConfig::default();
+        assert_eq!(config.instance.roles, vec!["gateway".to_string()]);
+        assert_eq!(config.instance.advertised_addr, None);
+    }
+
+    #[test]
+    fn load_or_create_persisted_instance_id_reads_existing_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "rune-instance-id-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("instance-id");
+        fs::write(&path, "node-123\n").unwrap();
+
+        let existing = fs::read_to_string(&path).unwrap();
+        assert_eq!(existing.trim(), "node-123");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn app_config_default_generates_non_empty_instance_id() {
+        let config = AppConfig::default();
+        assert!(!config.instance.id.trim().is_empty());
+    }
+
+    #[test]
+    fn capabilities_detect_embeds_instance_identity_manifest() {
+        let mut config = AppConfig::default();
+        config.instance.id = "node-a".to_string();
+        config.instance.name = "Node A".to_string();
+        config.instance.advertised_addr = Some("http://10.0.0.5:8787".to_string());
+        config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+        config.instance.peers = vec![PeerConfig {
+            id: "node-b".to_string(),
+            health_url: "http://10.0.0.6:8787/api/v1/instance/health".to_string(),
+        }];
+
+        let capabilities =
+            Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 7);
+        assert_eq!(capabilities.identity.id, "node-a");
+        assert_eq!(capabilities.identity.name, "Node A");
+        assert_eq!(
+            capabilities.identity.advertised_addr.as_deref(),
+            Some("http://10.0.0.5:8787")
+        );
+        assert_eq!(
+            capabilities.identity.roles,
+            vec!["gateway".to_string(), "scheduler".to_string()]
+        );
+        assert_eq!(capabilities.identity.capabilities_version, 1);
+        assert_eq!(capabilities.peer_count, 1);
+    }
+
+    #[test]
+    fn instance_peers_deserialize_from_struct_entries() {
+        let config = AppConfig::load(Some("config.example.toml")).unwrap();
+        assert!(config.instance.peers.is_empty());
     }
 
     #[test]

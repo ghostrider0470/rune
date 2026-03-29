@@ -16,14 +16,15 @@ use uuid::Uuid;
 use chrono::Timelike;
 
 use rune_config::{
-    AppConfig, Capabilities, ConfiguredModel, LaneQueueConfig, ModelProviderConfig, RuntimeMode,
+    AppConfig, Capabilities, ConfiguredModel, InstanceIdentity, LaneQueueConfig,
+    ModelProviderConfig, RuntimeMode,
 };
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };
 use rune_runtime::{
-    CompactionStrategy, ContextAssembler, HookRegistry, NoOpCompaction, PluginLoader,
-    PluginRegistry, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
+    CompactionStrategy, ContextAssembler, ContextTierKind, HookRegistry, NoOpCompaction,
+    PluginLoader, PluginRegistry, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -46,6 +47,7 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
+use rune_gateway::parse_memory_search_output;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
@@ -53,6 +55,7 @@ use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRe
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
         mode: RuntimeMode::Standalone,
+        updated_at: "2026-03-29T00:00:00Z".to_string(),
         storage_backend: "test".to_string(),
         pgvector: false,
         memory_mode: "disabled".to_string(),
@@ -63,7 +66,20 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
         tool_count,
         channels: vec![],
         approval_mode: "prompt".to_string(),
-        security_posture: "sandboxed".to_string(),
+        security_posture: "standard".to_string(),
+        identity: InstanceIdentity {
+            id: "test-instance".to_string(),
+            name: "test-instance".to_string(),
+            advertised_addr: Some("http://127.0.0.1:8787".to_string()),
+            roles: vec!["gateway".to_string(), "scheduler".to_string()],
+            capabilities_version: 1,
+            capability_hash: "cap-test-instance".to_string(),
+        },
+        peer_count: 0,
+        peers: vec![],
+        configured_models: vec![],
+        active_projects: vec![],
+        comms_transport: "filesystem".to_string(),
     })
 }
 
@@ -1518,7 +1534,12 @@ fn build_test_app_parts_with_ms365_services(
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
     std::fs::write(workspace_root.join("AGENTS.md"), "# Test workspace").unwrap();
 
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let context_assembler = ContextAssembler::new("You are a test assistant.").with_tier_budgets(
+        config.context.identity,
+        config.context.task,
+        config.context.project,
+        config.context.shared,
+    );
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -1559,6 +1580,14 @@ fn build_test_app_parts_with_ms365_services(
     let event_tx = test_event_sender().clone();
 
     config.gateway.auth_token = auth_token.clone();
+    let capabilities = Arc::new(Capabilities::detect(
+        &config,
+        RuntimeMode::Standalone,
+        "test",
+        false,
+        false,
+        0,
+    ));
     let skills_dir = config.paths.skills_dir.clone();
     let config = Arc::new(RwLock::new(config));
     let skill_registry = Arc::new(SkillRegistry::new());
@@ -1586,7 +1615,7 @@ fn build_test_app_parts_with_ms365_services(
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
+        capabilities,
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
@@ -1842,6 +1871,9 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 4);
     assert_eq!(payload["lane_stats"]["subagent_active"], 0);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
+    assert_eq!(payload["lane_stats"]["tool_active"], 0);
+    assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
+    assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
 
     drop(main_permit);
 }
@@ -2086,6 +2118,8 @@ async fn status_reports_configured_lane_capacities() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 6);
     assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
+    assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
+    assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
 }
 
 #[tokio::test]
@@ -2178,6 +2212,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
     let subagent_permit = lane_queue.acquire(Lane::Subagent).await;
+    let tool_permit = lane_queue.acquire_tool(Some("project-a")).await;
 
     let dispatcher = RpcDispatcher::new(state);
     let payload = dispatcher
@@ -2192,9 +2227,13 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["tools"]["active"], 1);
+    assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
+    assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
 
     drop(main_permit);
     drop(subagent_permit);
+    drop(tool_permit);
 }
 
 #[tokio::test]
@@ -2315,7 +2354,14 @@ async fn ws_rpc_runtime_context_budget_reports_partition_usage_and_checkpoint() 
 
     assert_eq!(payload["report"]["total_capacity"], 1000);
     assert_eq!(payload["report"]["total_used"], 250);
+    assert_eq!(payload["assembly"]["total_budget"], 36_000);
+    assert_eq!(payload["assembly"]["compaction_trigger_tokens"], 50_000);
+    assert_eq!(payload["assembly"]["warn_at_tokens"], 102_400);
+    assert_eq!(payload["assembly"]["usable_prompt_budget"], 113_000);
     assert_eq!(payload["checkpoint"]["status"], "planning");
+    assert_eq!(payload["tiers"]["identity"]["token_budget"], 1000);
+    assert_eq!(payload["tiers"]["task"]["staleness_policy"], "per_turn");
+    assert_eq!(payload["tiers"]["historical"]["priority"], 4);
     assert_eq!(payload["checkpoint"]["next_step"], "wire runtime");
     assert_eq!(
         payload["checkpoint"]["partition_snapshot"]["Objective"],
@@ -2332,6 +2378,121 @@ async fn ws_rpc_runtime_context_budget_reports_partition_usage_and_checkpoint() 
             .iter()
             .any(|partition| partition["name"] == "Objective" && partition["token_count"] == 100)
     );
+}
+
+#[tokio::test]
+async fn ws_rpc_runtime_context_budget_gc_compacts_and_returns_before_after_reports() {
+    use rune_gateway::logging::LogStore;
+    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
+    use rune_gateway::ws_rpc::RpcDispatcher;
+
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
+    };
+
+    let dispatcher = RpcDispatcher::new(state);
+    let payload = dispatcher
+        .dispatch(
+            "runtime.context_budget.gc",
+            serde_json::json!({
+                "total_capacity": 100,
+                "items": [
+                    { "partition": "history", "id": "h0", "token_count": 10 },
+                    { "partition": "history", "id": "h1", "token_count": 10 },
+                    { "partition": "history", "id": "h2", "token_count": 10 },
+                    { "partition": "history", "id": "h3", "token_count": 10 },
+                    { "partition": "history", "id": "h4", "token_count": 10 },
+                    { "partition": "history", "id": "h5", "token_count": 10 },
+                    { "partition": "background", "id": "bg", "token_count": 15, "summarized": true }
+                ],
+                "status": "busy",
+                "key_decisions": ["compact hot history"],
+                "next_step": "continue"
+            }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(payload["before"]["total_used"], 75);
+    assert_eq!(payload["after"]["total_used"], 75);
+    assert_eq!(payload["checkpoint"]["status"], "busy");
+    assert_eq!(payload["gc"]["NoAction"], serde_json::Value::Null);
+    assert!(payload["after"]["last_gc"].is_null());
 }
 
 #[tokio::test]
@@ -4094,7 +4255,12 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
 
 #[tokio::test]
 async fn health_returns_200() {
-    let app = build_test_app(None);
+    let mut config = AppConfig::default();
+    config.instance.id = "test-instance".to_string();
+    config.instance.name = "test-instance".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    let app = build_test_app_with_config(config, None);
     let response = app
         .oneshot(Request::get("/health").body(Body::empty()).unwrap())
         .await
@@ -4107,6 +4273,833 @@ async fn health_returns_200() {
     assert_eq!(json["ws_connections"], 0);
     assert_eq!(json["mode"], "standalone");
     assert_eq!(json["storage_backend"], "test");
+}
+
+#[tokio::test]
+async fn instance_health_returns_capability_manifest() {
+    let mut config = AppConfig::default();
+    config.instance.id = "test-instance".to_string();
+    config.instance.name = "test-instance".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["service"], "rune-gateway");
+    assert!(json["load"].is_object());
+    assert_eq!(json["load"]["session_count"], 0);
+    assert_eq!(json["load"]["ws_connections"], 0);
+    assert!(json["capabilities"].is_object());
+    assert!(
+        json["capabilities"]["updated_at"]
+            .as_str()
+            .unwrap()
+            .contains("T")
+    );
+    assert_eq!(json["capabilities"]["instance_id"], "test-instance");
+    assert_eq!(json["capabilities"]["instance_name"], "test-instance");
+    assert!(json["capabilities"]["identity"]["id"].is_string());
+    assert_eq!(json["capabilities"]["identity"]["name"], "test-instance");
+    assert_eq!(
+        json["capabilities"]["identity"]["advertised_addr"],
+        "http://127.0.0.1:8787"
+    );
+    assert!(
+        json["capabilities"]["identity"]["roles"]
+            .as_array()
+            .is_some_and(|roles| roles.iter().any(|role| role == "gateway"))
+    );
+    assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 1);
+    assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
+    assert_eq!(json["capabilities"]["peer_count"], 0);
+    assert!(json["capabilities"]["configured_models"].is_array());
+    assert!(
+        json["capabilities"]["configured_models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|model| model.is_string())
+    );
+    assert!(json["capabilities"]["active_projects"].is_array());
+    assert_eq!(json["capabilities"]["comms_transport"], "filesystem");
+}
+
+#[tokio::test]
+async fn instance_health_reports_peer_metadata_from_health_payload() {
+    let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peer_addr = peer_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 3,
+                "ws_subscribers": 1,
+                "ws_connections": 2
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "peer-a",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway", "coder"],
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "peer-a",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["rune"],
+                "comms_transport": "filesystem"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(peer_listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{peer_addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peer = json["peers"].as_array().unwrap().first().unwrap();
+    assert_eq!(peer["status"], "healthy");
+    assert_eq!(peer["name"], "peer-a");
+    assert_eq!(peer["load"]["session_count"], 3);
+    assert_eq!(peer["advertised_addr"], "http://peer-a:8787");
+    assert_eq!(peer["roles"], serde_json::json!(["gateway", "coder"]));
+    assert_eq!(peer["capability_hash"], "cap-peer-a");
+    assert_eq!(peer["capabilities_version"], 1);
+    assert_eq!(peer["comms_transport"], "filesystem");
+    assert_eq!(peer["configured_models"], serde_json::json!(["gpt-4.1"]));
+    assert_eq!(peer["active_projects"], serde_json::json!(["rune"]));
+    assert_eq!(peer["capabilities_version"], 1);
+    assert_eq!(peer["capability_hash"], "cap-peer-a");
+    assert_eq!(peer["comms_transport"], "filesystem");
+}
+
+#[tokio::test]
+async fn delegation_plan_selects_least_busy_healthy_peer() {
+    async fn spawn_peer(session_count: usize, ws_connections: usize, id: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let payload = serde_json::json!({
+                "status": "ok",
+                "service": "rune-gateway",
+                "version": "0.1.0",
+                "uptime_seconds": 12,
+                "load": {
+                    "session_count": session_count,
+                    "ws_subscribers": 0,
+                    "ws_connections": ws_connections
+                },
+                "capabilities": {
+                    "mode": "standalone",
+                    "updated_at": "2026-03-29T00:00:00Z",
+                    "storage_backend": "sqlite",
+                    "pgvector": false,
+                    "memory_mode": "semantic",
+                    "browser": false,
+                    "mcp_servers": 0,
+                    "tts": false,
+                    "stt": false,
+                    "channels": [],
+                    "approval_mode": "manual",
+                    "security_posture": "standard",
+                    "identity": {
+                        "id": id,
+                        "name": id,
+                        "advertised_addr": null,
+                        "roles": ["gateway"],
+                        "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
+                    },
+                    "instance_id": id,
+                    "instance_name": id,
+                    "peer_count": 0,
+                    "configured_models": [],
+                    "active_projects": [],
+                    "comms_transport": "filesystem"
+                },
+                "peers": []
+            });
+            let app = axum::Router::new().route(
+                "/api/v1/instance/health",
+                axum::routing::get(move || {
+                    let payload = payload.clone();
+                    async move { axum::Json(payload) }
+                }),
+            );
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}/api/v1/instance/health")
+    }
+
+    let peer_a_url = spawn_peer(8, 4, "peer-a").await;
+    let peer_b_url = spawn_peer(2, 1, "peer-b").await;
+
+    let mut config = AppConfig::default();
+    config.instance.id = "rune-test-instance".to_string();
+    config.instance.name = "Rune Test Instance".to_string();
+    config.instance.peers = vec![
+        rune_config::PeerConfig {
+            id: "peer-a".to_string(),
+            health_url: peer_a_url,
+        },
+        rune_config::PeerConfig {
+            id: "peer-b".to_string(),
+            health_url: peer_b_url.clone(),
+        },
+        rune_config::PeerConfig {
+            id: "peer-down".to_string(),
+            health_url: "http://127.0.0.1:9/api/v1/instance/health".to_string(),
+        },
+    ];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=least_busy")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["strategy"], "least_busy");
+    assert_eq!(json["selected_peer"]["id"], "peer-b");
+    assert_eq!(json["receiver"]["instance_id"], "peer-b");
+    assert_eq!(json["receiver"]["instance_name"], "peer-b");
+    assert_eq!(json["receiver"]["transport"], "http");
+    assert_eq!(json["selected_peer"]["capabilities_version"], 1);
+    assert_eq!(json["selected_peer"]["capability_hash"], "cap-peer-a");
+    assert_eq!(json["selected_peer"]["comms_transport"], "filesystem");
+    assert_eq!(
+        json["receiver"]["submit_url"],
+        format!(
+            "{}/api/v1/instance/delegations",
+            peer_b_url.trim_end_matches("/api/v1/instance/health")
+        )
+    );
+    assert_eq!(
+        json["receiver"]["result_url"],
+        format!(
+            "{}/api/v1/instance/delegations/{task_id}",
+            peer_b_url.trim_end_matches("/api/v1/instance/health"),
+            task_id = "{task_id}"
+        )
+    );
+    assert_eq!(json["selected_peer"]["load"]["session_count"], 2);
+    assert_eq!(json["candidates"].as_array().unwrap().len(), 3);
+    assert_eq!(json["sender"]["instance_id"], "rune-test-instance");
+    assert_eq!(json["sender"]["instance_name"], "Rune Test Instance");
+    assert_eq!(json["sender"]["transport"], "filesystem");
+    assert_eq!(json["sender"]["health_url"], serde_json::Value::Null);
+    assert_eq!(json["sender"]["submit_url"], serde_json::Value::Null);
+    assert_eq!(json["sender"]["result_url"], serde_json::Value::Null);
+    assert_eq!(json["routing"]["mode"], "least_busy");
+    assert_eq!(json["routing"]["peer_count"], 3);
+    assert_eq!(json["branch_reservation"]["required"], true);
+    assert_eq!(
+        json["branch_reservation"]["mechanism"],
+        "branch_reservation"
+    );
+    assert_eq!(json["file_locks"]["required"], true);
+    assert_eq!(json["file_locks"]["mechanism"], "file_locks");
+    assert_eq!(
+        json["task_status"]["states"],
+        serde_json::json!([
+            "submitted",
+            "accepted",
+            "running",
+            "completed",
+            "failed",
+            "timeout"
+        ])
+    );
+    assert_eq!(
+        json["task_status"]["terminal_states"],
+        serde_json::json!(["completed", "failed", "timeout"])
+    );
+    assert_eq!(json["result"]["status_field"], "status");
+    assert_eq!(json["result"]["artifact_field"], "artifacts");
+    assert_eq!(json["result"]["error_field"], "error");
+    assert_eq!(json["result"]["finished_at_field"], "finished_at");
+    assert_eq!(json["result"]["accepted_at_field"], "accepted_at");
+    assert_eq!(json["result"]["started_at_field"], "started_at");
+    assert_eq!(json["result"]["task_id_field"], "task_id");
+    assert_eq!(json["task_contract"]["protocol_version"], 1);
+    assert_eq!(
+        json["task_contract"]["submission_modes"],
+        serde_json::json!(["named", "least_busy"])
+    );
+    assert_eq!(
+        json["task_contract"]["lifecycle"],
+        serde_json::json!([
+            "submitted",
+            "accepted",
+            "running",
+            "completed",
+            "failed",
+            "timeout"
+        ])
+    );
+    assert!(
+        json["task_contract"]["conflict_prevention"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.as_str().unwrap_or_default().contains("branch names"))
+    );
+}
+
+#[tokio::test]
+async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertised_addr_is_set() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "peer-a",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway"],
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "peer-a",
+                "peer_count": 0,
+                "configured_models": [],
+                "active_projects": [],
+                "comms_transport": "filesystem"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787/".to_string());
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["selected_peer"]["id"], "peer-a");
+    assert_eq!(
+        json["sender"]["health_url"],
+        "http://127.0.0.1:8787/api/v1/instance/health"
+    );
+    assert_eq!(
+        json["sender"]["submit_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations"
+    );
+    assert_eq!(
+        json["sender"]["result_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations/{task_id}"
+    );
+    assert_eq!(json["routing"]["mode"], "named");
+    assert_eq!(json["capability_match"]["compatible"], true);
+    assert_eq!(
+        json["capability_match"]["missing_roles"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        json["capability_match"]["detail"],
+        "receiver matches advertised roles/projects but no configured model overlap was declared"
+    );
+}
+
+#[tokio::test]
+async fn delegation_plan_reports_capability_match_for_selected_peer() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "peer-a",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway", "scheduler"],
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "peer-a",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1", "claude-3-7-sonnet"],
+                "active_projects": ["/workspace/rune"],
+                "comms_transport": "filesystem"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+    config.models.providers = vec![rune_config::ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
+    }];
+    config.agents.defaults.workspace = Some("/workspace/rune".to_string());
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["capability_match"]["compatible"], true);
+    assert_eq!(
+        json["capability_match"]["model_overlap"],
+        serde_json::json!(["gpt-4.1"])
+    );
+    assert_eq!(
+        json["capability_match"]["missing_roles"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        json["capability_match"]["missing_projects"],
+        serde_json::json!([])
+    );
+}
+
+#[tokio::test]
+async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "Peer Alpha",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway", "coder"],
+                    "capabilities_version": 7,
+                    "capability_hash": "cap-peer-alpha"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "Peer Alpha",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["rune", "phoenix"],
+                "comms_transport": "http"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "peer-a");
+    assert_eq!(json["receiver"]["instance_name"], "Peer Alpha");
+    assert_eq!(json["selected_peer"]["name"], "Peer Alpha");
+    assert_eq!(json["selected_peer"]["capability_hash"], "cap-peer-alpha");
+    assert_eq!(json["selected_peer"]["capabilities_version"], 7);
+    assert_eq!(json["selected_peer"]["comms_transport"], "http");
+}
+
+
+#[tokio::test]
+async fn delegation_plan_rejects_named_strategy_when_peer_has_capability_mismatch() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-b",
+                    "name": "Peer Beta",
+                    "advertised_addr": "http://peer-b:8787",
+                    "roles": ["gateway"],
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-beta"
+                },
+                "instance_id": "peer-b",
+                "instance_name": "Peer Beta",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["phoenix"],
+                "comms_transport": "http"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    config.instance.roles = vec!["gateway".to_string(), "coder".to_string()];
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-b".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+    config.agents.list = vec![rune_config::AgentConfig {
+        id: "rune".to_string(),
+        default: Some(true),
+        model: None,
+        workspace: Some("rune".to_string()),
+        system_prompt: None,
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-b")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["selected_peer"]["id"], "peer-b");
+    assert_eq!(json["capability_match"]["compatible"], false);
+    assert_eq!(json["capability_match"]["missing_roles"], serde_json::json!(["coder"]));
+    assert_eq!(json["capability_match"]["missing_projects"], serde_json::json!(["rune"]));
+}
+
+#[tokio::test]
+async fn delegation_plan_exposes_full_task_contract_fields() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(
+        json["task_contract"]["required_fields"],
+        serde_json::json!(["task", "constraints", "expected_output", "timeout_secs"])
+    );
+    assert_eq!(
+        json["task_contract"]["optional_fields"],
+        serde_json::json!([
+            "target_peer_id",
+            "branch_reservation",
+            "file_locks",
+            "artifacts"
+        ])
+    );
+    assert_eq!(
+        json["task_contract"]["timeout_handling"],
+        serde_json::json!([
+            "sender supplies timeout_secs per task",
+            "runtime treats deadline expiry as timeout",
+            "timeout yields terminal status and structured error detail"
+        ])
+    );
+    assert_eq!(
+        json["task_contract"]["result_fields"],
+        serde_json::json!([
+            "task_id",
+            "status",
+            "accepted_at",
+            "started_at",
+            "output",
+            "artifacts",
+            "error",
+            "finished_at"
+        ])
+    );
+    assert!(
+        json["routing"]["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("no healthy peers available")
+    );
+    assert_eq!(json["receiver"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn delegation_plan_requires_peer_id_for_named_strategy() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn instance_health_reports_peer_health_states() {
+    let healthy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let healthy_addr = healthy_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let app =
+            axum::Router::new().route("/health", axum::routing::get(|| async { StatusCode::OK }));
+        axum::serve(healthy_listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![
+        rune_config::PeerConfig {
+            id: "peer-healthy".to_string(),
+            health_url: format!("http://{healthy_addr}/health"),
+        },
+        rune_config::PeerConfig {
+            id: "peer-down".to_string(),
+            health_url: "http://127.0.0.1:9/health".to_string(),
+        },
+    ];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peers = json["peers"].as_array().unwrap();
+    assert_eq!(peers.len(), 2);
+    assert_eq!(json["capabilities"]["peer_count"], 2);
+
+    let healthy = peers
+        .iter()
+        .find(|peer| peer["id"] == "peer-healthy")
+        .unwrap();
+    assert_eq!(healthy["status"], "degraded");
+    assert_eq!(
+        healthy["health_url"],
+        format!("http://{healthy_addr}/health")
+    );
+    assert!(healthy["latency_ms"].is_number());
+
+    let down = peers.iter().find(|peer| peer["id"] == "peer-down").unwrap();
+    assert_eq!(down["status"], "unreachable");
+    assert_eq!(down["health_url"], "http://127.0.0.1:9/health");
+    assert!(down["detail"].is_string());
 }
 
 #[tokio::test]
@@ -4126,15 +5119,30 @@ async fn status_returns_correct_shape() {
     assert!(json["registered_tools"].is_number());
     assert!(json["session_count"].is_number());
     assert!(json["capabilities"].is_object());
+    assert!(
+        json["capabilities"]["updated_at"]
+            .as_str()
+            .unwrap()
+            .contains("T")
+    );
     assert_eq!(json["capabilities"]["mode"], "standalone");
     assert_eq!(json["capabilities"]["storage_backend"], "test");
     assert_eq!(json["capabilities"]["pgvector"], false);
-    assert_eq!(json["capabilities"]["memory_mode"], "disabled");
+    assert_eq!(
+        json["capabilities"]["memory_mode"],
+        "semantic-keyword-fallback"
+    );
     assert_eq!(json["capabilities"]["browser"], false);
     assert_eq!(json["capabilities"]["mcp_servers"], 0);
     assert_eq!(json["capabilities"]["tts"], false);
     assert_eq!(json["capabilities"]["stt"], false);
     assert_eq!(json["capabilities"]["channels"], serde_json::json!([]));
+    assert!(json["capabilities"]["identity"]["id"].is_string());
+    assert!(
+        json["capabilities"]["identity"]["roles"]
+            .as_array()
+            .is_some_and(|roles| roles.iter().any(|role| role == "gateway"))
+    );
 }
 
 #[tokio::test]
@@ -4281,7 +5289,6 @@ async fn dashboard_models_lists_provider_inventory() {
     assert!(items.iter().any(|item| item["is_default"] == true));
 }
 
-
 #[tokio::test]
 async fn list_models_marks_configured_inventory_as_not_discovered() {
     let mut config = AppConfig::default();
@@ -4314,7 +5321,7 @@ async fn list_models_marks_configured_inventory_as_not_discovered() {
 
 #[tokio::test]
 async fn scan_models_uses_ollama_provider_discovery() {
-    use axum::{routing::get, Json, Router};
+    use axum::{Json, Router, routing::get};
     use serde_json::json;
     use tokio::net::TcpListener;
 
@@ -4399,6 +5406,96 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(context_budget["usable_prompt_budget"], 113000);
     assert_eq!(context_budget["auto_inject_project"], true);
     assert_eq!(context_budget["memory_search_k"], 10);
+    assert_eq!(context_budget["total_tier_budget"], 36000);
+    assert_eq!(context_budget["exceeds_usable_budget"], false);
+    let context_tiers = &json["context_tiers"];
+    assert_eq!(context_tiers["identity"], 1000);
+    assert_eq!(context_tiers["task"], 10000);
+    assert_eq!(context_tiers["project"], 20000);
+    assert_eq!(context_tiers["shared"], 5000);
+    let memory_hierarchy = &json["memory_hierarchy"];
+    assert_eq!(memory_hierarchy["prompt_cache_rows"], 0);
+    assert_eq!(memory_hierarchy["cached_tokens"], 0);
+    assert_eq!(memory_hierarchy["total_input_tokens"], 0);
+    assert_eq!(memory_hierarchy["cache_hit_ratio_percent"], 0.0);
+    assert_eq!(memory_hierarchy["l2_recall_hits"], 0);
+    assert_eq!(memory_hierarchy["l2_hot_memories"], 0);
+    assert_eq!(memory_hierarchy["l2_total_memories"], 0);
+    assert_eq!(memory_hierarchy["context_total_budget"], 36000);
+    assert_eq!(memory_hierarchy["context_compaction_trigger_tokens"], 50000);
+    assert_eq!(memory_hierarchy["context_over_budget"], false);
+    assert_eq!(memory_hierarchy["context_over_compaction_threshold"], false);
+    assert_eq!(memory_hierarchy["context_compaction_required"], false);
+    assert_eq!(memory_hierarchy["loaded_tier_count"], 5);
+    assert!(
+        items
+            .iter()
+            .any(|item| item["source"] == "memory_hierarchy")
+    );
+}
+
+#[tokio::test]
+async fn context_assembly_report_flags_compaction_when_budget_is_exceeded() {
+    let assembler = ContextAssembler::new("Identity block").with_tier_budgets(1, 1, 1, 1);
+    let report = assembler.analyze_context_usage(
+        None,
+        None,
+        &[
+            "This active task section is deliberately longer than the configured budget.".into(),
+            "Additional task context to force both tier and compaction thresholds.".into(),
+        ],
+        8,
+        false,
+    );
+
+    assert!(report.over_budget);
+    assert!(report.over_compaction_threshold);
+    assert!(report.compaction_required);
+}
+
+#[tokio::test]
+async fn context_assembler_uses_configured_tier_budgets() {
+    let assembler =
+        ContextAssembler::new("You are Rune.").with_tier_budgets(1200, 3400, 5600, 7800);
+    let specs = assembler.tier_specs();
+
+    assert_eq!(specs[0].kind, ContextTierKind::Identity);
+    assert_eq!(specs[0].token_budget, 1200);
+    assert_eq!(specs[1].kind, ContextTierKind::ActiveTask);
+    assert_eq!(specs[1].token_budget, 3400);
+    assert_eq!(specs[2].kind, ContextTierKind::Project);
+    assert_eq!(specs[2].token_budget, 5600);
+    assert_eq!(specs[3].kind, ContextTierKind::Shared);
+    assert_eq!(specs[3].token_budget, 7800);
+    assert_eq!(specs[4].kind, ContextTierKind::Historical);
+    assert_eq!(specs[4].token_budget, 0);
+}
+
+#[tokio::test]
+async fn create_session_accepts_project_id_metadata() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "direct",
+                        "mode": "operator",
+                        "project_id": "phoenix"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let json = body_json(response).await;
+    assert_eq!(json["project_id"], "phoenix");
+    assert_eq!(json["mode"], "operator");
 }
 
 #[tokio::test]
@@ -7101,7 +8198,11 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
         .unwrap();
 
     let response = app
-        .oneshot(Request::get("/api/dashboard/usage").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/api/dashboard/usage")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -8157,6 +9258,237 @@ async fn list_sessions_filters_by_channel_and_activity() {
     assert_eq!(items[0]["channel"], "telegram");
 }
 
+#[tokio::test]
+async fn create_subagent_session_accepts_shared_scratchpad_without_delegation_context() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let parent_json = body_json(response).await;
+    let parent_id = parent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "subagent",
+                        "requester_session_id": parent_id,
+                        "shared_scratchpad_path": "agents/acme/scratchpads/findings.md"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let subagent_json = body_json(response).await;
+    let subagent_id = subagent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/sessions?kind=subagent&include_metadata=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sessions = body_json(response).await;
+    let items = sessions.as_array().unwrap();
+    let session = items
+        .iter()
+        .find(|item| item["id"] == subagent_id)
+        .expect("subagent session present");
+    assert_eq!(
+        session["metadata"]["shared_scratchpad"]["path"],
+        "agents/acme/scratchpads/findings.md"
+    );
+    assert_eq!(
+        session["metadata"]["delegation_context"],
+        serde_json::json!({})
+    );
+}
+#[tokio::test]
+async fn create_subagent_session_accepts_delegation_context_and_scratchpad() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let parent_json = body_json(response).await;
+    let parent_id = parent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "subagent",
+                        "requester_session_id": parent_id,
+                        "channel_ref": "orchestrator:acme",
+                        "mode": "isolated",
+                        "delegation_context": {
+                            "task": "Implement retry budget fix",
+                            "budget": { "token_budget": 1536 },
+                            "file_summaries": [
+                                {"path": "src/retry.rs", "summary": "retry budget enforcement"}
+                            ]
+                        },
+                        "shared_scratchpad_path": "agents/acme/scratchpads/retry-fix.md"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let subagent_json = body_json(response).await;
+    let subagent_id = subagent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/sessions?kind=subagent&include_metadata=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sessions = body_json(response).await;
+    let items = sessions.as_array().unwrap();
+    let session = items
+        .iter()
+        .find(|item| item["id"] == subagent_id)
+        .expect("subagent session present");
+    assert_eq!(session["mode"], "isolated");
+    assert_eq!(
+        session["metadata"]["delegation_context"]["task"],
+        "Implement retry budget fix"
+    );
+    assert_eq!(
+        session["metadata"]["delegation_context"]["budget"]["token_budget"],
+        1536
+    );
+    assert_eq!(
+        session["metadata"]["shared_scratchpad"]["path"],
+        "agents/acme/scratchpads/retry-fix.md"
+    );
+}
+
+#[tokio::test]
+async fn create_subagent_session_embeds_delegation_plan_metadata() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let parent_json = body_json(response).await;
+    let parent_id = parent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "subagent",
+                        "requester_session_id": parent_id,
+                        "delegation_context": {
+                            "task": "Implement retry budget fix"
+                        },
+                        "delegation_plan": {
+                            "strategy": "named",
+                            "sender": {
+                                "instance_id": "origin-a",
+                                "instance_name": "Origin A",
+                                "submit_url": "http://origin-a/api/v1/instance/delegations"
+                            },
+                            "receiver": {
+                                "instance_id": "peer-b",
+                                "instance_name": "Peer B",
+                                "result_url": "http://peer-b/api/v1/instance/delegations/{task_id}"
+                            },
+                            "task_contract": {
+                                "protocol_version": 1,
+                                "submission_modes": ["http_post"]
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let subagent_json = body_json(response).await;
+    let subagent_id = subagent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/sessions?kind=subagent&include_metadata=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sessions = body_json(response).await;
+    let items = sessions.as_array().unwrap();
+    let session = items
+        .iter()
+        .find(|item| item["id"] == subagent_id)
+        .expect("subagent session present");
+    assert_eq!(
+        session["metadata"]["delegation_context"]["delegation_plan"]["strategy"],
+        "named"
+    );
+    assert_eq!(
+        session["metadata"]["delegation_context"]["delegation_plan"]["sender"]["instance_id"],
+        "origin-a"
+    );
+    assert_eq!(
+        session["metadata"]["delegation_context"]["delegation_plan"]["receiver"]["instance_name"],
+        "Peer B"
+    );
+}
+
 // ── Agents (subagent kind filter) tests ───────────────────────────────────────
 
 #[tokio::test]
@@ -8679,6 +10011,32 @@ async fn agent_steer_success() {
     // Verify metadata was updated.
     let session = session_repo.find_by_id(agent_id).await.unwrap();
     assert_eq!(session.metadata["subagent_lifecycle"], "steered");
+}
+
+#[tokio::test]
+async fn create_subagent_session_with_scratchpad_only_ignores_unknown_fields() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "kind": "subagent",
+                        "mode": "isolated",
+                        "shared_scratchpad_path": "agents/acme/scratchpads/research.md"
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let json = body_json(response).await;
+    assert_eq!(json["kind"], "subagent");
+    assert_eq!(json["mode"], "isolated");
 }
 
 #[tokio::test]
@@ -9396,12 +10754,28 @@ async fn memory_search_route_returns_workspace_hits() {
     assert_eq!(body["query"], "Hamza");
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
+    assert_eq!(body["results"][0]["file_path"], "MEMORY.md");
+    assert_eq!(body["results"][0]["line"], 2);
     assert!(
         body["results"][0]["snippet"]
             .as_str()
             .unwrap()
             .contains("Met Hamza at Horizon Tech")
     );
+}
+
+#[test]
+fn parse_memory_search_output_extracts_file_and_line_metadata() {
+    let results = parse_memory_search_output(
+        "Source: MEMORY.md#2\nMet Hamza at Horizon Tech\n---\nSource: memory/2026-03-26.md#14\nShipped webchat support today",
+    );
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].source, "MEMORY.md#2");
+    assert_eq!(results[0].file_path, "MEMORY.md");
+    assert_eq!(results[0].line, 2);
+    assert_eq!(results[1].file_path, "memory/2026-03-26.md");
+    assert_eq!(results[1].line, 14);
 }
 
 #[tokio::test]
@@ -10529,6 +11903,8 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
     assert_eq!(body["query"], "Hamza");
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
+    assert_eq!(body["results"][0]["file_path"], "MEMORY.md");
+    assert_eq!(body["results"][0]["line"], 2);
     assert!(
         body["results"][0]["snippet"]
             .as_str()
@@ -10669,6 +12045,36 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
 
     let (app, _) = build_test_app_parts(config, Some("secret-token".into()));
 
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let session_id = body_json(create_response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let send_response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/sessions/{session_id}/messages"))
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"content":"hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(send_response.status(), StatusCode::OK);
+
     let response = app
         .oneshot(
             Request::post("/api/doctor/run")
@@ -10681,28 +12087,92 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
 
-    assert_eq!(body["memory_hierarchy"]["l0"], "current turn context window (active transcript + system/task/project context)");
-    assert!(body["memory_hierarchy"]["l1"]
-        .as_str()
-        .unwrap()
-        .contains("prompt cache via provider prefixes"));
-    assert!(body["memory_hierarchy"]["l2"]
-        .as_str()
-        .unwrap()
-        .contains("memory retrieval"));
-    assert_eq!(body["memory_hierarchy"]["l3"], "durable session logs in transcript/session storage");
-    assert!(body["memory_hierarchy"]["promotion"]
-        .as_str()
-        .unwrap()
-        .contains("L2 hits become L1 candidates"));
-    assert!(body["memory_hierarchy"]["demotion"]
-        .as_str()
-        .unwrap()
-        .contains("compaction checkpoints persist stale L0 context"));
-    assert!(body["memory_hierarchy"]["metrics"]
-        .as_str()
-        .unwrap()
-        .contains("prompt_cache_rows="));
+    let l0_summary = body["memory_hierarchy"]["l0"].as_str().unwrap();
+    assert!(l0_summary.contains("current turn context window"));
+    assert!(l0_summary.contains("warn_at="));
+    assert!(l0_summary.contains("compress_after=50000"));
+    assert!(
+        body["memory_hierarchy"]["l1"]
+            .as_str()
+            .unwrap()
+            .contains("prompt cache via provider prefixes")
+    );
+    let l2_summary = body["memory_hierarchy"]["l2"].as_str().unwrap();
+    assert!(l2_summary.contains("memory retrieval"));
+    assert!(l2_summary.contains("recall_hits="));
+    assert!(
+        body["memory_hierarchy"]["l3"]
+            .as_str()
+            .unwrap()
+            .contains("ready for compaction handoff")
+    );
+    assert_eq!(body["memory_hierarchy"]["l3_cold_storage_enabled"], true);
+    assert!(
+        body["memory_hierarchy"]["promotion"]
+            .as_str()
+            .unwrap()
+            .contains("L2 hits become L1 candidates")
+    );
+    assert!(
+        body["memory_hierarchy"]["demotion"]
+            .as_str()
+            .unwrap()
+            .contains("compaction checkpoints persist stale L0 context")
+    );
+    assert!(
+        body["memory_hierarchy"]["metrics"]
+            .as_str()
+            .unwrap()
+            .contains("prompt_cache_rows=")
+    );
+    assert!(
+        body["memory_hierarchy"]["metrics"]
+            .as_str()
+            .unwrap()
+            .contains("l2_recall_hits=")
+    );
+    assert!(
+        body["memory_hierarchy"]["metrics"]
+            .as_str()
+            .unwrap()
+            .contains("l3_cold_storage_enabled=true")
+    );
+    assert_eq!(body["memory_hierarchy"]["prompt_cache_rows"], 1);
+    assert_eq!(body["memory_hierarchy"]["cached_tokens"], 0);
+    assert_eq!(body["memory_hierarchy"]["total_input_tokens"], 10);
+    assert_eq!(body["memory_hierarchy"]["cache_hit_ratio_percent"], 0.0);
+    assert_eq!(body["memory_hierarchy"]["context_total_budget"], 36000);
+    assert_eq!(
+        body["memory_hierarchy"]["context_total_estimated_tokens"],
+        7
+    );
+    assert_eq!(
+        body["memory_hierarchy"]["context_compaction_trigger_tokens"],
+        50000
+    );
+    assert_eq!(body["memory_hierarchy"]["context_over_budget"], false);
+    assert_eq!(
+        body["memory_hierarchy"]["context_over_compaction_threshold"],
+        false
+    );
+    assert_eq!(
+        body["memory_hierarchy"]["context_compaction_required"],
+        false
+    );
+    assert_eq!(body["memory_hierarchy"]["loaded_tier_count"], 5);
+    let tiers = body["memory_hierarchy"]["context_tier_counters"]
+        .as_array()
+        .unwrap();
+    assert_eq!(tiers.len(), 5);
+    assert_eq!(tiers[0]["kind"], "identity");
+    assert_eq!(tiers[0]["token_budget"], 1000);
+    assert_eq!(tiers[0]["priority"], 0);
+    assert_eq!(tiers[0]["staleness_policy"], "always_fresh");
+    assert_eq!(tiers[0]["loaded"], true);
+    assert_eq!(tiers[0]["source"], "system_instructions");
+    assert_eq!(body["memory_hierarchy"]["l2_recall_hits"], 0);
+    assert_eq!(body["memory_hierarchy"]["l2_hot_memories"], 0);
+    assert_eq!(body["memory_hierarchy"]["l2_total_memories"], 0);
 }
 
 #[tokio::test]
@@ -11383,7 +12853,6 @@ async fn api_tool_execution_route_returns_persisted_execution() {
     assert_eq!(json["result_summary"], "ok");
 }
 
-
 #[tokio::test]
 async fn tts_synthesize_rejects_empty_text() {
     let app = build_test_app(None);
@@ -11402,7 +12871,10 @@ async fn tts_synthesize_rejects_empty_text() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = body_json(response).await;
-    assert_eq!(json["message"], "bad request: text is required for TTS synthesis");
+    assert_eq!(
+        json["message"],
+        "bad request: text is required for TTS synthesis"
+    );
 }
 
 #[tokio::test]
@@ -12010,4 +13482,229 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
     assert_eq!(entry["cached_tokens"], 0);
     assert_eq!(entry["uncached_tokens"], 10);
     assert_eq!(entry["cache_hit_ratio_percent"], 0.0);
+}
+
+#[tokio::test]
+async fn instance_health_reports_peer_identity_and_transport_metadata_from_health_payload() {
+    let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peer_addr = peer_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 3,
+                "ws_subscribers": 1,
+                "ws_connections": 2
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "Peer A",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway", "coder"],
+                    "capabilities_version": 2,
+                    "capability_hash": "cap-peer-a-v2"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "Peer A",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["rune"],
+                "comms_transport": "http"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(peer_listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{peer_addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peer = json["peers"].as_array().unwrap().first().unwrap();
+    assert_eq!(peer["id"], "peer-a");
+    assert_eq!(peer["name"], "Peer A");
+    assert_eq!(peer["capability_hash"], "cap-peer-a-v2");
+    assert_eq!(peer["capabilities_version"], 2);
+    assert_eq!(peer["comms_transport"], "http");
+}
+
+#[tokio::test]
+async fn doctor_run_reports_instance_topology_summary() {
+    let mut config = AppConfig::default();
+    config.mode = RuntimeMode::Server;
+    config.database.backend = rune_config::StorageBackend::Postgres;
+    config.database.database_url = Some("postgresql://localhost/rune".into());
+    config.models.providers = vec![rune_config::ModelProviderConfig {
+        name: "azure".into(),
+        kind: "azure_openai".into(),
+        base_url: "https://example.invalid".into(),
+        api_key_env: Some("AZURE_OPENAI_API_KEY".into()),
+        api_key: None,
+        deployment_name: Some("gpt-4.1".into()),
+        api_version: None,
+        model_alias: Some("gpt-4.1".into()),
+        models: vec![rune_config::ConfiguredModel::Id("gpt-4.1".into())],
+    }];
+    config.memory.semantic_search_enabled = true;
+
+    let root = std::env::temp_dir().join(format!("rune-doctor-topology-{}", Uuid::now_v7()));
+    config.paths.db_dir = root.join("db");
+    config.paths.sessions_dir = root.join("sessions");
+    config.paths.memory_dir = root.join("memory");
+    config.paths.media_dir = root.join("media");
+    config.paths.skills_dir = root.join("skills");
+    config.paths.plugins_dir = root.join("plugins");
+    config.paths.logs_dir = root.join("logs");
+    config.paths.backups_dir = root.join("backups");
+    config.paths.config_dir = root.join("config");
+    config.paths.secrets_dir = root.join("secrets");
+    for dir in [
+        &config.paths.db_dir,
+        &config.paths.sessions_dir,
+        &config.paths.memory_dir,
+        &config.paths.media_dir,
+        &config.paths.skills_dir,
+        &config.paths.plugins_dir,
+        &config.paths.logs_dir,
+        &config.paths.backups_dir,
+        &config.paths.config_dir,
+        &config.paths.secrets_dir,
+    ] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::post("/api/doctor/run")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = body_json(response).await;
+    assert_eq!(body["topology"]["deployment"], "server");
+    assert_eq!(body["topology"]["database"], "azure-or-external-postgres");
+    assert_eq!(body["topology"]["models"], "azure");
+    assert_eq!(body["topology"]["search"], "semantic-hybrid");
+}
+
+#[tokio::test]
+async fn delegation_submission_accepts_structured_task_and_returns_status_envelope() {
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    let app = build_test_app_parts(config, None).0;
+
+    let payload = serde_json::json!({
+        "task_id": "delegation-421",
+        "protocol_version": 1,
+        "submitted_at": "2026-03-29T00:00:00Z",
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "submit_url": "http://sender-a/api/v1/instance/delegations",
+            "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
+        },
+        "task": {
+            "task": "Implement issue #421 acceptance-test shim",
+            "constraints": ["Run cargo check before returning"],
+            "expected_output": "Commit SHA plus summary of changed files",
+            "timeout_secs": 1800,
+            "target_peer_id": "peer-b",
+            "branch_reservation": "agent/rune/delegation-421",
+            "file_locks": ["crates/rune-gateway/src/routes.rs"],
+            "artifacts": [
+                {
+                    "name": "cargo-check.log",
+                    "kind": "log",
+                    "content_type": "text/plain",
+                    "description": "Verification output captured by receiver"
+                }
+            ]
+        }
+    });
+
+    let response = app
+        .oneshot(
+            Request::post("/api/v1/instance/delegations")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "peer-b");
+    assert_eq!(json["result"]["task_id"], "delegation-421");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert_eq!(json["result"]["started_at"], serde_json::Value::Null);
+    assert_eq!(json["result"]["finished_at"], serde_json::Value::Null);
+    assert_eq!(json["result"]["artifacts"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn delegation_status_route_returns_trackable_task_status() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegations/delegation-421")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["result"]["task_id"], "delegation-421");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert_eq!(json["receiver"]["instance_id"], "local-instance");
+    assert_eq!(
+        json["receiver"]["result_url"],
+        "/api/v1/instance/delegations/delegation-421"
+    );
 }

@@ -2,9 +2,10 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
-    AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
-    FunctionDefinition, GoogleProvider, ModelError, ModelProvider, OpenAiProvider, Role,
-    RoutedModelProvider, StreamEvent, ToolDefinition, provider_from_config,
+    AnthropicProvider, AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest,
+    FinishReason, FunctionDefinition, GoogleProvider, ImageUrlPart, MessagePart, ModelError,
+    ModelProvider, OpenAiProvider, Role, RoutedModelProvider, StreamEvent, ToolDefinition,
+    provider_from_config,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -22,6 +23,7 @@ fn simple_request() -> CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -104,6 +106,132 @@ async fn google_complete_stream_passthroughs_openai_compatible_sse() {
         payload.get("stream_options"),
         Some(&serde_json::json!({"include_usage": true}))
     );
+}
+
+
+#[tokio::test]
+async fn ollama_complete_stream_passthroughs_openai_compatible_sse() {
+    let server = MockServer::start().await;
+    let body = concat!(
+        r#"data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}],"usage":null}
+
+"#,
+        r#"data: {"choices":[{"delta":{"content":" from ollama"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}
+
+"#,
+        "data: [DONE]
+
+"
+    );
+
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = rune_models::OllamaProvider::with_base_url(&format!("{}/v1", server.uri()));
+    let mut request = simple_request();
+    request.model = Some("llama3.2".into());
+
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = stream.recv().await {
+        events.push(event);
+    }
+
+    assert_eq!(events.len(), 3);
+    assert!(matches!(&events[0], StreamEvent::TextDelta(delta) if delta == "Hello"));
+    assert!(matches!(&events[1], StreamEvent::TextDelta(delta) if delta == " from ollama"));
+    match &events[2] {
+        StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Hello from ollama"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+            assert_eq!(response.usage.total_tokens, 7);
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
+
+    let requests = server.received_requests().await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload.get("model"), Some(&serde_json::json!("llama3.2")));
+    assert_eq!(payload.get("stream"), Some(&serde_json::json!(true)));
+}
+
+#[tokio::test]
+async fn routed_provider_stream_uses_fallback_target_when_primary_selected() {
+    let fallback_server = MockServer::start().await;
+    let body = concat!(
+        r#"data: {"choices":[{"delta":{"content":"Fallback"},"finish_reason":null}],"usage":null}
+
+"#,
+        r#"data: {"choices":[{"delta":{"content":" stream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}
+
+"#,
+        "data: [DONE]
+
+"
+    );
+
+    Mock::given(method("POST"))
+        .and(body_partial_json(serde_json::json!({"model": "llama3.2"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .expect(1)
+        .mount(&fallback_server)
+        .await;
+
+    let models = ModelsConfig {
+        default_model: Some("local/llama3.2".into()),
+        default_image_model: None,
+        fallbacks: vec![ModelFallbackChainConfig {
+            name: "default-chat".into(),
+            chain: vec!["local/llama3.2".into(), "local/llama3.2".into()],
+        }],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![ModelProviderConfig {
+            name: "local".into(),
+            kind: "ollama".into(),
+            base_url: format!("{}/v1", fallback_server.uri()),
+            deployment_name: None,
+            api_version: None,
+            api_key_env: None,
+            api_key: None,
+            model_alias: None,
+            models: vec![ConfiguredModel::Id("llama3.2".into())],
+        }],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+    let request = CompletionRequest {
+        model: Some("local/llama3.2".into()),
+        ..simple_request()
+    };
+
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = stream.recv().await {
+        events.push(event);
+    }
+
+    assert_eq!(events.len(), 3);
+    assert!(matches!(&events[0], StreamEvent::TextDelta(delta) if delta == "Fallback"));
+    assert!(matches!(&events[1], StreamEvent::TextDelta(delta) if delta == " stream"));
+    match &events[2] {
+        StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Fallback stream"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
 }
 
 // --- Azure URL construction ---
@@ -303,6 +431,7 @@ async fn azure_request_golden_shape_full() {
             ChatMessage {
                 role: Role::System,
                 content: Some("You are helpful.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -310,6 +439,7 @@ async fn azure_request_golden_shape_full() {
             ChatMessage {
                 role: Role::User,
                 content: Some("Hello".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -319,6 +449,7 @@ async fn azure_request_golden_shape_full() {
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
             content: Some("You are helpful.".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -840,6 +971,47 @@ fn selects_ollama_provider_without_api_key() {
     };
     let provider = provider_from_config(&cfg).unwrap();
     let _: Box<dyn ModelProvider> = provider;
+}
+
+
+#[test]
+fn selects_openrouter_provider() {
+    let _guard = lock_env();
+    unsafe { std::env::set_var("TEST_OPENROUTER_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "openrouter".into(),
+        kind: "openrouter".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_OPENROUTER_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_OPENROUTER_KEY_SEL") };
+}
+
+#[test]
+fn selects_perplexity_provider() {
+    let _guard = lock_env();
+    unsafe { std::env::set_var("TEST_PERPLEXITY_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "perplexity".into(),
+        kind: "perplexity".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_PERPLEXITY_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_PERPLEXITY_KEY_SEL") };
 }
 
 #[test]
@@ -1796,6 +1968,7 @@ async fn foundry_openai_request_golden_shape() {
             ChatMessage {
                 role: Role::System,
                 content: Some("You are helpful.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -1803,6 +1976,7 @@ async fn foundry_openai_request_golden_shape() {
             ChatMessage {
                 role: Role::User,
                 content: Some("What is Rust?".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -1915,6 +2089,7 @@ async fn foundry_anthropic_extracts_system_message() {
             ChatMessage {
                 role: Role::System,
                 content: Some("You are a helpful assistant.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -1922,6 +2097,7 @@ async fn foundry_anthropic_extracts_system_message() {
             ChatMessage {
                 role: Role::User,
                 content: Some("Hi".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2029,6 +2205,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::System,
                 content: Some("Be concise.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2036,6 +2213,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::User,
                 content: Some("Explain Rust.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2043,6 +2221,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::Assistant,
                 content: Some("Rust is a systems language.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2050,6 +2229,7 @@ async fn foundry_anthropic_request_golden_shape() {
             ChatMessage {
                 role: Role::User,
                 content: Some("More detail.".into()),
+                content_parts: None,
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -2212,6 +2392,7 @@ fn claude_request() -> CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2534,6 +2715,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2542,6 +2724,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
             content: Some("Stable prefix".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2577,6 +2760,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2585,6 +2769,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
             content: Some("Stable prefix".into()),
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2675,4 +2860,171 @@ async fn openai_unauthenticated_mode_sends_no_auth_headers() {
         req.headers.get("api-key").is_none(),
         "unauthenticated mode must not send api-key header"
     );
+}
+
+#[tokio::test]
+async fn openai_serializes_multimodal_user_content_parts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = OpenAiProvider::new(&server.uri(), "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some(
+                "Describe this image
+
+[Attachments]
+- photo.jpg (image/jpeg, url=https://example.test/photo.jpg)"
+                    .into(),
+            ),
+            content_parts: Some(vec![
+                MessagePart::Text {
+                    text: "Describe this image".into(),
+                },
+                MessagePart::ImageUrl {
+                    image_url: ImageUrlPart {
+                        url: "https://example.test/photo.jpg".into(),
+                    },
+                },
+            ]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = provider.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let content = body["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[0]["text"], "Describe this image");
+    assert_eq!(content[1]["type"], "image_url");
+    assert_eq!(
+        content[1]["image_url"]["url"],
+        "https://example.test/photo.jpg"
+    );
+}
+
+#[tokio::test]
+async fn azure_serializes_multimodal_user_content_parts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(success_body()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = AzureOpenAiProvider::new(&server.uri(), "gpt-4o", "2024-06-01", "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some(
+                "Describe this image
+
+[Attachments]
+- photo.jpg (image/jpeg, url=https://example.test/photo.jpg)"
+                    .into(),
+            ),
+            content_parts: Some(vec![
+                MessagePart::Text {
+                    text: "Describe this image".into(),
+                },
+                MessagePart::ImageUrl {
+                    image_url: ImageUrlPart {
+                        url: "https://example.test/photo.jpg".into(),
+                    },
+                },
+            ]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("gpt-4o".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = provider.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let content = body["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[1]["type"], "image_url");
+    assert_eq!(
+        content[1]["image_url"]["url"],
+        "https://example.test/photo.jpg"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_serializes_multimodal_user_content_parts_as_content_blocks() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "content": [{ "type": "text", "text": "I see a diagram" }],
+            "usage": { "input_tokens": 10, "output_tokens": 8 },
+            "stop_reason": "end_turn"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = AnthropicProvider::azure(&server.uri(), "", "2023-06-01", "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Describe this image".into()),
+            content_parts: Some(vec![
+                MessagePart::Text {
+                    text: "Describe this image".into(),
+                },
+                MessagePart::ImageUrl {
+                    image_url: ImageUrlPart {
+                        url: "data:image/png;base64,QUJDRA==".into(),
+                    },
+                },
+            ]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("claude-sonnet-4-20250514".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = provider.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let content = body["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[0]["text"], "Describe this image");
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["source"]["type"], "base64");
+    assert_eq!(content[1]["source"]["media_type"], "image/png");
+    assert_eq!(content[1]["source"]["data"], "QUJDRA==");
 }

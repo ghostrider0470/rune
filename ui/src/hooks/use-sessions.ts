@@ -7,18 +7,34 @@ import type {
   TranscriptEntry,
   CreateSessionRequest,
   MessageResponse,
+  PatchSessionRequest,
 } from "@/lib/api-types";
 
 interface SessionFilters {
   active_minutes?: number;
   channel?: string;
+  kind?: string;
+  parent?: string;
+  project?: string;
+  include_metadata?: boolean;
+  session_token?: string;
   limit?: number;
+}
+
+export interface SessionTranscriptFilters {
+  limit?: number;
+  offset?: number;
 }
 
 export function useSessions(filters?: SessionFilters) {
   const params = new URLSearchParams();
   if (filters?.active_minutes) params.set("active", String(filters.active_minutes));
   if (filters?.channel) params.set("channel", filters.channel);
+  if (filters?.kind) params.set("kind", filters.kind);
+  if (filters?.parent) params.set("parent", filters.parent);
+  if (filters?.project) params.set("project", filters.project);
+  if (filters?.include_metadata) params.set("include_metadata", "true");
+  if (filters?.session_token) params.set("session_token", filters.session_token);
   if (filters?.limit) params.set("limit", String(filters.limit));
   const qs = params.toString();
 
@@ -46,10 +62,15 @@ export function useSessionStatus(id: string) {
   });
 }
 
-export function useSessionTranscript(id: string) {
+export function useSessionTranscript(id: string, filters?: SessionTranscriptFilters) {
+  const params = new URLSearchParams();
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  if (typeof filters?.offset === "number") params.set("offset", String(filters.offset));
+  const qs = params.toString();
+
   return useQuery({
-    queryKey: ["sessions", id, "transcript"],
-    queryFn: () => api.get<TranscriptEntry[]>(`/sessions/${id}/transcript`),
+    queryKey: ["sessions", id, "transcript", filters],
+    queryFn: () => api.get<TranscriptEntry[]>(`/sessions/${id}/transcript${qs ? `?${qs}` : ""}`),
     enabled: !!id,
     refetchInterval: 5_000,
   });
@@ -63,6 +84,22 @@ export function useCreateSession() {
       api.post<SessionResponse>("/sessions", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function usePatchSession(sessionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: PatchSessionRequest) =>
+      api.patch<SessionResponse>(`/sessions/${sessionId}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["sessions", sessionId, "status"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
@@ -86,8 +123,10 @@ export function useSendMessage(sessionId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (content: string) =>
-      api.post<MessageResponse>(`/sessions/${sessionId}/messages`, { content }),
+    mutationFn: (payload: string | { content: string; model?: string }) => {
+      const body = typeof payload === "string" ? { content: payload } : payload;
+      return api.post<MessageResponse>(`/sessions/${sessionId}/messages`, body);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sessions", sessionId, "transcript"] });
       queryClient.invalidateQueries({ queryKey: ["sessions", sessionId] });

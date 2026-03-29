@@ -16,16 +16,19 @@ use crate::output::{
     ApprovalPoliciesResponse, ApprovalPolicySummary, ApprovalRequestSummary, ConfigFileResponse,
     ConfigGetResponse, ConfigMutationResponse, ConfigValidationResult, ConfigureResponse,
     CronJobDetailResponse, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DoctorReport, GatewayCallResponse, GatewayConfigResponse,
-    GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
-    HeartbeatStatusResponse, LogsQueryResponse, MessageSearchHit, MessageSearchResponse,
-    MessageSendResponse, ModelScanProviderResult, ModelScanResponse, ReminderSummary,
-    RemindersListResponse, SandboxExplainResponse, SandboxListResponse, SandboxRecreateResponse,
-    ScannedModelDetail, SecretsApplyResponse, SecretsAuditResponse, SecretsConfigureResponse,
-    SecretsReloadResponse, SecurityAuditResponse, SessionDetailResponse, SessionListResponse,
-    SessionStatusCard, SessionSummary, SessionTreeNode, SessionTreeResponse, SkillCheckResponse,
-    SkillInfoResponse, SkillListResponse, SkillSummary, SpellSearchResponse, StatusResponse,
-    SystemEventListResponse,
+    CronStatusResponse, DelegationCapabilityMatch, DelegationConflictCapabilitySummary,
+    DelegationEndpointSummary, DelegationPlanResponse, DelegationResultContractSummary,
+    DelegationRoutingSummary, DelegationTaskContract, DelegationTaskStatusSummary, DoctorReport,
+    GatewayCallResponse, GatewayConfigResponse, GatewayDiscoverResponse,
+    GatewayInstanceHealthResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
+    HeartbeatStatusResponse, InstanceLoadSummary, LogsQueryResponse, MessageSearchHit,
+    MessageSearchResponse, MessageSendResponse, ModelScanProviderResult, ModelScanResponse,
+    PeerSummary, ReminderSummary, RemindersListResponse, SandboxExplainResponse,
+    SandboxListResponse, SandboxRecreateResponse, ScannedModelDetail, SecretsApplyResponse,
+    SecretsAuditResponse, SecretsConfigureResponse, SecretsReloadResponse, SecurityAuditResponse,
+    SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary, SessionTreeNode,
+    SessionTreeResponse, SkillCheckResponse, SkillInfoResponse, SkillListResponse, SkillSummary,
+    SpellSearchResponse, StatusResponse, SystemEventListResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -95,12 +98,166 @@ impl GatewayClient {
                 status: body["status"].as_str().unwrap_or("unknown").to_string(),
                 version: body["version"].as_str().map(String::from),
                 uptime_seconds: body["uptime_seconds"].as_u64(),
+                instance_id: body["capabilities"]["identity"]["id"]
+                    .as_str()
+                    .map(String::from)
+                    .or_else(|| {
+                        body["capabilities"]["instance_id"]
+                            .as_str()
+                            .map(String::from)
+                    }),
+                instance_name: body["capabilities"]["identity"]["name"]
+                    .as_str()
+                    .map(String::from)
+                    .or_else(|| {
+                        body["capabilities"]["instance_name"]
+                            .as_str()
+                            .map(String::from)
+                    }),
+                instance_roles: body["capabilities"]["identity"]["roles"]
+                    .as_array()
+                    .map(|roles| {
+                        roles
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                capabilities_version: body["capabilities"]["identity"]["capabilities_version"]
+                    .as_u64()
+                    .and_then(|v| u32::try_from(v).ok()),
+                capability_hash: body["capabilities"]["identity"]["capability_hash"]
+                    .as_str()
+                    .map(String::from),
+                advertised_addr: body["capabilities"]["identity"]["advertised_addr"]
+                    .as_str()
+                    .map(String::from),
             })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
     }
 
+    pub async fn gateway_instance_health(&self) -> Result<GatewayInstanceHealthResponse> {
+        let resp = self
+            .http
+            .get(self.url("/api/v1/instance/health"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if !resp.status().is_success() {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+
+        let body = resp
+            .json::<serde_json::Value>()
+            .await
+            .context("invalid JSON from /api/v1/instance/health")?;
+
+        Ok(GatewayInstanceHealthResponse {
+            status: body["status"].as_str().unwrap_or("unknown").to_string(),
+            version: body["version"].as_str().map(String::from),
+            uptime_seconds: body["uptime_seconds"].as_u64(),
+            instance_id: body["capabilities"]["identity"]["id"]
+                .as_str()
+                .map(String::from),
+            instance_name: body["capabilities"]["identity"]["name"]
+                .as_str()
+                .map(String::from),
+            advertised_addr: body["capabilities"]["identity"]["advertised_addr"]
+                .as_str()
+                .map(String::from),
+            instance_roles: body["capabilities"]["identity"]["roles"]
+                .as_array()
+                .map(|roles| {
+                    roles
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            capabilities_version: body["capabilities"]["identity"]["capabilities_version"]
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok()),
+            capability_hash: body["capabilities"]["identity"]["capability_hash"]
+                .as_str()
+                .map(String::from),
+            peer_count: body["capabilities"]["peer_count"]
+                .as_u64()
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or_else(|| body["peers"].as_array().map_or(0, |peers| peers.len())),
+            configured_models: body["capabilities"]["configured_models"]
+                .as_array()
+                .map(|models| {
+                    models
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            active_projects: body["capabilities"]["active_projects"]
+                .as_array()
+                .map(|projects| {
+                    projects
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            comms_transport: body["capabilities"]["comms_transport"]
+                .as_str()
+                .map(String::from),
+            load: parse_instance_load(&body["load"]),
+            peers: parse_peer_summaries(&body["peers"]),
+        })
+    }
+
+    pub async fn gateway_delegation_plan(
+        &self,
+        strategy: &str,
+        peer_id: Option<&str>,
+    ) -> Result<DelegationPlanResponse> {
+        let mut url = self.url(&format!(
+            "/api/v1/instance/delegation-plan?strategy={strategy}"
+        ));
+        if let Some(peer_id) = peer_id {
+            url.push_str("&peer_id=");
+            url.push_str(&urlencoding::encode(peer_id));
+        }
+
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if !resp.status().is_success() {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+
+        let body = resp
+            .json::<serde_json::Value>()
+            .await
+            .context("invalid JSON from /api/v1/instance/delegation-plan")?;
+
+        Ok(DelegationPlanResponse {
+            strategy: body["strategy"].as_str().unwrap_or("unknown").to_string(),
+            selected_peer: parse_peer_summary(&body["selected_peer"]),
+            candidates: parse_peer_summaries(&body["candidates"]),
+            detail: body["detail"].as_str().unwrap_or_default().to_string(),
+            task_contract: parse_delegation_task_contract(&body["task_contract"]),
+            capability_match: parse_delegation_capability_match(&body["capability_match"]),
+            sender: parse_delegation_endpoint(&body["sender"]),
+            receiver: parse_delegation_endpoint(&body["receiver"]),
+            routing: parse_delegation_routing(&body["routing"]),
+            branch_reservation: parse_delegation_conflict_capability(&body["branch_reservation"]),
+            file_locks: parse_delegation_conflict_capability(&body["file_locks"]),
+            task_status: parse_delegation_task_status(&body["task_status"]),
+            result: parse_delegation_result_contract(&body["result"]),
+        })
+    }
     /// `GET /config`
     pub async fn gateway_config(&self) -> Result<GatewayConfigResponse> {
         let resp = self
@@ -4827,6 +4984,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_status_parses_instance_identity_manifest() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "status": "running",
+                "version": "0.1.0",
+                "uptime_seconds": 12,
+                "capabilities": {
+                    "identity": {
+                        "id": "node-a",
+                        "name": "Node A",
+                        "advertised_addr": "http://10.0.0.5:8787",
+                        "roles": ["gateway", "scheduler"],
+                        "capabilities_version": 1,
+                        "capability_hash": "hash-node-a"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.gateway_status().await.unwrap();
+        assert_eq!(resp.instance_id.as_deref(), Some("node-a"));
+        assert_eq!(resp.instance_name.as_deref(), Some("Node A"));
+        assert_eq!(
+            resp.advertised_addr.as_deref(),
+            Some("http://10.0.0.5:8787")
+        );
+        assert_eq!(resp.instance_roles, vec!["gateway", "scheduler"]);
+        assert_eq!(resp.capabilities_version, Some(1));
+        assert_eq!(resp.capability_hash.as_deref(), Some("hash-node-a"));
+    }
+
+    #[tokio::test]
     async fn gateway_start_success() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -6667,5 +6860,399 @@ impl GatewayClient {
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
+    }
+}
+
+fn parse_instance_load(value: &serde_json::Value) -> Option<InstanceLoadSummary> {
+    Some(InstanceLoadSummary {
+        session_count: usize::try_from(value["session_count"].as_u64()?).ok()?,
+        ws_subscribers: usize::try_from(value["ws_subscribers"].as_u64()?).ok()?,
+        ws_connections: usize::try_from(value["ws_connections"].as_u64()?).ok()?,
+    })
+}
+
+fn parse_peer_summary(value: &serde_json::Value) -> Option<PeerSummary> {
+    if value.is_null() {
+        return None;
+    }
+
+    Some(PeerSummary {
+        id: value["id"].as_str().unwrap_or_default().to_string(),
+        health_url: value["health_url"].as_str().unwrap_or_default().to_string(),
+        status: value["status"].as_str().unwrap_or("unknown").to_string(),
+        detail: value["detail"].as_str().unwrap_or_default().to_string(),
+        checked_at: value["checked_at"].as_str().map(String::from),
+        latency_ms: value["latency_ms"].as_u64().map(u128::from),
+        advertised_addr: value["advertised_addr"].as_str().map(String::from),
+        roles: value["roles"]
+            .as_array()
+            .map(|roles| {
+                roles
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        configured_models: value["configured_models"]
+            .as_array()
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        active_projects: value["active_projects"]
+            .as_array()
+            .map(|projects| {
+                projects
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        capabilities_version: value["capabilities_version"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok()),
+        capability_hash: value["capability_hash"].as_str().map(String::from),
+        comms_transport: value["comms_transport"].as_str().map(String::from),
+        load: parse_instance_load(&value["load"]),
+    })
+}
+
+fn parse_peer_summaries(value: &serde_json::Value) -> Vec<PeerSummary> {
+    value
+        .as_array()
+        .map(|peers| peers.iter().filter_map(parse_peer_summary).collect())
+        .unwrap_or_default()
+}
+
+fn parse_string_array(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_delegation_capability_match(value: &serde_json::Value) -> DelegationCapabilityMatch {
+    DelegationCapabilityMatch {
+        compatible: value["compatible"].as_bool().unwrap_or(false),
+        missing_roles: value["missing_roles"]
+            .as_array()
+            .map(|roles| {
+                roles
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        missing_projects: value["missing_projects"]
+            .as_array()
+            .map(|projects| {
+                projects
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        model_overlap: value["model_overlap"]
+            .as_array()
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        detail: value["detail"].as_str().unwrap_or_default().to_string(),
+    }
+}
+
+fn parse_delegation_endpoint(value: &serde_json::Value) -> Option<DelegationEndpointSummary> {
+    if !value.is_object() {
+        return None;
+    }
+
+    Some(DelegationEndpointSummary {
+        instance_id: value["instance_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        instance_name: value["instance_name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        transport: value["transport"].as_str().unwrap_or_default().to_string(),
+        health_url: value["health_url"].as_str().map(str::to_string),
+        submit_url: value["submit_url"].as_str().map(str::to_string),
+        result_url: value["result_url"].as_str().map(str::to_string),
+    })
+}
+
+fn parse_delegation_routing(value: &serde_json::Value) -> Option<DelegationRoutingSummary> {
+    if !value.is_object() {
+        return None;
+    }
+
+    Some(DelegationRoutingSummary {
+        mode: value["mode"].as_str().unwrap_or_default().to_string(),
+        detail: value["detail"].as_str().unwrap_or_default().to_string(),
+        peer_count: value["peer_count"]
+            .as_u64()
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or_default(),
+    })
+}
+
+fn parse_delegation_conflict_capability(
+    value: &serde_json::Value,
+) -> Option<DelegationConflictCapabilitySummary> {
+    if !value.is_object() {
+        return None;
+    }
+
+    Some(DelegationConflictCapabilitySummary {
+        required: value["required"].as_bool().unwrap_or(false),
+        mechanism: value["mechanism"].as_str().unwrap_or_default().to_string(),
+        enforced_by: value["enforced_by"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        detail: value["detail"].as_str().unwrap_or_default().to_string(),
+    })
+}
+
+fn parse_delegation_task_status(value: &serde_json::Value) -> Option<DelegationTaskStatusSummary> {
+    if !value.is_object() {
+        return None;
+    }
+
+    Some(DelegationTaskStatusSummary {
+        states: value["states"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| entry.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        terminal_states: value["terminal_states"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| entry.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        sender_visibility: value["sender_visibility"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        timeout_behavior: value["timeout_behavior"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        failure_behavior: value["failure_behavior"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+    })
+}
+
+fn parse_delegation_result_contract(
+    value: &serde_json::Value,
+) -> Option<DelegationResultContractSummary> {
+    if !value.is_object() {
+        return None;
+    }
+
+    Some(DelegationResultContractSummary {
+        status_field: value["status_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        artifact_field: value["artifact_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        error_field: value["error_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        finished_at_field: value["finished_at_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        accepted_at_field: value["accepted_at_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        started_at_field: value["started_at_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        task_id_field: value["task_id_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+    })
+}
+
+fn parse_delegation_task_contract(value: &serde_json::Value) -> DelegationTaskContract {
+    DelegationTaskContract {
+        protocol_version: value["protocol_version"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(1),
+        submission_modes: parse_string_array(&value["submission_modes"]),
+        lifecycle: parse_string_array(&value["lifecycle"]),
+        timeout_handling: parse_string_array(&value["timeout_handling"]),
+        conflict_prevention: parse_string_array(&value["conflict_prevention"]),
+        required_fields: parse_string_array(&value["required_fields"]),
+        optional_fields: parse_string_array(&value["optional_fields"]),
+        result_fields: parse_string_array(&value["result_fields"]),
+    }
+}
+
+#[cfg(test)]
+mod delegation_plan_parse_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_extended_delegation_plan_fields() {
+        let body = json!({
+            "strategy": "least_busy",
+            "selected_peer": {
+                "id": "peer-b",
+                "health_url": "http://peer-b/health",
+                "status": "healthy",
+                "detail": "ok",
+                "checked_at": "2026-03-29T00:00:00Z",
+                "latency_ms": 12,
+                "advertised_addr": "http://peer-b:8787",
+                "roles": ["gateway", "coder"],
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["rune"],
+                "load": {
+                    "session_count": 2,
+                    "ws_subscribers": 0,
+                    "ws_connections": 1
+                }
+            },
+            "candidates": [],
+            "detail": "selected least-busy healthy peer 'peer-b'",
+            "task_contract": {
+                "protocol_version": 1,
+                "submission_modes": ["named", "least_busy"],
+                "lifecycle": ["submitted", "accepted", "running", "completed", "failed", "timeout"],
+                "timeout_handling": ["sender supplies timeout_secs per task"],
+                "conflict_prevention": ["agents must reserve branch names before execution"],
+                "required_fields": ["task"],
+                "optional_fields": ["target_peer_id"],
+                "result_fields": ["status"]
+            },
+            "sender": {
+                "instance_id": "sender-a",
+                "instance_name": "Sender A",
+                "transport": "filesystem",
+                "health_url": "http://sender-a/api/v1/instance/health",
+                "submit_url": "http://sender-a/api/v1/instance/delegations",
+                "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
+            },
+            "receiver": {
+                "instance_id": "peer-b",
+                "instance_name": "Peer B",
+                "transport": "http",
+                "health_url": "http://peer-b/api/v1/instance/health",
+                "submit_url": "http://peer-b/api/v1/instance/delegations",
+                "result_url": "http://peer-b/api/v1/instance/delegations/{task_id}"
+            },
+            "routing": {
+                "mode": "least_busy",
+                "detail": "selected least-busy healthy peer 'peer-b'",
+                "peer_count": 3
+            },
+            "branch_reservation": {
+                "required": true,
+                "mechanism": "branch_reservation",
+                "enforced_by": "orchestrator",
+                "detail": "reserve branch names"
+            },
+            "file_locks": {
+                "required": true,
+                "mechanism": "file_locks",
+                "enforced_by": "orchestrator",
+                "detail": "lock files"
+            },
+            "task_status": {
+                "states": ["submitted", "accepted", "running", "completed", "failed", "timeout"],
+                "terminal_states": ["completed", "failed", "timeout"],
+                "sender_visibility": "tracked",
+                "timeout_behavior": "timeout",
+                "failure_behavior": "failed"
+            },
+            "result": {
+                "status_field": "status",
+                "artifact_field": "artifacts",
+                "error_field": "error",
+                "finished_at_field": "finished_at",
+                "accepted_at_field": "accepted_at",
+                "started_at_field": "started_at",
+                "task_id_field": "task_id"
+            }
+        });
+
+        let parsed = DelegationPlanResponse {
+            strategy: body["strategy"].as_str().unwrap().to_string(),
+            selected_peer: parse_peer_summary(&body["selected_peer"]),
+            candidates: parse_peer_summaries(&body["candidates"]),
+            detail: body["detail"].as_str().unwrap().to_string(),
+            task_contract: parse_delegation_task_contract(&body["task_contract"]),
+            capability_match: parse_delegation_capability_match(&body["capability_match"]),
+            sender: parse_delegation_endpoint(&body["sender"]),
+            receiver: parse_delegation_endpoint(&body["receiver"]),
+            routing: parse_delegation_routing(&body["routing"]),
+            branch_reservation: parse_delegation_conflict_capability(&body["branch_reservation"]),
+            file_locks: parse_delegation_conflict_capability(&body["file_locks"]),
+            task_status: parse_delegation_task_status(&body["task_status"]),
+            result: parse_delegation_result_contract(&body["result"]),
+        };
+
+        assert_eq!(parsed.sender.as_ref().unwrap().instance_id, "sender-a");
+        assert_eq!(parsed.receiver.as_ref().unwrap().transport, "http");
+        assert_eq!(
+            parsed.sender.as_ref().unwrap().submit_url.as_deref(),
+            Some("http://sender-a/api/v1/instance/delegations")
+        );
+        assert_eq!(
+            parsed.receiver.as_ref().unwrap().result_url.as_deref(),
+            Some("http://peer-b/api/v1/instance/delegations/{task_id}")
+        );
+        assert_eq!(parsed.routing.as_ref().unwrap().peer_count, 3);
+        assert_eq!(
+            parsed.branch_reservation.as_ref().unwrap().mechanism,
+            "branch_reservation"
+        );
+        assert_eq!(parsed.file_locks.as_ref().unwrap().mechanism, "file_locks");
+        assert_eq!(
+            parsed.task_status.as_ref().unwrap().terminal_states,
+            vec!["completed", "failed", "timeout"]
+        );
+        assert_eq!(parsed.result.as_ref().unwrap().artifact_field, "artifacts");
+        assert_eq!(
+            parsed.result.as_ref().unwrap().accepted_at_field,
+            "accepted_at"
+        );
+        assert_eq!(
+            parsed.result.as_ref().unwrap().started_at_field,
+            "started_at"
+        );
+        assert_eq!(parsed.result.as_ref().unwrap().task_id_field, "task_id");
     }
 }

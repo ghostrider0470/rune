@@ -54,8 +54,25 @@ Or wire config manually:
 ```bash
 cp config.example.toml config.toml
 # fill in your provider + channel settings
+# optional: set [instance] name/advertised_addr/peers for multi-instance discovery
 ./target/release/rune-gateway --config config.toml
 ```
+
+For multi-instance federation bring-up, configure `[instance]` in `config.toml` and inspect `GET /api/v1/instance/health`. Example:
+
+```toml
+[instance]
+name = "rune-desktop"
+advertised_addr = "http://192.168.1.10:18790"
+roles = ["gateway", "scheduler"]
+peers = [
+  { id = "rune-laptop", health_url = "http://192.168.1.20:18790/api/v1/instance/health" },
+]
+```
+
+That endpoint returns instance identity, capability manifest, live load counters, and peer health snapshots so operators can verify discovery wiring before delegation lands.
+
+You can inspect the same surface from the CLI with `rune gateway instance-health` and preview delegation targeting with `rune gateway delegation-plan --strategy least_busy`.
 
 Then open `http://127.0.0.1:8787/webchat` for browser chat or `http://127.0.0.1:8787/dashboard` for the admin UI. The legacy `/chat` path redirects into WebChat so old bookmarks keep working.
 
@@ -157,6 +174,7 @@ That means local-first is the default experience, not a throwaway dev-only mode.
 
 Start here:
 - use [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md) for local setup and day-to-day build/run flow
+- use `rune gateway instance-health` via the CLI after configuring `[instance]` to inspect identity/capabilities/load, and `rune gateway delegation-plan --strategy least_busy` to preview the current cross-instance delegation contract
 - use [`docs/contributor/README.md`](docs/contributor/README.md) for the contributor docs hub and related execution references
 - use [`docs/AGENT-ORCHESTRATION.md`](docs/AGENT-ORCHESTRATION.md) for deeper runtime/repo execution context
 - use [`docs/reference/README.md`](docs/reference/README.md), [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md), [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md), and [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md) for technical reference material

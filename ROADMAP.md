@@ -62,7 +62,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 
 | Pillar | Status | Notes |
 |---|---|---|
-| WebSocket Gateway | ✅ Basic | Req/res/event framing, sequence numbering, gap detection, and RPC dispatch landed; broader parity work remains |
+| WebSocket Gateway | ✅ 2026-03-28 | Req/res/event framing, sequence numbering, gap detection, stateVersion tracking, and RPC dispatch landed; broader parity work remains |
 | Multi-channel Routing | ✅ 2026-03-16 | Telegram plus Discord/Slack/WhatsApp/Signal adapters landed with factory wiring, inbound normalization, outbound delivery flows, and adapter test coverage |
 | Device Pairing | ✅ 2026-03-16 | Ed25519 challenge-response pairing, PostgreSQL-backed device/request persistence, SHA-256 token storage, supervisor pruning, and route/integration coverage landed |
 | LaneQueue Concurrency | ✅ 2026-03-16 | LaneQueue implemented with per-lane caps, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
@@ -76,13 +76,14 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Sub-agents | ✅ Done | Session spawning + manager trait |
 | Semantic Browser Snapshots | ⚠️ 2026-03-16 | `rune-browser` now emits semantic snapshots, exposes a real `browse` tool, and is wired through gateway/config against the existing CDP snapshot path; Chromium launch/pool lifecycle and selector-aware extraction still need follow-up |
 | A2UI Protocol | ✅ 2026-03-28 | A2UI event bus, tool/RPC wiring, and admin UI renderers landed with inline/panel component rendering plus form/action callbacks |
+| WebSocket Gateway note | ✅ 2026-03-28 | Phase 2 WebSocket gateway RPC protocol slice tracked in #538 is shipped; issue checklist completed and verified on current main lineage |
 | TTS | ❌ Missing | No text-to-speech providers |
 | STT | ❌ Missing | No speech-to-text providers |
 | LLM Providers | ✅ Partial | Anthropic, OpenAI, Azure only — missing Google, Ollama, Bedrock, Groq, DeepSeek, Mistral |
 | Admin UI | ✅ 2026-03-28 | Admin shell now includes shipped chat, usage, debug, config, logs, agents, and skills pages; broader UX polish and deeper parity still remain |
 | Agent Modes | ❌ Missing | No Orchestrator/Architect/Coder/Debugger modes — beyond OpenClaw |
 | Git Worktree Isolation | ❌ Missing | No isolated agent execution environments — beyond OpenClaw |
-| Context Compression | ❌ Missing | No intelligent context windowing or priority-based assembly — beyond OpenClaw |
+| Context Compression | ⚠️ 2026-03-29 | Context tier budgeting, compaction diagnostics, checkpoint metadata, and delegated context handoff for subagents are shipped; transcript summarization/checkpoint persistence still need follow-up |
 | Memory Bank | ❌ Missing | No architectural decision records or project knowledge base — beyond OpenClaw |
 | Extended Channels | ❌ Missing | No LINE/Mattermost/Matrix/Feishu/iMessage — OpenClaw breadth |
 | Calendar/Email | ✅ 2026-03-26 | Microsoft 365 calendar, mail, files, users, Planner, and To-Do routes/services landed in gateway with auth and integration coverage |
@@ -201,18 +202,27 @@ Implementation note (2026-03-16): the roadmap originally called for Discord Gate
 
 ### Phase 4 — LaneQueue Concurrency Model (Backend)
 
-Replace sequential per-session execution with lane-based FIFO queuing.
+Status: ✅ Completed 2026-03-29
 
-**New file**
+Rune already ships lane-based FIFO concurrency control in the runtime. This pass verified the implementation on current `main` and updated roadmap bookkeeping to reflect the code that is already landed rather than re-implementing it.
+
+**Landed work**
 - `crates/rune-runtime/src/lane_queue.rs`
-  - `Lane` enum: `Main`, `Subagent`, `Cron`, `Nested`
-  - Per-lane semaphore caps: `Main=4`, `Subagent=8`, `Cron=independent`, `Nested=recursive`
-  - FIFO queue per lane using `tokio::sync::Semaphore` + `VecDeque`
-  - Task submission returning a handle/future
-  - Lane routing based on session kind
+  - `Lane` enum with `Main`, `Subagent`, and `Cron` routing derived from `SessionKind`
+  - per-lane semaphore caps with FIFO waiter queues implemented via `tokio::sync::Semaphore` + `VecDeque`
+  - fair permit acquisition/release flow plus lane utilization stats
+  - global and per-project tool concurrency controls via `ToolConcurrencyQueue`
+- `crates/rune-runtime/src/executor.rs`
+  - turn execution and approval resume paths acquire lane permits before running
+  - operator-facing lane stats surfaced when a `LaneQueue` is attached
+- `crates/rune-runtime/src/lib.rs`
+  - public re-exports for lane queue types
 
-**Modify**
-- `crates/rune-runtime/src/executor.rs` — Route turn execution through `LaneQueue`
+**Validation**
+- `cargo check -p rune-runtime`
+- `cargo test -p rune-runtime lane_queue -- --nocapture`
+
+Implementation note (2026-03-29): the original roadmap text mentioned a `Nested` lane and explicit task-handle submission API. The shipped implementation instead uses lane permits integrated directly into `TurnExecutor`, with main/subagent/cron lanes plus dedicated tool concurrency controls. The roadmap is now aligned to repo reality.
 
 ---
 
@@ -322,23 +332,36 @@ Implementation note (2026-03-28): most of this phase was already present in the 
 
 ### Phase 8 — TTS Backend + UI
 
-**New crate** `crates/rune-tts/`
-- `src/lib.rs` — TTS engine + provider trait
-- `src/openai.rs` — OpenAI TTS
-- `src/elevenlabs.rs` — ElevenLabs
-- `src/config.rs` — provider, voice, model, auto mode (`off|always|inbound|tagged`)
+Status: ✅ Completed 2026-03-29
 
-**Gateway routes**
-- `GET /tts/status`
-- `POST /tts/enable`
-- `POST /tts/disable`
-- `POST /tts/convert`
+Rune already ships the TTS backend crate, provider/config wiring, gateway control + synthesis routes, CLI client support, and the admin Settings UI surface for runtime enable/disable and provider defaults. This pass verified the implementation on current `main` and updated roadmap bookkeeping so the item reflects shipped reality.
 
-**Config**
-- Add `[tts]` to `AppConfig`
+**Landed work**
+- `crates/rune-tts/`
+  - `src/lib.rs` — TTS engine, provider trait, enable/disable toggle, and voice inventory exposure
+  - `src/openai.rs` — OpenAI TTS provider via `/v1/audio/speech`
+  - `src/elevenlabs.rs` — ElevenLabs TTS provider
+  - `src/config.rs` — provider, API key, voice, model, and auto mode (`off|always|inbound|tagged`)
+- `crates/rune-config/src/lib.rs`
+  - `TtsConfig` re-export and media capability wiring into app configuration
+- `crates/rune-gateway/src/server.rs` + `crates/rune-gateway/src/state.rs`
+  - runtime TTS engine construction and shared gateway state wiring
+- `crates/rune-gateway/src/routes.rs`
+  - `GET /tts/status`
+  - `POST /tts/synthesize`
+  - `POST /tts/enable`
+  - `POST /tts/disable`
+  - Telegram delivery path for synthesized audio when channel metadata is provided
+- `crates/rune-cli/src/client.rs` + `crates/rune-cli/src/cli.rs`
+  - status + synthesis client commands for operator use
+- `ui/src/hooks/use-system.ts` + `ui/src/routes/_admin/settings.tsx`
+  - Settings page controls for TTS provider, voice, model, auto mode, available voices, and runtime toggle
 
-**UI**
-- TTS controls in settings page
+**Validation**
+- `cargo check`
+- `cd ui && npm run build`
+
+Implementation note (2026-03-29): the roadmap text still described Phase 8 as missing, but the repo already contains the delivered backend and UI surfaces. The only shipped delta in this pass is the roadmap correction so planning state matches actual code state.
 
 ---
 
@@ -674,6 +697,8 @@ Smarter context assembly than OpenClaw's static file-loading. Priority-based con
 **Modify**
 - `crates/rune-runtime/src/executor.rs` — Replace static context assembly with `ContextManager`
 - `crates/rune-store/src/repos.rs` — Persist compressed context checkpoints
+
+**Implementation note (2026-03-29):** Core context-management groundwork is now partially shipped on current `main`: context tier budgeting/diagnostics, compaction-required metadata persistence, and delegated context handoff for sub-agents via `create_subagent_session_with_context` plus prompt injection of `delegation_context` and `shared_scratchpad`. The remaining gap in this roadmap item is true transcript/tool-output summarization with persisted checkpoints and broader cross-session relevance selection.
 
 ---
 

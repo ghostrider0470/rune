@@ -29,6 +29,72 @@ export interface StatusResponse {
   config_paths: StatusPaths;
 }
 
+
+export interface InstanceLoadResponse {
+  session_count: number;
+  ws_subscribers: number;
+  ws_connections: number;
+}
+
+export interface InstanceIdentityResponse {
+  id: string;
+  name: string;
+  advertised_addr: string | null;
+  roles: string[];
+  capabilities_version: number;
+  capability_hash: string;
+}
+
+export interface PeerHealthResponse {
+  id: string;
+  name: string;
+  health_url: string;
+  status: string;
+  detail: string;
+  checked_at: string;
+  latency_ms: number | null;
+  load: InstanceLoadResponse | null;
+  advertised_addr: string | null;
+  roles: string[];
+  capability_hash: string | null;
+  capabilities_version: number | null;
+  comms_transport: string | null;
+  configured_models: string[];
+  active_projects: string[];
+}
+
+export interface InstanceCapabilitiesResponse {
+  mode: string;
+  updated_at: string;
+  storage_backend: string;
+  pgvector: boolean;
+  memory_mode: string;
+  browser: boolean;
+  mcp_servers: number;
+  tts: boolean;
+  stt: boolean;
+  channels: string[];
+  approval_mode: string;
+  security_posture: string;
+  identity: InstanceIdentityResponse;
+  instance_id: string;
+  instance_name: string;
+  peer_count: number;
+  configured_models: string[];
+  active_projects: string[];
+  comms_transport: string;
+}
+
+export interface InstanceHealthResponse {
+  status: string;
+  service: string;
+  version: string;
+  uptime_seconds: number;
+  load: InstanceLoadResponse;
+  capabilities: InstanceCapabilitiesResponse;
+  peers: PeerHealthResponse[];
+}
+
 // Dashboard
 export interface DashboardSummaryResponse {
   gateway_status: string;
@@ -135,6 +201,8 @@ export interface CronJobResponse {
   name: string | null;
   schedule: CronSchedule;
   payload: CronPayload;
+  delivery_mode?: string;
+  webhook_url?: string | null;
   session_target: string;
   enabled: boolean;
   created_at: string;
@@ -147,6 +215,7 @@ export interface CronRunResponse {
   job_id: string;
   started_at: string;
   finished_at: string | null;
+  trigger_kind?: string;
   status: string;
   output: string | null;
 }
@@ -191,6 +260,8 @@ export interface SessionListItem {
   id: string;
   kind: string;
   status: string;
+  project_id?: string | null;
+  mode?: string | null;
   requester_session_id?: string | null;
   channel: string | null;
   created_at: string;
@@ -207,6 +278,8 @@ export interface SessionResponse {
   id: string;
   kind: string;
   status: string;
+  project_id: string | null;
+  mode: string | null;
   requester_session_id: string | null;
   channel_ref: string | null;
   created_at: string;
@@ -217,6 +290,13 @@ export interface SessionResponse {
   usage_completion_tokens: number;
   last_turn_started_at: string | null;
   last_turn_ended_at: string | null;
+}
+
+export interface PatchSessionRequest {
+  label?: string | null;
+  thinking_level?: string | null;
+  verbose?: boolean | null;
+  reasoning?: string | null;
 }
 
 export interface SessionStatusResponse {
@@ -251,6 +331,8 @@ export interface CreateSessionRequest {
   workspace_root?: string;
   requester_session_id?: string;
   channel_ref?: string;
+  mode?: string;
+  project_id?: string;
 }
 
 export interface PendingAttachment {

@@ -15,13 +15,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::output::{
-    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorMemoryHierarchySummary, DoctorPathSummary, DoctorReport,
-    DoctorTopologySummary,
+    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorContextTierCounter,
+    DoctorMemoryHierarchySummary, DoctorPathSummary, DoctorReport, DoctorTopologySummary,
 };
 use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
 use std::collections::BTreeMap;
-
 
 /// Result of a single diagnostic check.
 #[derive(Clone, Debug, Serialize)]
@@ -1253,6 +1252,36 @@ fn model_provider_descriptions(config: &AppConfig) -> Vec<(String, usize)> {
 }
 
 pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> DoctorReport {
+    let effective_memory_mode = config
+        .memory
+        .capability_mode(config.memory.semantic_search_enabled);
+    let l2_backend = if config.mem0.enabled
+        && config
+            .mem0
+            .postgres_url
+            .as_ref()
+            .is_some_and(|v| !v.trim().is_empty())
+    {
+        "Mem0 + pgvector"
+    } else {
+        match config.memory.requested_level().as_str() {
+            "semantic" => "semantic memory fallback",
+            "keyword" => "keyword/local memory",
+            "file" => "file memory",
+            _ => "memory",
+        }
+    };
+    let promotion = if config.mem0.enabled {
+        "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions; Mem0 access_count tracks hot recall frequency".to_string()
+    } else {
+        "L2 promotion to L1 candidates depends on stable prompt-prefix reuse on later turns/sessions".to_string()
+    };
+    let l3_ready = !config.paths.sessions_dir.as_os_str().is_empty();
+    let demotion_target = if config.mem0.enabled {
+        "warm/cold memory (Mem0 + transcript archive)"
+    } else {
+        "warm/cold memory (local memory + transcript archive)"
+    };
     let checks = results
         .iter()
         .map(|result| OutputDoctorCheck {
@@ -1305,13 +1334,100 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
         }),
         backend_matrix: build_backend_matrix(config),
         memory_hierarchy: Some(DoctorMemoryHierarchySummary {
-            l0: "current context window".to_string(),
-            l1: "prompt cache".to_string(),
-            l2: format!("{} retrieval", config.memory.requested_level().as_str()),
-            l3: "session log archive".to_string(),
-            promotion: "reused recall can re-enter cached prefixes".to_string(),
-            demotion: format!("compaction threshold {} tokens", config.runtime.compaction.compress_after),
-            metrics: "offline doctor report has no live cache metrics".to_string(),
+            l0: format!(
+                "current turn context window (active transcript + system/task/project context, warn_at={} tokens, compress_after={} tokens)",
+                config.runtime.compaction.warn_at_tokens,
+                config.runtime.compaction.compress_after
+            ),
+            l1: "prompt cache via provider prefixes (offline doctor cannot inspect live cache metrics)"
+                .to_string(),
+            l2: format!("{} ({})", l2_backend, effective_memory_mode),
+            l3: if l3_ready {
+                "durable session logs in transcript/session storage (ready for compaction handoff)".to_string()
+            } else {
+                "durable session logs in transcript/session storage".to_string()
+            },
+            promotion,
+            demotion: format!(
+                "compaction checkpoints persist stale L0 context to {} after {} tokens",
+                demotion_target,
+                config.runtime.compaction.compress_after
+            ),
+            metrics: if config.mem0.enabled {
+                format!(
+                    "offline doctor has no live cache metrics; Mem0 access_count persists hot-memory reuse. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false; gateway doctor exposes prompt_cache_rows/cached_tokens totals",
+                    config.context.identity + config.context.task + config.context.project + config.context.shared,
+                    config.runtime.compaction.compress_after
+                )
+            } else {
+                format!(
+                    "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false",
+                    config.context.identity + config.context.task + config.context.project + config.context.shared,
+                    config.runtime.compaction.compress_after
+                )
+            },
+            prompt_cache_rows: 0,
+            cached_tokens: 0,
+            total_input_tokens: 0,
+            cache_hit_ratio_percent: 0.0,
+            l2_recall_hits: 0,
+            l2_warm_memories: 0,
+            l2_hot_memories: 0,
+            l2_total_memories: 0,
+            context_total_budget: (config.context.identity + config.context.task + config.context.project + config.context.shared) as u64,
+            context_total_estimated_tokens: 0,
+            context_compaction_trigger_tokens: config.runtime.compaction.compress_after as u64,
+            context_over_budget: false,
+            context_over_compaction_threshold: false,
+            context_compaction_required: false,
+            loaded_tier_count: 5,
+            context_tier_counters: vec![
+                DoctorContextTierCounter {
+                    kind: "identity".to_string(),
+                    token_budget: config.context.identity as u64,
+                    estimated_tokens: 0,
+                    priority: 100,
+                    staleness_policy: "pinned".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "task".to_string(),
+                    token_budget: config.context.task as u64,
+                    estimated_tokens: 0,
+                    priority: 90,
+                    staleness_policy: "active".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "project".to_string(),
+                    token_budget: config.context.project as u64,
+                    estimated_tokens: 0,
+                    priority: 80,
+                    staleness_policy: "refresh_on_project_switch".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "shared".to_string(),
+                    token_budget: config.context.shared as u64,
+                    estimated_tokens: 0,
+                    priority: 70,
+                    staleness_policy: "refresh_periodic".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "memory".to_string(),
+                    token_budget: 0,
+                    estimated_tokens: 0,
+                    priority: 60,
+                    staleness_policy: "on_demand".to_string(),
+                    loaded: true,
+                    source: "runtime".to_string(),
+                },
+            ],
         }),
         run_at: chrono::Utc::now().to_rfc3339(),
     }

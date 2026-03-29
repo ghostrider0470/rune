@@ -36,6 +36,8 @@ Interpretation rules:
 - [x] `openclaw gateway health`
 - [x] `openclaw gateway probe`
 - [x] `openclaw gateway discover`
+- [x] `openclaw gateway instance-health`
+- [x] `openclaw gateway delegation-plan`
 - [x] `openclaw daemon status`
 - [ ] `openclaw daemon install`
 - [ ] `openclaw daemon uninstall`

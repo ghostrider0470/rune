@@ -6,6 +6,7 @@
 //! - **Capture**: After each turn, extracting durable facts from the
 //!   conversation via a cheap LLM call and storing them with embeddings.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +16,8 @@ use rune_models::ModelProvider;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+use crate::mem0_vault::{VaultSyncReport, VaultSyncer};
 
 /// A single remembered fact.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,6 +37,14 @@ pub struct Memory {
 pub struct MemoryCaptureMetadata {
     pub source_agent: Option<String>,
     pub trigger: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryHierarchyMetrics {
+    pub recall_hits: u64,
+    pub warm_memories: u64,
+    pub hot_memories: u64,
+    pub total_memories: u64,
 }
 
 /// A graph of memories: nodes + similarity edges for visualization.
@@ -93,6 +104,7 @@ pub struct Mem0Engine {
     http: reqwest::Client,
     config: Mem0Config,
     extraction_provider: Arc<dyn ModelProvider>,
+    vault: Option<Arc<VaultSyncer>>,
 }
 
 impl Mem0Engine {
@@ -100,10 +112,15 @@ impl Mem0Engine {
     ///
     /// Returns `None` if the config is disabled or embedding config is missing,
     /// so the caller can gracefully degrade.
-    pub fn try_new(
+    ///
+    /// Pass `vault_dir` to enable the markdown vault sync layer. When enabled,
+    /// every stored/deleted fact is projected to a `.md` file in the background
+    /// with zero impact on the LLM recall/capture hot path.
+    pub async fn try_new(
         config: &Mem0Config,
         extraction_provider: Arc<dyn ModelProvider>,
         repo: Arc<dyn rune_store::repos::MemoryFactRepo>,
+        vault_dir: Option<PathBuf>,
     ) -> Option<Arc<Self>> {
         if !config.enabled {
             info!("mem0 disabled by configuration");
@@ -120,12 +137,33 @@ impl Mem0Engine {
             .build()
             .expect("failed to build reqwest client");
 
+        let vault = if config.vault_enabled {
+            if let Some(dir) = vault_dir {
+                match VaultSyncer::new(dir.clone(), config.vault_link_threshold).await {
+                    Ok(v) => {
+                        info!(dir = %dir.display(), "mem0 vault sync enabled");
+                        Some(Arc::new(v))
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "mem0 vault init failed — continuing without vault");
+                        None
+                    }
+                }
+            } else {
+                warn!("mem0 vault enabled but no vault_dir resolved — skipping");
+                None
+            }
+        } else {
+            None
+        };
+
         info!("mem0 engine initialized");
         Some(Arc::new(Self {
             repo,
             http,
             config: config.clone(),
             extraction_provider,
+            vault,
         }))
     }
 
@@ -239,10 +277,50 @@ impl Mem0Engine {
         self.repo
             .delete(id)
             .await
-            .map_err(|e| format!("failed to delete memory: {e}"))
+            .map_err(|e| format!("failed to delete memory: {e}"))?;
+
+        // Background vault cleanup (fire-and-forget, never blocks LLM).
+        if let Some(ref vault) = self.vault {
+            if let Ok(uid) = Uuid::parse_str(id) {
+                let vault = vault.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = vault.delete_fact(&uid).await {
+                        warn!(error = %e, id = %uid, "vault delete failed");
+                    }
+                });
+            }
+        }
+
+        Ok(())
     }
 
     /// Return all memories (for graph visualization and admin dashboards).
+    pub async fn memory_hierarchy_metrics(
+        &self,
+    ) -> Result<MemoryHierarchyMetrics, rune_store::StoreError> {
+        let memories = self.repo.list_all().await?;
+        let total_memories = memories.len() as u64;
+        let warm_memories = memories
+            .iter()
+            .filter(|memory| memory.access_count > 0)
+            .count() as u64;
+        let hot_memories = memories
+            .iter()
+            .filter(|memory| memory.access_count >= 3)
+            .count() as u64;
+        let recall_hits = memories
+            .iter()
+            .map(|memory| u64::try_from(memory.access_count.max(0)).unwrap_or(0))
+            .sum();
+
+        Ok(MemoryHierarchyMetrics {
+            recall_hits,
+            warm_memories,
+            hot_memories,
+            total_memories,
+        })
+    }
+
     pub async fn list_all(&self) -> Vec<Memory> {
         match self.repo.list_all().await {
             Ok(facts) => facts.into_iter().map(Memory::from).collect(),
@@ -271,6 +349,28 @@ impl Mem0Engine {
             }
         };
         MemoryGraph { nodes, edges }
+    }
+
+    /// Perform a full vault sync: re-export every memory as a `.md` file with
+    /// `[[wikilinks]]` derived from the similarity graph, pruning orphaned files.
+    ///
+    /// Intended for the `/api/v1/memory/vault/sync` endpoint and one-off CLI use.
+    pub async fn vault_full_sync(&self) -> Result<VaultSyncReport, String> {
+        let vault = self
+            .vault
+            .as_ref()
+            .ok_or_else(|| "vault not enabled".to_string())?;
+        let memories = self.list_all().await;
+        let graph = self.graph(vault.link_threshold(), 5).await;
+        vault
+            .full_sync(&memories, &graph)
+            .await
+            .map_err(|e| format!("vault sync failed: {e}"))
+    }
+
+    /// Whether the vault sync layer is active.
+    pub fn vault_enabled(&self) -> bool {
+        self.vault.is_some()
     }
 
     /// Format recalled memories for injection into the system prompt.
@@ -428,6 +528,28 @@ impl Mem0Engine {
                 .await
                 .map_err(|e| format!("memory update failed: {e}"))?;
             debug!(id = %existing_id, "mem0: updated existing memory (dedup)");
+
+            // Background vault sync (fire-and-forget, never blocks LLM).
+            if let Some(ref vault) = self.vault {
+                let vault = vault.clone();
+                let mem = Memory {
+                    id: existing_id,
+                    fact: fact.fact.clone(),
+                    category: fact.category.clone(),
+                    source_session_id: Some(session_id),
+                    source_agent: None,
+                    trigger: None,
+                    created_at: now,
+                    updated_at: now,
+                    access_count: 0,
+                };
+                tokio::spawn(async move {
+                    if let Err(e) = vault.sync_fact_simple(&mem).await {
+                        warn!(error = %e, "vault sync failed for dedup-updated fact");
+                    }
+                });
+            }
+
             return Ok(None);
         }
 
@@ -445,7 +567,7 @@ impl Mem0Engine {
             .await
             .map_err(|e| format!("memory insert failed: {e}"))?;
 
-        Ok(Some(Memory {
+        let memory = Memory {
             id,
             fact: fact.fact.clone(),
             category: fact.category.clone(),
@@ -455,7 +577,20 @@ impl Mem0Engine {
             created_at: now,
             updated_at: now,
             access_count: 0,
-        }))
+        };
+
+        // Background vault sync (fire-and-forget, never blocks LLM).
+        if let Some(ref vault) = self.vault {
+            let vault = vault.clone();
+            let mem = memory.clone();
+            tokio::spawn(async move {
+                if let Err(e) = vault.sync_fact_simple(&mem).await {
+                    warn!(error = %e, "vault sync failed for new fact");
+                }
+            });
+        }
+
+        Ok(Some(memory))
     }
 }
 
