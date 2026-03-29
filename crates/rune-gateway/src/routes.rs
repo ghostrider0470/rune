@@ -1974,8 +1974,10 @@ pub struct CreateSessionRequest {
     /// Optional project identifier for project-scoped context loading.
     pub project_id: Option<String>,
     /// Optional preloaded delegation context for subagent handoff.
+    #[serde(default)]
     pub delegation_context: Option<serde_json::Value>,
     /// Optional shared scratchpad path used by parent and subagent.
+    #[serde(default)]
     pub shared_scratchpad_path: Option<String>,
 }
 
@@ -2130,7 +2132,9 @@ pub async fn create_session(
 ) -> Result<(StatusCode, Json<SessionResponse>), GatewayError> {
     let kind = parse_session_kind(&body.kind)?;
 
-    let row = if kind == SessionKind::Subagent && body.delegation_context.is_some() {
+    let row = if kind == SessionKind::Subagent
+        && (body.delegation_context.is_some() || body.shared_scratchpad_path.is_some())
+    {
         state
             .session_engine
             .create_subagent_session_with_context(
