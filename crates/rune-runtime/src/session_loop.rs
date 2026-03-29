@@ -44,8 +44,11 @@ Rune commands:
 type SessionIndex = HashMap<String, Uuid>;
 
 type EventPriority = u8;
-const PRIORITY_USER_MESSAGE: EventPriority = 0;
-const PRIORITY_BACKGROUND: EventPriority = 4;
+pub const PRIORITY_IMMEDIATE: EventPriority = 0;
+pub const PRIORITY_USER_MESSAGE: EventPriority = 1;
+pub const PRIORITY_COMMS_DIRECTIVE: EventPriority = 2;
+pub const PRIORITY_CRON: EventPriority = 3;
+pub const PRIORITY_BACKGROUND: EventPriority = 4;
 
 /// The main session loop that ties channels to the runtime.
 pub struct SessionLoop {
@@ -188,9 +191,28 @@ impl SessionLoop {
         }
     }
 
+    pub fn classify_source_priority(source: &str) -> EventPriority {
+        match source.trim().to_ascii_lowercase().as_str() {
+            "heartbeat" | "health" | "health-check" | "health_check" => PRIORITY_IMMEDIATE,
+            "telegram" | "telegram-message" | "telegram_message" | "user" => {
+                PRIORITY_USER_MESSAGE
+            }
+            "comms" | "directive" | "comms-directive" | "comms_directive" => {
+                PRIORITY_COMMS_DIRECTIVE
+            }
+            "cron" | "scheduler" | "scheduled" => PRIORITY_CRON,
+            _ => PRIORITY_BACKGROUND,
+        }
+    }
+
     #[must_use]
     pub fn event_priority_for_test(event: &InboundEvent) -> EventPriority {
         Self::classify_event_priority(event)
+    }
+
+    #[must_use]
+    pub fn source_priority_for_test(source: &str) -> EventPriority {
+        Self::classify_source_priority(source)
     }
 
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
