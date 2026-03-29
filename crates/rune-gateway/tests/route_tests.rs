@@ -4920,11 +4920,31 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(context_budget["usable_prompt_budget"], 113000);
     assert_eq!(context_budget["auto_inject_project"], true);
     assert_eq!(context_budget["memory_search_k"], 10);
+    assert_eq!(context_budget["total_tier_budget"], 36000);
+    assert_eq!(context_budget["exceeds_usable_budget"], false);
     let context_tiers = &json["context_tiers"];
     assert_eq!(context_tiers["identity"], 1000);
     assert_eq!(context_tiers["task"], 10000);
     assert_eq!(context_tiers["project"], 20000);
     assert_eq!(context_tiers["shared"], 5000);
+}
+
+#[tokio::test]
+async fn context_assembly_report_flags_compaction_when_budget_is_exceeded() {
+    let assembler = ContextAssembler::new("Identity block").with_tier_budgets(1, 1, 1, 1);
+    let report = assembler.analyze_context_usage(
+        None,
+        None,
+        &[
+            "This active task section is deliberately longer than the configured budget.".into(),
+            "Additional task context to force both tier and compaction thresholds.".into(),
+        ],
+        8,
+    );
+
+    assert!(report.over_budget);
+    assert!(report.over_compaction_threshold);
+    assert!(report.compaction_required);
 }
 
 #[tokio::test]

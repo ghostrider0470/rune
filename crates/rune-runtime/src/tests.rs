@@ -2686,7 +2686,6 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     assert!(first_system.contains("## Prompt Cache Padding"));
 }
 
-
 #[tokio::test]
 async fn create_subagent_session_with_context_persists_delegation_slice_and_scratchpad() {
     let h = TestHarness::new();
@@ -2730,8 +2729,14 @@ async fn create_subagent_session_with_context_persists_delegation_slice_and_scra
     assert_eq!(session.requester_session_id, Some(parent.id));
     assert_eq!(session.channel_ref.as_deref(), Some("orchestrator:acme"));
     assert_eq!(session.metadata["mode"], "isolated");
-    assert_eq!(session.metadata["delegation_context"]["task"], "Fix auth timeout regression");
-    assert_eq!(session.metadata["delegation_context"]["budget"]["token_budget"], 2048);
+    assert_eq!(
+        session.metadata["delegation_context"]["task"],
+        "Fix auth timeout regression"
+    );
+    assert_eq!(
+        session.metadata["delegation_context"]["budget"]["token_budget"],
+        2048
+    );
     assert_eq!(
         session.metadata["delegation_context"]["file_summaries"][0]["path"],
         "src/auth.rs"

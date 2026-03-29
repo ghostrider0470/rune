@@ -97,7 +97,6 @@ impl SessionEngine {
         Ok(row)
     }
 
-
     /// Create a subagent session preloaded with delegation context and scratchpad metadata.
     ///
     /// The context payload is stored in session metadata under `delegation_context` so an
