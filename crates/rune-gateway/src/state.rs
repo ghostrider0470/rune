@@ -1,6 +1,7 @@
 //! Shared application state for Axum handlers.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -78,6 +79,59 @@ struct TokenMetricsEntry {
 #[derive(Clone, Debug, Default)]
 pub struct TokenMetricsStore {
     inner: Arc<Mutex<HashMap<(String, String), TokenMetricsEntry>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DelegationTaskRecord {
+    pub request: crate::routes::DelegationTaskRequest,
+    pub result: crate::routes::DelegationTaskResultResponse,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DelegationTaskStore {
+    inner: Arc<Mutex<HashMap<String, DelegationTaskRecord>>>,
+}
+
+impl DelegationTaskStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn submit(
+        &self,
+        request: crate::routes::DelegationTaskRequest,
+    ) -> Result<crate::routes::DelegationTaskResultResponse, String> {
+        let mut inner = self.inner.lock().await;
+        match inner.entry(request.task_id.clone()) {
+            Entry::Occupied(_) => Err(format!(
+                "delegation task '{}' already exists",
+                request.task_id
+            )),
+            Entry::Vacant(slot) => {
+                let accepted_at = chrono::Utc::now().to_rfc3339();
+                let result = crate::routes::DelegationTaskResultResponse {
+                    task_id: request.task_id.clone(),
+                    status: "accepted".to_string(),
+                    accepted_at,
+                    started_at: None,
+                    output: None,
+                    artifacts: request.task.artifacts.clone(),
+                    error: None,
+                    finished_at: None,
+                };
+                slot.insert(DelegationTaskRecord {
+                    request,
+                    result: result.clone(),
+                });
+                Ok(result)
+            }
+        }
+    }
+
+    pub async fn get(&self, task_id: &str) -> Option<DelegationTaskRecord> {
+        let inner = self.inner.lock().await;
+        inner.get(task_id).cloned()
+    }
 }
 
 impl TokenMetricsStore {
@@ -261,4 +315,6 @@ pub struct AppState {
     pub comms_client: Option<Arc<CommsClient>>,
     /// Rolling in-memory prompt cache metrics grouped by provider/model.
     pub token_metrics: TokenMetricsStore,
+    /// In-memory registry for delegated cross-instance tasks.
+    pub delegation_tasks: DelegationTaskStore,
 }

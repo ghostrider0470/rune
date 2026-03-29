@@ -71,7 +71,7 @@ pub struct InstanceHealthResponse {
     pub peers: Vec<PeerHealthResponse>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationArtifactResponse {
     pub name: String,
     pub kind: String,
@@ -80,7 +80,7 @@ pub struct DelegationArtifactResponse {
     pub description: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskPayload {
     pub task: String,
     pub constraints: Vec<String>,
@@ -96,7 +96,7 @@ pub struct DelegationTaskPayload {
     pub artifacts: Vec<DelegationArtifactResponse>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskRequest {
     pub task_id: String,
     pub protocol_version: u32,
@@ -105,13 +105,19 @@ pub struct DelegationTaskRequest {
     pub task: DelegationTaskPayload,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationErrorResponse {
     pub code: String,
     pub message: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DelegationTaskCreateResponse {
+    pub receiver: DelegationEndpointResponse,
+    pub result: DelegationTaskResultResponse,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskResultResponse {
     pub task_id: String,
     pub status: String,
@@ -125,7 +131,7 @@ pub struct DelegationTaskResultResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskStatusEnvelope {
     pub receiver: DelegationEndpointResponse,
     pub result: DelegationTaskResultResponse,
@@ -161,7 +167,7 @@ pub struct DelegationPlanResponse {
     pub result: DelegationResultContractResponse,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationEndpointResponse {
     pub instance_id: String,
     pub instance_name: String,
@@ -438,6 +444,91 @@ pub async fn delegation_plan(
             started_at_field: "started_at",
             task_id_field: "task_id",
         },
+    }))
+}
+
+pub async fn create_delegation_task(
+    State(state): State<AppState>,
+    Json(request): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskCreateResponse>), GatewayError> {
+    if request.protocol_version != 1 {
+        return Err(GatewayError::BadRequest(format!(
+            "unsupported delegation protocol version {} (expected 1)",
+            request.protocol_version
+        )));
+    }
+
+    if request.task.task.trim().is_empty() {
+        return Err(GatewayError::BadRequest(
+            "delegation task.task must not be empty".to_string(),
+        ));
+    }
+
+    if request.task.expected_output.trim().is_empty() {
+        return Err(GatewayError::BadRequest(
+            "delegation task.expected_output must not be empty".to_string(),
+        ));
+    }
+
+    if request.task.timeout_secs == 0 {
+        return Err(GatewayError::BadRequest(
+            "delegation task.timeout_secs must be greater than 0".to_string(),
+        ));
+    }
+
+    let result = state
+        .delegation_tasks
+        .submit(request)
+        .await
+        .map_err(GatewayError::BadRequest)?;
+
+    let receiver = DelegationEndpointResponse {
+        instance_id: state.capabilities.identity.id.clone(),
+        instance_name: state.capabilities.identity.name.clone(),
+        transport: state.capabilities.comms_transport.clone(),
+        health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+            format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+        }),
+        submit_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+            format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+        }),
+        result_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+            format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
+        }),
+    };
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(DelegationTaskCreateResponse { receiver, result }),
+    ))
+}
+
+pub async fn get_delegation_task(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
+    let record = state
+        .delegation_tasks
+        .get(&task_id)
+        .await
+        .ok_or_else(|| GatewayError::BadRequest(format!("delegation task {task_id} was not found")))?;
+
+    Ok(Json(DelegationTaskStatusEnvelope {
+        receiver: DelegationEndpointResponse {
+            instance_id: state.capabilities.identity.id.clone(),
+            instance_name: state.capabilities.identity.name.clone(),
+            transport: state.capabilities.comms_transport.clone(),
+            health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+            }),
+            submit_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+            }),
+            result_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
+            }),
+        },
+        result: record.result,
     }))
 }
 
@@ -7528,7 +7619,76 @@ mod tests {
         }
     }
 
-    #[test]
+    #[tokio::test]
+    async fn delegation_task_routes_accept_and_fetch_status() {
+        let store = crate::state::DelegationTaskStore::new();
+        let request = DelegationTaskRequest {
+            task_id: "delegation-accept-1".to_string(),
+            protocol_version: 1,
+            submitted_at: "2026-03-29T00:00:00Z".to_string(),
+            sender: DelegationEndpointResponse {
+                instance_id: "sender".to_string(),
+                instance_name: "Sender".to_string(),
+                transport: "http".to_string(),
+                health_url: Some("http://sender/api/v1/instance/health".to_string()),
+                submit_url: Some("http://sender/api/v1/instance/delegations".to_string()),
+                result_url: Some("http://sender/api/v1/instance/delegations/{task_id}".to_string()),
+            },
+            task: DelegationTaskPayload {
+                task: "Run cargo check".to_string(),
+                constraints: vec!["No unrelated files".to_string()],
+                expected_output: "Commit SHA".to_string(),
+                timeout_secs: 300,
+                target_peer_id: Some("peer-b".to_string()),
+                branch_reservation: Some("agent/rune/delegation-421".to_string()),
+                file_locks: vec!["crates/rune-gateway/src/routes.rs".to_string()],
+                artifacts: vec![],
+            },
+        };
+
+        let accepted = store.submit(request.clone()).await.expect("task accepted");
+        assert_eq!(accepted.task_id, request.task_id);
+        assert_eq!(accepted.status, "accepted");
+        assert!(accepted.started_at.is_none());
+        assert!(accepted.finished_at.is_none());
+
+        let stored = store.get(&request.task_id).await.expect("stored task");
+        assert_eq!(stored.request.task.task, "Run cargo check");
+        assert_eq!(stored.result.status, "accepted");
+    }
+
+    #[tokio::test]
+    async fn delegation_task_store_rejects_duplicate_ids() {
+        let store = crate::state::DelegationTaskStore::new();
+        let request = DelegationTaskRequest {
+            task_id: "delegation-dup-1".to_string(),
+            protocol_version: 1,
+            submitted_at: "2026-03-29T00:00:00Z".to_string(),
+            sender: DelegationEndpointResponse {
+                instance_id: "sender".to_string(),
+                instance_name: "Sender".to_string(),
+                transport: "http".to_string(),
+                health_url: None,
+                submit_url: None,
+                result_url: None,
+            },
+            task: DelegationTaskPayload {
+                task: "Duplicate test".to_string(),
+                constraints: vec![],
+                expected_output: "status".to_string(),
+                timeout_secs: 30,
+                target_peer_id: None,
+                branch_reservation: None,
+                file_locks: vec![],
+                artifacts: vec![],
+            },
+        };
+
+        store.submit(request.clone()).await.expect("first task accepted");
+        let error = store.submit(request).await.expect_err("duplicate id rejected");
+        assert!(error.contains("already exists"), "unexpected error: {error}");
+    }
+
     fn storage_checks_warn_on_missing_dirs() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().join("nonexistent");

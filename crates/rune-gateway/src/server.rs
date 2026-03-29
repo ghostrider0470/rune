@@ -39,7 +39,7 @@ use crate::ms365::{
 };
 use crate::pairing::DeviceRegistry;
 use crate::routes;
-use crate::state::{AppState, SessionEvent, TokenMetricsStore};
+use crate::state::{AppState, DelegationTaskStore, SessionEvent, TokenMetricsStore};
 use crate::supervisor::{BackgroundSupervisor, SupervisorDeps};
 use crate::webchat;
 use crate::ws;
@@ -311,6 +311,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         ms365_users_service: services.ms365_users_service,
         comms_client,
         token_metrics: TokenMetricsStore::new(),
+        delegation_tasks: DelegationTaskStore::new(),
     };
 
     // Build operator delivery for heartbeat/scheduled output to Telegram.
@@ -432,6 +433,14 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route(
             "/api/v1/instance/delegation-plan",
             get(routes::delegation_plan),
+        )
+        .route(
+            "/api/v1/instance/delegations",
+            post(routes::create_delegation_task),
+        )
+        .route(
+            "/api/v1/instance/delegations/{task_id}",
+            get(routes::get_delegation_task),
         )
         .route("/chat", get(webchat::legacy_chat_redirect))
         .route("/webchat", get(webchat::webchat_handler))
