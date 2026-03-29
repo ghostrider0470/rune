@@ -1089,6 +1089,7 @@ pub struct DashboardDiagnosticsResponse {
     pub items: Vec<DashboardDiagnosticItem>,
     pub context_budget: ContextBudgetDiagnostics,
     pub context_tiers: ContextTierDiagnostics,
+    pub memory_hierarchy: DashboardMemoryHierarchyDiagnostics,
 }
 
 #[derive(Serialize)]
@@ -1111,6 +1112,24 @@ pub struct ContextTierDiagnostics {
     pub task: usize,
     pub project: usize,
     pub shared: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DashboardMemoryHierarchyDiagnostics {
+    pub prompt_cache_rows: u64,
+    pub cached_tokens: u64,
+    pub total_input_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
+    pub l2_recall_hits: u64,
+    pub l2_hot_memories: u64,
+    pub l2_total_memories: u64,
+    pub context_total_budget: u64,
+    pub context_total_estimated_tokens: u64,
+    pub context_compaction_trigger_tokens: u64,
+    pub context_over_budget: bool,
+    pub context_over_compaction_threshold: bool,
+    pub context_compaction_required: bool,
+    pub loaded_tier_count: u64,
 }
 
 // SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
@@ -1352,6 +1371,27 @@ pub async fn dashboard_diagnostics(
         shared: config.context.shared,
     };
 
+    let memory_hierarchy_summary =
+        doctor_memory_hierarchy(&state, &config, &state.capabilities, &state.token_metrics).await;
+    let memory_hierarchy = DashboardMemoryHierarchyDiagnostics {
+        prompt_cache_rows: memory_hierarchy_summary.prompt_cache_rows,
+        cached_tokens: memory_hierarchy_summary.cached_tokens,
+        total_input_tokens: memory_hierarchy_summary.total_input_tokens,
+        cache_hit_ratio_percent: memory_hierarchy_summary.cache_hit_ratio_percent,
+        l2_recall_hits: memory_hierarchy_summary.l2_recall_hits,
+        l2_hot_memories: memory_hierarchy_summary.l2_hot_memories,
+        l2_total_memories: memory_hierarchy_summary.l2_total_memories,
+        context_total_budget: memory_hierarchy_summary.context_total_budget,
+        context_total_estimated_tokens: memory_hierarchy_summary.context_total_estimated_tokens,
+        context_compaction_trigger_tokens: memory_hierarchy_summary
+            .context_compaction_trigger_tokens,
+        context_over_budget: memory_hierarchy_summary.context_over_budget,
+        context_over_compaction_threshold: memory_hierarchy_summary
+            .context_over_compaction_threshold,
+        context_compaction_required: memory_hierarchy_summary.context_compaction_required,
+        loaded_tier_count: memory_hierarchy_summary.loaded_tier_count,
+    };
+
     items.push(DashboardDiagnosticItem {
         level: "info",
         source: "context",
@@ -1367,6 +1407,25 @@ pub async fn dashboard_diagnostics(
             context_budget.memory_search_k,
             context_budget.total_tier_budget,
             context_budget.exceeds_usable_budget,
+        ),
+        observed_at: now.clone(),
+    });
+
+    items.push(DashboardDiagnosticItem {
+        level: if memory_hierarchy.context_compaction_required { "warn" } else { "info" },
+        source: "memory_hierarchy",
+        message: format!(
+            "Memory hierarchy: prompt_cache_rows={} cache_hit_ratio_percent={:.1} l2_recall_hits={} l2_hot_memories={} l2_total_memories={} loaded_tiers={} context_estimated_tokens={} compaction_trigger={} over_budget={} compaction_required={}",
+            memory_hierarchy.prompt_cache_rows,
+            memory_hierarchy.cache_hit_ratio_percent,
+            memory_hierarchy.l2_recall_hits,
+            memory_hierarchy.l2_hot_memories,
+            memory_hierarchy.l2_total_memories,
+            memory_hierarchy.loaded_tier_count,
+            memory_hierarchy.context_total_estimated_tokens,
+            memory_hierarchy.context_compaction_trigger_tokens,
+            memory_hierarchy.context_over_budget,
+            memory_hierarchy.context_compaction_required,
         ),
         observed_at: now.clone(),
     });
@@ -1387,6 +1446,7 @@ pub async fn dashboard_diagnostics(
         items,
         context_budget,
         context_tiers,
+        memory_hierarchy,
     }))
 }
 

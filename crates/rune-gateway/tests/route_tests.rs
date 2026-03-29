@@ -5039,6 +5039,25 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(context_tiers["task"], 10000);
     assert_eq!(context_tiers["project"], 20000);
     assert_eq!(context_tiers["shared"], 5000);
+    let memory_hierarchy = &json["memory_hierarchy"];
+    assert_eq!(memory_hierarchy["prompt_cache_rows"], 0);
+    assert_eq!(memory_hierarchy["cached_tokens"], 0);
+    assert_eq!(memory_hierarchy["total_input_tokens"], 0);
+    assert_eq!(memory_hierarchy["cache_hit_ratio_percent"], 0.0);
+    assert_eq!(memory_hierarchy["l2_recall_hits"], 0);
+    assert_eq!(memory_hierarchy["l2_hot_memories"], 0);
+    assert_eq!(memory_hierarchy["l2_total_memories"], 0);
+    assert_eq!(memory_hierarchy["context_total_budget"], 36000);
+    assert_eq!(memory_hierarchy["context_compaction_trigger_tokens"], 50000);
+    assert_eq!(memory_hierarchy["context_over_budget"], false);
+    assert_eq!(memory_hierarchy["context_over_compaction_threshold"], false);
+    assert_eq!(memory_hierarchy["context_compaction_required"], false);
+    assert_eq!(memory_hierarchy["loaded_tier_count"], 5);
+    assert!(
+        items
+            .iter()
+            .any(|item| item["source"] == "memory_hierarchy")
+    );
 }
 
 #[tokio::test]
