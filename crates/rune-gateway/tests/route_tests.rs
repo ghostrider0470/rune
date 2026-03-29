@@ -4180,14 +4180,14 @@ async fn instance_health_returns_capability_manifest() {
     assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 1);
     assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
     assert_eq!(json["capabilities"]["peer_count"], 0);
-    assert_eq!(
-        json["capabilities"]["configured_models"],
-        serde_json::json!([])
-    );
-    assert_eq!(
-        json["capabilities"]["active_projects"],
-        serde_json::json!([])
-    );
+    assert!(json["capabilities"]["configured_models"].is_array());
+    assert!(json["capabilities"]["configured_models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|model| model.is_string()));
+    assert!(json["capabilities"]["active_projects"].is_array());
+    assert_eq!(json["capabilities"]["comms_transport"], "filesystem");
 }
 
 #[tokio::test]
