@@ -5102,6 +5102,8 @@ async fn instance_health_reports_peer_health_states() {
         .find(|peer| peer["id"] == "peer-healthy")
         .unwrap();
     assert_eq!(healthy["status"], "degraded");
+    assert_eq!(healthy["observed_status"], "invalid-payload");
+    assert_eq!(healthy["last_seen_at"], serde_json::Value::Null);
     assert_eq!(
         healthy["health_url"],
         format!("http://{healthy_addr}/health")
@@ -5110,8 +5112,90 @@ async fn instance_health_reports_peer_health_states() {
 
     let down = peers.iter().find(|peer| peer["id"] == "peer-down").unwrap();
     assert_eq!(down["status"], "unreachable");
+    assert_eq!(down["observed_status"], "unreachable");
+    assert_eq!(down["last_seen_at"], serde_json::Value::Null);
     assert_eq!(down["health_url"], "http://127.0.0.1:9/health");
     assert!(down["detail"].is_string());
+}
+
+#[tokio::test]
+async fn instance_health_preserves_last_seen_and_observed_status_from_peer_payload() {
+    let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peer_addr = peer_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(|| async {
+                axum::Json(serde_json::json!({
+                    "status": "healthy",
+                    "service": "rune-gateway",
+                    "version": "0.1.0",
+                    "uptime_seconds": 42,
+                    "load": {
+                        "session_count": 2,
+                        "ws_subscribers": 1,
+                        "ws_connections": 3
+                    },
+                    "capabilities": {
+                        "mode": "direct",
+                        "updated_at": "2026-03-29T10:00:00Z",
+                        "storage_backend": "sqlite",
+                        "pgvector": false,
+                        "memory_mode": "hierarchical",
+                        "browser": false,
+                        "mcp_servers": 0,
+                        "tts": false,
+                        "stt": false,
+                        "channels": ["telegram"],
+                        "approval_mode": "manual",
+                        "security_posture": "standard",
+                        "identity": {
+                            "id": "peer-a",
+                            "name": "Peer A",
+                            "advertised_addr": "http://127.0.0.1:8787",
+                            "roles": ["gateway"],
+                            "capabilities_version": 1,
+                            "capability_hash": "cap-peer-a"
+                        },
+                        "instance_id": "peer-a",
+                        "instance_name": "Peer A",
+                        "peer_count": 0,
+                        "configured_models": ["claude-3-7-sonnet"],
+                        "active_projects": ["/workspace/peer-a"],
+                        "comms_transport": "filesystem"
+                    },
+                    "peers": []
+                }))
+            }),
+        );
+        axum::serve(peer_listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{peer_addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peer = json["peers"].as_array().unwrap().first().unwrap();
+    assert_eq!(peer["id"], "peer-a");
+    assert_eq!(peer["status"], "healthy");
+    assert_eq!(peer["observed_status"], "healthy");
+    assert!(peer["last_seen_at"].is_string());
+    assert_eq!(peer["name"], "Peer A");
+    assert_eq!(peer["capability_hash"], "cap-peer-a");
 }
 
 #[tokio::test]
@@ -5333,7 +5417,7 @@ async fn list_models_marks_configured_inventory_as_not_discovered() {
 
 #[tokio::test]
 async fn scan_models_uses_ollama_provider_discovery() {
-    use axum::{Json, Router, routing::get};
+    use axum::{Router, routing::get};
     use serde_json::json;
     use tokio::net::TcpListener;
 
@@ -5345,7 +5429,7 @@ async fn scan_models_uses_ollama_provider_discovery() {
             Router::new().route(
                 "/api/tags",
                 get(|| async {
-                    Json(json!({
+                    axum::Json(json!({
                         "models": [
                             {
                                 "name": "llama3.2:latest",
