@@ -308,6 +308,8 @@ Observed subflows include:
 - `openclaw gateway health`
 - `openclaw gateway probe`
 - `openclaw gateway discover`
+- `openclaw gateway instance-health`
+- `openclaw gateway delegation-plan`
 
 ### Parity
 - **exact** for lifecycle semantics and operator expectations
