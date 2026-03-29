@@ -4765,6 +4765,96 @@ async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
     assert_eq!(json["selected_peer"]["comms_transport"], "http");
 }
 
+
+#[tokio::test]
+async fn delegation_plan_rejects_named_strategy_when_peer_has_capability_mismatch() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-b",
+                    "name": "Peer Beta",
+                    "advertised_addr": "http://peer-b:8787",
+                    "roles": ["gateway"],
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-beta"
+                },
+                "instance_id": "peer-b",
+                "instance_name": "Peer Beta",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["phoenix"],
+                "comms_transport": "http"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    config.instance.roles = vec!["gateway".to_string(), "coder".to_string()];
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-b".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+    config.agents.list = vec![rune_config::AgentConfig {
+        id: "rune".to_string(),
+        default: Some(true),
+        model: None,
+        workspace: Some("rune".to_string()),
+        system_prompt: None,
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-b")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["selected_peer"]["id"], "peer-b");
+    assert_eq!(json["capability_match"]["compatible"], false);
+    assert_eq!(json["capability_match"]["missing_roles"], serde_json::json!(["coder"]));
+    assert_eq!(json["capability_match"]["missing_projects"], serde_json::json!(["rune"]));
+}
+
 #[tokio::test]
 async fn delegation_plan_exposes_full_task_contract_fields() {
     let app = build_test_app(None);
