@@ -38,6 +38,24 @@ impl WorkspaceContext {
     pub fn has_file(&self, name: &str) -> bool {
         self.files.iter().any(|(n, _)| n == name)
     }
+
+    /// Return only the files that belong to the project context tier.
+    #[must_use]
+    pub fn project_tier_files(&self) -> Vec<(String, String)> {
+        self.files
+            .iter()
+            .filter(|(name, _)| is_project_tier_file(name))
+            .cloned()
+            .collect()
+    }
+}
+
+fn is_project_tier_file(name: &str) -> bool {
+    matches!(
+        name,
+        "AGENTS.md" | "ROADMAP.md" | "agent-orchestration-runbook.md"
+    ) || name.starts_with("memory/")
+        || name == "MEMORY.md"
 }
 
 /// Loads workspace context files from the workspace root.
@@ -195,6 +213,31 @@ mod tests {
     async fn empty_context_formats_empty() {
         let ctx = WorkspaceContext::default();
         assert!(ctx.format_for_prompt().is_empty());
+    }
+
+    #[test]
+    fn project_tier_files_filter_to_project_context_inputs() {
+        let ctx = WorkspaceContext {
+            files: vec![
+                ("AGENTS.md".into(), "rules".into()),
+                ("SOUL.md".into(), "soul".into()),
+                ("ROADMAP.md".into(), "roadmap".into()),
+                ("memory/2026-03-29.md".into(), "daily".into()),
+                ("MEMORY.md".into(), "long".into()),
+            ],
+        };
+
+        let filtered = ctx.project_tier_files();
+        assert_eq!(filtered.len(), 4);
+        assert!(filtered.iter().any(|(name, _)| name == "AGENTS.md"));
+        assert!(filtered.iter().any(|(name, _)| name == "ROADMAP.md"));
+        assert!(
+            filtered
+                .iter()
+                .any(|(name, _)| name == "memory/2026-03-29.md")
+        );
+        assert!(filtered.iter().any(|(name, _)| name == "MEMORY.md"));
+        assert!(!filtered.iter().any(|(name, _)| name == "SOUL.md"));
     }
 
     #[tokio::test]
