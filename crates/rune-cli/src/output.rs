@@ -313,15 +313,6 @@ pub struct DelegationTaskContract {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DelegationCapabilityMatch {
-    pub compatible: bool,
-    pub missing_roles: Vec<String>,
-    pub missing_projects: Vec<String>,
-    pub model_overlap: Vec<String>,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationEndpointSummary {
     pub instance_id: String,
     pub instance_name: String,
@@ -361,9 +352,6 @@ pub struct DelegationResultContractSummary {
     pub artifact_field: String,
     pub error_field: String,
     pub finished_at_field: String,
-    pub accepted_at_field: String,
-    pub started_at_field: String,
-    pub task_id_field: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -373,7 +361,6 @@ pub struct DelegationPlanResponse {
     pub candidates: Vec<PeerSummary>,
     pub detail: String,
     pub task_contract: DelegationTaskContract,
-    pub capability_match: DelegationCapabilityMatch,
     pub sender: Option<DelegationEndpointSummary>,
     pub receiver: Option<DelegationEndpointSummary>,
     pub routing: Option<DelegationRoutingSummary>,
@@ -447,91 +434,6 @@ Timeout handling: {}",
                 "
 Conflict prevention: {}",
                 self.task_contract.conflict_prevention.join("; ")
-            )?;
-        }
-        write!(
-            f,
-            "
-Capability match: {}",
-            if self.capability_match.compatible {
-                "compatible"
-            } else {
-                "mismatch"
-            }
-        )?;
-        write!(
-            f,
-            "
-Capability detail: {}",
-            self.capability_match.detail
-        )?;
-        if !self.capability_match.model_overlap.is_empty() {
-            write!(
-                f,
-                "
-Model overlap: {}",
-                self.capability_match.model_overlap.join(", ")
-            )?;
-        }
-        if !self.capability_match.missing_roles.is_empty() {
-            write!(
-                f,
-                "
-Missing roles: {}",
-                self.capability_match.missing_roles.join(", ")
-            )?;
-        }
-        if !self.capability_match.missing_projects.is_empty() {
-            write!(
-                f,
-                "
-Missing projects: {}",
-                self.capability_match.missing_projects.join(", ")
-            )?;
-        }
-        if let Some(sender) = &self.sender {
-            write!(
-                f,
-                "
-Sender: {} ({})",
-        write!(
-            f,
-            "
-Capability match: {}",
-            if self.capability_match.compatible {
-                "compatible"
-            } else {
-                "mismatch"
-            }
-        )?;
-        write!(
-            f,
-            "
-Capability detail: {}",
-            self.capability_match.detail
-        )?;
-        if !self.capability_match.model_overlap.is_empty() {
-            write!(
-                f,
-                "
-Model overlap: {}",
-                self.capability_match.model_overlap.join(", ")
-            )?;
-        }
-        if !self.capability_match.missing_roles.is_empty() {
-            write!(
-                f,
-                "
-Missing roles: {}",
-                self.capability_match.missing_roles.join(", ")
-            )?;
-        }
-        if !self.capability_match.missing_projects.is_empty() {
-            write!(
-                f,
-                "
-Missing projects: {}",
-                self.capability_match.missing_projects.join(", ")
             )?;
         }
         if let Some(sender) = &self.sender {
@@ -648,17 +550,6 @@ pub struct DoctorTopologySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DoctorContextTierCounter {
-    pub kind: String,
-    pub token_budget: u64,
-    pub estimated_tokens: u64,
-    pub priority: u8,
-    pub staleness_policy: String,
-    pub loaded: bool,
-    pub source: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorMemoryHierarchySummary {
     pub l0: String,
     pub l1: String,
@@ -678,27 +569,9 @@ pub struct DoctorMemoryHierarchySummary {
     #[serde(default)]
     pub l2_recall_hits: u64,
     #[serde(default)]
-    pub l2_warm_memories: u64,
-    #[serde(default)]
     pub l2_hot_memories: u64,
     #[serde(default)]
     pub l2_total_memories: u64,
-    #[serde(default)]
-    pub context_total_budget: u64,
-    #[serde(default)]
-    pub context_total_estimated_tokens: u64,
-    #[serde(default)]
-    pub context_compaction_trigger_tokens: u64,
-    #[serde(default)]
-    pub context_over_budget: bool,
-    #[serde(default)]
-    pub context_over_compaction_threshold: bool,
-    #[serde(default)]
-    pub context_compaction_required: bool,
-    #[serde(default)]
-    pub loaded_tier_count: u64,
-    #[serde(default)]
-    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -783,39 +656,11 @@ impl fmt::Display for DoctorReport {
             )?;
             writeln!(
                 f,
-                "  L2 Counters: recall_hits={}, warm_memories={}, hot_memories={}, total_memories={}",
+                "  L2 Counters: recall_hits={}, hot_memories={}, total_memories={}",
                 memory_hierarchy.l2_recall_hits,
-                memory_hierarchy.l2_warm_memories,
                 memory_hierarchy.l2_hot_memories,
                 memory_hierarchy.l2_total_memories
             )?;
-            writeln!(
-                f,
-                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}",
-                memory_hierarchy.loaded_tier_count,
-                memory_hierarchy.context_total_budget,
-                memory_hierarchy.context_total_estimated_tokens,
-                memory_hierarchy.context_compaction_trigger_tokens,
-                memory_hierarchy.context_over_budget,
-                memory_hierarchy.context_over_compaction_threshold,
-                memory_hierarchy.context_compaction_required
-            )?;
-            if !memory_hierarchy.context_tier_counters.is_empty() {
-                writeln!(f, "  Context Tier Details:")?;
-                for tier in &memory_hierarchy.context_tier_counters {
-                    writeln!(
-                        f,
-                        "    - {}: loaded={}, budget={}, estimated_tokens={}, priority={}, staleness_policy={}, source={}",
-                        tier.kind,
-                        tier.loaded,
-                        tier.token_budget,
-                        tier.estimated_tokens,
-                        tier.priority,
-                        tier.staleness_policy,
-                        tier.source
-                    )?;
-                }
-            }
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
@@ -6007,17 +5852,8 @@ mod tests {
                 total_input_tokens: 0,
                 cache_hit_ratio_percent: 0.0,
                 l2_recall_hits: 0,
-                l2_warm_memories: 0,
                 l2_hot_memories: 0,
                 l2_total_memories: 0,
-                context_total_budget: 36_000,
-                context_total_estimated_tokens: 0,
-                context_compaction_trigger_tokens: 96_000,
-                context_over_budget: false,
-                context_over_compaction_threshold: false,
-                context_compaction_required: false,
-                loaded_tier_count: 4,
-                context_tier_counters: vec![],
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
@@ -6034,7 +5870,6 @@ mod tests {
         assert!(out.contains("Memory Hierarchy:"));
         assert!(out.contains("L1: prompt cache via provider prefixes"));
         assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
-        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
@@ -6681,14 +6516,6 @@ mod tests {
                 optional_fields: vec!["target_peer_id".into()],
                 result_fields: vec!["status".into()],
             },
-            capability_match: DelegationCapabilityMatch {
-                compatible: true,
-                missing_roles: vec![],
-                missing_projects: vec![],
-                model_overlap: vec!["gpt-4.1".into()],
-                detail: "receiver matches advertised roles/projects with 1 overlapping model(s)"
-                    .into(),
-            },
             sender: Some(DelegationEndpointSummary {
                 instance_id: "sender-a".into(),
                 instance_name: "Sender A".into(),
@@ -6741,9 +6568,6 @@ mod tests {
                 artifact_field: "artifacts".into(),
                 error_field: "error".into(),
                 finished_at_field: "finished_at".into(),
-                accepted_at_field: "accepted_at".into(),
-                started_at_field: "started_at".into(),
-                task_id_field: "task_id".into(),
             }),
         };
         let out = render(&response, OutputFormat::Human);
