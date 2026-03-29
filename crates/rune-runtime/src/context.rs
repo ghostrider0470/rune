@@ -128,6 +128,7 @@ pub struct ContextAssemblyReport {
     pub compaction_trigger_tokens: usize,
     pub over_budget: bool,
     pub over_compaction_threshold: bool,
+    pub compaction_required: bool,
     pub tiers: Vec<ContextTierUsage>,
 }
 
@@ -313,13 +314,17 @@ impl ContextAssembler {
             .iter()
             .map(|spec| spec.token_budget)
             .sum::<usize>();
+        let over_budget = total_budget > 0 && total_estimated_tokens > total_budget;
+        let over_compaction_threshold =
+            compaction_trigger_tokens > 0 && total_estimated_tokens > compaction_trigger_tokens;
+
         ContextAssemblyReport {
             total_estimated_tokens,
             total_budget,
             compaction_trigger_tokens,
-            over_budget: total_budget > 0 && total_estimated_tokens > total_budget,
-            over_compaction_threshold: compaction_trigger_tokens > 0
-                && total_estimated_tokens > compaction_trigger_tokens,
+            over_budget,
+            over_compaction_threshold,
+            compaction_required: over_budget || over_compaction_threshold,
             tiers,
         }
     }
