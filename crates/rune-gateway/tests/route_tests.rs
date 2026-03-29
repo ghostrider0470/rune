@@ -23,8 +23,8 @@ use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
 };
 use rune_runtime::{
-    CompactionStrategy, ContextAssembler, HookRegistry, NoOpCompaction, PluginLoader,
-    PluginRegistry, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
+    CompactionStrategy, ContextAssembler, ContextTierKind, HookRegistry, NoOpCompaction,
+    PluginLoader, PluginRegistry, SessionEngine, SkillLoader, SkillRegistry, TurnExecutor,
     heartbeat::HeartbeatRunner,
     scheduler::{ReminderStore, Scheduler},
 };
@@ -4166,6 +4166,7 @@ async fn instance_health_returns_capability_manifest() {
     assert_eq!(json["load"]["session_count"], 0);
     assert_eq!(json["load"]["ws_connections"], 0);
     assert!(json["capabilities"].is_object());
+    assert!(json["capabilities"]["updated_at"].as_str().unwrap().contains("T"));
     assert_eq!(json["capabilities"]["instance_id"], "test-instance");
     assert_eq!(json["capabilities"]["instance_name"], "test-instance");
     assert_eq!(json["capabilities"]["identity"]["id"], "test-instance");
@@ -4468,6 +4469,7 @@ async fn status_returns_correct_shape() {
     assert!(json["registered_tools"].is_number());
     assert!(json["session_count"].is_number());
     assert!(json["capabilities"].is_object());
+    assert!(json["capabilities"]["updated_at"].as_str().unwrap().contains("T"));
     assert_eq!(json["capabilities"]["mode"], "standalone");
     assert_eq!(json["capabilities"]["storage_backend"], "test");
     assert_eq!(json["capabilities"]["pgvector"], false);
@@ -4745,6 +4747,28 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(context_budget["usable_prompt_budget"], 113000);
     assert_eq!(context_budget["auto_inject_project"], true);
     assert_eq!(context_budget["memory_search_k"], 10);
+    let context_tiers = &json["context_tiers"];
+    assert_eq!(context_tiers["identity"], 1000);
+    assert_eq!(context_tiers["task"], 10000);
+    assert_eq!(context_tiers["project"], 20000);
+    assert_eq!(context_tiers["shared"], 5000);
+}
+
+#[tokio::test]
+async fn context_assembler_uses_configured_tier_budgets() {
+    let assembler = ContextAssembler::new("You are Rune.").with_tier_budgets(1200, 3400, 5600, 7800);
+    let specs = assembler.tier_specs();
+
+    assert_eq!(specs[0].kind, ContextTierKind::Identity);
+    assert_eq!(specs[0].token_budget, 1200);
+    assert_eq!(specs[1].kind, ContextTierKind::ActiveTask);
+    assert_eq!(specs[1].token_budget, 3400);
+    assert_eq!(specs[2].kind, ContextTierKind::Project);
+    assert_eq!(specs[2].token_budget, 5600);
+    assert_eq!(specs[3].kind, ContextTierKind::Shared);
+    assert_eq!(specs[3].token_budget, 7800);
+    assert_eq!(specs[4].kind, ContextTierKind::Historical);
+    assert_eq!(specs[4].token_budget, 0);
 }
 
 #[tokio::test]
