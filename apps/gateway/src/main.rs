@@ -696,6 +696,13 @@ async fn build_services(
         .unwrap_or("You are Rune, a Rust-powered AI assistant built for speed and reliability.")
         .to_string();
 
+    let context_assembler = ContextAssembler::new(&system_prompt).with_tier_budgets(
+        config.context.identity,
+        config.context.task,
+        config.context.project,
+        config.context.shared,
+    );
+
     let mut turn_executor = TurnExecutor::new(
         session_repo.clone(),
         turn_repo.clone(),
@@ -704,7 +711,7 @@ async fn build_services(
         model_provider.clone(),
         tool_executor,
         tool_registry,
-        ContextAssembler::new(&system_prompt),
+        context_assembler,
         {
             let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
                 TokenBudgetCompaction::new(
