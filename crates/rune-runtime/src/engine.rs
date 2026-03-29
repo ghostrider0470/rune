@@ -97,6 +97,44 @@ impl SessionEngine {
         Ok(row)
     }
 
+
+    /// Create a subagent session preloaded with delegation context and scratchpad metadata.
+    ///
+    /// The context payload is stored in session metadata under `delegation_context` so an
+    /// orchestrator can inject an objective/history/background slice without forcing the
+    /// subagent to rediscover the same files. An optional `shared_scratchpad_path` gives both
+    /// orchestrator and subagent a stable handoff location for incremental findings.
+    pub async fn create_subagent_session_with_context(
+        &self,
+        workspace_root: Option<String>,
+        requester_session_id: Option<Uuid>,
+        channel_ref: Option<String>,
+        mode: Option<String>,
+        delegation_context: serde_json::Value,
+        shared_scratchpad_path: Option<String>,
+    ) -> Result<SessionRow, RuntimeError> {
+        let session = self
+            .create_session_full(
+                SessionKind::Subagent,
+                workspace_root,
+                requester_session_id,
+                channel_ref,
+                mode,
+            )
+            .await?;
+
+        let mut patch = serde_json::json!({
+            "delegation_context": delegation_context,
+        });
+        if let Some(path) = shared_scratchpad_path {
+            patch["shared_scratchpad"] = serde_json::json!({
+                "path": path,
+            });
+        }
+
+        self.patch_metadata(session.id, patch).await
+    }
+
     /// Transition a session to Ready status. Idempotent: if already ready, returns Ok.
     pub async fn mark_ready(&self, session_id: Uuid) -> Result<SessionRow, RuntimeError> {
         let row = self.session_repo.find_by_id(session_id).await?;

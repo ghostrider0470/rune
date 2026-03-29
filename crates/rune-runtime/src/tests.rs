@@ -2685,3 +2685,59 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
 }
+
+
+#[tokio::test]
+async fn create_subagent_session_with_context_persists_delegation_slice_and_scratchpad() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let parent = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let session = engine
+        .create_subagent_session_with_context(
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            Some(parent.id),
+            Some("orchestrator:acme".to_string()),
+            Some("isolated".to_string()),
+            serde_json::json!({
+                "task": "Fix auth timeout regression",
+                "budget": {
+                    "token_budget": 2048,
+                    "partitions": [
+                        {"id": "objective", "partition": "objective", "token_count": 180},
+                        {"id": "history-1", "partition": "history", "token_count": 420},
+                        {"id": "background-1", "partition": "background", "token_count": 260}
+                    ]
+                },
+                "file_summaries": [
+                    {"path": "src/auth.rs", "summary": "timeout logic and retry budget"}
+                ],
+                "memories": ["customer escalated timeout failures after retry patch"]
+            }),
+            Some("agents/acme/scratchpads/subagent-1.md".to_string()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(session.kind, "subagent");
+    assert_eq!(session.status, "ready");
+    assert_eq!(session.requester_session_id, Some(parent.id));
+    assert_eq!(session.channel_ref.as_deref(), Some("orchestrator:acme"));
+    assert_eq!(session.metadata["mode"], "isolated");
+    assert_eq!(session.metadata["delegation_context"]["task"], "Fix auth timeout regression");
+    assert_eq!(session.metadata["delegation_context"]["budget"]["token_budget"], 2048);
+    assert_eq!(
+        session.metadata["delegation_context"]["file_summaries"][0]["path"],
+        "src/auth.rs"
+    );
+    assert_eq!(
+        session.metadata["shared_scratchpad"]["path"],
+        "agents/acme/scratchpads/subagent-1.md"
+    );
+}
