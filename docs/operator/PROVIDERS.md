@@ -46,27 +46,27 @@ Rune ships 10 model providers, all config-driven through `config.toml`:
 ### Provider configuration example
 
 ```toml
-[[providers]]
+[[models.providers]]
 name = "primary"
 kind = "openai"
 base_url = "https://api.openai.com/v1"
-default_model = "gpt-4o"
 api_key_env = "OPENAI_API_KEY"
+models = ["gpt-4o"]
 
-[[providers]]
+[[models.providers]]
 name = "azure"
 kind = "azure_openai"
 base_url = "https://my-resource.openai.azure.com"
-default_model = "gpt-4o"
 deployment_name = "gpt-4o-deployment"
 api_version = "2024-06-01"
 api_key_env = "AZURE_OPENAI_API_KEY"
+models = ["gpt-4o"]
 
-[[providers]]
+[[models.providers]]
 name = "local"
 kind = "ollama"
 base_url = "http://localhost:11434"
-default_model = "llama3"
+models = ["llama3"]
 ```
 
 ### API key resolution order
@@ -92,7 +92,7 @@ Fallback chains allow automatic failover when a primary model encounters a retri
 default_model = "gpt-4o"
 image_model = "gpt-4o"
 
-[[models.text_fallbacks]]
+[[models.fallbacks]]
 name = "primary-chain"
 chain = ["gpt-4o", "claude-sonnet-4-20250514", "llama3"]
 
