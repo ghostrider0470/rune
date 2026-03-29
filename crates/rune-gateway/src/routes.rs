@@ -517,7 +517,9 @@ async fn collect_peer_health(
                         advertised_addr: payload.capabilities.identity.advertised_addr,
                         roles: payload.capabilities.identity.roles,
                         capability_hash: Some(payload.capabilities.identity.capability_hash),
-                        capabilities_version: Some(payload.capabilities.identity.capabilities_version),
+                        capabilities_version: Some(
+                            payload.capabilities.identity.capabilities_version,
+                        ),
                         comms_transport: Some(payload.capabilities.comms_transport),
                         configured_models: payload.capabilities.configured_models,
                         active_projects: payload.capabilities.active_projects,
