@@ -262,6 +262,8 @@ export interface CreateSessionRequest {
   workspace_root?: string;
   requester_session_id?: string;
   channel_ref?: string;
+  mode?: string;
+  project_id?: string;
 }
 
 export interface PendingAttachment {
