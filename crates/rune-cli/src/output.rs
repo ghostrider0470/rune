@@ -526,6 +526,20 @@ pub struct DoctorMemoryHierarchySummary {
     pub l2_hot_memories: u64,
     #[serde(default)]
     pub l2_total_memories: u64,
+    #[serde(default)]
+    pub context_total_budget: u64,
+    #[serde(default)]
+    pub context_total_estimated_tokens: u64,
+    #[serde(default)]
+    pub context_compaction_trigger_tokens: u64,
+    #[serde(default)]
+    pub context_over_budget: bool,
+    #[serde(default)]
+    pub context_over_compaction_threshold: bool,
+    #[serde(default)]
+    pub context_compaction_required: bool,
+    #[serde(default)]
+    pub loaded_tier_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -614,6 +628,17 @@ impl fmt::Display for DoctorReport {
                 memory_hierarchy.l2_recall_hits,
                 memory_hierarchy.l2_hot_memories,
                 memory_hierarchy.l2_total_memories
+            )?;
+            writeln!(
+                f,
+                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}",
+                memory_hierarchy.loaded_tier_count,
+                memory_hierarchy.context_total_budget,
+                memory_hierarchy.context_total_estimated_tokens,
+                memory_hierarchy.context_compaction_trigger_tokens,
+                memory_hierarchy.context_over_budget,
+                memory_hierarchy.context_over_compaction_threshold,
+                memory_hierarchy.context_compaction_required
             )?;
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
@@ -5808,6 +5833,13 @@ mod tests {
                 l2_recall_hits: 0,
                 l2_hot_memories: 0,
                 l2_total_memories: 0,
+                context_total_budget: 36_000,
+                context_total_estimated_tokens: 0,
+                context_compaction_trigger_tokens: 96_000,
+                context_over_budget: false,
+                context_over_compaction_threshold: false,
+                context_compaction_required: false,
+                loaded_tier_count: 4,
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
@@ -5824,6 +5856,7 @@ mod tests {
         assert!(out.contains("Memory Hierarchy:"));
         assert!(out.contains("L1: prompt cache via provider prefixes"));
         assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
+        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
