@@ -1305,13 +1305,24 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
         }),
         backend_matrix: build_backend_matrix(config),
         memory_hierarchy: Some(DoctorMemoryHierarchySummary {
-            l0: "current context window".to_string(),
-            l1: "prompt cache".to_string(),
-            l2: format!("{} retrieval", config.memory.requested_level().as_str()),
-            l3: "session log archive".to_string(),
-            promotion: "reused recall can re-enter cached prefixes".to_string(),
-            demotion: format!("compaction threshold {} tokens", config.runtime.compaction.compress_after),
-            metrics: "offline doctor report has no live cache metrics".to_string(),
+            l0: "current turn context window (active transcript + system/task/project context)"
+                .to_string(),
+            l1: "prompt cache via provider prefixes (offline doctor cannot inspect live cache metrics)"
+                .to_string(),
+            l2: format!(
+                "{} memory retrieval ({})",
+                config.memory.requested_level().as_str(),
+                config.memory.capability_mode(config.memory.semantic_search_enabled)
+            ),
+            l3: "durable session logs in transcript/session storage".to_string(),
+            promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions"
+                .to_string(),
+            demotion: format!(
+                "compaction checkpoints persist stale L0 context to warm/cold memory after {} tokens",
+                config.runtime.compaction.compress_after
+            ),
+            metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals"
+                .to_string(),
         }),
         run_at: chrono::Utc::now().to_rfc3339(),
     }

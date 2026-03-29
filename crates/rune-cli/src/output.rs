@@ -5354,13 +5354,13 @@ mod tests {
                 fix_hint: None,
             }],
             memory_hierarchy: Some(crate::output::DoctorMemoryHierarchySummary {
-                l0: "current context window".into(),
-                l1: "prompt cache".into(),
-                l2: "semantic retrieval".into(),
-                l3: "session log archive".into(),
-                promotion: "reuse hot facts".into(),
-                demotion: "compact stale context".into(),
-                metrics: "prompt_cache_rows=1".into(),
+                l0: "current turn context window (active transcript + system/task/project context)".into(),
+                l1: "prompt cache via provider prefixes (offline doctor cannot inspect live cache metrics)".into(),
+                l2: "semantic retrieval (semantic-hybrid)".into(),
+                l3: "durable session logs in transcript/session storage".into(),
+                promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
+                demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
+                metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
@@ -5375,7 +5375,7 @@ mod tests {
         assert!(out.contains("Backend Matrix:"));
         assert!(out.contains("storage: sqlite (connected) — 4 repo surfaces configured"));
         assert!(out.contains("Memory Hierarchy:"));
-        assert!(out.contains("L1: prompt cache"));
+        assert!(out.contains("L1: prompt cache via provider prefixes"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
