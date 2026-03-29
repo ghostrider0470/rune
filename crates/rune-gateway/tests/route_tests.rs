@@ -4189,6 +4189,199 @@ async fn instance_health_returns_capability_manifest() {
 }
 
 #[tokio::test]
+async fn instance_health_reports_peer_metadata_from_health_payload() {
+    let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peer_addr = peer_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 3,
+                "ws_subscribers": 1,
+                "ws_connections": 2
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "peer-a",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway", "coder"],
+                    "capabilities_version": 1
+                },
+                "instance_id": "peer-a",
+                "instance_name": "peer-a",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["rune"],
+                "comms_transport": "filesystem"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(peer_listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{peer_addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peer = json["peers"].as_array().unwrap().first().unwrap();
+    assert_eq!(peer["status"], "healthy");
+    assert_eq!(peer["load"]["session_count"], 3);
+    assert_eq!(peer["advertised_addr"], "http://peer-a:8787");
+    assert_eq!(peer["roles"], serde_json::json!(["gateway", "coder"]));
+    assert_eq!(peer["configured_models"], serde_json::json!(["gpt-4.1"]));
+    assert_eq!(peer["active_projects"], serde_json::json!(["rune"]));
+}
+
+#[tokio::test]
+async fn delegation_plan_selects_least_busy_healthy_peer() {
+    async fn spawn_peer(
+        session_count: usize,
+        ws_connections: usize,
+        id: &'static str,
+    ) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let payload = serde_json::json!({
+                "status": "ok",
+                "service": "rune-gateway",
+                "version": "0.1.0",
+                "uptime_seconds": 12,
+                "load": {
+                    "session_count": session_count,
+                    "ws_subscribers": 0,
+                    "ws_connections": ws_connections
+                },
+                "capabilities": {
+                    "mode": "standalone",
+                    "updated_at": "2026-03-29T00:00:00Z",
+                    "storage_backend": "sqlite",
+                    "pgvector": false,
+                    "memory_mode": "semantic",
+                    "browser": false,
+                    "mcp_servers": 0,
+                    "tts": false,
+                    "stt": false,
+                    "channels": [],
+                    "approval_mode": "manual",
+                    "security_posture": "standard",
+                    "identity": {
+                        "id": id,
+                        "name": id,
+                        "advertised_addr": null,
+                        "roles": ["gateway"],
+                        "capabilities_version": 1
+                    },
+                    "instance_id": id,
+                    "instance_name": id,
+                    "peer_count": 0,
+                    "configured_models": [],
+                    "active_projects": [],
+                    "comms_transport": "filesystem"
+                },
+                "peers": []
+            });
+            let app = axum::Router::new().route(
+                "/api/v1/instance/health",
+                axum::routing::get(move || {
+                    let payload = payload.clone();
+                    async move { axum::Json(payload) }
+                }),
+            );
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}/api/v1/instance/health")
+    }
+
+    let peer_a_url = spawn_peer(8, 4, "peer-a").await;
+    let peer_b_url = spawn_peer(2, 1, "peer-b").await;
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![
+        rune_config::PeerConfig {
+            id: "peer-a".to_string(),
+            health_url: peer_a_url,
+        },
+        rune_config::PeerConfig {
+            id: "peer-b".to_string(),
+            health_url: peer_b_url,
+        },
+        rune_config::PeerConfig {
+            id: "peer-down".to_string(),
+            health_url: "http://127.0.0.1:9/api/v1/instance/health".to_string(),
+        },
+    ];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=least_busy")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["strategy"], "least_busy");
+    assert_eq!(json["selected_peer"]["id"], "peer-b");
+    assert_eq!(json["selected_peer"]["load"]["session_count"], 2);
+    assert_eq!(json["candidates"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn delegation_plan_requires_peer_id_for_named_strategy() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn instance_health_reports_peer_health_states() {
     let healthy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let healthy_addr = healthy_listener.local_addr().unwrap();
