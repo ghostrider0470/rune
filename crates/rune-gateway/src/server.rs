@@ -178,7 +178,17 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
                 if services.config.media.tts.provider == "elevenlabs" {
                     Box::new(ElevenLabsTts::new(key))
                 } else {
-                    Box::new(OpenAiTts::new(key))
+                    Box::new(OpenAiTts::new(
+                        key,
+                        services
+                            .config
+                            .media
+                            .tts
+                            .base_url
+                            .clone()
+                            .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+                        services.config.media.tts.api_version.clone(),
+                    ))
                 };
             Arc::new(RwLock::new(TtsEngine::new(
                 provider,
