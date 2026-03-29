@@ -6949,6 +6949,8 @@ fn parse_delegation_endpoint(value: &serde_json::Value) -> Option<DelegationEndp
             .to_string(),
         transport: value["transport"].as_str().unwrap_or_default().to_string(),
         health_url: value["health_url"].as_str().map(str::to_string),
+        submit_url: value["submit_url"].as_str().map(str::to_string),
+        result_url: value["result_url"].as_str().map(str::to_string),
     })
 }
 
@@ -7046,6 +7048,18 @@ fn parse_delegation_result_contract(
             .as_str()
             .unwrap_or_default()
             .to_string(),
+        accepted_at_field: value["accepted_at_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        started_at_field: value["started_at_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        task_id_field: value["task_id_field"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
     })
 }
 
@@ -7107,13 +7121,17 @@ mod delegation_plan_parse_tests {
                 "instance_id": "sender-a",
                 "instance_name": "Sender A",
                 "transport": "filesystem",
-                "health_url": "http://sender-a/api/v1/instance/health"
+                "health_url": "http://sender-a/api/v1/instance/health",
+                "submit_url": "http://sender-a/api/v1/instance/delegations",
+                "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
             },
             "receiver": {
                 "instance_id": "peer-b",
                 "instance_name": "Peer B",
                 "transport": "http",
-                "health_url": "http://peer-b/api/v1/instance/health"
+                "health_url": "http://peer-b/api/v1/instance/health",
+                "submit_url": "http://peer-b/api/v1/instance/delegations",
+                "result_url": "http://peer-b/api/v1/instance/delegations/{task_id}"
             },
             "routing": {
                 "mode": "least_busy",
@@ -7143,7 +7161,10 @@ mod delegation_plan_parse_tests {
                 "status_field": "status",
                 "artifact_field": "artifacts",
                 "error_field": "error",
-                "finished_at_field": "finished_at"
+                "finished_at_field": "finished_at",
+                "accepted_at_field": "accepted_at",
+                "started_at_field": "started_at",
+                "task_id_field": "task_id"
             }
         });
 
@@ -7164,6 +7185,14 @@ mod delegation_plan_parse_tests {
 
         assert_eq!(parsed.sender.as_ref().unwrap().instance_id, "sender-a");
         assert_eq!(parsed.receiver.as_ref().unwrap().transport, "http");
+        assert_eq!(
+            parsed.sender.as_ref().unwrap().submit_url.as_deref(),
+            Some("http://sender-a/api/v1/instance/delegations")
+        );
+        assert_eq!(
+            parsed.receiver.as_ref().unwrap().result_url.as_deref(),
+            Some("http://peer-b/api/v1/instance/delegations/{task_id}")
+        );
         assert_eq!(parsed.routing.as_ref().unwrap().peer_count, 3);
         assert_eq!(
             parsed.branch_reservation.as_ref().unwrap().mechanism,
@@ -7175,5 +7204,14 @@ mod delegation_plan_parse_tests {
             vec!["completed", "failed", "timeout"]
         );
         assert_eq!(parsed.result.as_ref().unwrap().artifact_field, "artifacts");
+        assert_eq!(
+            parsed.result.as_ref().unwrap().accepted_at_field,
+            "accepted_at"
+        );
+        assert_eq!(
+            parsed.result.as_ref().unwrap().started_at_field,
+            "started_at"
+        );
+        assert_eq!(parsed.result.as_ref().unwrap().task_id_field, "task_id");
     }
 }

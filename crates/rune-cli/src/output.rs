@@ -315,6 +315,8 @@ pub struct DelegationEndpointSummary {
     pub instance_name: String,
     pub transport: String,
     pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,6 +349,9 @@ pub struct DelegationResultContractSummary {
     pub artifact_field: String,
     pub error_field: String,
     pub finished_at_field: String,
+    pub accepted_at_field: String,
+    pub started_at_field: String,
+    pub task_id_field: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6464,12 +6469,16 @@ mod tests {
                 instance_name: "Sender A".into(),
                 transport: "filesystem".into(),
                 health_url: Some("http://sender-a/api/v1/instance/health".into()),
+                submit_url: Some("http://sender-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://sender-a/api/v1/instance/delegations/{task_id}".into()),
             }),
             receiver: Some(DelegationEndpointSummary {
                 instance_id: "peer-a".into(),
                 instance_name: "Peer A".into(),
                 transport: "http".into(),
                 health_url: Some("http://peer-a/api/v1/instance/health".into()),
+                submit_url: Some("http://peer-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://peer-a/api/v1/instance/delegations/{task_id}".into()),
             }),
             routing: Some(DelegationRoutingSummary {
                 mode: "least_busy".into(),
@@ -6507,6 +6516,9 @@ mod tests {
                 artifact_field: "artifacts".into(),
                 error_field: "error".into(),
                 finished_at_field: "finished_at".into(),
+                accepted_at_field: "accepted_at".into(),
+                started_at_field: "started_at".into(),
+                task_id_field: "task_id".into(),
             }),
         };
         let out = render(&response, OutputFormat::Human);
