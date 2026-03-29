@@ -2643,6 +2643,16 @@ pub struct SessionTreeNode {
     pub subagent_last_note: Option<String>,
     pub created_at: String,
     pub turn_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_lifecycle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_runtime_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_runtime_attached: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_status_updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_last_note: Option<String>,
     pub children: Vec<SessionTreeNode>,
 }
 
@@ -2756,6 +2766,11 @@ pub async fn get_session_tree(
             subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
+            subagent_lifecycle: metadata_string(&row.metadata, "subagent_lifecycle"),
+            subagent_runtime_status: metadata_string(&row.metadata, "subagent_runtime_status"),
+            subagent_runtime_attached: metadata_bool(&row.metadata, "subagent_runtime_attached"),
+            subagent_status_updated_at: metadata_string(&row.metadata, "subagent_status_updated_at"),
+            subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             children,
         }
     }
