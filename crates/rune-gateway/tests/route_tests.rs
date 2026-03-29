@@ -64,6 +64,12 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
         channels: vec![],
         approval_mode: "prompt".to_string(),
         security_posture: "sandboxed".to_string(),
+        instance_id: "test-instance".to_string(),
+        instance_name: "test-instance".to_string(),
+        peer_count: 0,
+        configured_models: vec![],
+        active_projects: vec![],
+        comms_transport: "filesystem".to_string(),
     })
 }
 
