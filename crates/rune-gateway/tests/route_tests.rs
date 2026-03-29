@@ -1534,7 +1534,13 @@ fn build_test_app_parts_with_ms365_services(
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
     std::fs::write(workspace_root.join("AGENTS.md"), "# Test workspace").unwrap();
 
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let context_assembler = ContextAssembler::new("You are a test assistant.")
+        .with_tier_budgets(
+            config.context.identity,
+            config.context.task,
+            config.context.project,
+            config.context.shared,
+        );
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
