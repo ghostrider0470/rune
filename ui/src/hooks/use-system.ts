@@ -3,6 +3,7 @@ import { api } from "@/lib/api-client";
 import type {
   HealthResponse,
   StatusResponse,
+  InstanceHealthResponse,
   HeartbeatState,
   ActionResponse,
   ReminderResponse,
@@ -219,5 +220,14 @@ export function useSttDisable() {
       queryClient.invalidateQueries({ queryKey: ["stt"] });
       queryClient.invalidateQueries({ queryKey: ["config"] });
     },
+  });
+}
+
+
+export function useInstanceHealth() {
+  return useQuery({
+    queryKey: ["instance", "health"],
+    queryFn: () => api.get<InstanceHealthResponse>("/api/v1/instance/health"),
+    refetchInterval: 15_000,
   });
 }
