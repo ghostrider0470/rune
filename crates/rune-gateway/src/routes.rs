@@ -2637,6 +2637,8 @@ pub struct SessionTreeNode {
     pub kind: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
@@ -2759,6 +2761,7 @@ pub async fn get_session_tree(
             id: row.id.to_string(),
             kind: row.kind.clone(),
             status: row.status.clone(),
+            parent_session_id: row.requester_session_id.map(|id| id.to_string()),
             mode: metadata_string(&row.metadata, "mode"),
             channel: row.channel_ref.clone(),
             orchestration_status,

@@ -792,6 +792,8 @@ pub struct DoctorMemoryHierarchySummary {
     pub demotion: String,
     pub metrics: String,
     #[serde(default)]
+    pub last_checkpoint_at: Option<String>,
+    #[serde(default)]
     pub prompt_cache_rows: u64,
     #[serde(default)]
     pub cached_tokens: u64,
@@ -920,7 +922,7 @@ impl fmt::Display for DoctorReport {
             )?;
             writeln!(
                 f,
-                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}, l3_cold_storage_enabled={}",
+                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}, l3_cold_storage_enabled={}, last_checkpoint_at={}",
                 memory_hierarchy.loaded_tier_count,
                 memory_hierarchy.context_total_budget,
                 memory_hierarchy.context_total_estimated_tokens,
@@ -928,7 +930,8 @@ impl fmt::Display for DoctorReport {
                 memory_hierarchy.context_over_budget,
                 memory_hierarchy.context_over_compaction_threshold,
                 memory_hierarchy.context_compaction_required,
-                memory_hierarchy.l3_cold_storage_enabled
+                memory_hierarchy.l3_cold_storage_enabled,
+                memory_hierarchy.last_checkpoint_at.as_deref().unwrap_or("never")
             )?;
             if !memory_hierarchy.context_tier_counters.is_empty() {
                 writeln!(f, "  Context Tier Details:")?;
@@ -6132,6 +6135,7 @@ mod tests {
                 promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
                 demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
                 metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
+                last_checkpoint_at: None,
                 prompt_cache_rows: 0,
                 cached_tokens: 0,
                 total_input_tokens: 0,
