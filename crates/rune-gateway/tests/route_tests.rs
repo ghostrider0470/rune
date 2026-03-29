@@ -49,6 +49,7 @@ use rune_gateway::ms365::{
 };
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
+use rune_gateway::parse_memory_search_output;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
@@ -9745,12 +9746,28 @@ async fn memory_search_route_returns_workspace_hits() {
     assert_eq!(body["query"], "Hamza");
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
+    assert_eq!(body["results"][0]["file_path"], "MEMORY.md");
+    assert_eq!(body["results"][0]["line"], 2);
     assert!(
         body["results"][0]["snippet"]
             .as_str()
             .unwrap()
             .contains("Met Hamza at Horizon Tech")
     );
+}
+
+#[test]
+fn parse_memory_search_output_extracts_file_and_line_metadata() {
+    let results = parse_memory_search_output(
+        "Source: MEMORY.md#2\nMet Hamza at Horizon Tech\n---\nSource: memory/2026-03-26.md#14\nShipped webchat support today",
+    );
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].source, "MEMORY.md#2");
+    assert_eq!(results[0].file_path, "MEMORY.md");
+    assert_eq!(results[0].line, 2);
+    assert_eq!(results[1].file_path, "memory/2026-03-26.md");
+    assert_eq!(results[1].line, 14);
 }
 
 #[tokio::test]
@@ -10878,6 +10895,8 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
     assert_eq!(body["query"], "Hamza");
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     assert_eq!(body["results"][0]["source"], "MEMORY.md#2");
+    assert_eq!(body["results"][0]["file_path"], "MEMORY.md");
+    assert_eq!(body["results"][0]["line"], 2);
     assert!(
         body["results"][0]["snippet"]
             .as_str()

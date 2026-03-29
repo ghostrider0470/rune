@@ -22,7 +22,7 @@ pub use events::{
     broadcast_runtime_event,
 };
 pub use logging::init_logging;
-pub use routes::{DoctorCheck, storage_path_checks_for_tests};
+pub use routes::{DoctorCheck, parse_memory_search_output, storage_path_checks_for_tests};
 pub use server::{GatewayHandle, Services, build_router, start};
 pub use state::{AppState, SessionEvent, TokenMetricsStore, WebChatRateLimiter};
 pub use supervisor::BackgroundSupervisor;

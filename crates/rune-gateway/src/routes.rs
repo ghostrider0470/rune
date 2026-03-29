@@ -5360,13 +5360,21 @@ pub struct MemorySearchQuery {
 }
 
 #[derive(Serialize)]
+pub struct MemorySearchResult {
+    pub source: String,
+    pub file_path: String,
+    pub line: usize,
+    pub snippet: String,
+}
+
+#[derive(Serialize)]
 pub struct MemorySearchResponse {
     pub query: String,
-    pub results: Vec<Value>,
+    pub results: Vec<MemorySearchResult>,
     pub message: String,
 }
 
-pub(crate) fn parse_memory_search_output(output: &str) -> Vec<Value> {
+pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
     output
         .split("\n---\n")
         .filter_map(|chunk| {
@@ -5376,13 +5384,26 @@ pub(crate) fn parse_memory_search_output(output: &str) -> Vec<Value> {
             }
 
             let (source_line, snippet) = chunk.split_once("\n")?;
-            let source = source_line.strip_prefix("Source: ")?.trim();
-            Some(json!({
-                "source": source,
-                "snippet": snippet.trim(),
-            }))
+            let source = source_line.strip_prefix("Source: ")?.trim().to_string();
+            let (file_path, line) = parse_memory_source(&source);
+            Some(MemorySearchResult {
+                source,
+                file_path,
+                line,
+                snippet: snippet.trim().to_string(),
+            })
         })
         .collect()
+}
+
+fn parse_memory_source(source: &str) -> (String, usize) {
+    if let Some((file_path, line)) = source.rsplit_once('#') {
+        if let Ok(line) = line.parse::<usize>() {
+            return (file_path.to_string(), line);
+        }
+    }
+
+    (source.to_string(), 0)
 }
 
 /// `GET /api/memory/status` - memory subsystem status.
