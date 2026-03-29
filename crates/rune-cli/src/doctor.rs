@@ -1355,15 +1355,17 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             ),
             metrics: if config.mem0.enabled {
                 format!(
-                    "offline doctor has no live cache metrics; Mem0 access_count persists hot-memory reuse. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false; gateway doctor exposes prompt_cache_rows/cached_tokens totals",
+                    "offline doctor has no live cache metrics; Mem0 access_count persists hot-memory reuse. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false, l3_cold_storage_enabled={}; gateway doctor exposes prompt_cache_rows/cached_tokens totals",
                     config.context.identity + config.context.task + config.context.project + config.context.shared,
-                    config.runtime.compaction.compress_after
+                    config.runtime.compaction.compress_after,
+                    l3_ready
                 )
             } else {
                 format!(
-                    "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false",
+                    "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false, l3_cold_storage_enabled={}",
                     config.context.identity + config.context.task + config.context.project + config.context.shared,
-                    config.runtime.compaction.compress_after
+                    config.runtime.compaction.compress_after,
+                    l3_ready
                 )
             },
             last_checkpoint_at: None,
