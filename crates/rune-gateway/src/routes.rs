@@ -1783,6 +1783,8 @@ pub struct CreateSessionRequest {
     pub channel_ref: Option<String>,
     /// Optional agent mode hint stored in session metadata.
     pub mode: Option<String>,
+    /// Optional project identifier for project-scoped context loading.
+    pub project_id: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -1944,6 +1946,7 @@ pub async fn create_session(
             body.requester_session_id,
             body.channel_ref,
             body.mode,
+            body.project_id,
         )
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
@@ -3719,6 +3722,7 @@ pub async fn telegram_webhook(
                     workspace,
                     None,
                     Some(routing_key.clone()),
+                    None,
                     None,
                 )
                 .await

@@ -218,6 +218,17 @@ impl ContextAssembler {
     }
 
     #[must_use]
+    pub fn with_context_config(mut self, config: &rune_config::ContextConfig) -> Self {
+        self.tier_specs = vec![
+            ContextTierSpec::new(ContextTierKind::Identity, config.identity),
+            ContextTierSpec::new(ContextTierKind::ActiveTask, config.task),
+            ContextTierSpec::new(ContextTierKind::Project, config.project),
+            ContextTierSpec::new(ContextTierKind::Shared, config.shared),
+            ContextTierSpec::new(ContextTierKind::Historical, 0),
+        ];
+        self
+    }
+
     pub fn with_tier_budgets(
         mut self,
         identity: usize,
@@ -263,7 +274,10 @@ impl ContextAssembler {
             .collect::<Vec<_>>()
             .join("\n\n");
         let project_section = workspace
-            .map(WorkspaceContext::format_for_prompt)
+            .map(|workspace| WorkspaceContext {
+                files: workspace.project_tier_files(),
+            })
+            .map(|workspace| workspace.format_for_prompt())
             .unwrap_or_default();
         let shared_section = memory
             .map(MemoryContext::format_for_prompt)
@@ -868,6 +882,26 @@ mod context_tier_tests {
             specs[4],
             ContextTierSpec::new(ContextTierKind::Historical, 0)
         );
+    }
+
+    #[test]
+    fn with_context_config_uses_runtime_context_tiers() {
+        let config = rune_config::ContextConfig {
+            identity: 111,
+            task: 222,
+            project: 333,
+            shared: 444,
+        };
+
+        let assembler = ContextAssembler::new("Identity instructions").with_context_config(&config);
+        let specs = assembler.tier_specs();
+
+        assert_eq!(specs.len(), 5);
+        assert_eq!(specs[0].token_budget, 111);
+        assert_eq!(specs[1].token_budget, 222);
+        assert_eq!(specs[2].token_budget, 333);
+        assert_eq!(specs[3].token_budget, 444);
+        assert_eq!(specs[4].token_budget, 0);
     }
 
     #[test]

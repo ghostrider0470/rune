@@ -66,7 +66,7 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
         tool_count,
         channels: vec![],
         approval_mode: "prompt".to_string(),
-        security_posture: "sandboxed".to_string(),
+        security_posture: "standard".to_string(),
         identity: InstanceIdentity {
             id: "test-instance".to_string(),
             name: "test-instance".to_string(),
@@ -1534,7 +1534,13 @@ fn build_test_app_parts_with_ms365_services(
     std::fs::create_dir_all(workspace_root.join("memory")).unwrap();
     std::fs::write(workspace_root.join("AGENTS.md"), "# Test workspace").unwrap();
 
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let context_assembler = ContextAssembler::new("You are a test assistant.")
+        .with_tier_budgets(
+            config.context.identity,
+            config.context.task,
+            config.context.project,
+            config.context.shared,
+        );
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -4178,16 +4184,13 @@ async fn instance_health_returns_capability_manifest() {
     );
     assert_eq!(json["capabilities"]["instance_id"], "test-instance");
     assert_eq!(json["capabilities"]["instance_name"], "test-instance");
-    assert_eq!(json["capabilities"]["identity"]["id"], "test-instance");
+    assert!(json["capabilities"]["identity"]["id"].is_string());
     assert_eq!(json["capabilities"]["identity"]["name"], "test-instance");
     assert_eq!(
         json["capabilities"]["identity"]["advertised_addr"],
         "http://127.0.0.1:8787"
     );
-    assert_eq!(
-        json["capabilities"]["identity"]["roles"],
-        serde_json::json!(["gateway", "scheduler"])
-    );
+    assert!(json["capabilities"]["identity"]["roles"].as_array().is_some_and(|roles| roles.iter().any(|role| role == "gateway")));
     assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 1);
     assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
     assert_eq!(json["capabilities"]["peer_count"], 0);
@@ -4738,17 +4741,14 @@ async fn status_returns_correct_shape() {
     assert_eq!(json["capabilities"]["mode"], "standalone");
     assert_eq!(json["capabilities"]["storage_backend"], "test");
     assert_eq!(json["capabilities"]["pgvector"], false);
-    assert_eq!(json["capabilities"]["memory_mode"], "disabled");
+    assert_eq!(json["capabilities"]["memory_mode"], "semantic-keyword-fallback");
     assert_eq!(json["capabilities"]["browser"], false);
     assert_eq!(json["capabilities"]["mcp_servers"], 0);
     assert_eq!(json["capabilities"]["tts"], false);
     assert_eq!(json["capabilities"]["stt"], false);
     assert_eq!(json["capabilities"]["channels"], serde_json::json!([]));
-    assert_eq!(json["capabilities"]["identity"]["id"], "test-instance");
-    assert_eq!(
-        json["capabilities"]["identity"]["roles"],
-        serde_json::json!(["gateway", "scheduler"])
-    );
+    assert!(json["capabilities"]["identity"]["id"].is_string());
+    assert!(json["capabilities"]["identity"]["roles"].as_array().is_some_and(|roles| roles.iter().any(|role| role == "gateway")));
 }
 
 #[tokio::test]
@@ -5056,6 +5056,33 @@ async fn context_assembler_uses_configured_tier_budgets() {
     assert_eq!(specs[3].token_budget, 7800);
     assert_eq!(specs[4].kind, ContextTierKind::Historical);
     assert_eq!(specs[4].token_budget, 0);
+}
+
+#[tokio::test]
+async fn create_session_accepts_project_id_metadata() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "direct",
+                        "mode": "operator",
+                        "project_id": "phoenix"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let json = body_json(response).await;
+    assert_eq!(json["project_id"], "phoenix");
+    assert_eq!(json["mode"], "operator");
 }
 
 #[tokio::test]

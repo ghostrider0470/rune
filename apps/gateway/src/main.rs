@@ -2446,6 +2446,7 @@ impl SessionSpawner for LiveSessionSpawner {
                 requester_session_id,
                 None,
                 None,
+                None,
             )
             .await
             .map_err(|e| e.to_string())?;
