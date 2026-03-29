@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use tracing::info;
 use uuid::Uuid;
 
-use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
+use rune_core::{AttachmentRef, JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
 use rune_runtime::comms::CommsMessage;
 use rune_runtime::heartbeat::HeartbeatState;
 use rune_runtime::scheduler::{
@@ -3968,10 +3968,12 @@ pub async fn telegram_webhook(
             }
         }
 
-        if !content.trim().is_empty() {
+        let attachments = telegram_message_attachments(message);
+
+        if !content.trim().is_empty() || !attachments.is_empty() {
             let (turn_row, usage) = state
                 .turn_executor
-                .execute(session.id, &content, None)
+                .execute_with_attachments(session.id, &content, attachments, None)
                 .await
                 .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
@@ -4043,6 +4045,131 @@ pub async fn telegram_webhook(
     }
 
     Ok(StatusCode::OK)
+}
+
+
+fn telegram_message_attachments(message: &serde_json::Value) -> Vec<AttachmentRef> {
+    let mut attachments = Vec::new();
+
+    if let Some(items) = message.get("photo").and_then(|value| value.as_array()) {
+        if let Some(photo) = items
+            .iter()
+            .filter_map(|item| {
+                let file_id = item.get("file_id").and_then(|value| value.as_str())?;
+                let width = item.get("width").and_then(|value| value.as_u64()).unwrap_or(0);
+                let height = item
+                    .get("height")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                let area = width.saturating_mul(height);
+                Some((area, file_id, item))
+            })
+            .max_by_key(|(area, _, _)| *area)
+        {
+            let (_, file_id, item) = photo;
+            attachments.push(AttachmentRef {
+                name: format!("telegram-photo-{}.jpg", file_id),
+                mime_type: Some("image/jpeg".to_string()),
+                size_bytes: item.get("file_size").and_then(|value| value.as_u64()),
+                url: Some(format!("telegram-file:{file_id}")),
+                provider_file_id: Some(file_id.to_string()),
+            });
+        }
+    }
+
+    if let Some(sticker) = message.get("sticker") {
+        if let Some(file_id) = sticker.get("file_id").and_then(|value| value.as_str()) {
+            let mime_type = sticker
+                .get("is_animated")
+                .and_then(|value| value.as_bool())
+                .map(|animated| if animated { "application/x-tgsticker" } else { "image/webp" })
+                .unwrap_or("image/webp");
+            attachments.push(AttachmentRef {
+                name: format!("telegram-sticker-{}", file_id),
+                mime_type: Some(mime_type.to_string()),
+                size_bytes: sticker.get("file_size").and_then(|value| value.as_u64()),
+                url: Some(format!("telegram-file:{file_id}")),
+                provider_file_id: Some(file_id.to_string()),
+            });
+        }
+    }
+
+    for (field, fallback_name, fallback_mime) in [
+        ("document", "telegram-document", None),
+        ("animation", "telegram-animation", Some("video/mp4")),
+        ("video", "telegram-video", Some("video/mp4")),
+        ("video_note", "telegram-video-note", Some("video/mp4")),
+        ("audio", "telegram-audio", None),
+        ("voice", "telegram-voice", Some("audio/ogg")),
+    ] {
+        if let Some(item) = message.get(field) {
+            if let Some(file_id) = item.get("file_id").and_then(|value| value.as_str()) {
+                let name = item
+                    .get("file_name")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{fallback_name}-{file_id}"));
+                let mime_type = item
+                    .get("mime_type")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                    .or_else(|| fallback_mime.map(str::to_string));
+                attachments.push(AttachmentRef {
+                    name,
+                    mime_type,
+                    size_bytes: item.get("file_size").and_then(|value| value.as_u64()),
+                    url: Some(format!("telegram-file:{file_id}")),
+                    provider_file_id: Some(file_id.to_string()),
+                });
+            }
+        }
+    }
+
+    attachments
+}
+
+#[cfg(test)]
+mod telegram_attachment_tests {
+    use super::telegram_message_attachments;
+
+    #[test]
+    fn extracts_largest_photo_as_image_attachment() {
+        let message = serde_json::json!({
+            "photo": [
+                {"file_id": "small", "width": 10, "height": 10, "file_size": 100},
+                {"file_id": "large", "width": 100, "height": 50, "file_size": 2000}
+            ]
+        });
+
+        let attachments = telegram_message_attachments(&message);
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].provider_file_id.as_deref(), Some("large"));
+        assert_eq!(attachments[0].mime_type.as_deref(), Some("image/jpeg"));
+        assert_eq!(attachments[0].url.as_deref(), Some("telegram-file:large"));
+    }
+
+    #[test]
+    fn extracts_documents_and_voice_with_provider_ids() {
+        let message = serde_json::json!({
+            "document": {
+                "file_id": "doc_1",
+                "file_name": "brief.pdf",
+                "mime_type": "application/pdf",
+                "file_size": 4096
+            },
+            "voice": {
+                "file_id": "voice_1",
+                "file_size": 512
+            }
+        });
+
+        let attachments = telegram_message_attachments(&message);
+        assert_eq!(attachments.len(), 2);
+        assert_eq!(attachments[0].name, "brief.pdf");
+        assert_eq!(attachments[0].provider_file_id.as_deref(), Some("doc_1"));
+        assert_eq!(attachments[1].provider_file_id.as_deref(), Some("voice_1"));
+        assert_eq!(attachments[1].mime_type.as_deref(), Some("audio/ogg"));
+    }
 }
 
 // ── Models ────────────────────────────────────────────────────────────────────
