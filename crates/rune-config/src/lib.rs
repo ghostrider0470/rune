@@ -853,12 +853,32 @@ impl Default for DatabaseConfig {
 pub struct ContextConfig {
     #[serde(default = "default_context_identity_tokens")]
     pub identity: usize,
+    #[serde(default = "default_context_identity_priority")]
+    pub identity_priority: u8,
+    #[serde(default = "default_context_identity_staleness_policy")]
+    pub identity_staleness_policy: String,
     #[serde(default = "default_context_task_tokens")]
     pub task: usize,
+    #[serde(default = "default_context_task_priority")]
+    pub task_priority: u8,
+    #[serde(default = "default_context_task_staleness_policy")]
+    pub task_staleness_policy: String,
     #[serde(default = "default_context_project_tokens")]
     pub project: usize,
+    #[serde(default = "default_context_project_priority")]
+    pub project_priority: u8,
+    #[serde(default = "default_context_project_staleness_policy")]
+    pub project_staleness_policy: String,
     #[serde(default = "default_context_shared_tokens")]
     pub shared: usize,
+    #[serde(default = "default_context_shared_priority")]
+    pub shared_priority: u8,
+    #[serde(default = "default_context_shared_staleness_policy")]
+    pub shared_staleness_policy: String,
+    #[serde(default = "default_context_historical_priority")]
+    pub historical_priority: u8,
+    #[serde(default = "default_context_historical_staleness_policy")]
+    pub historical_staleness_policy: String,
 }
 
 fn default_context_identity_tokens() -> usize {
@@ -873,14 +893,54 @@ fn default_context_project_tokens() -> usize {
 fn default_context_shared_tokens() -> usize {
     5_000
 }
+fn default_context_identity_priority() -> u8 {
+    0
+}
+fn default_context_task_priority() -> u8 {
+    1
+}
+fn default_context_project_priority() -> u8 {
+    2
+}
+fn default_context_shared_priority() -> u8 {
+    3
+}
+fn default_context_historical_priority() -> u8 {
+    4
+}
+fn default_context_identity_staleness_policy() -> String {
+    "always_fresh".to_string()
+}
+fn default_context_task_staleness_policy() -> String {
+    "per_turn".to_string()
+}
+fn default_context_project_staleness_policy() -> String {
+    "per_session".to_string()
+}
+fn default_context_shared_staleness_policy() -> String {
+    "on_demand".to_string()
+}
+fn default_context_historical_staleness_policy() -> String {
+    "retrieval_only".to_string()
+}
 
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             identity: default_context_identity_tokens(),
+            identity_priority: default_context_identity_priority(),
+            identity_staleness_policy: default_context_identity_staleness_policy(),
             task: default_context_task_tokens(),
+            task_priority: default_context_task_priority(),
+            task_staleness_policy: default_context_task_staleness_policy(),
             project: default_context_project_tokens(),
+            project_priority: default_context_project_priority(),
+            project_staleness_policy: default_context_project_staleness_policy(),
             shared: default_context_shared_tokens(),
+            shared_priority: default_context_shared_priority(),
+            shared_staleness_policy: default_context_shared_staleness_policy(),
+            historical_priority: default_context_historical_priority(),
+            historical_staleness_policy: default_context_historical_staleness_policy(),
         }
     }
 }
@@ -893,9 +953,19 @@ mod context_config_tests {
     fn default_context_tier_budgets_match_story_defaults() {
         let cfg = ContextConfig::default();
         assert_eq!(cfg.identity, 1_000);
+        assert_eq!(cfg.identity_priority, 0);
+        assert_eq!(cfg.identity_staleness_policy, "always_fresh");
         assert_eq!(cfg.task, 10_000);
+        assert_eq!(cfg.task_priority, 1);
+        assert_eq!(cfg.task_staleness_policy, "per_turn");
         assert_eq!(cfg.project, 20_000);
+        assert_eq!(cfg.project_priority, 2);
+        assert_eq!(cfg.project_staleness_policy, "per_session");
         assert_eq!(cfg.shared, 5_000);
+        assert_eq!(cfg.shared_priority, 3);
+        assert_eq!(cfg.shared_staleness_policy, "on_demand");
+        assert_eq!(cfg.historical_priority, 4);
+        assert_eq!(cfg.historical_staleness_policy, "retrieval_only");
     }
 }
 

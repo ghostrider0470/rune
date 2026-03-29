@@ -183,6 +183,17 @@ impl ContextAssemblyReport {
     }
 }
 
+fn parse_staleness_policy(value: &str) -> Option<ContextStalenessPolicy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "always_fresh" => Some(ContextStalenessPolicy::AlwaysFresh),
+        "per_turn" => Some(ContextStalenessPolicy::PerTurn),
+        "per_session" => Some(ContextStalenessPolicy::PerSession),
+        "on_demand" => Some(ContextStalenessPolicy::OnDemand),
+        "retrieval_only" => Some(ContextStalenessPolicy::RetrievalOnly),
+        _ => None,
+    }
+}
+
 fn estimate_tokens(text: &str) -> usize {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -276,11 +287,41 @@ impl ContextAssembler {
     #[must_use]
     pub fn with_context_config(mut self, config: &rune_config::ContextConfig) -> Self {
         self.tier_specs = vec![
-            ContextTierSpec::new(ContextTierKind::Identity, config.identity),
-            ContextTierSpec::new(ContextTierKind::ActiveTask, config.task),
-            ContextTierSpec::new(ContextTierKind::Project, config.project),
-            ContextTierSpec::new(ContextTierKind::Shared, config.shared),
-            ContextTierSpec::new(ContextTierKind::Historical, 0),
+            ContextTierSpec {
+                kind: ContextTierKind::Identity,
+                token_budget: config.identity,
+                priority: config.identity_priority,
+                staleness_policy: parse_staleness_policy(&config.identity_staleness_policy)
+                    .unwrap_or(ContextTierKind::Identity.default_staleness_policy()),
+            },
+            ContextTierSpec {
+                kind: ContextTierKind::ActiveTask,
+                token_budget: config.task,
+                priority: config.task_priority,
+                staleness_policy: parse_staleness_policy(&config.task_staleness_policy)
+                    .unwrap_or(ContextTierKind::ActiveTask.default_staleness_policy()),
+            },
+            ContextTierSpec {
+                kind: ContextTierKind::Project,
+                token_budget: config.project,
+                priority: config.project_priority,
+                staleness_policy: parse_staleness_policy(&config.project_staleness_policy)
+                    .unwrap_or(ContextTierKind::Project.default_staleness_policy()),
+            },
+            ContextTierSpec {
+                kind: ContextTierKind::Shared,
+                token_budget: config.shared,
+                priority: config.shared_priority,
+                staleness_policy: parse_staleness_policy(&config.shared_staleness_policy)
+                    .unwrap_or(ContextTierKind::Shared.default_staleness_policy()),
+            },
+            ContextTierSpec {
+                kind: ContextTierKind::Historical,
+                token_budget: 0,
+                priority: config.historical_priority,
+                staleness_policy: parse_staleness_policy(&config.historical_staleness_policy)
+                    .unwrap_or(ContextTierKind::Historical.default_staleness_policy()),
+            },
         ];
         self
     }
@@ -962,9 +1003,19 @@ mod context_tier_tests {
     fn with_context_config_uses_runtime_context_tiers() {
         let config = rune_config::ContextConfig {
             identity: 111,
+            identity_priority: 9,
+            identity_staleness_policy: "always_fresh".into(),
             task: 222,
+            task_priority: 8,
+            task_staleness_policy: "per_turn".into(),
             project: 333,
+            project_priority: 7,
+            project_staleness_policy: "per_session".into(),
             shared: 444,
+            shared_priority: 6,
+            shared_staleness_policy: "on_demand".into(),
+            historical_priority: 5,
+            historical_staleness_policy: "retrieval_only".into(),
         };
 
         let assembler = ContextAssembler::new("Identity instructions").with_context_config(&config);
@@ -972,10 +1023,29 @@ mod context_tier_tests {
 
         assert_eq!(specs.len(), 5);
         assert_eq!(specs[0].token_budget, 111);
+        assert_eq!(specs[0].priority, 9);
+        assert_eq!(
+            specs[0].staleness_policy,
+            ContextStalenessPolicy::AlwaysFresh
+        );
         assert_eq!(specs[1].token_budget, 222);
+        assert_eq!(specs[1].priority, 8);
+        assert_eq!(specs[1].staleness_policy, ContextStalenessPolicy::PerTurn);
         assert_eq!(specs[2].token_budget, 333);
+        assert_eq!(specs[2].priority, 7);
+        assert_eq!(
+            specs[2].staleness_policy,
+            ContextStalenessPolicy::PerSession
+        );
         assert_eq!(specs[3].token_budget, 444);
+        assert_eq!(specs[3].priority, 6);
+        assert_eq!(specs[3].staleness_policy, ContextStalenessPolicy::OnDemand);
         assert_eq!(specs[4].token_budget, 0);
+        assert_eq!(specs[4].priority, 5);
+        assert_eq!(
+            specs[4].staleness_policy,
+            ContextStalenessPolicy::RetrievalOnly
+        );
     }
 
     #[test]
