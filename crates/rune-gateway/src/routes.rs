@@ -251,10 +251,22 @@ pub struct PeerHealthAlert {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PeerFailoverAdvice {
+    pub should_absorb_work: bool,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_projects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerHealthAlertsResponse {
     pub status: String,
     pub alerts: Vec<PeerHealthAlert>,
     pub checked_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub absorbable_peers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failover: Vec<PeerFailoverAdvice>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -850,26 +862,57 @@ pub async fn peer_health_alerts(
 
 fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAlertsResponse {
     let checked_at = Utc::now().to_rfc3339();
-    let alerts = peers
-        .into_iter()
-        .filter(|peer| peer.status != "healthy")
-        .map(|peer| PeerHealthAlert {
-            severity: match peer.status.as_str() {
-                "unreachable" => "critical".to_string(),
-                _ => "warning".to_string(),
-            },
-            peer_id: peer.id,
-            peer_name: peer.name,
-            status: peer.status,
-            detail: peer.detail,
-            checked_at: peer.checked_at,
-        })
-        .collect::<Vec<_>>();
+    let mut alerts = Vec::new();
+    let mut absorbable_peers = Vec::new();
+    let mut failover = Vec::new();
+
+    for peer in peers {
+        if peer.status != "healthy" {
+            alerts.push(PeerHealthAlert {
+                severity: match peer.status.as_str() {
+                    "unreachable" => "critical".to_string(),
+                    _ => "warning".to_string(),
+                },
+                peer_id: peer.id.clone(),
+                peer_name: peer.name.clone(),
+                status: peer.status.clone(),
+                detail: peer.detail.clone(),
+                checked_at: peer.checked_at.clone(),
+            });
+        }
+
+        let should_absorb_work = peer.status == "unreachable" && !peer.active_projects.is_empty();
+        if should_absorb_work {
+            absorbable_peers.push(peer.id.clone());
+        }
+        if peer.status != "healthy" {
+            let reason = if peer.status == "unreachable" {
+                if peer.active_projects.is_empty() {
+                    "peer is unreachable but advertised no active projects".to_string()
+                } else {
+                    format!(
+                        "peer is unreachable; absorb critical work for {} project(s)",
+                        peer.active_projects.len()
+                    )
+                }
+            } else {
+                "peer is degraded; keep assignments local until health recovers".to_string()
+            };
+            failover.push(PeerFailoverAdvice {
+                should_absorb_work,
+                reason,
+                candidate_projects: peer.active_projects.clone(),
+            });
+        }
+    }
+
     let status = if alerts.is_empty() { "ok" } else { "degraded" };
     PeerHealthAlertsResponse {
         status: status.to_string(),
         alerts,
         checked_at,
+        absorbable_peers,
+        failover,
     }
 }
 
@@ -2645,28 +2688,8 @@ pub struct SessionTreeNode {
     pub delegation_roles: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegation_depth: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_lifecycle: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_runtime_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_runtime_attached: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_status_updated_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_last_note: Option<String>,
     pub created_at: String,
     pub turn_count: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_lifecycle: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_runtime_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_runtime_attached: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_status_updated_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_last_note: Option<String>,
     pub children: Vec<SessionTreeNode>,
 }
 
@@ -2773,18 +2796,8 @@ pub async fn get_session_tree(
             orchestration_status,
             delegation_roles,
             delegation_depth,
-            subagent_lifecycle: metadata_string(&row.metadata, "subagent_lifecycle"),
-            subagent_runtime_status: metadata_string(&row.metadata, "subagent_runtime_status"),
-            subagent_runtime_attached: metadata_bool(&row.metadata, "subagent_runtime_attached"),
-            subagent_status_updated_at: metadata_string(&row.metadata, "subagent_status_updated_at"),
-            subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
-            subagent_lifecycle: metadata_string(&row.metadata, "subagent_lifecycle"),
-            subagent_runtime_status: metadata_string(&row.metadata, "subagent_runtime_status"),
-            subagent_runtime_attached: metadata_bool(&row.metadata, "subagent_runtime_attached"),
-            subagent_status_updated_at: metadata_string(&row.metadata, "subagent_status_updated_at"),
-            subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             children,
         }
     }
@@ -8056,6 +8069,8 @@ mod tests {
             detail: "200 OK".to_string(),
             checked_at: "2026-03-29T00:00:00Z".to_string(),
             latency_ms: Some(12),
+            last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
+            observed_status: "healthy".to_string(),
             load: Some(InstanceLoadResponse {
                 session_count: 1,
                 ws_subscribers: 0,
@@ -8071,6 +8086,8 @@ mod tests {
         }]);
         assert_eq!(response.status, "ok");
         assert!(response.alerts.is_empty());
+        assert!(response.absorbable_peers.is_empty());
+        assert!(response.failover.is_empty());
     }
 
     #[test]
@@ -8084,6 +8101,8 @@ mod tests {
                 detail: "connection refused".to_string(),
                 checked_at: "2026-03-29T00:00:00Z".to_string(),
                 latency_ms: None,
+                last_seen_at: None,
+                observed_status: "unreachable".to_string(),
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
@@ -8091,7 +8110,7 @@ mod tests {
                 capabilities_version: None,
                 comms_transport: None,
                 configured_models: Vec::new(),
-                active_projects: Vec::new(),
+                active_projects: vec!["/workspace/rune".to_string()],
             },
             PeerHealthResponse {
                 id: "peer-b".to_string(),
@@ -8101,6 +8120,8 @@ mod tests {
                 detail: "500 Internal Server Error".to_string(),
                 checked_at: "2026-03-29T00:00:03Z".to_string(),
                 latency_ms: Some(55),
+                last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
+                observed_status: "degraded".to_string(),
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
@@ -8117,6 +8138,13 @@ mod tests {
         assert_eq!(response.alerts[0].peer_id, "peer-a");
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
+        assert_eq!(response.absorbable_peers, vec!["peer-a".to_string()]);
+        assert_eq!(response.failover.len(), 2);
+        assert!(response.failover[0].should_absorb_work);
+        assert_eq!(
+            response.failover[0].candidate_projects,
+            vec!["/workspace/rune".to_string()]
+        );
     }
 
 }
@@ -8158,6 +8186,8 @@ pub async fn submit_delegation_task(
             .clone()
             .unwrap_or_else(|| "Local Instance".to_string()),
         transport: request.sender.transport.clone(),
+        capabilities_version: 0,
+        capability_hash: String::new(),
         health_url: None,
         submit_url: None,
         result_url: request.sender.result_url.clone(),
@@ -8178,6 +8208,8 @@ pub async fn delegation_task_status(
             instance_id: "local-instance".to_string(),
             instance_name: "Local Instance".to_string(),
             transport: "http".to_string(),
+            capabilities_version: 0,
+            capability_hash: String::new(),
             health_url: None,
             submit_url: None,
             result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
