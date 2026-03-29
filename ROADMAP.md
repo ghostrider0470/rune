@@ -332,23 +332,36 @@ Implementation note (2026-03-28): most of this phase was already present in the 
 
 ### Phase 8 — TTS Backend + UI
 
-**New crate** `crates/rune-tts/`
-- `src/lib.rs` — TTS engine + provider trait
-- `src/openai.rs` — OpenAI TTS
-- `src/elevenlabs.rs` — ElevenLabs
-- `src/config.rs` — provider, voice, model, auto mode (`off|always|inbound|tagged`)
+Status: ✅ Completed 2026-03-29
 
-**Gateway routes**
-- `GET /tts/status`
-- `POST /tts/enable`
-- `POST /tts/disable`
-- `POST /tts/convert`
+Rune already ships the TTS backend crate, provider/config wiring, gateway control + synthesis routes, CLI client support, and the admin Settings UI surface for runtime enable/disable and provider defaults. This pass verified the implementation on current `main` and updated roadmap bookkeeping so the item reflects shipped reality.
 
-**Config**
-- Add `[tts]` to `AppConfig`
+**Landed work**
+- `crates/rune-tts/`
+  - `src/lib.rs` — TTS engine, provider trait, enable/disable toggle, and voice inventory exposure
+  - `src/openai.rs` — OpenAI TTS provider via `/v1/audio/speech`
+  - `src/elevenlabs.rs` — ElevenLabs TTS provider
+  - `src/config.rs` — provider, API key, voice, model, and auto mode (`off|always|inbound|tagged`)
+- `crates/rune-config/src/lib.rs`
+  - `TtsConfig` re-export and media capability wiring into app configuration
+- `crates/rune-gateway/src/server.rs` + `crates/rune-gateway/src/state.rs`
+  - runtime TTS engine construction and shared gateway state wiring
+- `crates/rune-gateway/src/routes.rs`
+  - `GET /tts/status`
+  - `POST /tts/synthesize`
+  - `POST /tts/enable`
+  - `POST /tts/disable`
+  - Telegram delivery path for synthesized audio when channel metadata is provided
+- `crates/rune-cli/src/client.rs` + `crates/rune-cli/src/cli.rs`
+  - status + synthesis client commands for operator use
+- `ui/src/hooks/use-system.ts` + `ui/src/routes/_admin/settings.tsx`
+  - Settings page controls for TTS provider, voice, model, auto mode, available voices, and runtime toggle
 
-**UI**
-- TTS controls in settings page
+**Validation**
+- `cargo check`
+- `cd ui && npm run build`
+
+Implementation note (2026-03-29): the roadmap text still described Phase 8 as missing, but the repo already contains the delivered backend and UI surfaces. The only shipped delta in this pass is the roadmap correction so planning state matches actual code state.
 
 ---
 
