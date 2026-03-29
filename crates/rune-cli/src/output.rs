@@ -494,6 +494,51 @@ Missing projects: {}",
                 f,
                 "
 Sender: {} ({})",
+        write!(
+            f,
+            "
+Capability match: {}",
+            if self.capability_match.compatible {
+                "compatible"
+            } else {
+                "mismatch"
+            }
+        )?;
+        write!(
+            f,
+            "
+Capability detail: {}",
+            self.capability_match.detail
+        )?;
+        if !self.capability_match.model_overlap.is_empty() {
+            write!(
+                f,
+                "
+Model overlap: {}",
+                self.capability_match.model_overlap.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_roles.is_empty() {
+            write!(
+                f,
+                "
+Missing roles: {}",
+                self.capability_match.missing_roles.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_projects.is_empty() {
+            write!(
+                f,
+                "
+Missing projects: {}",
+                self.capability_match.missing_projects.join(", ")
+            )?;
+        }
+        if let Some(sender) = &self.sender {
+            write!(
+                f,
+                "
+Sender: {} ({})",
                 sender.instance_name, sender.transport
             )?;
             if let Some(health_url) = &sender.health_url {
@@ -522,7 +567,6 @@ Receiver: {} ({})",
             if let Some(result_url) = &receiver.result_url {
                 write!(f, " result={result_url}")?;
             }
-        }
         }
         for peer in &self.candidates {
             write!(
