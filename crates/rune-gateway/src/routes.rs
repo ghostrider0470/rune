@@ -2722,6 +2722,10 @@ pub struct SessionTreeNode {
     pub kind: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_subagent_result_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_subagent_result_excerpt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
@@ -2802,16 +2806,44 @@ pub async fn get_session_tree(
         turn_counts.insert(*sid, turns.len() as u32);
     }
 
+    let mut last_subagent_result_map = std::collections::HashMap::new();
+    for sid in &subtree_ids {
+        let transcript_items = state
+            .transcript_repo
+            .list_by_session(*sid)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+        let last_subagent_result = transcript_items
+            .iter()
+            .rev()
+            .find(|item| item.kind == "subagent_result");
+        let last_subagent_result_at = last_subagent_result.map(|item| item.created_at.to_rfc3339());
+        let last_subagent_result_excerpt = last_subagent_result
+            .and_then(|item| item.payload.get("content").or_else(|| item.payload.get("summary")))
+            .and_then(|value| value.as_str())
+            .map(|text| {
+                const MAX_CHARS: usize = 200;
+                if text.chars().count() <= MAX_CHARS {
+                    text.to_string()
+                } else {
+                    let truncated: String = text.chars().take(MAX_CHARS).collect();
+                    format!("{truncated}…")
+                }
+            });
+        last_subagent_result_map.insert(*sid, (last_subagent_result_at, last_subagent_result_excerpt));
+    }
+
     fn build_node(
         row: &rune_store::models::SessionRow,
         children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
         turn_counts: &std::collections::HashMap<Uuid, u32>,
+        last_subagent_result_map: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
     ) -> SessionTreeNode {
         let children = children_map
             .get(&row.id)
             .map(|kids| {
                 kids.iter()
-                    .map(|child| build_node(child, children_map, turn_counts))
+                    .map(|child| build_node(child, children_map, turn_counts, last_subagent_result_map))
                     .collect()
             })
             .unwrap_or_default();
@@ -2842,10 +2874,16 @@ pub async fn get_session_tree(
                 .and_then(|value| value.as_u64())
                 .map(|value| value as u32)
         };
+        let (last_subagent_result_at, last_subagent_result_excerpt) = last_subagent_result_map
+            .get(&row.id)
+            .cloned()
+            .unwrap_or((None, None));
         SessionTreeNode {
             id: row.id.to_string(),
             kind: row.kind.clone(),
             status: row.status.clone(),
+            last_subagent_result_at,
+            last_subagent_result_excerpt,
             parent_session_id: row.requester_session_id.map(|id| id.to_string()),
             mode: metadata_string(&row.metadata, "mode"),
             channel: row.channel_ref.clone(),
@@ -2866,7 +2904,7 @@ pub async fn get_session_tree(
         }
     }
 
-    let tree = build_node(&root, &children_map, &turn_counts);
+    let tree = build_node(&root, &children_map, &turn_counts, &last_subagent_result_map);
     Ok(Json(tree))
 }
 
