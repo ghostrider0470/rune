@@ -131,6 +131,12 @@ pub struct DelegationTaskStatusEnvelope {
     pub result: DelegationTaskResultResponse,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskAcceptedResponse {
+    pub receiver: DelegationEndpointResponse,
+    pub result: DelegationTaskResultResponse,
+}
+
 #[derive(Clone, Serialize)]
 pub struct DelegationTaskContractResponse {
     pub protocol_version: u32,
@@ -321,6 +327,65 @@ pub async fn instance_health(
     }))
 }
 
+pub async fn submit_delegation_task(
+    State(state): State<AppState>,
+    Json(body): Json<DelegationTaskRequest>,
+) -> Result<Json<DelegationTaskAcceptedResponse>, GatewayError> {
+    let now = Utc::now().to_rfc3339();
+    let receiver = local_delegation_endpoint(&state.capabilities);
+    let result = DelegationTaskResultResponse {
+        task_id: body.task_id,
+        status: "accepted".to_string(),
+        accepted_at: now,
+        started_at: None,
+        output: None,
+        artifacts: Vec::new(),
+        error: None,
+        finished_at: None,
+    };
+
+    Ok(Json(DelegationTaskAcceptedResponse { receiver, result }))
+}
+
+pub async fn delegation_task_status(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
+    let receiver = local_delegation_endpoint(&state.capabilities);
+    let result = DelegationTaskResultResponse {
+        task_id,
+        status: "failed".to_string(),
+        accepted_at: Utc::now().to_rfc3339(),
+        started_at: None,
+        output: None,
+        artifacts: Vec::new(),
+        error: Some(DelegationErrorResponse {
+            code: "not_implemented".to_string(),
+            message: "Cross-instance task execution is not implemented yet on this instance; this endpoint currently advertises the protocol contract only.".to_string(),
+        }),
+        finished_at: Some(Utc::now().to_rfc3339()),
+    };
+
+    Ok(Json(DelegationTaskStatusEnvelope { receiver, result }))
+}
+
+fn local_delegation_endpoint(capabilities: &rune_config::Capabilities) -> DelegationEndpointResponse {
+    DelegationEndpointResponse {
+        instance_id: capabilities.identity.id.clone(),
+        instance_name: capabilities.identity.name.clone(),
+        transport: capabilities.comms_transport.clone(),
+        health_url: capabilities.identity.advertised_addr.as_ref().map(|addr| {
+            format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+        }),
+        submit_url: capabilities.identity.advertised_addr.as_ref().map(|addr| {
+            format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+        }),
+        result_url: capabilities.identity.advertised_addr.as_ref().map(|addr| {
+            format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
+        }),
+    }
+}
+
 pub async fn delegation_plan(
     State(state): State<AppState>,
     Query(query): Query<DelegationPlanQuery>,
@@ -394,20 +459,7 @@ pub async fn delegation_plan(
         candidates: peers,
         detail,
         task_contract: delegation_task_contract(),
-        sender: DelegationEndpointResponse {
-            instance_id: state.capabilities.identity.id.clone(),
-            instance_name: state.capabilities.identity.name.clone(),
-            transport: state.capabilities.comms_transport.clone(),
-            health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
-                format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
-            }),
-            submit_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
-                format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
-            }),
-            result_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
-                format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
-            }),
-        },
+        sender: local_delegation_endpoint(&state.capabilities),
         receiver,
         routing,
         branch_reservation: DelegationConflictCapabilityResponse {

@@ -12975,3 +12975,89 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
     assert_eq!(entry["uncached_tokens"], 10);
     assert_eq!(entry["cache_hit_ratio_percent"], 0.0);
 }
+
+#[tokio::test]
+async fn delegation_submit_accepts_task_and_returns_receiver_contract() {
+    let mut config = AppConfig::default();
+    config.instance.id = "receiver-a".to_string();
+    config.instance.name = "Receiver A".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let payload = serde_json::json!({
+        "task_id": "delegation-421",
+        "protocol_version": 1,
+        "submitted_at": "2026-03-29T00:00:00Z",
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "health_url": "http://sender-a/api/v1/instance/health",
+            "submit_url": "http://sender-a/api/v1/instance/delegations",
+            "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
+        },
+        "task": {
+            "task": "Implement issue #421",
+            "constraints": ["cargo check", "no direct push to main"],
+            "expected_output": "commit hash and verification log",
+            "timeout_secs": 900,
+            "target_peer_id": "receiver-a",
+            "branch_reservation": "agent/rune/delegation-421",
+            "file_locks": ["crates/rune-gateway/src/routes.rs"],
+            "artifacts": []
+        }
+    });
+
+    let response = app
+        .oneshot(
+            Request::post("/api/v1/instance/delegations")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "receiver-a");
+    assert_eq!(json["receiver"]["instance_name"], "Receiver A");
+    assert_eq!(json["result"]["task_id"], "delegation-421");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert_eq!(json["result"]["started_at"], serde_json::Value::Null);
+    assert_eq!(json["result"]["output"], serde_json::Value::Null);
+    assert_eq!(json["result"]["error"], serde_json::Value::Null);
+    assert_eq!(
+        json["receiver"]["submit_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations"
+    );
+}
+
+#[tokio::test]
+async fn delegation_status_exposes_structured_not_implemented_failure_until_runtime_lands() {
+    let mut config = AppConfig::default();
+    config.instance.id = "receiver-a".to_string();
+    config.instance.name = "Receiver A".to_string();
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegations/delegation-421")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "receiver-a");
+    assert_eq!(json["result"]["task_id"], "delegation-421");
+    assert_eq!(json["result"]["status"], "failed");
+    assert_eq!(json["result"]["error"]["code"], "not_implemented");
+    assert!(json["result"]["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("protocol contract only"));
+    assert!(json["result"]["finished_at"].as_str().is_some());
+}
