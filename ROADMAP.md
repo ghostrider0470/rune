@@ -77,12 +77,12 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Semantic Browser Snapshots | ⚠️ 2026-03-16 | `rune-browser` now emits semantic snapshots, exposes a real `browse` tool, and is wired through gateway/config against the existing CDP snapshot path; Chromium launch/pool lifecycle and selector-aware extraction still need follow-up |
 | A2UI Protocol | ✅ 2026-03-28 | A2UI event bus, tool/RPC wiring, and admin UI renderers landed with inline/panel component rendering plus form/action callbacks |
 | WebSocket Gateway note | ✅ 2026-03-28 | Phase 2 WebSocket gateway RPC protocol slice tracked in #538 is shipped; issue checklist completed and verified on current main lineage |
-| TTS | ❌ Missing | No text-to-speech providers |
-| STT | ❌ Missing | No speech-to-text providers |
+| TTS | ✅ 2026-03-29 | `rune-tts` crate, provider/config wiring, gateway synthesis/toggle routes, CLI support, and admin Settings controls are shipped |
+| STT | ✅ 2026-03-28 | `rune-stt` crate, gateway transcribe/toggle routes, inbound audio transcription, and admin Settings controls are shipped |
 | LLM Providers | ✅ Partial | Anthropic, OpenAI, Azure only — missing Google, Ollama, Bedrock, Groq, DeepSeek, Mistral |
 | Admin UI | ✅ 2026-03-28 | Admin shell now includes shipped chat, usage, debug, config, logs, agents, and skills pages; broader UX polish and deeper parity still remain |
-| Agent Modes | ❌ Missing | No Orchestrator/Architect/Coder/Debugger modes — beyond OpenClaw |
-| Git Worktree Isolation | ❌ Missing | No isolated agent execution environments — beyond OpenClaw |
+| Agent Modes | ⚠️ 2026-03-29 | Project orchestrator routing/registry, persisted orchestrator state, merge queue, and delegated subagent context handoff are shipped; named specialist modes and mode APIs still need follow-up |
+| Git Worktree Isolation | ⚠️ 2026-03-29 | Orchestrator state already tracks branch/worktree paths and merge queue metadata, but automated worktree lifecycle management and executor/tool scoping are still missing |
 | Context Compression | ⚠️ 2026-03-29 | Context tier budgeting, compaction diagnostics, checkpoint metadata, and delegated context handoff for subagents are shipped; transcript summarization/checkpoint persistence still need follow-up |
 | Memory Bank | ❌ Missing | No architectural decision records or project knowledge base — beyond OpenClaw |
 | Extended Channels | ❌ Missing | No LINE/Mattermost/Matrix/Feishu/iMessage — OpenClaw breadth |
