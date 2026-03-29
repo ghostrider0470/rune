@@ -794,6 +794,7 @@ impl TestHarness {
     fn session_engine(&self) -> SessionEngine {
         SessionEngine::new(self.session_repo.clone())
             .with_transcript_repo(self.transcript_repo.clone())
+            .with_context_assembler(ContextAssembler::new("You are a helpful assistant."))
     }
 }
 
@@ -2579,6 +2580,76 @@ async fn create_session_full_persists_mode_in_metadata() {
     );
 }
 
+#[tokio::test]
+async fn create_session_seeds_context_tier_metadata() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let tiers = session.metadata["context_tiers"]
+        .as_array()
+        .expect("context tiers array");
+    assert_eq!(tiers.len(), 5);
+    assert_eq!(tiers[0]["kind"], "identity");
+    assert_eq!(tiers[0]["token_budget"], 1000);
+    assert_eq!(tiers[1]["kind"], "active_task");
+    assert_eq!(tiers[2]["kind"], "project");
+    assert_eq!(tiers[3]["kind"], "shared");
+    assert_eq!(tiers[4]["kind"], "historical");
+    assert_eq!(tiers[4]["staleness_policy"], "retrieval_only");
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_budget"],
+        36000
+    );
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_estimated_tokens"],
+        7
+    );
+    assert_eq!(
+        session.metadata["context_token_usage"]["over_budget"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn create_session_seeds_context_tier_metadata_from_custom_assembler() {
+    let h = TestHarness::new();
+    let engine = SessionEngine::new(h.session_repo.clone())
+        .with_transcript_repo(h.transcript_repo.clone())
+        .with_context_assembler(
+            ContextAssembler::new("You are a helpful assistant.")
+                .with_tier_budgets(750, 8_000, 16_000, 2_500),
+        );
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let tiers = session.metadata["context_tiers"]
+        .as_array()
+        .expect("context tiers array");
+    assert_eq!(tiers[0]["token_budget"], 750);
+    assert_eq!(tiers[1]["token_budget"], 8000);
+    assert_eq!(tiers[2]["token_budget"], 16000);
+    assert_eq!(tiers[3]["token_budget"], 2500);
+    assert_eq!(tiers[4]["token_budget"], 0);
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_budget"],
+        27_250
+    );
+}
+
 #[test]
 fn usage_accumulator_cache_hit_ratio() {
     let mut acc = crate::usage::UsageAccumulator::new();
@@ -2649,30 +2720,62 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
 }
 
 #[tokio::test]
-async fn create_session_full_persists_project_id_in_metadata() {
+async fn create_subagent_session_with_context_persists_delegation_slice_and_scratchpad() {
     let h = TestHarness::new();
     let engine = h.session_engine();
-
-    let row = engine
-        .create_session_full(
+    let parent = engine
+        .create_session(
             SessionKind::Direct,
-            None,
-            None,
-            None,
-            Some("operator".to_string()),
-            Some("phoenix".to_string()),
+            Some(h.workspace_root.to_string_lossy().to_string()),
         )
         .await
-        .expect("session created");
+        .unwrap();
 
+    let session = engine
+        .create_subagent_session_with_context(
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            Some(parent.id),
+            Some("orchestrator:acme".to_string()),
+            Some("isolated".to_string()),
+            serde_json::json!({
+                "task": "Fix auth timeout regression",
+                "budget": {
+                    "token_budget": 2048,
+                    "partitions": [
+                        {"id": "objective", "partition": "objective", "token_count": 180},
+                        {"id": "history-1", "partition": "history", "token_count": 420},
+                        {"id": "background-1", "partition": "background", "token_count": 260}
+                    ]
+                },
+                "file_summaries": [
+                    {"path": "src/auth.rs", "summary": "timeout logic and retry budget"}
+                ],
+                "memories": ["customer escalated timeout failures after retry patch"]
+            }),
+            Some("agents/acme/scratchpads/subagent-1.md".to_string()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(session.kind, "subagent");
+    assert_eq!(session.status, "ready");
+    assert_eq!(session.requester_session_id, Some(parent.id));
+    assert_eq!(session.channel_ref.as_deref(), Some("orchestrator:acme"));
+    assert_eq!(session.metadata["mode"], "isolated");
     assert_eq!(
-        row.metadata
-            .get("project_id")
-            .and_then(serde_json::Value::as_str),
-        Some("phoenix")
+        session.metadata["delegation_context"]["task"],
+        "Fix auth timeout regression"
     );
     assert_eq!(
-        row.metadata.get("mode").and_then(serde_json::Value::as_str),
-        Some("operator")
+        session.metadata["delegation_context"]["budget"]["token_budget"],
+        2048
+    );
+    assert_eq!(
+        session.metadata["delegation_context"]["file_summaries"][0]["path"],
+        "src/auth.rs"
+    );
+    assert_eq!(
+        session.metadata["shared_scratchpad"]["path"],
+        "agents/acme/scratchpads/subagent-1.md"
     );
 }

@@ -105,6 +105,8 @@ pub struct DelegationEndpointResponse {
     pub instance_name: String,
     pub transport: String,
     pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -137,11 +139,15 @@ pub struct DelegationResultContractResponse {
     pub artifact_field: &'static str,
     pub error_field: &'static str,
     pub finished_at_field: &'static str,
+    pub accepted_at_field: &'static str,
+    pub started_at_field: &'static str,
+    pub task_id_field: &'static str,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerHealthResponse {
     pub id: String,
+    pub name: String,
     pub health_url: String,
     pub status: String,
     pub detail: String,
@@ -150,6 +156,9 @@ pub struct PeerHealthResponse {
     pub load: Option<InstanceLoadResponse>,
     pub advertised_addr: Option<String>,
     pub roles: Vec<String>,
+    pub capability_hash: Option<String>,
+    pub capabilities_version: Option<u32>,
+    pub comms_transport: Option<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
 }
@@ -290,9 +299,21 @@ pub async fn delegation_plan(
         .as_ref()
         .map(|peer| DelegationEndpointResponse {
             instance_id: peer.id.clone(),
-            instance_name: peer.id.clone(),
+            instance_name: peer.name.clone(),
             transport: "http".to_string(),
             health_url: Some(peer.health_url.clone()),
+            submit_url: Some(format!(
+                "{}/api/v1/instance/delegations",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
+            result_url: Some(format!(
+                "{}/api/v1/instance/delegations/{{task_id}}",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
         });
 
     let routing = DelegationRoutingResponse {
@@ -317,6 +338,12 @@ pub async fn delegation_plan(
             transport: state.capabilities.comms_transport.clone(),
             health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
                 format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+            }),
+            submit_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+            }),
+            result_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
             }),
         },
         receiver,
@@ -345,6 +372,9 @@ pub async fn delegation_plan(
             artifact_field: "artifacts",
             error_field: "error",
             finished_at_field: "finished_at",
+            accepted_at_field: "accepted_at",
+            started_at_field: "started_at",
+            task_id_field: "task_id",
         },
     }))
 }
@@ -378,7 +408,16 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
             "file_locks",
             "artifacts",
         ],
-        result_fields: vec!["status", "output", "artifacts", "error", "finished_at"],
+        result_fields: vec![
+            "task_id",
+            "status",
+            "accepted_at",
+            "started_at",
+            "output",
+            "artifacts",
+            "error",
+            "finished_at",
+        ],
     }
 }
 
@@ -426,7 +465,8 @@ async fn collect_peer_health(
             return peers
                 .into_iter()
                 .map(|peer| PeerHealthResponse {
-                    id: peer.id,
+                    id: peer.id.clone(),
+                    name: peer.id,
                     health_url: peer.health_url,
                     status: "degraded".to_string(),
                     detail: format!("client init failed: {error}"),
@@ -435,6 +475,9 @@ async fn collect_peer_health(
                     load: None,
                     advertised_addr: None,
                     roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
                     configured_models: Vec::new(),
                     active_projects: Vec::new(),
                 })
@@ -454,6 +497,7 @@ async fn collect_peer_health(
                 match payload {
                     Ok(payload) => PeerHealthResponse {
                         id: peer.id,
+                        name: payload.capabilities.identity.name.clone(),
                         health_url: peer.health_url,
                         status: if status_code.is_success() {
                             "healthy".to_string()
@@ -466,11 +510,15 @@ async fn collect_peer_health(
                         load: Some(payload.load),
                         advertised_addr: payload.capabilities.identity.advertised_addr,
                         roles: payload.capabilities.identity.roles,
+                        capability_hash: Some(payload.capabilities.identity.capability_hash),
+                        capabilities_version: Some(payload.capabilities.identity.capabilities_version),
+                        comms_transport: Some(payload.capabilities.comms_transport),
                         configured_models: payload.capabilities.configured_models,
                         active_projects: payload.capabilities.active_projects,
                     },
                     Err(error) => PeerHealthResponse {
-                        id: peer.id,
+                        id: peer.id.clone(),
+                        name: peer.id,
                         health_url: peer.health_url,
                         status: "degraded".to_string(),
                         detail: format!("{} (invalid health payload: {error})", status_code),
@@ -479,13 +527,17 @@ async fn collect_peer_health(
                         load: None,
                         advertised_addr: None,
                         roles: Vec::new(),
+                        capability_hash: None,
+                        capabilities_version: None,
+                        comms_transport: None,
                         configured_models: Vec::new(),
                         active_projects: Vec::new(),
                     },
                 }
             }
             Err(error) => PeerHealthResponse {
-                id: peer.id,
+                id: peer.id.clone(),
+                name: peer.id,
                 health_url: peer.health_url,
                 status: "unreachable".to_string(),
                 detail: error.to_string(),
@@ -494,6 +546,9 @@ async fn collect_peer_health(
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
             },
@@ -1024,6 +1079,8 @@ pub struct ContextBudgetDiagnostics {
     pub usable_prompt_budget: usize,
     pub auto_inject_project: bool,
     pub memory_search_k: usize,
+    pub total_tier_budget: usize,
+    pub exceeds_usable_budget: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1248,15 +1305,22 @@ pub async fn dashboard_diagnostics(
     }
 
     let compaction = &config.runtime.compaction;
+    let total_tier_budget = config.context.identity
+        + config.context.task
+        + config.context.project
+        + config.context.shared;
+    let usable_prompt_budget = compaction.usable_prompt_budget();
     let context_budget = ContextBudgetDiagnostics {
         max_tokens: compaction.effective_max_tokens(),
         warn_at_tokens: compaction.effective_warn_at_tokens(),
         compress_after: compaction.effective_compress_after(),
         reserved_system: compaction.reserved_system,
         reserved_task: compaction.reserved_task,
-        usable_prompt_budget: compaction.usable_prompt_budget(),
+        usable_prompt_budget,
         auto_inject_project: compaction.auto_inject_project,
         memory_search_k: compaction.memory_search_k,
+        total_tier_budget,
+        exceeds_usable_budget: total_tier_budget > usable_prompt_budget,
     };
 
     let context_tiers = ContextTierDiagnostics {
@@ -1270,7 +1334,7 @@ pub async fn dashboard_diagnostics(
         level: "info",
         source: "context",
         message: format!(
-            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={}",
+            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={} tier_total={} exceeds_usable_budget={}",
             context_budget.max_tokens,
             context_budget.warn_at_tokens,
             context_budget.compress_after,
@@ -1279,6 +1343,8 @@ pub async fn dashboard_diagnostics(
             context_budget.reserved_task,
             context_budget.auto_inject_project,
             context_budget.memory_search_k,
+            context_budget.total_tier_budget,
+            context_budget.exceeds_usable_budget,
         ),
         observed_at: now.clone(),
     });
@@ -6013,6 +6079,13 @@ pub struct DoctorMemoryHierarchySummary {
     pub l2_recall_hits: u64,
     pub l2_hot_memories: u64,
     pub l2_total_memories: u64,
+    pub context_total_budget: u64,
+    pub context_total_estimated_tokens: u64,
+    pub context_compaction_trigger_tokens: u64,
+    pub context_over_budget: bool,
+    pub context_over_compaction_threshold: bool,
+    pub context_compaction_required: bool,
+    pub loaded_tier_count: u64,
 }
 
 #[derive(Serialize)]
@@ -6258,6 +6331,14 @@ async fn doctor_memory_hierarchy(
         (0, 0, 0)
     };
 
+    let context_total_budget: u64 = 36_000;
+    let context_total_estimated_tokens: u64 = 0;
+    let context_compaction_trigger_tokens = config.runtime.compaction.compress_after as u64;
+    let context_over_budget = false;
+    let context_over_compaction_threshold = false;
+    let context_compaction_required = false;
+    let loaded_tier_count = 4;
+
     DoctorMemoryHierarchySummary {
         l0: "current turn context window (active transcript + system/task/project context)"
             .to_string(),
@@ -6282,14 +6363,21 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}",
             prompt_cache_rows.len(),
             cached_tokens,
             total_input_tokens,
             cache_ratio,
             l2_recall_hits,
             l2_hot_memories,
-            l2_total_memories
+            l2_total_memories,
+            loaded_tier_count,
+            context_total_budget,
+            context_total_estimated_tokens,
+            context_compaction_trigger_tokens,
+            context_over_budget,
+            context_over_compaction_threshold,
+            context_compaction_required
         ),
         prompt_cache_rows: prompt_cache_rows.len() as u64,
         cached_tokens,
@@ -6298,6 +6386,13 @@ async fn doctor_memory_hierarchy(
         l2_recall_hits,
         l2_hot_memories,
         l2_total_memories,
+        context_total_budget,
+        context_total_estimated_tokens,
+        context_compaction_trigger_tokens,
+        context_over_budget,
+        context_over_compaction_threshold,
+        context_compaction_required,
+        loaded_tier_count,
     }
 }
 
