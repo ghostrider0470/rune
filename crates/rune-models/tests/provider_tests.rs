@@ -973,6 +973,47 @@ fn selects_ollama_provider_without_api_key() {
     let _: Box<dyn ModelProvider> = provider;
 }
 
+
+#[test]
+fn selects_openrouter_provider() {
+    let _guard = lock_env();
+    unsafe { std::env::set_var("TEST_OPENROUTER_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "openrouter".into(),
+        kind: "openrouter".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_OPENROUTER_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_OPENROUTER_KEY_SEL") };
+}
+
+#[test]
+fn selects_perplexity_provider() {
+    let _guard = lock_env();
+    unsafe { std::env::set_var("TEST_PERPLEXITY_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "perplexity".into(),
+        kind: "perplexity".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_PERPLEXITY_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_PERPLEXITY_KEY_SEL") };
+}
+
 #[test]
 fn selects_groq_provider() {
     let _guard = lock_env();
