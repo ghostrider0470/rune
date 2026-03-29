@@ -156,6 +156,7 @@ Typical `delegation_context` contents:
 
 - Delegation metadata sections are currently rendered into subagent system context.
 - This ships the context-handoff substrate for delegated sessions.
+- Subagent creation also persists `shared_scratchpad_path` even when no explicit `delegation_context` payload is supplied; Rune stores an empty object for `delegation_context` in that case so prompt assembly has a stable metadata shape.
 - Shared scratchpad support is path-level metadata today; higher-level bidirectional scratchpad workflows can build on top of it.
 
 ## Further detail still missing
