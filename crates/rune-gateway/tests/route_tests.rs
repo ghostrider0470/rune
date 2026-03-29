@@ -4350,6 +4350,7 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
                 "ws_connections": 2
             },
             "capabilities": {
+                "schema_version": 1,
                 "mode": "standalone",
                 "updated_at": "2026-03-29T00:00:00Z",
                 "storage_backend": "sqlite",
@@ -4370,6 +4371,8 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
                     "capabilities_version": 1,
                     "capability_hash": "cap-peer-a"
                 },
+                "roles": ["gateway", "coder"],
+                "peer_ids": [],
                 "instance_id": "peer-a",
                 "instance_name": "peer-a",
                 "peer_count": 0,
@@ -4617,6 +4620,7 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
                 "ws_connections": 0
             },
             "capabilities": {
+                "schema_version": 7,
                 "mode": "standalone",
                 "updated_at": "2026-03-29T00:00:00Z",
                 "storage_backend": "sqlite",
@@ -4821,6 +4825,7 @@ async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
                 "ws_connections": 0
             },
             "capabilities": {
+                "schema_version": 7,
                 "mode": "standalone",
                 "updated_at": "2026-03-29T00:00:00Z",
                 "storage_backend": "sqlite",
@@ -4841,6 +4846,8 @@ async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
                     "capabilities_version": 7,
                     "capability_hash": "cap-peer-alpha"
                 },
+                "roles": ["gateway", "coder"],
+                "peer_ids": [],
                 "instance_id": "peer-a",
                 "instance_name": "Peer Alpha",
                 "peer_count": 0,

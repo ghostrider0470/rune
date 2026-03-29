@@ -300,6 +300,7 @@ pub async fn instance_health(
             ws_connections: active_ws_connections(),
         },
         capabilities: CapabilitiesResponse {
+            schema_version: state.capabilities.identity.capabilities_version,
             mode: state.capabilities.mode.as_str().to_string(),
             updated_at: state.capabilities.updated_at.clone(),
             storage_backend: state.capabilities.storage_backend.clone(),
@@ -320,6 +321,13 @@ pub async fn instance_health(
                 capabilities_version: state.capabilities.identity.capabilities_version,
                 capability_hash: state.capabilities.identity.capability_hash.clone(),
             },
+            roles: state.capabilities.identity.roles.clone(),
+            peer_ids: state
+                .capabilities
+                .peers
+                .iter()
+                .map(|peer| peer.id.clone())
+                .collect(),
             instance_id: state.capabilities.identity.id.clone(),
             instance_name: state.capabilities.identity.name.clone(),
             peer_count: state.capabilities.peer_count,
@@ -867,6 +875,7 @@ pub struct UpdateStatusResponse {
 
 #[derive(Serialize, Deserialize)]
 pub struct CapabilitiesResponse {
+    pub schema_version: u32,
     pub mode: String,
     pub updated_at: String,
     pub storage_backend: String,
@@ -880,6 +889,8 @@ pub struct CapabilitiesResponse {
     pub approval_mode: String,
     pub security_posture: String,
     pub identity: InstanceIdentityResponse,
+    pub roles: Vec<String>,
+    pub peer_ids: Vec<String>,
     pub instance_id: String,
     pub instance_name: String,
     pub peer_count: usize,
@@ -1046,6 +1057,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             logs_dir: config.paths.logs_dir.display().to_string(),
         },
         capabilities: CapabilitiesResponse {
+            schema_version: state.capabilities.identity.capabilities_version,
             mode: state.capabilities.mode.as_str().to_string(),
             updated_at: state.capabilities.updated_at.clone(),
             storage_backend: state.capabilities.storage_backend.clone(),
@@ -1066,6 +1078,13 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
                 capabilities_version: state.capabilities.identity.capabilities_version,
                 capability_hash: state.capabilities.identity.capability_hash.clone(),
             },
+            roles: state.capabilities.identity.roles.clone(),
+            peer_ids: state
+                .capabilities
+                .peers
+                .iter()
+                .map(|peer| peer.id.clone())
+                .collect(),
             instance_id: state.capabilities.identity.id.clone(),
             instance_name: state.capabilities.identity.name.clone(),
             peer_count: state.capabilities.peer_count,
