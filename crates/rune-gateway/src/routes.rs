@@ -97,6 +97,16 @@ pub struct DelegationPlanResponse {
     pub file_locks: DelegationConflictCapabilityResponse,
     pub task_status: DelegationTaskStatusResponse,
     pub result: DelegationResultContractResponse,
+    pub capability_match: DelegationCapabilityMatchResponse,
+}
+
+#[derive(Serialize)]
+pub struct DelegationCapabilityMatchResponse {
+    pub compatible: bool,
+    pub missing_roles: Vec<String>,
+    pub missing_projects: Vec<String>,
+    pub model_overlap: Vec<String>,
+    pub detail: String,
 }
 
 #[derive(Serialize)]
@@ -311,7 +321,7 @@ pub async fn delegation_plan(
 
     Ok(Json(DelegationPlanResponse {
         strategy: strategy.clone(),
-        selected_peer,
+        selected_peer: selected_peer.clone(),
         candidates: peers,
         detail,
         task_contract: delegation_task_contract(),
@@ -350,7 +360,84 @@ pub async fn delegation_plan(
             error_field: "error",
             finished_at_field: "finished_at",
         },
+        capability_match: evaluate_capability_match(&state.capabilities, selected_peer.as_ref()),
     }))
+}
+
+fn evaluate_capability_match(
+    capabilities: &rune_config::Capabilities,
+    selected_peer: Option<&PeerHealthResponse>,
+) -> DelegationCapabilityMatchResponse {
+    let Some(peer) = selected_peer else {
+        return DelegationCapabilityMatchResponse {
+            compatible: false,
+            missing_roles: Vec::new(),
+            missing_projects: Vec::new(),
+            model_overlap: Vec::new(),
+            detail: "no receiver selected; capability compatibility unavailable".to_string(),
+        };
+    };
+
+    let missing_roles = capabilities
+        .identity
+        .roles
+        .iter()
+        .filter(|role| !peer.roles.iter().any(|candidate| candidate == *role))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let missing_projects = capabilities
+        .active_projects
+        .iter()
+        .filter(|project| {
+            !peer
+                .active_projects
+                .iter()
+                .any(|candidate| candidate == *project)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let model_overlap = capabilities
+        .configured_models
+        .iter()
+        .filter(|model| {
+            peer.configured_models
+                .iter()
+                .any(|candidate| candidate == *model)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let compatible = missing_roles.is_empty() && missing_projects.is_empty();
+    let detail = if compatible {
+        if model_overlap.is_empty() {
+            "receiver matches advertised roles/projects but no configured model overlap was declared"
+                .to_string()
+        } else {
+            format!(
+                "receiver matches advertised roles/projects with {} overlapping model(s)",
+                model_overlap.len()
+            )
+        }
+    } else {
+        let mut reasons = Vec::new();
+        if !missing_roles.is_empty() {
+            reasons.push(format!("missing roles: {}", missing_roles.join(", ")));
+        }
+        if !missing_projects.is_empty() {
+            reasons.push(format!("missing projects: {}", missing_projects.join(", ")));
+        }
+        format!("receiver capability mismatch ({})", reasons.join("; "))
+    };
+
+    DelegationCapabilityMatchResponse {
+        compatible,
+        missing_roles,
+        missing_projects,
+        model_overlap,
+        detail,
+    }
 }
 
 fn delegation_task_contract() -> DelegationTaskContractResponse {
@@ -476,7 +563,9 @@ async fn collect_peer_health(
                         advertised_addr: payload.capabilities.identity.advertised_addr,
                         roles: payload.capabilities.identity.roles,
                         capability_hash: Some(payload.capabilities.identity.capability_hash),
-                        capabilities_version: Some(payload.capabilities.identity.capabilities_version),
+                        capabilities_version: Some(
+                            payload.capabilities.identity.capabilities_version,
+                        ),
                         comms_transport: Some(payload.capabilities.comms_transport),
                         configured_models: payload.capabilities.configured_models,
                         active_projects: payload.capabilities.active_projects,

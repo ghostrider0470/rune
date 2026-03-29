@@ -16,17 +16,17 @@ use crate::output::{
     ApprovalPoliciesResponse, ApprovalPolicySummary, ApprovalRequestSummary, ConfigFileResponse,
     ConfigGetResponse, ConfigMutationResponse, ConfigValidationResult, ConfigureResponse,
     CronJobDetailResponse, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DelegationPlanResponse, DelegationTaskContract, DoctorReport, GatewayCallResponse,
-    GatewayConfigResponse, GatewayDiscoverResponse, GatewayInstanceHealthResponse,
-    GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
-    InstanceLoadSummary, LogsQueryResponse, MessageSearchHit, MessageSearchResponse,
-    MessageSendResponse, ModelScanProviderResult, ModelScanResponse, PeerSummary, ReminderSummary,
-    RemindersListResponse, SandboxExplainResponse, SandboxListResponse, SandboxRecreateResponse,
-    ScannedModelDetail, SecretsApplyResponse, SecretsAuditResponse, SecretsConfigureResponse,
-    SecretsReloadResponse, SecurityAuditResponse, SessionDetailResponse, SessionListResponse,
-    SessionStatusCard, SessionSummary, SessionTreeNode, SessionTreeResponse, SkillCheckResponse,
-    SkillInfoResponse, SkillListResponse, SkillSummary, SpellSearchResponse, StatusResponse,
-    SystemEventListResponse,
+    CronStatusResponse, DelegationCapabilityMatch, DelegationPlanResponse, DelegationTaskContract,
+    DoctorReport, GatewayCallResponse, GatewayConfigResponse, GatewayDiscoverResponse,
+    GatewayInstanceHealthResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
+    HeartbeatStatusResponse, InstanceLoadSummary, LogsQueryResponse, MessageSearchHit,
+    MessageSearchResponse, MessageSendResponse, ModelScanProviderResult, ModelScanResponse,
+    PeerSummary, ReminderSummary, RemindersListResponse, SandboxExplainResponse,
+    SandboxListResponse, SandboxRecreateResponse, ScannedModelDetail, SecretsApplyResponse,
+    SecretsAuditResponse, SecretsConfigureResponse, SecretsReloadResponse, SecurityAuditResponse,
+    SessionDetailResponse, SessionListResponse, SessionStatusCard, SessionSummary, SessionTreeNode,
+    SessionTreeResponse, SkillCheckResponse, SkillInfoResponse, SkillListResponse, SkillSummary,
+    SpellSearchResponse, StatusResponse, SystemEventListResponse,
 };
 
 /// HTTP client that talks to the Rune gateway API.
@@ -246,6 +246,7 @@ impl GatewayClient {
             candidates: parse_peer_summaries(&body["candidates"]),
             detail: body["detail"].as_str().unwrap_or_default().to_string(),
             task_contract: parse_delegation_task_contract(&body["task_contract"]),
+            capability_match: parse_delegation_capability_match(&body["capability_match"]),
         })
     }
     /// `GET /config`
@@ -6922,6 +6923,40 @@ fn parse_string_array(value: &serde_json::Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_delegation_capability_match(value: &serde_json::Value) -> DelegationCapabilityMatch {
+    DelegationCapabilityMatch {
+        compatible: value["compatible"].as_bool().unwrap_or(false),
+        missing_roles: value["missing_roles"]
+            .as_array()
+            .map(|roles| {
+                roles
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        missing_projects: value["missing_projects"]
+            .as_array()
+            .map(|projects| {
+                projects
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        model_overlap: value["model_overlap"]
+            .as_array()
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        detail: value["detail"].as_str().unwrap_or_default().to_string(),
+    }
 }
 
 fn parse_delegation_task_contract(value: &serde_json::Value) -> DelegationTaskContract {

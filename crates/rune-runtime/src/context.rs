@@ -865,8 +865,8 @@ mod context_budget_tests {
 
     #[test]
     fn analyze_context_usage_marks_over_budget_when_tier_sum_exceeded() {
-        let assembler = ContextAssembler::new("Identity instructions")
-            .with_tier_budgets(1, 1, 1, 1);
+        let assembler =
+            ContextAssembler::new("Identity instructions").with_tier_budgets(1, 1, 1, 1);
         let workspace = WorkspaceContext {
             files: vec![("AGENTS.md".into(), "project rules".into())],
         };

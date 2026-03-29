@@ -4517,6 +4517,118 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
         "http://127.0.0.1:8787/api/v1/instance/health"
     );
     assert_eq!(json["routing"]["mode"], "named");
+    assert_eq!(json["capability_match"]["compatible"], false);
+    assert_eq!(
+        json["capability_match"]["missing_roles"],
+        serde_json::json!(["scheduler"])
+    );
+    assert_eq!(
+        json["capability_match"]["detail"],
+        "receiver capability mismatch (missing roles: scheduler)"
+    );
+}
+
+#[tokio::test]
+async fn delegation_plan_reports_capability_match_for_selected_peer() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "peer-a",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway", "scheduler"],
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "peer-a",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1", "claude-3-7-sonnet"],
+                "active_projects": ["/workspace/rune"],
+                "comms_transport": "filesystem"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+    config.models.providers = vec![rune_config::ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
+    }];
+    config.agents.defaults.workspace = Some("/workspace/rune".to_string());
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["capability_match"]["compatible"], true);
+    assert_eq!(
+        json["capability_match"]["model_overlap"],
+        serde_json::json!(["gpt-4.1"])
+    );
+    assert_eq!(
+        json["capability_match"]["missing_roles"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        json["capability_match"]["missing_projects"],
+        serde_json::json!([])
+    );
 }
 
 #[tokio::test]

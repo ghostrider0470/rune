@@ -429,7 +429,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/health", get(routes::health))
         .route("/ready", get(routes::ready))
         .route("/api/v1/instance/health", get(routes::instance_health))
-        .route("/api/v1/instance/delegation-plan", get(routes::delegation_plan))
+        .route(
+            "/api/v1/instance/delegation-plan",
+            get(routes::delegation_plan),
+        )
         .route("/chat", get(webchat::legacy_chat_redirect))
         .route("/webchat", get(webchat::webchat_handler))
         .route("/assets/{path}", get(routes::branded_asset))
