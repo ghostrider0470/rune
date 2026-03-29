@@ -48,7 +48,7 @@ pub use context::{
 };
 pub use context_budget::{
     BudgetItem, BudgetReport, Checkpoint, CheckpointStore, GcResult, Partition, PartitionBudget,
-    PartitionReport, TokenBudget, heartbeat_gc, persist_checkpoint, recover_checkpoint,
+    PartitionReport, TokenBudget, heartbeat_gc, heartbeat_gc_with_store, persist_checkpoint, recover_checkpoint,
 };
 pub use dispatcher::{DispatchDecision, MessageDispatcher, OrchestratorRegistry};
 pub use engine::SessionEngine;
