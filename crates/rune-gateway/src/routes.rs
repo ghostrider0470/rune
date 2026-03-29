@@ -7753,3 +7753,73 @@ mod tests {
 pub fn storage_path_checks_for_tests(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     storage_path_checks(config)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct DelegationTaskStatusPath {
+    pub task_id: String,
+}
+
+pub async fn submit_delegation_task(
+    State(_state): State<AppState>,
+    Json(request): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
+    let now = Utc::now().to_rfc3339();
+    let result = DelegationTaskResultResponse {
+        task_id: request.task_id.clone(),
+        status: "accepted".to_string(),
+        accepted_at: now,
+        started_at: None,
+        output: None,
+        artifacts: request.task.artifacts.clone(),
+        error: None,
+        finished_at: None,
+    };
+
+    let receiver = DelegationEndpointResponse {
+        instance_id: request
+            .task
+            .target_peer_id
+            .clone()
+            .unwrap_or_else(|| "local-instance".to_string()),
+        instance_name: request
+            .task
+            .target_peer_id
+            .clone()
+            .unwrap_or_else(|| "Local Instance".to_string()),
+        transport: request.sender.transport.clone(),
+        health_url: None,
+        submit_url: None,
+        result_url: request.sender.result_url.clone(),
+    };
+
+    Ok((
+        StatusCode::CREATED,
+        Json(DelegationTaskStatusEnvelope { receiver, result }),
+    ))
+}
+
+pub async fn delegation_task_status(
+    Path(path): Path<DelegationTaskStatusPath>,
+) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
+    let now = Utc::now().to_rfc3339();
+    Ok(Json(DelegationTaskStatusEnvelope {
+        receiver: DelegationEndpointResponse {
+            instance_id: "local-instance".to_string(),
+            instance_name: "Local Instance".to_string(),
+            transport: "http".to_string(),
+            health_url: None,
+            submit_url: None,
+            result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
+        },
+        result: DelegationTaskResultResponse {
+            task_id: path.task_id,
+            status: "accepted".to_string(),
+            accepted_at: now,
+            started_at: None,
+            output: None,
+            artifacts: Vec::new(),
+            error: None,
+            finished_at: None,
+        },
+    }))
+}

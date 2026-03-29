@@ -13627,3 +13627,84 @@ async fn doctor_run_reports_instance_topology_summary() {
     assert_eq!(body["topology"]["models"], "azure");
     assert_eq!(body["topology"]["search"], "semantic-hybrid");
 }
+
+#[tokio::test]
+async fn delegation_submission_accepts_structured_task_and_returns_status_envelope() {
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    let app = build_test_app_parts(config, None).0;
+
+    let payload = serde_json::json!({
+        "task_id": "delegation-421",
+        "protocol_version": 1,
+        "submitted_at": "2026-03-29T00:00:00Z",
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "submit_url": "http://sender-a/api/v1/instance/delegations",
+            "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
+        },
+        "task": {
+            "task": "Implement issue #421 acceptance-test shim",
+            "constraints": ["Run cargo check before returning"],
+            "expected_output": "Commit SHA plus summary of changed files",
+            "timeout_secs": 1800,
+            "target_peer_id": "peer-b",
+            "branch_reservation": "agent/rune/delegation-421",
+            "file_locks": ["crates/rune-gateway/src/routes.rs"],
+            "artifacts": [
+                {
+                    "name": "cargo-check.log",
+                    "kind": "log",
+                    "content_type": "text/plain",
+                    "description": "Verification output captured by receiver"
+                }
+            ]
+        }
+    });
+
+    let response = app
+        .oneshot(
+            Request::post("/api/v1/instance/delegations")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "peer-b");
+    assert_eq!(json["result"]["task_id"], "delegation-421");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert_eq!(json["result"]["started_at"], serde_json::Value::Null);
+    assert_eq!(json["result"]["finished_at"], serde_json::Value::Null);
+    assert_eq!(json["result"]["artifacts"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn delegation_status_route_returns_trackable_task_status() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegations/delegation-421")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["result"]["task_id"], "delegation-421");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert_eq!(json["receiver"]["instance_id"], "local-instance");
+    assert_eq!(
+        json["receiver"]["result_url"],
+        "/api/v1/instance/delegations/delegation-421"
+    );
+}
