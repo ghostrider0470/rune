@@ -2021,7 +2021,13 @@ async fn direct_session_prompt_includes_workspace_and_memory_context() {
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].stable_prefix_messages.as_ref().expect("stable prefix messages")[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("SOUL.md"));
     assert!(system.contains("USER.md"));
@@ -2060,7 +2066,13 @@ async fn channel_session_prompt_excludes_long_term_memory() {
     executor.execute(session.id, "ping", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].stable_prefix_messages.as_ref().expect("stable prefix messages")[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("Today's Notes"));
     assert!(!system.contains("Long-term Memory"));
@@ -2141,7 +2153,13 @@ async fn enabled_skills_are_injected_into_system_prompt() {
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].stable_prefix_messages.as_ref().expect("stable prefix messages")[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
     assert!(system.contains("## Available Spells"));
     assert!(system.contains("skill-alpha"));
     assert!(system.contains("Alpha description"));
@@ -2717,6 +2735,67 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
         .unwrap();
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
+}
+
+#[tokio::test]
+async fn subagent_prompt_includes_delegation_context_and_shared_scratchpad() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let parent = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    let session = engine
+        .create_subagent_session_with_context(
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            Some(parent.id),
+            Some("orchestrator:acme".to_string()),
+            Some("isolated".to_string()),
+            serde_json::json!({
+                "task": "Implement retry budget fix",
+                "budget": { "token_budget": 1536 },
+                "file_summaries": [
+                    {"path": "src/retry.rs", "summary": "retry budget enforcement"}
+                ],
+                "memories": ["customer escalated retries looping forever"]
+            }),
+            Some("agents/acme/scratchpads/retry-fix.md".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("Delegation context loaded"),
+    ]));
+    let executor = h.turn_executor(
+        model.clone(),
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
+
+    executor
+        .execute(session.id, "continue", None)
+        .await
+        .unwrap();
+
+    let requests = model.requests().await;
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
+    assert!(system.contains("## Delegation Context"));
+    assert!(system.contains("Implement retry budget fix"));
+    assert!(system.contains("src/retry.rs"));
+    assert!(system.contains("customer escalated retries looping forever"));
+    assert!(system.contains("## Shared Scratchpad"));
+    assert!(system.contains("agents/acme/scratchpads/retry-fix.md"));
 }
 
 #[tokio::test]
