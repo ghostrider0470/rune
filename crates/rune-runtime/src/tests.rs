@@ -2573,6 +2573,46 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
 }
 
 #[tokio::test]
+async fn enrich_media_content_ignores_image_placeholders_for_multimodal_attachments() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = SharedSentChannelAdapter { sent };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let msg = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-img".to_string(),
+        sender: "user-img".to_string(),
+        content: "what's in this image?".to_string(),
+        attachments: vec![rune_core::AttachmentRef {
+            name: "photo.jpg".to_string(),
+            mime_type: Some("image/jpeg".to_string()),
+            size_bytes: Some(42),
+            url: Some("telegram-file:file-123".to_string()),
+            provider_file_id: None,
+        }],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-img".to_string(),
+    };
+
+    let enriched = crate::session_loop::enrich_media_content_for_test(&session_loop, &msg).await;
+    assert_eq!(enriched, "what's in this image?");
+}
+
+
+#[tokio::test]
 async fn create_session_full_persists_mode_in_metadata() {
     let h = TestHarness::new();
     let engine = h.session_engine();
