@@ -174,6 +174,7 @@ That means local-first is the default experience, not a throwaway dev-only mode.
 
 Start here:
 - use [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md) for local setup and day-to-day build/run flow
+- use `rune gateway instance-health` via the CLI after configuring `[instance]` to inspect identity/capabilities/load, and `rune gateway delegation-plan --strategy least_busy` to preview the current cross-instance delegation contract
 - use [`docs/contributor/README.md`](docs/contributor/README.md) for the contributor docs hub and related execution references
 - use [`docs/AGENT-ORCHESTRATION.md`](docs/AGENT-ORCHESTRATION.md) for deeper runtime/repo execution context
 - use [`docs/reference/README.md`](docs/reference/README.md), [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md), [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md), and [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md) for technical reference material
