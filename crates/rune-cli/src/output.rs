@@ -6157,7 +6157,7 @@ mod tests {
                 context_over_compaction_threshold: false,
                 context_compaction_required: false,
                 l3_cold_storage_enabled: true,
-                loaded_tier_count: 4,
+                loaded_tier_count: 5,
                 context_tier_counters: vec![DoctorContextTierCounter {
                     kind: "identity".into(),
                     token_budget: 1_000,
@@ -6184,7 +6184,7 @@ mod tests {
         assert!(out.contains("Memory Hierarchy:"));
         assert!(out.contains("L1: prompt cache via provider prefixes"));
         assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
-        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false, l3_cold_storage_enabled=true"));
+        assert!(out.contains("Context Tier Counters: loaded_tiers=5, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false, l3_cold_storage_enabled=true"));
         assert!(out.contains("identity: loaded=true, refresh_required=true, budget=1000, estimated_tokens=64, priority=0, staleness_policy=always_fresh, source=system_instructions"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
