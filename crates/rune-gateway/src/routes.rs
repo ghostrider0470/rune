@@ -2436,6 +2436,14 @@ pub async fn create_session(
 
 /// First-class session status parity card for `/sessions/{id}/status`.
 #[derive(Serialize)]
+pub struct SessionAuditSummary {
+    pub transcript_items: u32,
+    pub status_notes: u32,
+    pub last_transcript_at: Option<String>,
+    pub last_operator_note: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct SessionStatusResponse {
     pub session_id: String,
     pub runtime: String,
@@ -2483,6 +2491,8 @@ pub struct SessionStatusResponse {
     pub subagent_status_updated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_last_note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audit: Option<SessionAuditSummary>,
     pub unresolved: Vec<String>,
 }
 
@@ -2544,6 +2554,11 @@ pub async fn get_session_status(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
     let aggregate = aggregate_turns(&turns);
+    let transcript_items = state
+        .transcript_repo
+        .list_by_session(row.id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
     let metadata = &row.metadata;
     let model_override = metadata_string(metadata, "selected_model");
@@ -2591,6 +2606,30 @@ pub async fn get_session_status(
     let subagent_runtime_attached = metadata_bool(metadata, "subagent_runtime_attached");
     let subagent_status_updated_at = metadata_string(metadata, "subagent_status_updated_at");
     let subagent_last_note = metadata_string(metadata, "subagent_last_note");
+    let status_notes = transcript_items
+        .iter()
+        .filter(|item| item.kind == "status_note")
+        .count() as u32;
+    let last_transcript_at = transcript_items
+        .last()
+        .map(|item| item.created_at.to_rfc3339());
+    let last_operator_note = transcript_items
+        .iter()
+        .rev()
+        .find(|item| item.kind == "status_note")
+        .and_then(|item| item.payload.get("content"))
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned);
+    let audit = if row.kind == "subagent" {
+        Some(SessionAuditSummary {
+            transcript_items: transcript_items.len() as u32,
+            status_notes,
+            last_transcript_at,
+            last_operator_note,
+        })
+    } else {
+        None
+    };
 
     let mut unresolved = Vec::new();
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
@@ -2644,6 +2683,7 @@ pub async fn get_session_status(
         subagent_runtime_attached,
         subagent_status_updated_at,
         subagent_last_note,
+        audit,
         unresolved,
     }))
 }
