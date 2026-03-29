@@ -49,9 +49,9 @@ use crate::{SupervisorDeps, run_job_lifecycle};
 /// Response for `GET /health` and `GET /ready`.
 #[derive(Serialize)]
 pub struct HealthResponse {
-    pub status: &'static str,
-    pub service: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub service: String,
+    pub version: String,
     pub uptime_seconds: u64,
     pub session_count: usize,
     pub ws_subscribers: usize,
@@ -60,18 +60,26 @@ pub struct HealthResponse {
     pub storage_backend: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct InstanceHealthResponse {
-    pub status: &'static str,
-    pub service: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub service: String,
+    pub version: String,
     pub uptime_seconds: u64,
     pub load: InstanceLoadResponse,
     pub capabilities: CapabilitiesResponse,
     pub peers: Vec<PeerHealthResponse>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
+pub struct DelegationPlanResponse {
+    pub strategy: String,
+    pub selected_peer: Option<PeerHealthResponse>,
+    pub candidates: Vec<PeerHealthResponse>,
+    pub detail: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PeerHealthResponse {
     pub id: String,
     pub health_url: String,
@@ -79,9 +87,14 @@ pub struct PeerHealthResponse {
     pub detail: String,
     pub checked_at: String,
     pub latency_ms: Option<u128>,
+    pub load: Option<InstanceLoadResponse>,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InstanceLoadResponse {
     pub session_count: usize,
     pub ws_subscribers: usize,
@@ -95,9 +108,9 @@ pub struct TokenMetricsResponse {
 
 #[derive(Serialize)]
 pub struct ReadinessResponse {
-    pub status: &'static str,
-    pub service: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub service: String,
+    pub version: String,
     pub mode: &'static str,
     pub storage_backend: String,
     pub checks: Vec<DoctorCheck>,
@@ -112,9 +125,9 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
     Ok(Json(HealthResponse {
-        status: "ok",
-        service: "rune-gateway",
-        version: env!("CARGO_PKG_VERSION"),
+        status: "ok".to_string(),
+        service: "rune-gateway".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         session_count: sessions.len(),
         ws_subscribers: state.event_tx.receiver_count(),
@@ -136,9 +149,9 @@ pub async fn instance_health(
     let peers = collect_peer_health(state.capabilities.peers.clone()).await;
 
     Ok(Json(InstanceHealthResponse {
-        status: "ok",
-        service: "rune-gateway",
-        version: env!("CARGO_PKG_VERSION"),
+        status: "ok".to_string(),
+        service: "rune-gateway".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         load: InstanceLoadResponse {
             session_count: sessions.len(),
@@ -146,7 +159,7 @@ pub async fn instance_health(
             ws_connections: active_ws_connections(),
         },
         capabilities: CapabilitiesResponse {
-            mode: state.capabilities.mode.as_str(),
+            mode: state.capabilities.mode.as_str().to_string(),
             updated_at: state.capabilities.updated_at.clone(),
             storage_backend: state.capabilities.storage_backend.clone(),
             pgvector: state.capabilities.pgvector,
@@ -176,6 +189,66 @@ pub async fn instance_health(
     }))
 }
 
+pub async fn delegation_plan(
+    State(state): State<AppState>,
+    Query(query): Query<DelegationPlanQuery>,
+) -> Result<Json<DelegationPlanResponse>, GatewayError> {
+    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+    let strategy = query.strategy.as_deref().unwrap_or("least_busy");
+
+    let selected_peer = match strategy {
+        "named" => {
+            let target = query.peer_id.as_deref().ok_or_else(|| {
+                GatewayError::BadRequest("peer_id is required when strategy=named".to_string())
+            })?;
+            peers.iter().find(|peer| peer.id == target).cloned()
+        }
+        "least_busy" => select_least_busy_peer(&peers),
+        other => {
+            return Err(GatewayError::BadRequest(format!(
+                "unsupported delegation strategy '{other}' (expected 'least_busy' or 'named')"
+            )));
+        }
+    };
+
+    let detail = match (&selected_peer, strategy) {
+        (Some(peer), "named") => format!("selected named peer '{}'", peer.id),
+        (Some(peer), "least_busy") => format!("selected least-busy healthy peer '{}'", peer.id),
+        (None, "named") => format!(
+            "named peer '{}' was not found or is unavailable",
+            query.peer_id.as_deref().unwrap_or_default()
+        ),
+        (None, _) => "no healthy peers available for delegation".to_string(),
+        (Some(peer), _) => format!("selected peer '{}'", peer.id),
+    };
+
+    Ok(Json(DelegationPlanResponse {
+        strategy: strategy.to_string(),
+        selected_peer,
+        candidates: peers,
+        detail,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DelegationPlanQuery {
+    pub strategy: Option<String>,
+    pub peer_id: Option<String>,
+}
+
+fn select_least_busy_peer(peers: &[PeerHealthResponse]) -> Option<PeerHealthResponse> {
+    peers
+        .iter()
+        .filter(|peer| peer.status == "healthy")
+        .min_by_key(|peer| {
+            let session_count = peer.load.as_ref().map(|load| load.session_count).unwrap_or(usize::MAX);
+            let ws_connections = peer.load.as_ref().map(|load| load.ws_connections).unwrap_or(usize::MAX);
+            let latency = peer.latency_ms.unwrap_or(u128::MAX);
+            (session_count, ws_connections, latency, peer.id.as_str())
+        })
+        .cloned()
+}
+
 async fn collect_peer_health(
     peers: Vec<rune_config::PeerCapabilityTarget>,
 ) -> Vec<PeerHealthResponse> {
@@ -199,6 +272,11 @@ async fn collect_peer_health(
                     detail: format!("client init failed: {error}"),
                     checked_at: checked_at.clone(),
                     latency_ms: None,
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
                 })
                 .collect();
         }
@@ -211,24 +289,39 @@ async fn collect_peer_health(
         let item = match client.get(&peer.health_url).send().await {
             Ok(response) => {
                 let latency_ms = Some(started.elapsed().as_millis());
-                if response.status().is_success() {
-                    PeerHealthResponse {
+                let status_code = response.status();
+                let payload = response.json::<InstanceHealthResponse>().await;
+                match payload {
+                    Ok(payload) => PeerHealthResponse {
                         id: peer.id,
                         health_url: peer.health_url,
-                        status: "healthy".to_string(),
-                        detail: response.status().to_string(),
+                        status: if status_code.is_success() {
+                            "healthy".to_string()
+                        } else {
+                            "degraded".to_string()
+                        },
+                        detail: status_code.to_string(),
                         checked_at,
                         latency_ms,
-                    }
-                } else {
-                    PeerHealthResponse {
+                        load: Some(payload.load),
+                        advertised_addr: payload.capabilities.identity.advertised_addr,
+                        roles: payload.capabilities.identity.roles,
+                        configured_models: payload.capabilities.configured_models,
+                        active_projects: payload.capabilities.active_projects,
+                    },
+                    Err(error) => PeerHealthResponse {
                         id: peer.id,
                         health_url: peer.health_url,
                         status: "degraded".to_string(),
-                        detail: response.status().to_string(),
+                        detail: format!("{} (invalid health payload: {error})", status_code),
                         checked_at,
                         latency_ms,
-                    }
+                        load: None,
+                        advertised_addr: None,
+                        roles: Vec::new(),
+                        configured_models: Vec::new(),
+                        active_projects: Vec::new(),
+                    },
                 }
             }
             Err(error) => PeerHealthResponse {
@@ -238,6 +331,11 @@ async fn collect_peer_health(
                 detail: error.to_string(),
                 checked_at,
                 latency_ms: None,
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
             },
         };
         results.push(item);
@@ -262,9 +360,9 @@ pub async fn ready(State(state): State<AppState>) -> Result<Response, GatewayErr
     let failing = checks.iter().any(|check| check.status == "fail");
     let status = if failing { "degraded" } else { "ok" };
     let body = ReadinessResponse {
-        status,
-        service: "rune-gateway",
-        version: env!("CARGO_PKG_VERSION"),
+        status: status.to_string(),
+        service: "rune-gateway".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         mode: state.capabilities.mode.as_str(),
         storage_backend: state.capabilities.storage_backend.clone(),
         checks,
@@ -323,9 +421,9 @@ pub struct UpdateStatusResponse {
     pub detail: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CapabilitiesResponse {
-    pub mode: &'static str,
+    pub mode: String,
     pub updated_at: String,
     pub storage_backend: String,
     pub pgvector: bool,
@@ -346,7 +444,7 @@ pub struct CapabilitiesResponse {
     pub comms_transport: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct InstanceIdentityResponse {
     pub id: String,
     pub name: String,
@@ -500,7 +598,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             logs_dir: config.paths.logs_dir.display().to_string(),
         },
         capabilities: CapabilitiesResponse {
-            mode: state.capabilities.mode.as_str(),
+            mode: state.capabilities.mode.as_str().to_string(),
             updated_at: state.capabilities.updated_at.clone(),
             storage_backend: state.capabilities.storage_backend.clone(),
             pgvector: state.capabilities.pgvector,
