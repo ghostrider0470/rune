@@ -1773,6 +1773,10 @@ pub struct CreateSessionRequest {
     pub mode: Option<String>,
     /// Optional project identifier for project-scoped context loading.
     pub project_id: Option<String>,
+    /// Optional preloaded delegation context for subagent handoff.
+    pub delegation_context: Option<serde_json::Value>,
+    /// Optional shared scratchpad path used by parent and subagent.
+    pub shared_scratchpad_path: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -1926,18 +1930,33 @@ pub async fn create_session(
 ) -> Result<(StatusCode, Json<SessionResponse>), GatewayError> {
     let kind = parse_session_kind(&body.kind)?;
 
-    let row = state
-        .session_engine
-        .create_session_full(
-            kind,
-            body.workspace_root,
-            body.requester_session_id,
-            body.channel_ref,
-            body.mode,
-            body.project_id,
-        )
-        .await
-        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let row = if kind == SessionKind::Subagent && body.delegation_context.is_some() {
+        state
+            .session_engine
+            .create_subagent_session_with_context(
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                body.delegation_context.unwrap_or(serde_json::json!({})),
+                body.shared_scratchpad_path,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    } else {
+        state
+            .session_engine
+            .create_session_full(
+                kind,
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                body.project_id,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    };
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: row.id.to_string(),
@@ -6296,6 +6315,15 @@ async fn doctor_memory_hierarchy(
     capabilities: &rune_config::Capabilities,
     token_metrics: &TokenMetricsStore,
 ) -> DoctorMemoryHierarchySummary {
+    let context_report = rune_runtime::ContextAssembler::new("Rune doctor identity context")
+        .with_context_config(&config.context)
+        .analyze_context_usage(
+            None,
+            None,
+            &[],
+            config.runtime.compaction.compress_after,
+            true,
+        );
     let prompt_cache_rows = token_metrics.snapshot().await;
     let (cached_tokens, total_input_tokens) =
         prompt_cache_rows
@@ -6339,17 +6367,20 @@ async fn doctor_memory_hierarchy(
         (0, 0, 0)
     };
 
-    let context_total_budget: u64 = 36_000;
-    let context_total_estimated_tokens: u64 = 0;
-    let context_compaction_trigger_tokens = config.runtime.compaction.compress_after as u64;
-    let context_over_budget = false;
-    let context_over_compaction_threshold = false;
-    let context_compaction_required = false;
-    let loaded_tier_count = 4;
+    let context_total_budget = context_report.total_budget as u64;
+    let context_total_estimated_tokens = context_report.total_estimated_tokens as u64;
+    let context_compaction_trigger_tokens = context_report.compaction_trigger_tokens as u64;
+    let context_over_budget = context_report.over_budget;
+    let context_over_compaction_threshold = context_report.over_compaction_threshold;
+    let context_compaction_required = context_report.compaction_required;
+    let loaded_tier_count = context_report.tiers.len() as u64;
 
     DoctorMemoryHierarchySummary {
-        l0: "current turn context window (active transcript + system/task/project context)"
-            .to_string(),
+        l0: format!(
+            "current turn context window (active transcript + system/task/project context, warn_at={} tokens, compress_after={} tokens)",
+            config.runtime.compaction.warn_at_tokens,
+            config.runtime.compaction.compress_after
+        ),
         l1: format!(
             "prompt cache via provider prefixes ({} metric row(s), {:.1}% cached input tokens)",
             prompt_cache_rows.len(),
@@ -6363,7 +6394,8 @@ async fn doctor_memory_hierarchy(
             l2_hot_memories,
             l2_total_memories
         ),
-        l3: "durable session logs in transcript/session storage".to_string(),
+        l3: "durable session logs in transcript/session storage (ready for compaction handoff)"
+            .to_string(),
         promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions"
             .to_string(),
         demotion: format!(
