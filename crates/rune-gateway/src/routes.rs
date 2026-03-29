@@ -1670,7 +1670,8 @@ pub async fn dashboard_diagnostics(
     let total_tier_budget = config.context.identity
         + config.context.task
         + config.context.project
-        + config.context.shared;
+        + config.context.shared
+        + config.context.historical;
     let usable_prompt_budget = compaction.usable_prompt_budget();
     let context_budget = ContextBudgetDiagnostics {
         max_tokens: compaction.effective_max_tokens(),
@@ -2657,16 +2658,6 @@ pub struct SessionTreeNode {
     pub subagent_last_note: Option<String>,
     pub created_at: String,
     pub turn_count: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_lifecycle: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_runtime_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_runtime_attached: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_status_updated_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_last_note: Option<String>,
     pub children: Vec<SessionTreeNode>,
 }
 
@@ -2780,11 +2771,6 @@ pub async fn get_session_tree(
             subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
-            subagent_lifecycle: metadata_string(&row.metadata, "subagent_lifecycle"),
-            subagent_runtime_status: metadata_string(&row.metadata, "subagent_runtime_status"),
-            subagent_runtime_attached: metadata_bool(&row.metadata, "subagent_runtime_attached"),
-            subagent_status_updated_at: metadata_string(&row.metadata, "subagent_status_updated_at"),
-            subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             children,
         }
     }
@@ -8056,6 +8042,8 @@ mod tests {
             detail: "200 OK".to_string(),
             checked_at: "2026-03-29T00:00:00Z".to_string(),
             latency_ms: Some(12),
+            last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
+            observed_status: "healthy".to_string(),
             load: Some(InstanceLoadResponse {
                 session_count: 1,
                 ws_subscribers: 0,
@@ -8084,6 +8072,8 @@ mod tests {
                 detail: "connection refused".to_string(),
                 checked_at: "2026-03-29T00:00:00Z".to_string(),
                 latency_ms: None,
+                last_seen_at: None,
+                observed_status: "unreachable".to_string(),
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
@@ -8101,6 +8091,8 @@ mod tests {
                 detail: "500 Internal Server Error".to_string(),
                 checked_at: "2026-03-29T00:00:03Z".to_string(),
                 latency_ms: Some(55),
+                last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
+                observed_status: "degraded".to_string(),
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
@@ -8158,6 +8150,8 @@ pub async fn submit_delegation_task(
             .clone()
             .unwrap_or_else(|| "Local Instance".to_string()),
         transport: request.sender.transport.clone(),
+        capabilities_version: request.sender.capabilities_version,
+        capability_hash: request.sender.capability_hash.clone(),
         health_url: None,
         submit_url: None,
         result_url: request.sender.result_url.clone(),
@@ -8178,6 +8172,8 @@ pub async fn delegation_task_status(
             instance_id: "local-instance".to_string(),
             instance_name: "Local Instance".to_string(),
             transport: "http".to_string(),
+            capabilities_version: 1,
+            capability_hash: "local-dev".to_string(),
             health_url: None,
             submit_url: None,
             result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
