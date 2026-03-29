@@ -54,6 +54,7 @@ use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRe
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
         mode: RuntimeMode::Standalone,
+        updated_at: "2026-03-29T00:00:00Z".to_string(),
         storage_backend: "test".to_string(),
         pgvector: false,
         memory_mode: "disabled".to_string(),
@@ -73,6 +74,7 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
             capabilities_version: 1,
         },
         peer_count: 0,
+        peers: vec![],
         configured_models: vec![],
         active_projects: vec![],
         comms_transport: "filesystem".to_string(),
@@ -1571,6 +1573,14 @@ fn build_test_app_parts_with_ms365_services(
     let event_tx = test_event_sender().clone();
 
     config.gateway.auth_token = auth_token.clone();
+    let capabilities = Arc::new(Capabilities::detect(
+        &config,
+        RuntimeMode::Standalone,
+        "test",
+        false,
+        false,
+        0,
+    ));
     let skills_dir = config.paths.skills_dir.clone();
     let config = Arc::new(RwLock::new(config));
     let skill_registry = Arc::new(SkillRegistry::new());
@@ -1598,7 +1608,7 @@ fn build_test_app_parts_with_ms365_services(
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
         log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
+        capabilities,
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
         skill_registry,
@@ -4109,7 +4119,12 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
 
 #[tokio::test]
 async fn health_returns_200() {
-    let app = build_test_app(None);
+    let mut config = AppConfig::default();
+    config.instance.id = "test-instance".to_string();
+    config.instance.name = "test-instance".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    let app = build_test_app_with_config(config, None);
     let response = app
         .oneshot(Request::get("/health").body(Body::empty()).unwrap())
         .await
@@ -4126,7 +4141,12 @@ async fn health_returns_200() {
 
 #[tokio::test]
 async fn instance_health_returns_capability_manifest() {
-    let app = build_test_app(None);
+    let mut config = AppConfig::default();
+    config.instance.id = "test-instance".to_string();
+    config.instance.name = "test-instance".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    let app = build_test_app_with_config(config, None);
     let response = app
         .oneshot(
             Request::get("/api/v1/instance/health")
@@ -4166,6 +4186,61 @@ async fn instance_health_returns_capability_manifest() {
         json["capabilities"]["active_projects"],
         serde_json::json!([])
     );
+}
+
+#[tokio::test]
+async fn instance_health_reports_peer_health_states() {
+    let healthy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let healthy_addr = healthy_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let app =
+            axum::Router::new().route("/health", axum::routing::get(|| async { StatusCode::OK }));
+        axum::serve(healthy_listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![
+        rune_config::PeerConfig {
+            id: "peer-healthy".to_string(),
+            health_url: format!("http://{healthy_addr}/health"),
+        },
+        rune_config::PeerConfig {
+            id: "peer-down".to_string(),
+            health_url: "http://127.0.0.1:9/health".to_string(),
+        },
+    ];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peers = json["peers"].as_array().unwrap();
+    assert_eq!(peers.len(), 2);
+    assert_eq!(json["capabilities"]["peer_count"], 2);
+
+    let healthy = peers
+        .iter()
+        .find(|peer| peer["id"] == "peer-healthy")
+        .unwrap();
+    assert_eq!(healthy["status"], "healthy");
+    assert_eq!(
+        healthy["health_url"],
+        format!("http://{healthy_addr}/health")
+    );
+    assert!(healthy["latency_ms"].is_number());
+
+    let down = peers.iter().find(|peer| peer["id"] == "peer-down").unwrap();
+    assert_eq!(down["status"], "unreachable");
+    assert_eq!(down["health_url"], "http://127.0.0.1:9/health");
+    assert!(down["detail"].is_string());
 }
 
 #[tokio::test]
