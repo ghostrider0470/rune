@@ -14791,6 +14791,22 @@ async fn session_status_route_surfaces_subagent_audit_summary() {
         })
         .await
         .unwrap();
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id,
+            turn_id: None,
+            seq: 2,
+            kind: "subagent_result".into(),
+            payload: serde_json::json!({
+                "content": "Identified result routing gap: parent session lacks last delegated outcome summary when descendant completes."
+            }),
+            created_at: chrono::DateTime::parse_from_rfc3339("2026-03-29T12:04:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        })
+        .await
+        .unwrap();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -14846,14 +14862,23 @@ async fn session_status_route_surfaces_subagent_audit_summary() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["audit"]["transcript_items"], 2);
+    assert_eq!(json["audit"]["transcript_items"], 3);
     assert_eq!(json["audit"]["status_notes"], 1);
+    assert_eq!(json["audit"]["subagent_results"], 1);
     assert_eq!(
         json["audit"]["last_transcript_at"],
-        "2026-03-29T12:03:00+00:00"
+        "2026-03-29T12:04:00+00:00"
     );
     assert_eq!(
         json["audit"]["last_operator_note"],
         "Operator asked for a tighter review pass"
+    );
+    assert_eq!(
+        json["audit"]["last_subagent_result_at"],
+        "2026-03-29T12:04:00+00:00"
+    );
+    assert_eq!(
+        json["audit"]["last_subagent_result_excerpt"],
+        "Identified result routing gap: parent session lacks last delegated outcome summary when descendant completes."
     );
 }

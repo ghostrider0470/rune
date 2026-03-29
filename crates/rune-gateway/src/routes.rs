@@ -2439,8 +2439,11 @@ pub async fn create_session(
 pub struct SessionAuditSummary {
     pub transcript_items: u32,
     pub status_notes: u32,
+    pub subagent_results: u32,
     pub last_transcript_at: Option<String>,
     pub last_operator_note: Option<String>,
+    pub last_subagent_result_at: Option<String>,
+    pub last_subagent_result_excerpt: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2610,6 +2613,10 @@ pub async fn get_session_status(
         .iter()
         .filter(|item| item.kind == "status_note")
         .count() as u32;
+    let subagent_results = transcript_items
+        .iter()
+        .filter(|item| item.kind == "subagent_result")
+        .count() as u32;
     let last_transcript_at = transcript_items
         .last()
         .map(|item| item.created_at.to_rfc3339());
@@ -2620,12 +2627,32 @@ pub async fn get_session_status(
         .and_then(|item| item.payload.get("content"))
         .and_then(|value| value.as_str())
         .map(ToOwned::to_owned);
+    let last_subagent_result = transcript_items
+        .iter()
+        .rev()
+        .find(|item| item.kind == "subagent_result");
+    let last_subagent_result_at = last_subagent_result.map(|item| item.created_at.to_rfc3339());
+    let last_subagent_result_excerpt = last_subagent_result
+        .and_then(|item| item.payload.get("content").or_else(|| item.payload.get("summary")))
+        .and_then(|value| value.as_str())
+        .map(|text| {
+            const MAX_CHARS: usize = 200;
+            if text.chars().count() <= MAX_CHARS {
+                text.to_string()
+            } else {
+                let truncated: String = text.chars().take(MAX_CHARS).collect();
+                format!("{truncated}…")
+            }
+        });
     let audit = if row.kind == "subagent" {
         Some(SessionAuditSummary {
             transcript_items: transcript_items.len() as u32,
             status_notes,
+            subagent_results,
             last_transcript_at,
             last_operator_note,
+            last_subagent_result_at,
+            last_subagent_result_excerpt,
         })
     } else {
         None
