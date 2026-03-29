@@ -2214,6 +2214,14 @@ pub struct SessionResponse {
     pub usage_prompt_tokens: u64,
     pub usage_completion_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verbose: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_turn_started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_turn_ended_at: Option<String>,
@@ -2414,6 +2422,10 @@ pub async fn create_session(
             latest_model: None,
             usage_prompt_tokens: 0,
             usage_completion_tokens: 0,
+            label: metadata_string(&row.metadata, "label"),
+            thinking_level: metadata_string(&row.metadata, "thinking_level"),
+            reasoning: metadata_string(&row.metadata, "reasoning"),
+            verbose: metadata_bool(&row.metadata, "verbose"),
             last_turn_started_at: None,
             last_turn_ended_at: None,
         }),
@@ -2504,6 +2516,10 @@ pub async fn get_session(
         latest_model: aggregate.latest_model,
         usage_prompt_tokens: aggregate.usage_prompt_tokens,
         usage_completion_tokens: aggregate.usage_completion_tokens,
+        label: metadata_string(&row.metadata, "label"),
+        thinking_level: metadata_string(&row.metadata, "thinking_level"),
+        reasoning: metadata_string(&row.metadata, "reasoning"),
+        verbose: metadata_bool(&row.metadata, "verbose"),
         last_turn_started_at: aggregate.last_turn_started_at,
         last_turn_ended_at: aggregate.last_turn_ended_at,
     }))
@@ -2835,6 +2851,10 @@ pub async fn patch_session(
         latest_model: aggregate.latest_model,
         usage_prompt_tokens: aggregate.usage_prompt_tokens,
         usage_completion_tokens: aggregate.usage_completion_tokens,
+        label: metadata_string(&row.metadata, "label"),
+        thinking_level: metadata_string(&row.metadata, "thinking_level"),
+        reasoning: metadata_string(&row.metadata, "reasoning"),
+        verbose: metadata_bool(&row.metadata, "verbose"),
         last_turn_started_at: aggregate.last_turn_started_at,
         last_turn_ended_at: aggregate.last_turn_ended_at,
     }))
