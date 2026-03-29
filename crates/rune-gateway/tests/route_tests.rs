@@ -14561,6 +14561,7 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
     let child = &json["children"][0];
     assert_eq!(child["id"], child_id.to_string());
     assert_eq!(child["kind"], "subagent");
+    assert_eq!(child["parent_session_id"], root_id.to_string());
     assert_eq!(child["mode"], "architect");
     assert_eq!(child["orchestration_status"], "delegated");
     assert_eq!(child["delegation_roles"], serde_json::json!(["architect", "coder"]));
