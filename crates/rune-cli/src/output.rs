@@ -99,6 +99,9 @@ pub struct PeerSummary {
     pub latency_ms: Option<u128>,
     pub advertised_addr: Option<String>,
     pub roles: Vec<String>,
+    pub capability_hash: Option<String>,
+    pub capabilities_version: Option<u32>,
+    pub comms_transport: Option<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
     pub load: Option<InstanceLoadSummary>,
@@ -266,6 +269,27 @@ Peers: {}",
                     "
     Roles: {}",
                     peer.roles.join(", ")
+                )?;
+            }
+            if let Some(version) = peer.capabilities_version {
+                write!(
+                    f,
+                    "
+    Capabilities version: {version}"
+                )?;
+            }
+            if let Some(ref capability_hash) = peer.capability_hash {
+                write!(
+                    f,
+                    "
+    Capability hash: {capability_hash}"
+                )?;
+            }
+            if let Some(ref comms_transport) = peer.comms_transport {
+                write!(
+                    f,
+                    "
+    Comms transport: {comms_transport}"
                 )?;
             }
             if !peer.configured_models.is_empty() {
@@ -6524,6 +6548,9 @@ mod tests {
                 latency_ms: Some(15),
                 advertised_addr: Some("http://peer-a:8787".into()),
                 roles: vec!["gateway".into()],
+                capability_hash: Some("cap-peer-a".into()),
+                capabilities_version: Some(3),
+                comms_transport: Some("http".into()),
                 configured_models: vec!["claude-3-7-sonnet".into()],
                 active_projects: vec!["/workspace/peer".into()],
                 load: Some(InstanceLoadSummary {
@@ -6537,6 +6564,9 @@ mod tests {
         assert!(out.contains("Instance health: ok"));
         assert!(out.contains("Peers: 1"));
         assert!(out.contains("peer-a [healthy]"));
+        assert!(out.contains("Capabilities version: 3"));
+        assert!(out.contains("Capability hash: cap-peer-a"));
+        assert!(out.contains("Comms transport: http"));
     }
 
     #[test]
@@ -6552,6 +6582,9 @@ mod tests {
                 latency_ms: Some(10),
                 advertised_addr: None,
                 roles: vec!["gateway".into()],
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
                 configured_models: vec![],
                 active_projects: vec![],
                 load: Some(InstanceLoadSummary {
