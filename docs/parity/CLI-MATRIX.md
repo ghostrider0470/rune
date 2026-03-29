@@ -60,7 +60,7 @@
 |-----------------|----------------|--------|---------------------|----------|
 | `message` | `rune message` | **Partial** | `send`, `read`, `edit`, `delete`, `react`, `pin`, `search`, `broadcast`, `thread list/reply`, `voice send/status`, `tag`, `ack`, `list-reactions` shipped | #74 |
 | `agent` | `rune agent` | **Shipped** | `run`, `result` | #70 |
-| `agents` | `rune agents` | **Partial** | `list`, `show`, `status`, `tree`, `templates`, `start --template` shipped. `steer`/`kill` remain blocked because no client-facing transport surface exists yet to send those control actions, even though internal lifecycle/session logic already exists. | #63/#70 |
+| `agents` | `rune agents` | **Shipped** | `list`, `show`, `status`, `tree`, `templates`, `start --template`, `spawn`, `steer`, and `kill` shipped through gateway-backed CLI transport. Remaining work is deeper runtime/streaming parity, not control-surface absence. | #63/#70 |
 | `acp` | `acp_dispatch` tool + `rune acp send/inbox/ack` | **Partial** | Tool dispatches tasks to Claude Code / Codex CLIs as subprocesses. CLI ACP send/inbox/ack now routes through gateway `/acp/send`, `/acp/inbox`, and `/acp/ack`. Remaining gaps: streaming output, background dispatch, richer agent config/sandbox controls. | #70 |
 | `devices` | — | **Not started** | `list`, `remove`, `clear`, `approve`, `reject`, `rotate`, `revoke` | — |
 | `pairing` | — | **Not started** | `list`, `approve` | — |
@@ -79,7 +79,7 @@
 ### Tier 1 summary
 
 - **Shipped:** 6
-- **Partial:** 3 (`message` — breadth verbs remain; `agents` — inspect/start/spawn/steer/kill surface exists but transport/runtime parity still needs validation; `skills` — plugins/hooks lifecycle still missing)
+- **Partial:** 2 (`message` — breadth verbs remain; `skills` — plugins/hooks lifecycle still missing)
 - **Not started:** 7
 
 ---
@@ -184,6 +184,6 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 |-----------|--------|
 | Every OpenClaw CLI family has a Rune decision | **Done** — this matrix |
 | Shell completion generation for bash, zsh, fish | **Shipped** — PR #143 |
-| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, substantial `message` surfaces, and `agents` inspect/start flows shipped, plus first gateway-backed `logs`/`doctor` admin surfaces; subagent `steer` / `kill` still lack a client-facing transport and `secrets` is still not started |
+| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, substantial `message` surfaces, and `agents` inspect/start flows shipped, plus first gateway-backed `logs`/`doctor` admin surfaces; `secrets` is still not started |
 | Lifecycle families have working equivalents | **Not started** — `setup`, `update`, `uninstall`, `reset` all missing |
 | Audit matrix produced | **Done** — this document |

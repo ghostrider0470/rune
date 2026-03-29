@@ -1374,7 +1374,7 @@ What it does require is preservation of the behavioral contract seen by operator
 
 ---
 
-## Issue #73 subagent control transport gap
+## Issue #73 subagent control transport status
 
 The current client-visible `rune agents` surface supports:
 
@@ -1384,17 +1384,16 @@ The current client-visible `rune agents` surface supports:
 - `tree`
 - `templates`
 - `start --template`
+- `spawn`
+- `steer`
+- `kill`
 
-`steer` and `kill` are not parity-shipped yet.
+Gateway-backed public transport for interactive subagent control is now shipped through `POST /agents/{id}/steer` and `POST /agents/{id}/kill`, with matching CLI client methods and command handlers.
 
-The blocker is not absence of all internal lifecycle logic. Rune already has internal subagent lifecycle/session transitions, but it does **not** yet expose a supported client-facing transport contract for interactive subagent control. Until that transport exists, parity status should be treated as:
+Current remaining gap is narrower than transport absence: deeper runtime attachment/streaming parity for live subagent execution is still incomplete, so control actions should be described as shipped transport with conservative runtime semantics rather than full remote execution parity.
 
-- inspectable: yes
-- startable: yes
-- steerable through a supported public transport: no
-- kill/cancel through a supported public transport: no
+Evidence in repo includes:
 
-Any future parity claim for `steer` or `kill` must include both:
+1. gateway routes + route tests for steer/kill success and error cases, and
+2. CLI parse/client/output coverage for `rune agents steer` / `rune agents kill`.
 
-1. a callable client-facing transport surface, and
-2. operator-visible success/failure semantics for those actions.
