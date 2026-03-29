@@ -72,7 +72,7 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
             name: "test-instance".to_string(),
             advertised_addr: Some("http://127.0.0.1:8787".to_string()),
             roles: vec!["gateway".to_string(), "scheduler".to_string()],
-            capabilities_version: 1,
+            capabilities_version: 2,
             capability_hash: "cap-test-instance".to_string(),
         },
         peer_count: 0,
@@ -4204,7 +4204,7 @@ async fn instance_health_returns_capability_manifest() {
             .as_array()
             .is_some_and(|roles| roles.iter().any(|role| role == "gateway"))
     );
-    assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 1);
+    assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 2);
     assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
     assert_eq!(json["capabilities"]["peer_count"], 0);
     assert!(json["capabilities"]["configured_models"].is_array());
@@ -4252,7 +4252,7 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
                     "name": "peer-a",
                     "advertised_addr": "http://peer-a:8787",
                     "roles": ["gateway", "coder"],
-                    "capabilities_version": 1,
+                    "capabilities_version": 2,
                     "capability_hash": "cap-peer-a"
                 },
                 "instance_id": "peer-a",
@@ -4299,7 +4299,7 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
     assert_eq!(peer["advertised_addr"], "http://peer-a:8787");
     assert_eq!(peer["roles"], serde_json::json!(["gateway", "coder"]));
     assert_eq!(peer["capability_hash"], "cap-peer-a");
-    assert_eq!(peer["capabilities_version"], 1);
+    assert_eq!(peer["capabilities_version"], 2);
     assert_eq!(peer["comms_transport"], "filesystem");
     assert_eq!(peer["configured_models"], serde_json::json!(["gpt-4.1"]));
     assert_eq!(peer["active_projects"], serde_json::json!(["rune"]));
@@ -4339,7 +4339,7 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
                         "name": id,
                         "advertised_addr": null,
                         "roles": ["gateway"],
-                        "capabilities_version": 1,
+                        "capabilities_version": 2,
                     "capability_hash": "cap-peer-a"
                     },
                     "instance_id": id,
@@ -4513,7 +4513,7 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
                     "name": "peer-a",
                     "advertised_addr": "http://peer-a:8787",
                     "roles": ["gateway"],
-                    "capabilities_version": 1,
+                    "capabilities_version": 2,
                     "capability_hash": "cap-peer-a"
                 },
                 "instance_id": "peer-a",

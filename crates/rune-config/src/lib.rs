@@ -612,7 +612,7 @@ impl Capabilities {
                 name: config.instance.name.clone(),
                 advertised_addr: config.instance.advertised_addr.clone(),
                 roles: config.instance.roles.clone(),
-                capabilities_version: 1,
+                capabilities_version: 2,
                 capability_hash: capability_hash_from_config(config),
             },
             peer_count: config.instance.peers.len(),
@@ -2410,7 +2410,7 @@ mod tests {
         config.instance.name = "Node A".to_string();
         config.instance.advertised_addr = Some("http://10.0.0.5:8787".to_string());
         config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
-        config.instance.peers = vec![InstancePeer {
+        config.instance.peers = vec![PeerConfig {
             id: "node-b".to_string(),
             health_url: "http://10.0.0.6:8787/api/v1/instance/health".to_string(),
         }];
@@ -2427,7 +2427,7 @@ mod tests {
             capabilities.identity.roles,
             vec!["gateway".to_string(), "scheduler".to_string()]
         );
-        assert_eq!(capabilities.identity.capabilities_version, 1);
+        assert_eq!(capabilities.identity.capabilities_version, 2);
         assert_eq!(capabilities.peer_count, 1);
     }
 
