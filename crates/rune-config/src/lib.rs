@@ -390,12 +390,20 @@ pub struct Capabilities {
     pub channels: Vec<String>,
     pub approval_mode: String,
     pub security_posture: String,
-    pub instance_id: String,
-    pub instance_name: String,
+    pub identity: InstanceIdentity,
     pub peer_count: usize,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
     pub comms_transport: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstanceIdentity {
+    pub id: String,
+    pub name: String,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub capabilities_version: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,6 +413,10 @@ pub struct InstanceConfig {
     #[serde(default = "default_instance_name")]
     pub name: String,
     #[serde(default)]
+    pub advertised_addr: Option<String>,
+    #[serde(default = "default_instance_roles")]
+    pub roles: Vec<String>,
+    #[serde(default)]
     pub peers: Vec<String>,
 }
 
@@ -413,6 +425,8 @@ impl Default for InstanceConfig {
         Self {
             id: default_instance_id(),
             name: default_instance_name(),
+            advertised_addr: None,
+            roles: default_instance_roles(),
             peers: Vec::new(),
         }
     }
@@ -427,6 +441,10 @@ fn default_instance_id() -> String {
 
 fn default_instance_name() -> String {
     default_instance_id()
+}
+
+fn default_instance_roles() -> Vec<String> {
+    vec!["gateway".to_string()]
 }
 
 impl Capabilities {
@@ -479,8 +497,13 @@ impl Capabilities {
             channels,
             approval_mode: config.approval.mode.as_str().to_string(),
             security_posture: config.security.posture().to_string(),
-            instance_id: config.instance.id.clone(),
-            instance_name: config.instance.name.clone(),
+            identity: InstanceIdentity {
+                id: config.instance.id.clone(),
+                name: config.instance.name.clone(),
+                advertised_addr: config.instance.advertised_addr.clone(),
+                roles: config.instance.roles.clone(),
+                capabilities_version: 1,
+            },
             peer_count: config.instance.peers.len(),
             configured_models,
             active_projects,
@@ -2226,6 +2249,35 @@ mod tests {
             .expect("time went backwards")
             .as_nanos();
         std::env::temp_dir().join(format!("rune-config-{name}-{nanos}.toml"))
+    }
+
+    #[test]
+    fn instance_config_defaults_include_gateway_role() {
+        let config = AppConfig::default();
+        assert_eq!(config.instance.roles, vec!["gateway".to_string()]);
+        assert_eq!(config.instance.advertised_addr, None);
+    }
+
+    #[test]
+    fn capabilities_detect_embeds_instance_identity_manifest() {
+        let mut config = AppConfig::default();
+        config.instance.id = "node-a".to_string();
+        config.instance.name = "Node A".to_string();
+        config.instance.advertised_addr = Some("http://10.0.0.5:8787".to_string());
+        config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+
+        let capabilities = Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 7);
+        assert_eq!(capabilities.identity.id, "node-a");
+        assert_eq!(capabilities.identity.name, "Node A");
+        assert_eq!(
+            capabilities.identity.advertised_addr.as_deref(),
+            Some("http://10.0.0.5:8787")
+        );
+        assert_eq!(
+            capabilities.identity.roles,
+            vec!["gateway".to_string(), "scheduler".to_string()]
+        );
+        assert_eq!(capabilities.identity.capabilities_version, 1);
     }
 
     #[test]

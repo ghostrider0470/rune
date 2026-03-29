@@ -36,6 +36,11 @@ pub struct StatusResponse {
     pub status: String,
     pub version: Option<String>,
     pub uptime_seconds: Option<u64>,
+    pub instance_id: Option<String>,
+    pub instance_name: Option<String>,
+    pub instance_roles: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub advertised_addr: Option<String>,
 }
 
 impl fmt::Display for StatusResponse {
@@ -5281,6 +5286,11 @@ mod tests {
             status: "running".into(),
             version: Some("0.1.0".into()),
             uptime_seconds: Some(120),
+            instance_id: None,
+            instance_name: None,
+            instance_roles: vec![],
+            capabilities_version: None,
+            advertised_addr: None,
         };
         let out = render(&s, OutputFormat::Human);
         assert!(out.contains("Status: running"));
@@ -5294,6 +5304,11 @@ mod tests {
             status: "running".into(),
             version: None,
             uptime_seconds: None,
+            instance_id: None,
+            instance_name: None,
+            instance_roles: vec![],
+            capabilities_version: None,
+            advertised_addr: None,
         };
         let out = render(&s, OutputFormat::Json);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -6287,6 +6302,11 @@ mod tests {
                 status: "running".into(),
                 version: Some("0.1.0".into()),
                 uptime_seconds: Some(42),
+                instance_id: None,
+                instance_name: None,
+                instance_roles: vec![],
+                capabilities_version: None,
+                advertised_addr: None,
             },
             health: HealthResponse {
                 healthy: true,
