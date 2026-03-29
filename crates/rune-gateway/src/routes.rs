@@ -144,8 +144,15 @@ pub async fn instance_health(
             channels: state.capabilities.channels.clone(),
             approval_mode: state.capabilities.approval_mode.clone(),
             security_posture: state.capabilities.security_posture.clone(),
-            instance_id: state.capabilities.instance_id.clone(),
-            instance_name: state.capabilities.instance_name.clone(),
+            identity: InstanceIdentityResponse {
+                id: state.capabilities.identity.id.clone(),
+                name: state.capabilities.identity.name.clone(),
+                advertised_addr: state.capabilities.identity.advertised_addr.clone(),
+                roles: state.capabilities.identity.roles.clone(),
+                capabilities_version: state.capabilities.identity.capabilities_version,
+            },
+            instance_id: state.capabilities.identity.id.clone(),
+            instance_name: state.capabilities.identity.name.clone(),
             peer_count: state.capabilities.peer_count,
             configured_models: state.capabilities.configured_models.clone(),
             active_projects: state.capabilities.active_projects.clone(),
@@ -244,12 +251,22 @@ pub struct CapabilitiesResponse {
     pub channels: Vec<String>,
     pub approval_mode: String,
     pub security_posture: String,
+    pub identity: InstanceIdentityResponse,
     pub instance_id: String,
     pub instance_name: String,
     pub peer_count: usize,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
     pub comms_transport: String,
+}
+
+#[derive(Serialize)]
+pub struct InstanceIdentityResponse {
+    pub id: String,
+    pub name: String,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub capabilities_version: u32,
 }
 
 #[derive(Serialize)]
@@ -408,8 +425,15 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
             channels: state.capabilities.channels.clone(),
             approval_mode: state.capabilities.approval_mode.clone(),
             security_posture: state.capabilities.security_posture.clone(),
-            instance_id: state.capabilities.instance_id.clone(),
-            instance_name: state.capabilities.instance_name.clone(),
+            identity: InstanceIdentityResponse {
+                id: state.capabilities.identity.id.clone(),
+                name: state.capabilities.identity.name.clone(),
+                advertised_addr: state.capabilities.identity.advertised_addr.clone(),
+                roles: state.capabilities.identity.roles.clone(),
+                capabilities_version: state.capabilities.identity.capabilities_version,
+            },
+            instance_id: state.capabilities.identity.id.clone(),
+            instance_name: state.capabilities.identity.name.clone(),
             peer_count: state.capabilities.peer_count,
             configured_models: state.capabilities.configured_models.clone(),
             active_projects: state.capabilities.active_projects.clone(),

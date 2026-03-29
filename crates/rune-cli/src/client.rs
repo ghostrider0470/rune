@@ -95,6 +95,11 @@ impl GatewayClient {
                 status: body["status"].as_str().unwrap_or("unknown").to_string(),
                 version: body["version"].as_str().map(String::from),
                 uptime_seconds: body["uptime_seconds"].as_u64(),
+                instance_id: body["capabilities"]["identity"]["id"].as_str().map(String::from).or_else(|| body["capabilities"]["instance_id"].as_str().map(String::from)),
+                instance_name: body["capabilities"]["identity"]["name"].as_str().map(String::from).or_else(|| body["capabilities"]["instance_name"].as_str().map(String::from)),
+                instance_roles: body["capabilities"]["identity"]["roles"].as_array().map(|roles| roles.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
+                capabilities_version: body["capabilities"]["identity"]["capabilities_version"].as_u64().and_then(|v| u32::try_from(v).ok()),
+                advertised_addr: body["capabilities"]["identity"]["advertised_addr"].as_str().map(String::from),
             })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
@@ -4824,6 +4829,37 @@ mod tests {
         let client = GatewayClient::new(&server.uri());
         let resp = client.gateway_health().await.unwrap();
         assert!(resp.healthy);
+    }
+
+    #[tokio::test]
+    async fn gateway_status_parses_instance_identity_manifest() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "status": "running",
+                "version": "0.1.0",
+                "uptime_seconds": 12,
+                "capabilities": {
+                    "identity": {
+                        "id": "node-a",
+                        "name": "Node A",
+                        "advertised_addr": "http://10.0.0.5:8787",
+                        "roles": ["gateway", "scheduler"],
+                        "capabilities_version": 1
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let resp = client.gateway_status().await.unwrap();
+        assert_eq!(resp.instance_id.as_deref(), Some("node-a"));
+        assert_eq!(resp.instance_name.as_deref(), Some("Node A"));
+        assert_eq!(resp.advertised_addr.as_deref(), Some("http://10.0.0.5:8787"));
+        assert_eq!(resp.instance_roles, vec!["gateway", "scheduler"]);
+        assert_eq!(resp.capabilities_version, Some(1));
     }
 
     #[tokio::test]
