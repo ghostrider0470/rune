@@ -108,6 +108,132 @@ async fn google_complete_stream_passthroughs_openai_compatible_sse() {
     );
 }
 
+
+#[tokio::test]
+async fn ollama_complete_stream_passthroughs_openai_compatible_sse() {
+    let server = MockServer::start().await;
+    let body = concat!(
+        r#"data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}],"usage":null}
+
+"#,
+        r#"data: {"choices":[{"delta":{"content":" from ollama"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}
+
+"#,
+        "data: [DONE]
+
+"
+    );
+
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = rune_models::OllamaProvider::with_base_url(&format!("{}/v1", server.uri()));
+    let mut request = simple_request();
+    request.model = Some("llama3.2".into());
+
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = stream.recv().await {
+        events.push(event);
+    }
+
+    assert_eq!(events.len(), 3);
+    assert!(matches!(&events[0], StreamEvent::TextDelta(delta) if delta == "Hello"));
+    assert!(matches!(&events[1], StreamEvent::TextDelta(delta) if delta == " from ollama"));
+    match &events[2] {
+        StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Hello from ollama"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+            assert_eq!(response.usage.total_tokens, 7);
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
+
+    let requests = server.received_requests().await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload.get("model"), Some(&serde_json::json!("llama3.2")));
+    assert_eq!(payload.get("stream"), Some(&serde_json::json!(true)));
+}
+
+#[tokio::test]
+async fn routed_provider_stream_uses_fallback_target_when_primary_selected() {
+    let fallback_server = MockServer::start().await;
+    let body = concat!(
+        r#"data: {"choices":[{"delta":{"content":"Fallback"},"finish_reason":null}],"usage":null}
+
+"#,
+        r#"data: {"choices":[{"delta":{"content":" stream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}
+
+"#,
+        "data: [DONE]
+
+"
+    );
+
+    Mock::given(method("POST"))
+        .and(body_partial_json(serde_json::json!({"model": "llama3.2"})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .expect(1)
+        .mount(&fallback_server)
+        .await;
+
+    let models = ModelsConfig {
+        default_model: Some("local/llama3.2".into()),
+        default_image_model: None,
+        fallbacks: vec![ModelFallbackChainConfig {
+            name: "default-chat".into(),
+            chain: vec!["local/llama3.2".into(), "local/llama3.2".into()],
+        }],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![ModelProviderConfig {
+            name: "local".into(),
+            kind: "ollama".into(),
+            base_url: format!("{}/v1", fallback_server.uri()),
+            deployment_name: None,
+            api_version: None,
+            api_key_env: None,
+            api_key: None,
+            model_alias: None,
+            models: vec![ConfiguredModel::Id("llama3.2".into())],
+        }],
+    };
+
+    let provider = RoutedModelProvider::from_models_config(&models).unwrap();
+    let request = CompletionRequest {
+        model: Some("local/llama3.2".into()),
+        ..simple_request()
+    };
+
+    let mut stream = provider.complete_stream(&request).await.unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = stream.recv().await {
+        events.push(event);
+    }
+
+    assert_eq!(events.len(), 3);
+    assert!(matches!(&events[0], StreamEvent::TextDelta(delta) if delta == "Fallback"));
+    assert!(matches!(&events[1], StreamEvent::TextDelta(delta) if delta == " stream"));
+    match &events[2] {
+        StreamEvent::Done(response) => {
+            assert_eq!(response.content.as_deref(), Some("Fallback stream"));
+            assert_eq!(response.finish_reason, Some(FinishReason::Stop));
+        }
+        other => panic!("expected done event, got {other:?}"),
+    }
+}
+
 // --- Azure URL construction ---
 
 #[test]
@@ -845,6 +971,47 @@ fn selects_ollama_provider_without_api_key() {
     };
     let provider = provider_from_config(&cfg).unwrap();
     let _: Box<dyn ModelProvider> = provider;
+}
+
+
+#[test]
+fn selects_openrouter_provider() {
+    let _guard = lock_env();
+    unsafe { std::env::set_var("TEST_OPENROUTER_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "openrouter".into(),
+        kind: "openrouter".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_OPENROUTER_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_OPENROUTER_KEY_SEL") };
+}
+
+#[test]
+fn selects_perplexity_provider() {
+    let _guard = lock_env();
+    unsafe { std::env::set_var("TEST_PERPLEXITY_KEY_SEL", "fake") };
+    let cfg = ModelProviderConfig {
+        name: "perplexity".into(),
+        kind: "perplexity".into(),
+        base_url: String::new(),
+        deployment_name: None,
+        api_version: None,
+        api_key_env: Some("TEST_PERPLEXITY_KEY_SEL".into()),
+        api_key: None,
+        model_alias: None,
+        models: vec![],
+    };
+    let provider = provider_from_config(&cfg).unwrap();
+    let _: Box<dyn ModelProvider> = provider;
+    unsafe { std::env::remove_var("TEST_PERPLEXITY_KEY_SEL") };
 }
 
 #[test]
