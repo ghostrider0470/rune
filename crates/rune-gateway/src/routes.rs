@@ -6046,7 +6046,6 @@ pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
         .collect()
 }
 
-
 #[derive(Serialize, Deserialize)]
 struct RemoteMemorySearchResponse {
     pub query: String,
@@ -6640,6 +6639,7 @@ pub struct DoctorMemoryHierarchySummary {
     pub promotion: String,
     pub demotion: String,
     pub metrics: String,
+    pub last_checkpoint_at: Option<String>,
     pub prompt_cache_rows: u64,
     pub cached_tokens: u64,
     pub total_input_tokens: u64,
@@ -6913,6 +6913,11 @@ async fn doctor_memory_hierarchy(
             (0, 0, 0, 0, 0)
         };
 
+    let last_checkpoint_at = std::fs::read(config.paths.data_dir.join("context-checkpoint.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<rune_runtime::Checkpoint>(&bytes).ok())
+        .map(|checkpoint| checkpoint.timestamp.to_rfc3339());
+
     let context_total_budget = context_report.total_budget as u64;
     let context_total_estimated_tokens = context_report.total_estimated_tokens as u64;
     let context_compaction_trigger_tokens = context_report.compaction_trigger_tokens as u64;
@@ -6973,7 +6978,7 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_warm_memories={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}, l3_cold_storage_enabled={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_warm_memories={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}, l3_cold_storage_enabled={}, last_checkpoint_at={}",
             prompt_cache_rows.len(),
             cached_tokens,
             total_input_tokens,
@@ -6989,8 +6994,10 @@ async fn doctor_memory_hierarchy(
             context_over_budget,
             context_over_compaction_threshold,
             context_compaction_required,
-            l3_cold_storage_enabled
+            l3_cold_storage_enabled,
+            last_checkpoint_at.as_deref().unwrap_or("never")
         ),
+        last_checkpoint_at,
         prompt_cache_rows: prompt_cache_rows.len() as u64,
         cached_tokens,
         total_input_tokens,
