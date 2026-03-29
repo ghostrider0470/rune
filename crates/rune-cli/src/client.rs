@@ -124,6 +124,9 @@ impl GatewayClient {
                 capabilities_version: body["capabilities"]["identity"]["capabilities_version"]
                     .as_u64()
                     .and_then(|v| u32::try_from(v).ok()),
+                capability_hash: body["capabilities"]["identity"]["capability_hash"]
+                    .as_str()
+                    .map(String::from),
                 advertised_addr: body["capabilities"]["identity"]["advertised_addr"]
                     .as_str()
                     .map(String::from),
@@ -175,6 +178,9 @@ impl GatewayClient {
             capabilities_version: body["capabilities"]["identity"]["capabilities_version"]
                 .as_u64()
                 .and_then(|v| u32::try_from(v).ok()),
+            capability_hash: body["capabilities"]["identity"]["capability_hash"]
+                .as_str()
+                .map(String::from),
             peer_count: body["capabilities"]["peer_count"]
                 .as_u64()
                 .and_then(|v| usize::try_from(v).ok())
@@ -4981,7 +4987,8 @@ mod tests {
                         "name": "Node A",
                         "advertised_addr": "http://10.0.0.5:8787",
                         "roles": ["gateway", "scheduler"],
-                        "capabilities_version": 1
+                        "capabilities_version": 1,
+                        "capability_hash": "hash-node-a"
                     }
                 }
             })))
@@ -4998,6 +5005,7 @@ mod tests {
         );
         assert_eq!(resp.instance_roles, vec!["gateway", "scheduler"]);
         assert_eq!(resp.capabilities_version, Some(1));
+        assert_eq!(resp.capability_hash.as_deref(), Some("hash-node-a"));
     }
 
     #[tokio::test]

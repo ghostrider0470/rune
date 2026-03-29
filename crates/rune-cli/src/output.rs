@@ -40,6 +40,7 @@ pub struct StatusResponse {
     pub instance_name: Option<String>,
     pub instance_roles: Vec<String>,
     pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
     pub advertised_addr: Option<String>,
 }
 
@@ -63,6 +64,9 @@ impl fmt::Display for StatusResponse {
         }
         if let Some(version) = self.capabilities_version {
             write!(f, "\nCapabilities version: {version}")?;
+        }
+        if let Some(ref capability_hash) = self.capability_hash {
+            write!(f, "\nCapability hash: {capability_hash}")?;
         }
         if let Some(ref advertised_addr) = self.advertised_addr {
             write!(f, "\nAdvertised address: {advertised_addr}")?;
@@ -110,6 +114,7 @@ pub struct GatewayInstanceHealthResponse {
     pub advertised_addr: Option<String>,
     pub instance_roles: Vec<String>,
     pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
     pub peer_count: usize,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
@@ -154,6 +159,13 @@ Instance name: {instance_name}"
                 f,
                 "
 Capabilities version: {version}"
+            )?;
+        }
+        if let Some(ref capability_hash) = self.capability_hash {
+            write!(
+                f,
+                "
+Capability hash: {capability_hash}"
             )?;
         }
         if let Some(ref advertised_addr) = self.advertised_addr {
@@ -5569,6 +5581,7 @@ mod tests {
             instance_name: None,
             instance_roles: vec![],
             capabilities_version: None,
+            capability_hash: None,
             advertised_addr: None,
         };
         let out = render(&s, OutputFormat::Human);
@@ -5587,6 +5600,7 @@ mod tests {
             instance_name: None,
             instance_roles: vec![],
             capabilities_version: None,
+            capability_hash: None,
             advertised_addr: None,
         };
         let out = render(&s, OutputFormat::Json);
@@ -6234,6 +6248,7 @@ mod tests {
             advertised_addr: Some("http://127.0.0.1:8787".into()),
             instance_roles: vec!["gateway".into(), "scheduler".into()],
             capabilities_version: Some(1),
+            capability_hash: Some("cap-inst-a".into()),
             peer_count: 1,
             configured_models: vec!["gpt-4.1".into()],
             active_projects: vec!["/workspace/rune".into()],
@@ -6658,6 +6673,7 @@ mod tests {
                 instance_name: None,
                 instance_roles: vec![],
                 capabilities_version: None,
+                capability_hash: None,
                 advertised_addr: None,
             },
             health: HealthResponse {

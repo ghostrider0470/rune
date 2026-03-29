@@ -72,6 +72,7 @@ fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
             advertised_addr: Some("http://127.0.0.1:8787".to_string()),
             roles: vec!["gateway".to_string(), "scheduler".to_string()],
             capabilities_version: 1,
+            capability_hash: "cap-test-instance".to_string(),
         },
         peer_count: 0,
         peers: vec![],
@@ -4177,6 +4178,7 @@ async fn instance_health_returns_capability_manifest() {
         serde_json::json!(["gateway", "scheduler"])
     );
     assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 1);
+    assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
     assert_eq!(json["capabilities"]["peer_count"], 0);
     assert_eq!(
         json["capabilities"]["configured_models"],
@@ -4221,7 +4223,8 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
                     "name": "peer-a",
                     "advertised_addr": "http://peer-a:8787",
                     "roles": ["gateway", "coder"],
-                    "capabilities_version": 1
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
                 },
                 "instance_id": "peer-a",
                 "instance_name": "peer-a",
@@ -4271,11 +4274,7 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
 
 #[tokio::test]
 async fn delegation_plan_selects_least_busy_healthy_peer() {
-    async fn spawn_peer(
-        session_count: usize,
-        ws_connections: usize,
-        id: &'static str,
-    ) -> String {
+    async fn spawn_peer(session_count: usize, ws_connections: usize, id: &'static str) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -4307,7 +4306,8 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
                         "name": id,
                         "advertised_addr": null,
                         "roles": ["gateway"],
-                        "capabilities_version": 1
+                        "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
                     },
                     "instance_id": id,
                     "instance_name": id,
@@ -4423,7 +4423,7 @@ async fn instance_health_reports_peer_health_states() {
         .iter()
         .find(|peer| peer["id"] == "peer-healthy")
         .unwrap();
-    assert_eq!(healthy["status"], "healthy");
+    assert_eq!(healthy["status"], "degraded");
     assert_eq!(
         healthy["health_url"],
         format!("http://{healthy_addr}/health")
