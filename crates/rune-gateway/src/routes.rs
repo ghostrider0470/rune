@@ -2236,6 +2236,8 @@ pub struct SessionListItem {
     pub usage_prompt_tokens: u64,
     pub usage_completion_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_cached_prompt_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -2319,6 +2321,7 @@ pub async fn list_sessions(
             turn_count: aggregate.turn_count,
             usage_prompt_tokens: aggregate.usage_prompt_tokens,
             usage_completion_tokens: aggregate.usage_completion_tokens,
+            usage_cached_prompt_tokens: Some(aggregate.usage_cached_prompt_tokens),
             latest_model: aggregate.latest_model,
             metadata: None,
         };
@@ -3326,6 +3329,7 @@ struct SessionTurnAggregate {
     latest_model: Option<String>,
     usage_prompt_tokens: u64,
     usage_completion_tokens: u64,
+    usage_cached_prompt_tokens: u64,
     last_turn_started_at: Option<String>,
     last_turn_ended_at: Option<String>,
 }
@@ -3340,6 +3344,10 @@ fn aggregate_turns(turns: &[TurnRow]) -> SessionTurnAggregate {
         .iter()
         .map(|turn| turn.usage_completion_tokens.unwrap_or(0).max(0) as u64)
         .sum();
+    let usage_cached_prompt_tokens = turns
+        .iter()
+        .map(|turn| turn.usage_cached_prompt_tokens.unwrap_or(0).max(0) as u64)
+        .sum();
     let latest_turn = turns.iter().max_by_key(|turn| turn.started_at);
 
     SessionTurnAggregate {
@@ -3347,6 +3355,7 @@ fn aggregate_turns(turns: &[TurnRow]) -> SessionTurnAggregate {
         latest_model: latest_turn.and_then(|turn| turn.model_ref.clone()),
         usage_prompt_tokens,
         usage_completion_tokens,
+        usage_cached_prompt_tokens,
         last_turn_started_at: latest_turn.map(|turn| turn.started_at.to_rfc3339()),
         last_turn_ended_at: latest_turn.and_then(|turn| turn.ended_at.map(|dt| dt.to_rfc3339())),
     }
