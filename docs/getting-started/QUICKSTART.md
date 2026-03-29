@@ -65,7 +65,7 @@ cp config.example.toml config.toml
 ./target/release/rune-gateway --config config.toml
 ```
 
-If you are wiring multiple Rune instances together, set `[instance]` in `config.toml` and check `http://127.0.0.1:8787/api/v1/instance/health` after startup to confirm identity, capability manifest, and peer reachability.
+If you are wiring multiple Rune instances together, set `[instance]` in `config.toml` and check `http://127.0.0.1:8787/api/v1/instance/health` after startup to confirm identity, capability manifest, and peer reachability. Then run `rune gateway instance-health` locally for the same summary over the CLI, and `rune gateway delegation-plan --strategy least_busy` (or `--strategy named --peer-id <peer>`) to inspect the sender/receiver contract before turning on cross-instance delegation.
 
 Open:
 
