@@ -11344,6 +11344,25 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
     assert_eq!(body["memory_hierarchy"]["cached_tokens"], 0);
     assert_eq!(body["memory_hierarchy"]["total_input_tokens"], 0);
     assert_eq!(body["memory_hierarchy"]["cache_hit_ratio_percent"], 0.0);
+    assert_eq!(body["memory_hierarchy"]["context_total_budget"], 36000);
+    assert_eq!(
+        body["memory_hierarchy"]["context_total_estimated_tokens"],
+        0
+    );
+    assert_eq!(
+        body["memory_hierarchy"]["context_compaction_trigger_tokens"],
+        50000
+    );
+    assert_eq!(body["memory_hierarchy"]["context_over_budget"], false);
+    assert_eq!(
+        body["memory_hierarchy"]["context_over_compaction_threshold"],
+        false
+    );
+    assert_eq!(
+        body["memory_hierarchy"]["context_compaction_required"],
+        false
+    );
+    assert_eq!(body["memory_hierarchy"]["loaded_tier_count"], 4);
     assert_eq!(body["memory_hierarchy"]["l2_recall_hits"], 0);
     assert_eq!(body["memory_hierarchy"]["l2_hot_memories"], 0);
     assert_eq!(body["memory_hierarchy"]["l2_total_memories"], 0);

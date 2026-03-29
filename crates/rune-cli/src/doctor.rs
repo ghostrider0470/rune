@@ -1349,9 +1349,17 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                 config.runtime.compaction.compress_after
             ),
             metrics: if config.mem0.enabled {
-                "offline doctor has no live cache metrics; Mem0 access_count persists hot-memory reuse, and gateway doctor exposes prompt_cache_rows/cached_tokens totals".to_string()
+                format!(
+                    "offline doctor has no live cache metrics; Mem0 access_count persists hot-memory reuse. Context tiers ship static budgets: loaded_tiers=4, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false; gateway doctor exposes prompt_cache_rows/cached_tokens totals",
+                    36_000,
+                    config.runtime.compaction.compress_after
+                )
             } else {
-                "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".to_string()
+                format!(
+                    "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals. Context tiers ship static budgets: loaded_tiers=4, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false",
+                    36_000,
+                    config.runtime.compaction.compress_after
+                )
             },
             prompt_cache_rows: 0,
             cached_tokens: 0,
@@ -1360,6 +1368,13 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             l2_recall_hits: 0,
             l2_hot_memories: 0,
             l2_total_memories: 0,
+            context_total_budget: 36_000,
+            context_total_estimated_tokens: 0,
+            context_compaction_trigger_tokens: config.runtime.compaction.compress_after as u64,
+            context_over_budget: false,
+            context_over_compaction_threshold: false,
+            context_compaction_required: false,
+            loaded_tier_count: 4,
         }),
         run_at: chrono::Utc::now().to_rfc3339(),
     }

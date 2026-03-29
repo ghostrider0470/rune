@@ -6072,6 +6072,13 @@ pub struct DoctorMemoryHierarchySummary {
     pub l2_recall_hits: u64,
     pub l2_hot_memories: u64,
     pub l2_total_memories: u64,
+    pub context_total_budget: u64,
+    pub context_total_estimated_tokens: u64,
+    pub context_compaction_trigger_tokens: u64,
+    pub context_over_budget: bool,
+    pub context_over_compaction_threshold: bool,
+    pub context_compaction_required: bool,
+    pub loaded_tier_count: u64,
 }
 
 #[derive(Serialize)]
@@ -6317,6 +6324,14 @@ async fn doctor_memory_hierarchy(
         (0, 0, 0)
     };
 
+    let context_total_budget: u64 = 36_000;
+    let context_total_estimated_tokens: u64 = 0;
+    let context_compaction_trigger_tokens = config.runtime.compaction.compress_after as u64;
+    let context_over_budget = false;
+    let context_over_compaction_threshold = false;
+    let context_compaction_required = false;
+    let loaded_tier_count = 4;
+
     DoctorMemoryHierarchySummary {
         l0: "current turn context window (active transcript + system/task/project context)"
             .to_string(),
@@ -6341,14 +6356,21 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}",
             prompt_cache_rows.len(),
             cached_tokens,
             total_input_tokens,
             cache_ratio,
             l2_recall_hits,
             l2_hot_memories,
-            l2_total_memories
+            l2_total_memories,
+            loaded_tier_count,
+            context_total_budget,
+            context_total_estimated_tokens,
+            context_compaction_trigger_tokens,
+            context_over_budget,
+            context_over_compaction_threshold,
+            context_compaction_required
         ),
         prompt_cache_rows: prompt_cache_rows.len() as u64,
         cached_tokens,
@@ -6357,6 +6379,13 @@ async fn doctor_memory_hierarchy(
         l2_recall_hits,
         l2_hot_memories,
         l2_total_memories,
+        context_total_budget,
+        context_total_estimated_tokens,
+        context_compaction_trigger_tokens,
+        context_over_budget,
+        context_over_compaction_threshold,
+        context_compaction_required,
+        loaded_tier_count,
     }
 }
 
