@@ -117,11 +117,26 @@ pub struct DelegationTaskResultResponse {
     pub status: String,
     pub accepted_at: String,
     pub started_at: Option<String>,
+    pub deadline_at: Option<String>,
     pub output: Option<String>,
     #[serde(default)]
     pub artifacts: Vec<DelegationArtifactResponse>,
     pub error: Option<DelegationErrorResponse>,
     pub finished_at: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskRecord {
+    pub task_id: String,
+    pub protocol_version: u32,
+    pub submitted_at: String,
+    pub accepted_at: String,
+    pub started_at: Option<String>,
+    pub deadline_at: String,
+    pub sender: DelegationEndpointResponse,
+    pub receiver: DelegationEndpointResponse,
+    pub task: DelegationTaskPayload,
+    pub result: DelegationTaskResultResponse,
 }
 
 #[allow(dead_code)]
@@ -141,6 +156,7 @@ pub struct DelegationTaskContractResponse {
     pub required_fields: Vec<&'static str>,
     pub optional_fields: Vec<&'static str>,
     pub result_fields: Vec<&'static str>,
+    pub status_polling: Vec<&'static str>,
     pub example_request: DelegationTaskRequest,
     pub example_result: DelegationTaskResultResponse,
 }
@@ -213,6 +229,7 @@ pub struct DelegationResultContractResponse {
     pub finished_at_field: &'static str,
     pub accepted_at_field: &'static str,
     pub started_at_field: &'static str,
+    pub deadline_at_field: &'static str,
     pub task_id_field: &'static str,
 }
 
@@ -331,6 +348,20 @@ pub async fn instance_health(
     }))
 }
 
+pub async fn delegation_status(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
+    let record = resolve_delegation_record(&state, &task_id)
+        .await?
+        .ok_or_else(|| GatewayError::SessionNotFound(format!("delegation task '{task_id}' not found")))?;
+
+    Ok(Json(DelegationTaskStatusEnvelope {
+        receiver: record.receiver,
+        result: record.result,
+    }))
+}
+
 pub async fn delegation_plan(
     State(state): State<AppState>,
     Query(query): Query<DelegationPlanQuery>,
@@ -358,7 +389,11 @@ pub async fn delegation_plan(
 
     let capability_match = evaluate_capability_match(&state.capabilities, selected_peer.as_ref());
 
-    let detail = match (&selected_peer, strategy.as_str(), capability_match.compatible) {
+    let detail = match (
+        &selected_peer,
+        strategy.as_str(),
+        capability_match.compatible,
+    ) {
         (Some(peer), "named", true) => format!("selected named peer '{}'", peer.id),
         (Some(peer), "named", false) => format!(
             "selected named peer '{}' with capability mismatch: {}",
@@ -462,6 +497,7 @@ pub async fn delegation_plan(
             finished_at_field: "finished_at",
             accepted_at_field: "accepted_at",
             started_at_field: "started_at",
+            deadline_at_field: "deadline_at",
             task_id_field: "task_id",
         },
         capability_match,
@@ -590,6 +626,7 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
         status: "completed".to_string(),
         accepted_at: "2026-03-29T00:00:05Z".to_string(),
         started_at: Some("2026-03-29T00:00:10Z".to_string()),
+        deadline_at: Some("2026-03-29T01:10:00Z".to_string()),
         output: Some(
             "Committed agent/rune/delegation-421 at abc1234 and uploaded verification log"
                 .to_string(),
@@ -638,20 +675,276 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
             "status",
             "accepted_at",
             "started_at",
+            "deadline_at",
             "output",
             "artifacts",
             "error",
             "finished_at",
+        ],
+        status_polling: vec![
+            "GET /api/v1/instance/delegations/{task_id}",
+            "terminal statuses remain queryable after completion",
+            "timeout returns structured result envelope with status=timeout",
         ],
         example_request,
         example_result,
     }
 }
 
+#[derive(Clone)]
+enum DelegationTerminalKind {
+    Completed,
+    Failed,
+    Timeout,
+}
+
+async fn resolve_delegation_record(
+    state: &AppState,
+    task_id: &str,
+) -> Result<Option<DelegationTaskRecord>, GatewayError> {
+    let mut sessions = state
+        .session_repo
+        .list(500, 0)
+        .await
+        .map_err(|error| GatewayError::Internal(format!("list sessions failed: {error}")))?;
+    sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    for session in sessions {
+        if let Some(record) =
+            delegation_record_from_session_row(&state.capabilities, &session, task_id)
+        {
+            return Ok(Some(record));
+        }
+    }
+
+    Ok(None)
+}
+
+fn delegation_record_from_session_row(
+    capabilities: &rune_config::Capabilities,
+    session: &SessionRow,
+    task_id: &str,
+) -> Option<DelegationTaskRecord> {
+    let metadata = &session.metadata;
+    let delegation_context = metadata.get("delegation_context")?;
+    let task_request = delegation_context.get("task_request")?;
+    if task_request.get("task_id")?.as_str()? != task_id {
+        return None;
+    }
+
+    let sender =
+        serde_json::from_value::<DelegationEndpointResponse>(task_request.get("sender")?.clone())
+            .ok()?;
+
+    let receiver =
+        delegation_context
+            .get("delegation_plan")
+            .and_then(|plan| plan.get("receiver"))
+            .cloned()
+            .and_then(|value| serde_json::from_value::<DelegationEndpointResponse>(value).ok())
+            .unwrap_or_else(|| DelegationEndpointResponse {
+                instance_id: capabilities.identity.id.clone(),
+                instance_name: capabilities.identity.name.clone(),
+                transport: capabilities.comms_transport.clone(),
+                health_url: capabilities
+                    .identity
+                    .advertised_addr
+                    .as_ref()
+                    .map(|addr| format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))),
+                submit_url: capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                    format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+                }),
+                result_url: capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                    format!(
+                        "{}/api/v1/instance/delegations/{{task_id}}",
+                        addr.trim_end_matches('/')
+                    )
+                }),
+            });
+
+    let payload =
+        serde_json::from_value::<DelegationTaskPayload>(task_request.get("task")?.clone()).ok()?;
+    let protocol_version = task_request
+        .get("protocol_version")
+        .and_then(|value| value.as_u64())
+        .map(|value| value as u32)
+        .unwrap_or(1);
+    let submitted_at = task_request.get("submitted_at")?.as_str()?.to_string();
+    let accepted_at = metadata
+        .get("accepted_at")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| submitted_at.clone());
+    let started_at = metadata
+        .get("started_at")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    let deadline_at = metadata
+        .get("deadline_at")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            DateTime::parse_from_rfc3339(&submitted_at)
+                .ok()
+                .map(|submitted| {
+                    (submitted + chrono::Duration::seconds(payload.timeout_secs as i64))
+                        .with_timezone(&Utc)
+                        .to_rfc3339()
+                })
+        })?;
+
+    let (status, finished_at, output, artifacts, error) =
+        compute_delegation_terminal_state(session, &deadline_at);
+
+    let result = DelegationTaskResultResponse {
+        task_id: task_id.to_string(),
+        status,
+        accepted_at: accepted_at.clone(),
+        started_at: started_at.clone(),
+        deadline_at: Some(deadline_at.clone()),
+        output,
+        artifacts,
+        error,
+        finished_at,
+    };
+
+    Some(DelegationTaskRecord {
+        task_id: task_id.to_string(),
+        protocol_version,
+        submitted_at,
+        accepted_at,
+        started_at,
+        deadline_at,
+        sender,
+        receiver,
+        task: payload,
+        result,
+    })
+}
+
+fn compute_delegation_terminal_state(
+    session: &SessionRow,
+    deadline_at: &str,
+) -> (
+    String,
+    Option<String>,
+    Option<String>,
+    Vec<DelegationArtifactResponse>,
+    Option<DelegationErrorResponse>,
+) {
+    let now = Utc::now();
+    let deadline = DateTime::parse_from_rfc3339(deadline_at)
+        .ok()
+        .map(|value| value.with_timezone(&Utc));
+    let metadata = Some(&session.metadata);
+
+    if session.status != "completed" && session.status != "failed" {
+        if deadline.is_some_and(|deadline| now >= deadline) {
+            return terminal_delegation_result(
+                DelegationTerminalKind::Timeout,
+                Some(deadline_at.to_string()),
+                Some("delegated task exceeded declared timeout before completion".to_string()),
+            );
+        }
+
+        if let Some(started_at) = metadata
+            .and_then(|value| value.get("started_at"))
+            .and_then(|value| value.as_str())
+        {
+            return (
+                "running".to_string(),
+                None,
+                Some(format!("task is running since {started_at}")),
+                Vec::new(),
+                None,
+            );
+        }
+
+        return (
+            "accepted".to_string(),
+            None,
+            Some("task accepted and awaiting execution".to_string()),
+            Vec::new(),
+            None,
+        );
+    }
+
+    let terminal_message = latest_assistant_message(metadata);
+    let failed = metadata
+        .and_then(|value| value.get("last_error"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    if let Some(error_message) = failed {
+        return terminal_delegation_result(
+            DelegationTerminalKind::Failed,
+            Some(session.updated_at.to_rfc3339()),
+            Some(error_message),
+        );
+    }
+
+    terminal_delegation_result(
+        DelegationTerminalKind::Completed,
+        Some(session.updated_at.to_rfc3339()),
+        terminal_message,
+    )
+}
+
+fn terminal_delegation_result(
+    kind: DelegationTerminalKind,
+    finished_at: Option<String>,
+    message: Option<String>,
+) -> (
+    String,
+    Option<String>,
+    Option<String>,
+    Vec<DelegationArtifactResponse>,
+    Option<DelegationErrorResponse>,
+) {
+    match kind {
+        DelegationTerminalKind::Completed => (
+            "completed".to_string(),
+            finished_at,
+            message,
+            Vec::new(),
+            None,
+        ),
+        DelegationTerminalKind::Failed => (
+            "failed".to_string(),
+            finished_at,
+            None,
+            Vec::new(),
+            Some(DelegationErrorResponse {
+                code: "execution_failed".to_string(),
+                message: message.unwrap_or_else(|| "delegated task failed".to_string()),
+            }),
+        ),
+        DelegationTerminalKind::Timeout => (
+            "timeout".to_string(),
+            finished_at,
+            None,
+            Vec::new(),
+            Some(DelegationErrorResponse {
+                code: "deadline_exceeded".to_string(),
+                message: message.unwrap_or_else(|| "delegated task timed out".to_string()),
+            }),
+        ),
+    }
+}
+
+fn latest_assistant_message(metadata: Option<&serde_json::Value>) -> Option<String> {
+    metadata
+        .and_then(|value| value.get("last_assistant_message"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DelegationPlanQuery {
     pub strategy: Option<String>,
     pub peer_id: Option<String>,
+    pub timeout_secs: Option<u64>,
 }
 
 fn select_least_busy_peer(peers: &[PeerHealthResponse]) -> Option<PeerHealthResponse> {

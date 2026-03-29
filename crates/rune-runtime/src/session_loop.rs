@@ -810,12 +810,18 @@ impl SessionLoop {
         let items = transcript_repo.list_by_session(session_id).await.ok()?;
 
         for item in items.iter().rev() {
-            if item.kind == "assistant_message" {
-                if let Ok(rune_core::TranscriptItem::AssistantMessage { content }) =
-                    serde_json::from_value::<rune_core::TranscriptItem>(item.payload.clone())
-                {
-                    return Some(content);
+            if item.kind != "assistant_message" {
+                continue;
+            }
+
+            if let Ok(rune_core::TranscriptItem::AssistantMessage { content }) =
+                serde_json::from_value::<rune_core::TranscriptItem>(item.payload.clone())
+            {
+                let trimmed = content.trim();
+                if trimmed.is_empty() || trimmed == "[No text response returned]" {
+                    continue;
                 }
+                return Some(content);
             }
         }
         None

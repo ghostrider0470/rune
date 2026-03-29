@@ -108,7 +108,6 @@ async fn google_complete_stream_passthroughs_openai_compatible_sse() {
     );
 }
 
-
 #[tokio::test]
 async fn ollama_complete_stream_passthroughs_openai_compatible_sse() {
     let server = MockServer::start().await;
@@ -972,7 +971,6 @@ fn selects_ollama_provider_without_api_key() {
     let provider = provider_from_config(&cfg).unwrap();
     let _: Box<dyn ModelProvider> = provider;
 }
-
 
 #[test]
 fn selects_openrouter_provider() {
