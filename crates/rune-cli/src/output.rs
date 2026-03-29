@@ -508,6 +508,14 @@ pub struct DoctorMemoryHierarchySummary {
     pub demotion: String,
     pub metrics: String,
     #[serde(default)]
+    pub prompt_cache_rows: u64,
+    #[serde(default)]
+    pub cached_tokens: u64,
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    #[serde(default)]
+    pub cache_hit_ratio_percent: f64,
+    #[serde(default)]
     pub l2_recall_hits: u64,
     #[serde(default)]
     pub l2_hot_memories: u64,
@@ -587,6 +595,14 @@ impl fmt::Display for DoctorReport {
             writeln!(f, "  Promotion: {}", memory_hierarchy.promotion)?;
             writeln!(f, "  Demotion: {}", memory_hierarchy.demotion)?;
             writeln!(f, "  Metrics: {}", memory_hierarchy.metrics)?;
+            writeln!(
+                f,
+                "  L1 Counters: prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}",
+                memory_hierarchy.prompt_cache_rows,
+                memory_hierarchy.cached_tokens,
+                memory_hierarchy.total_input_tokens,
+                memory_hierarchy.cache_hit_ratio_percent
+            )?;
             writeln!(
                 f,
                 "  L2 Counters: recall_hits={}, hot_memories={}, total_memories={}",
@@ -5780,6 +5796,10 @@ mod tests {
                 promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
                 demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
                 metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
+                prompt_cache_rows: 0,
+                cached_tokens: 0,
+                total_input_tokens: 0,
+                cache_hit_ratio_percent: 0.0,
                 l2_recall_hits: 0,
                 l2_hot_memories: 0,
                 l2_total_memories: 0,
@@ -5798,6 +5818,7 @@ mod tests {
         assert!(out.contains("storage: sqlite (connected) — 4 repo surfaces configured"));
         assert!(out.contains("Memory Hierarchy:"));
         assert!(out.contains("L1: prompt cache via provider prefixes"));
+        assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
