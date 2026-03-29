@@ -6723,6 +6723,9 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec!["claude-3-7-sonnet".into()],
                 active_projects: vec!["/workspace/peer".into()],
+                capabilities_version: Some(1),
+                capability_hash: Some("cap-peer-a".into()),
+                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
@@ -6751,6 +6754,9 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec![],
                 active_projects: vec![],
+                capabilities_version: Some(1),
+                capability_hash: Some("cap-peer-a".into()),
+                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
