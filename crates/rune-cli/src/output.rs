@@ -6626,6 +6626,9 @@ mod tests {
                 artifact_field: "artifacts".into(),
                 error_field: "error".into(),
                 finished_at_field: "finished_at".into(),
+                accepted_at_field: "accepted_at".into(),
+                started_at_field: "started_at".into(),
+                task_id_field: "task_id".into(),
             }),
         };
         let out = render(&response, OutputFormat::Human);
