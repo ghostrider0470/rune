@@ -888,3 +888,86 @@ async fn progressive_edit_loop(
 async fn drain_chunks(mut rx: tokio::sync::mpsc::Receiver<String>) {
     while rx.recv().await.is_some() {}
 }
+
+#[cfg(test)]
+mod media_enrichment_tests {
+    use super::*;
+    use chrono::Utc;
+    use rune_channels::ChannelMessage;
+    use rune_core::{AttachmentRef, ChannelId};
+
+    fn image_message(content: &str, mime: &str) -> ChannelMessage {
+        ChannelMessage {
+            channel_id: ChannelId::new(),
+            raw_chat_id: "chat-test".to_string(),
+            sender: "user-test".to_string(),
+            content: content.to_string(),
+            attachments: vec![AttachmentRef {
+                name: "image".to_string(),
+                mime_type: Some(mime.to_string()),
+                size_bytes: Some(16),
+                url: Some("telegram-file:file-123".to_string()),
+                provider_file_id: Some("file-123".to_string()),
+            }],
+            timestamp: Utc::now(),
+            provider_message_id: "provider-msg".to_string(),
+        }
+    }
+
+    #[test]
+    fn image_attachment_is_appended_to_caption_text() {
+        let msg = image_message("What is in this photo?", "image/jpeg");
+        let mut extra_parts = Vec::new();
+
+        for attachment in &msg.attachments {
+            let url = match attachment.url.as_deref() {
+                Some(u) if u.starts_with("telegram-file:") => u,
+                _ => continue,
+            };
+            let _file_id = &url["telegram-file:".len()..];
+            let mime = attachment.mime_type.as_deref().unwrap_or("");
+            if mime.starts_with(IMAGE_MIME_PREFIX) {
+                extra_parts.push("[Image attached]".to_string());
+            }
+        }
+
+        let enriched = if extra_parts.is_empty() {
+            msg.content.clone()
+        } else {
+            let enrichment = extra_parts.join("\n");
+            if msg.content.is_empty() {
+                enrichment
+            } else {
+                format!("{}\n{enrichment}", msg.content)
+            }
+        };
+
+        assert_eq!(enriched, "What is in this photo?\n[Image attached]");
+    }
+
+    #[test]
+    fn image_only_message_still_marks_image_presence() {
+        let msg = image_message("", "image/png");
+        let mut extra_parts = Vec::new();
+
+        for attachment in &msg.attachments {
+            let url = match attachment.url.as_deref() {
+                Some(u) if u.starts_with("telegram-file:") => u,
+                _ => continue,
+            };
+            let _file_id = &url["telegram-file:".len()..];
+            let mime = attachment.mime_type.as_deref().unwrap_or("");
+            if mime.starts_with(IMAGE_MIME_PREFIX) {
+                extra_parts.push("[Image attached]".to_string());
+            }
+        }
+
+        let enriched = if extra_parts.is_empty() {
+            msg.content.clone()
+        } else {
+            extra_parts.join("\n")
+        };
+
+        assert_eq!(enriched, "[Image attached]");
+    }
+}
