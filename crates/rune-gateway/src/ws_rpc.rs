@@ -971,6 +971,10 @@ impl RpcDispatcher {
                     "active": stats.cron_active,
                     "capacity": stats.cron_capacity,
                 },
+                "heartbeat": {
+                    "active": stats.heartbeat_active,
+                    "capacity": stats.heartbeat_capacity,
+                },
                 "tools": {
                     "active": stats.tool_active,
                     "capacity": stats.tool_capacity,
@@ -1632,6 +1636,11 @@ impl RpcDispatcher {
                 "subagent_capacity": stats.subagent_capacity,
                 "cron_active": stats.cron_active,
                 "cron_capacity": stats.cron_capacity,
+                "heartbeat_active": stats.heartbeat_active,
+                "heartbeat_capacity": stats.heartbeat_capacity,
+                "tool_active": stats.tool_active,
+                "tool_capacity": stats.tool_capacity,
+                "project_tool_capacity": stats.project_tool_capacity,
             })
         });
 
