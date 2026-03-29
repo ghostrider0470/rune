@@ -703,7 +703,9 @@ fn attachment_image_ref(attachment: &AttachmentRef) -> Option<String> {
     }
 
     if let Some(url) = attachment.url.as_deref() {
-        return Some(url.to_string());
+        if !url.starts_with("telegram-file:") {
+            return Some(url.to_string());
+        }
     }
 
     attachment
@@ -847,7 +849,23 @@ mod attachment_prompt_tests {
         );
     }
     #[test]
-    fn prefers_attachment_url_for_image_parts() {
+    fn prefers_attachment_url_for_http_image_parts() {
+        let attachment = AttachmentRef {
+            name: "photo.jpg".into(),
+            mime_type: Some("image/jpeg".into()),
+            size_bytes: Some(42),
+            url: Some("https://example.test/photo.jpg".into()),
+            provider_file_id: Some("file_123".into()),
+        };
+
+        assert_eq!(
+            attachment_image_ref(&attachment).as_deref(),
+            Some("https://example.test/photo.jpg")
+        );
+    }
+
+    #[test]
+    fn prefers_provider_file_id_over_telegram_file_urls_for_image_parts() {
         let attachment = AttachmentRef {
             name: "photo.jpg".into(),
             mime_type: Some("image/jpeg".into()),
@@ -858,7 +876,7 @@ mod attachment_prompt_tests {
 
         assert_eq!(
             attachment_image_ref(&attachment).as_deref(),
-            Some("telegram-file:file_123")
+            Some("provider-file:file_123")
         );
     }
 
