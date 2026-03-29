@@ -24,7 +24,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
     "Cache padding block 57. Cache padding block 58. Cache padding block 59. Cache padding block 60.\n"
 );
 
-use rune_core::{AttachmentRef, TranscriptItem};
+use rune_core::{AttachmentRef, SessionKind, TranscriptItem};
 use rune_models::{ChatMessage, FunctionCall, ImageUrlPart, MessagePart, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
@@ -200,6 +200,62 @@ pub struct ContextAssembler {
 }
 
 impl ContextAssembler {
+    #[must_use]
+    pub fn delegation_context_section(
+        &self,
+        delegation_context: &serde_json::Value,
+    ) -> Option<String> {
+        if !delegation_context.is_object() {
+            return None;
+        }
+
+        let pretty = serde_json::to_string_pretty(delegation_context).ok()?;
+        Some(format!(
+            "## Delegation Context\n\nThe orchestrator preloaded this context slice. Use it before re-reading files.\n\n```json\n{pretty}\n```"
+        ))
+    }
+
+    #[must_use]
+    pub fn shared_scratchpad_section(
+        &self,
+        shared_scratchpad: &serde_json::Value,
+    ) -> Option<String> {
+        let path = shared_scratchpad.get("path")?.as_str()?.trim();
+        if path.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "## Shared Scratchpad\n\nCoordinate via this shared scratchpad path when you need to leave structured findings for the orchestrator:\n- `{path}`"
+        ))
+    }
+
+    #[must_use]
+    pub fn session_metadata_sections(
+        &self,
+        session_kind: SessionKind,
+        session_metadata: &serde_json::Value,
+    ) -> Vec<String> {
+        if !matches!(session_kind, SessionKind::Subagent) {
+            return Vec::new();
+        }
+
+        let mut sections = Vec::new();
+        if let Some(section) = session_metadata
+            .get("delegation_context")
+            .and_then(|value| self.delegation_context_section(value))
+        {
+            sections.push(section);
+        }
+        if let Some(section) = session_metadata
+            .get("shared_scratchpad")
+            .and_then(|value| self.shared_scratchpad_section(value))
+        {
+            sections.push(section);
+        }
+        sections
+    }
+
     pub fn new(system_instructions: impl Into<String>) -> Self {
         Self {
             system_instructions: system_instructions.into(),
