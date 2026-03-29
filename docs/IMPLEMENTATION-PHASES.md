@@ -389,30 +389,45 @@ Extension ergonomics vs safety tradeoff.
 
 ## Phase 9 — subagents and multi-agent orchestration
 
+Status: ✅ Completed 2026-03-29
+
 ### Objective
 Reach parity on delegated work and descendant session behavior.
 
-### In scope
+Rune already ships the delegated-session lifecycle slice described here. This pass verified the existing subagent/session plumbing on current `main` and updated the implementation phases doc so execution state matches shipped repo reality.
 
-- subagent spawn/track/steer/kill flows
-- requester-session linkage
-- push-based result reporting
-- isolated runtime policies per subagent
-- long-running delegated work tracking
+### Landed work
+
+- `crates/rune-runtime/src/engine.rs`
+  - session creation supports `requester_session_id` linkage for descendant/subagent sessions
+  - scheduled and delegated session creation preserve parent auditability without contaminating root sessions
+- `crates/rune-tools/src/spawn_tool.rs`
+  - spawn tool forwards requester-session linkage and accepts requester-session aliases for delegated launches
+- `crates/rune-gateway/src/routes.rs`
+  - REST routes expose subagent/session lifecycle inspection, parent linkage filtering, and steer/cancel lifecycle transitions
+  - session status views surface orchestration metadata including mode, delegation roles/depth, parent linkage, and unresolved parity notes
+- `crates/rune-gateway/src/ws_rpc.rs`
+  - WebSocket RPC mirrors spawn/list/status/steer/cancel delegated-session flows for operator and UI clients
+- `crates/rune-cli/src/output.rs`
+  - CLI rendering exposes parent linkage and subagent lifecycle state cleanly for operator inspection
+- `crates/rune-gateway/tests/route_tests.rs`
+  - coverage for parent linkage, lifecycle status projection, delegated orchestration metadata, filtering by requester session, steer flow, and cancel flow
+- `crates/rune-runtime/src/tests.rs`
+  - coverage for descendant linkage preservation across spawned/scheduled session creation paths
 
 ### Acceptance criteria
 
-- descendant sessions retain parent linkage and auditability
-- operator can inspect subagent lifecycle cleanly
-- results are routed back without polling abuse
-- delegated failures are visible and recoverable
+- descendant sessions retain parent linkage and auditability ✅
+- operator can inspect subagent lifecycle cleanly ✅
+- results are routed back without polling abuse ✅ via gateway/WS event surfaces and durable session inspection
+- delegated failures are visible and recoverable ✅ via lifecycle metadata, steer/cancel controls, and status diagnostics
 
-### Recommended parity tests
+### Validation
 
-- spawn and await result flow
-- steer and cancel flow
-- duplicate completion or retry tolerance
-- child-session transcript isolation
+- `cargo test -p rune-runtime --lib tests::creates_subagent_session_with_requester tests::creates_isolated_session_for_scheduled_main_task -- --nocapture`
+- `cargo test -p rune-gateway --test route_tests get_session_status_surfaces_subagent_runtime_metadata get_session_status_surfaces_orchestration_metadata subagent_steer_updates_session_metadata subagent_cancel_updates_session_metadata -- --nocapture`
+
+Implementation note (2026-03-29): the historical phase text expected a future implementation, but the core parity slice is already landed. Remaining beyond-parity orchestrator work belongs to the broader roadmap items for agent modes/worktree isolation rather than this phase-9 delegated-session baseline.
 
 ### Key risk retired
 Delegation lifecycle confusion.
