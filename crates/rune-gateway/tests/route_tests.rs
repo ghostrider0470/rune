@@ -1871,6 +1871,9 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 4);
     assert_eq!(payload["lane_stats"]["subagent_active"], 0);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
+    assert_eq!(payload["lane_stats"]["tool_active"], 0);
+    assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
+    assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
 
     drop(main_permit);
 }
@@ -2115,6 +2118,8 @@ async fn status_reports_configured_lane_capacities() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 6);
     assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
+    assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
+    assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
 }
 
 #[tokio::test]
@@ -2207,6 +2212,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
     let subagent_permit = lane_queue.acquire(Lane::Subagent).await;
+    let tool_permit = lane_queue.acquire_tool(Some("project-a")).await;
 
     let dispatcher = RpcDispatcher::new(state);
     let payload = dispatcher
@@ -2221,9 +2227,13 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["tools"]["active"], 1);
+    assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
+    assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
 
     drop(main_permit);
     drop(subagent_permit);
+    drop(tool_permit);
 }
 
 #[tokio::test]

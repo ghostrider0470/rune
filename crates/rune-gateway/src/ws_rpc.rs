@@ -970,6 +970,11 @@ impl RpcDispatcher {
                     "active": stats.cron_active,
                     "capacity": stats.cron_capacity,
                 },
+                "tools": {
+                    "active": stats.tool_active,
+                    "capacity": stats.tool_capacity,
+                    "per_project_capacity": stats.project_tool_capacity,
+                },
             })
         });
 
