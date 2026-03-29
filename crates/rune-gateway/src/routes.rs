@@ -71,7 +71,7 @@ pub struct InstanceHealthResponse {
     pub peers: Vec<PeerHealthResponse>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationArtifactResponse {
     pub name: String,
     pub kind: String,
@@ -2447,6 +2447,8 @@ pub struct SessionAuditSummary {
 pub struct ParentSubagentResultSummary {
     pub session_id: String,
     pub summary: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub artifacts: Vec<DelegationArtifactResponse>,
 }
 
 #[derive(Serialize)]
@@ -3475,7 +3477,20 @@ fn latest_subagent_result(
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .unwrap_or_default();
-        Some(ParentSubagentResultSummary { session_id, summary })
+        let artifacts = item
+            .payload
+            .get("artifacts")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        Some(ParentSubagentResultSummary {
+            session_id,
+            summary,
+            artifacts,
+        })
     })
 }
 
