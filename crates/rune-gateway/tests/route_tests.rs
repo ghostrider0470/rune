@@ -8469,7 +8469,16 @@ async fn get_session_status_surfaces_subagent_metadata() {
             kind: "subagent_result".into(),
             payload: json!({
                 "session_id": "99999999-9999-9999-9999-999999999999",
-                "summary": "Tests tightened and lifecycle audit trail captured"
+                "summary": "Tests tightened and lifecycle audit trail captured",
+                "artifacts": [
+                    {
+                        "name": "review-notes.md",
+                        "kind": "markdown",
+                        "uri": "memory://subagents/99999999-9999-9999-9999-999999999999/review-notes.md",
+                        "content_type": "text/markdown",
+                        "description": "Follow-up notes from the delegated review pass"
+                    }
+                ]
             }),
             created_at: now + chrono::TimeDelta::milliseconds(1),
         })
@@ -8523,7 +8532,16 @@ async fn get_session_status_surfaces_subagent_metadata() {
         json["latest_subagent_result"],
         json!({
             "session_id": "99999999-9999-9999-9999-999999999999",
-            "summary": "Tests tightened and lifecycle audit trail captured"
+            "summary": "Tests tightened and lifecycle audit trail captured",
+            "artifacts": [
+                {
+                    "name": "review-notes.md",
+                    "kind": "markdown",
+                    "uri": "memory://subagents/99999999-9999-9999-9999-999999999999/review-notes.md",
+                    "content_type": "text/markdown",
+                    "description": "Follow-up notes from the delegated review pass"
+                }
+            ]
         })
     );
     let unresolved = json["unresolved"].as_array().unwrap();
