@@ -1930,6 +1930,7 @@ async fn session_parent_linkage() {
             Some(parent.id),
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1944,6 +1945,7 @@ async fn session_parent_linkage() {
             None,
             None,
             Some("telegram".to_string()),
+            None,
             None,
         )
         .await
@@ -1960,6 +1962,7 @@ async fn session_parent_linkage() {
             None,
             Some("system:scheduled-main".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1969,6 +1972,7 @@ async fn session_parent_linkage() {
             SessionKind::Subagent,
             Some("/workspace".to_string()),
             Some(scheduled_main.id),
+            None,
             None,
             None,
         )
@@ -2036,6 +2040,7 @@ async fn channel_session_prompt_excludes_long_term_memory() {
             Some(h.workspace_root.to_string_lossy().to_string()),
             None,
             Some("telegram".to_string()),
+            None,
             None,
         )
         .await
@@ -2451,6 +2456,7 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
             None,
             Some("chat-2:user-2".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -2501,6 +2507,7 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
             Some(h.workspace_root.to_string_lossy().to_string()),
             None,
             Some("chat-1:user-1".to_string()),
+            None,
             None,
         )
         .await
@@ -2566,6 +2573,7 @@ async fn create_session_full_persists_mode_in_metadata() {
             None,
             None,
             Some("architect".to_string()),
+            None,
         )
         .await
         .unwrap();
@@ -2646,4 +2654,33 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
         .unwrap();
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
+}
+
+#[tokio::test]
+async fn create_session_full_persists_project_id_in_metadata() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let row = engine
+        .create_session_full(
+            SessionKind::Direct,
+            None,
+            None,
+            None,
+            Some("operator".to_string()),
+            Some("phoenix".to_string()),
+        )
+        .await
+        .expect("session created");
+
+    assert_eq!(
+        row.metadata
+            .get("project_id")
+            .and_then(serde_json::Value::as_str),
+        Some("phoenix")
+    );
+    assert_eq!(
+        row.metadata.get("mode").and_then(serde_json::Value::as_str),
+        Some("operator")
+    );
 }

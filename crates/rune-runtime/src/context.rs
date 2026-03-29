@@ -228,7 +228,10 @@ impl ContextAssembler {
             .collect::<Vec<_>>()
             .join("\n\n");
         let project_section = workspace
-            .map(WorkspaceContext::format_for_prompt)
+            .map(|workspace| WorkspaceContext {
+                files: workspace.project_tier_files(),
+            })
+            .map(|workspace| workspace.format_for_prompt())
             .unwrap_or_default();
         let shared_section = memory
             .map(MemoryContext::format_for_prompt)
@@ -874,8 +877,8 @@ mod context_budget_tests {
 
     #[test]
     fn analyze_context_usage_marks_over_budget_when_tier_sum_exceeded() {
-        let assembler = ContextAssembler::new("Identity instructions")
-            .with_tier_budgets(1, 1, 1, 1);
+        let assembler =
+            ContextAssembler::new("Identity instructions").with_tier_budgets(1, 1, 1, 1);
         let workspace = WorkspaceContext {
             files: vec![("AGENTS.md".into(), "project rules".into())],
         };

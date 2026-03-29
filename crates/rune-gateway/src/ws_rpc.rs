@@ -318,6 +318,7 @@ impl RpcDispatcher {
                 requester_session_id,
                 Some(channel_ref.to_string()),
                 None,
+                None,
             )
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -386,6 +387,7 @@ impl RpcDispatcher {
                 requester_session_id,
                 channel_ref,
                 mode,
+                None,
             )
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;

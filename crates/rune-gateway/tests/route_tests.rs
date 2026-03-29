@@ -4914,6 +4914,33 @@ async fn context_assembler_uses_configured_tier_budgets() {
 }
 
 #[tokio::test]
+async fn create_session_accepts_project_id_metadata() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "direct",
+                        "mode": "operator",
+                        "project_id": "phoenix"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let json = body_json(response).await;
+    assert_eq!(json["project_id"], "phoenix");
+    assert_eq!(json["mode"], "operator");
+}
+
+#[tokio::test]
 async fn dashboard_sessions_includes_kind_and_activity_fields() {
     let app = build_test_app(None);
 

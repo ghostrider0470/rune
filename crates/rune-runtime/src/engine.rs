@@ -9,7 +9,7 @@ use rune_store::models::{NewSession, SessionRow};
 use rune_store::repos::{SessionRepo, TranscriptRepo};
 
 use crate::error::RuntimeError;
-use crate::session_metadata::set_session_mode;
+use crate::session_metadata::{set_project_id, set_session_mode};
 
 /// Creates and manages session lifecycle. Persists state via store repo traits.
 pub struct SessionEngine {
@@ -42,7 +42,7 @@ impl SessionEngine {
         kind: SessionKind,
         workspace_root: Option<String>,
     ) -> Result<SessionRow, RuntimeError> {
-        self.create_session_full(kind, workspace_root, None, None, None)
+        self.create_session_full(kind, workspace_root, None, None, None, None)
             .await
     }
 
@@ -57,14 +57,18 @@ impl SessionEngine {
         requester_session_id: Option<Uuid>,
         channel_ref: Option<String>,
         mode: Option<String>,
+        project_id: Option<String>,
     ) -> Result<SessionRow, RuntimeError> {
         let id = SessionId::new();
         let now = Utc::now();
 
-        let metadata = mode
+        let mut metadata = mode
             .as_deref()
             .map(|mode| set_session_mode(&serde_json::json!({}), mode))
             .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(project_id) = project_id.as_deref() {
+            metadata = set_project_id(&metadata, project_id);
+        }
 
         let new_session = NewSession {
             id: id.into_uuid(),
