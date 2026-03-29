@@ -1284,6 +1284,17 @@ pub enum GatewayAction {
     Probe,
     /// Discover operator-facing runtime URLs and config binding details.
     Discover,
+    /// Inspect instance identity, capabilities, load, and peer health.
+    InstanceHealth,
+    /// Compute a peer selection plan for cross-instance delegation.
+    DelegationPlan {
+        /// Selection strategy (`least_busy` or `named`).
+        #[arg(long, default_value = "least_busy")]
+        strategy: String,
+        /// Required when `--strategy named`.
+        #[arg(long)]
+        peer_id: Option<String>,
+    },
     /// Query structured gateway logs.
     Logs(LogsArgs),
     /// Run gateway-backed diagnostic checks and inspect recent results.
@@ -2794,6 +2805,40 @@ mod tests {
                 action: GatewayAction::Discover
             }
         ));
+    }
+
+    #[test]
+    fn parse_gateway_instance_health() {
+        let cli = Cli::try_parse_from(["rune", "gateway", "instance-health"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gateway {
+                action: GatewayAction::InstanceHealth
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_gateway_delegation_plan_named() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "gateway",
+            "delegation-plan",
+            "--strategy",
+            "named",
+            "--peer-id",
+            "peer-a",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Gateway {
+                action: GatewayAction::DelegationPlan { strategy, peer_id },
+            } => {
+                assert_eq!(strategy, "named");
+                assert_eq!(peer_id.as_deref(), Some("peer-a"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

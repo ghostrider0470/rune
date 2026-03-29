@@ -16,10 +16,11 @@ use crate::output::{
     ApprovalPoliciesResponse, ApprovalPolicySummary, ApprovalRequestSummary, ConfigFileResponse,
     ConfigGetResponse, ConfigMutationResponse, ConfigValidationResult, ConfigureResponse,
     CronJobDetailResponse, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DoctorReport, GatewayCallResponse, GatewayConfigResponse,
-    GatewayDiscoverResponse, GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse,
-    HeartbeatStatusResponse, LogsQueryResponse, MessageSearchHit, MessageSearchResponse,
-    MessageSendResponse, ModelScanProviderResult, ModelScanResponse, ReminderSummary,
+    CronStatusResponse, DelegationPlanResponse, DoctorReport, GatewayCallResponse,
+    GatewayConfigResponse, GatewayDiscoverResponse, GatewayInstanceHealthResponse,
+    GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
+    InstanceLoadSummary, LogsQueryResponse, MessageSearchHit, MessageSearchResponse,
+    MessageSendResponse, ModelScanProviderResult, ModelScanResponse, PeerSummary, ReminderSummary,
     RemindersListResponse, SandboxExplainResponse, SandboxListResponse, SandboxRecreateResponse,
     ScannedModelDetail, SecretsApplyResponse, SecretsAuditResponse, SecretsConfigureResponse,
     SecretsReloadResponse, SecurityAuditResponse, SessionDetailResponse, SessionListResponse,
@@ -132,6 +133,114 @@ impl GatewayClient {
         }
     }
 
+    pub async fn gateway_instance_health(&self) -> Result<GatewayInstanceHealthResponse> {
+        let resp = self
+            .http
+            .get(self.url("/api/v1/instance/health"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if !resp.status().is_success() {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+
+        let body = resp
+            .json::<serde_json::Value>()
+            .await
+            .context("invalid JSON from /api/v1/instance/health")?;
+
+        Ok(GatewayInstanceHealthResponse {
+            status: body["status"].as_str().unwrap_or("unknown").to_string(),
+            version: body["version"].as_str().map(String::from),
+            uptime_seconds: body["uptime_seconds"].as_u64(),
+            instance_id: body["capabilities"]["identity"]["id"]
+                .as_str()
+                .map(String::from),
+            instance_name: body["capabilities"]["identity"]["name"]
+                .as_str()
+                .map(String::from),
+            advertised_addr: body["capabilities"]["identity"]["advertised_addr"]
+                .as_str()
+                .map(String::from),
+            instance_roles: body["capabilities"]["identity"]["roles"]
+                .as_array()
+                .map(|roles| {
+                    roles
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            capabilities_version: body["capabilities"]["identity"]["capabilities_version"]
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok()),
+            peer_count: body["capabilities"]["peer_count"]
+                .as_u64()
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or_else(|| body["peers"].as_array().map_or(0, |peers| peers.len())),
+            configured_models: body["capabilities"]["configured_models"]
+                .as_array()
+                .map(|models| {
+                    models
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            active_projects: body["capabilities"]["active_projects"]
+                .as_array()
+                .map(|projects| {
+                    projects
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            comms_transport: body["capabilities"]["comms_transport"]
+                .as_str()
+                .map(String::from),
+            load: parse_instance_load(&body["load"]),
+            peers: parse_peer_summaries(&body["peers"]),
+        })
+    }
+
+    pub async fn gateway_delegation_plan(
+        &self,
+        strategy: &str,
+        peer_id: Option<&str>,
+    ) -> Result<DelegationPlanResponse> {
+        let mut url = self.url(&format!(
+            "/api/v1/instance/delegation-plan?strategy={strategy}"
+        ));
+        if let Some(peer_id) = peer_id {
+            url.push_str("&peer_id=");
+            url.push_str(&urlencoding::encode(peer_id));
+        }
+
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+
+        if !resp.status().is_success() {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+
+        let body = resp
+            .json::<serde_json::Value>()
+            .await
+            .context("invalid JSON from /api/v1/instance/delegation-plan")?;
+
+        Ok(DelegationPlanResponse {
+            strategy: body["strategy"].as_str().unwrap_or("unknown").to_string(),
+            selected_peer: parse_peer_summary(&body["selected_peer"]),
+            candidates: parse_peer_summaries(&body["candidates"]),
+            detail: body["detail"].as_str().unwrap_or_default().to_string(),
+        })
+    }
     /// `GET /config`
     pub async fn gateway_config(&self) -> Result<GatewayConfigResponse> {
         let resp = self
@@ -6733,4 +6842,63 @@ impl GatewayClient {
             bail!("Gateway returned HTTP {}", resp.status());
         }
     }
+}
+
+fn parse_instance_load(value: &serde_json::Value) -> Option<InstanceLoadSummary> {
+    Some(InstanceLoadSummary {
+        session_count: usize::try_from(value["session_count"].as_u64()?).ok()?,
+        ws_subscribers: usize::try_from(value["ws_subscribers"].as_u64()?).ok()?,
+        ws_connections: usize::try_from(value["ws_connections"].as_u64()?).ok()?,
+    })
+}
+
+fn parse_peer_summary(value: &serde_json::Value) -> Option<PeerSummary> {
+    if value.is_null() {
+        return None;
+    }
+
+    Some(PeerSummary {
+        id: value["id"].as_str().unwrap_or_default().to_string(),
+        health_url: value["health_url"].as_str().unwrap_or_default().to_string(),
+        status: value["status"].as_str().unwrap_or("unknown").to_string(),
+        detail: value["detail"].as_str().unwrap_or_default().to_string(),
+        checked_at: value["checked_at"].as_str().map(String::from),
+        latency_ms: value["latency_ms"].as_u64().map(u128::from),
+        advertised_addr: value["advertised_addr"].as_str().map(String::from),
+        roles: value["roles"]
+            .as_array()
+            .map(|roles| {
+                roles
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        configured_models: value["configured_models"]
+            .as_array()
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        active_projects: value["active_projects"]
+            .as_array()
+            .map(|projects| {
+                projects
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        load: parse_instance_load(&value["load"]),
+    })
+}
+
+fn parse_peer_summaries(value: &serde_json::Value) -> Vec<PeerSummary> {
+    value
+        .as_array()
+        .map(|peers| peers.iter().filter_map(parse_peer_summary).collect())
+        .unwrap_or_default()
 }

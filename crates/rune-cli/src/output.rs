@@ -78,6 +78,270 @@ pub struct HealthResponse {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceLoadSummary {
+    pub session_count: usize,
+    pub ws_subscribers: usize,
+    pub ws_connections: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerSummary {
+    pub id: String,
+    pub health_url: String,
+    pub status: String,
+    pub detail: String,
+    pub checked_at: Option<String>,
+    pub latency_ms: Option<u128>,
+    pub advertised_addr: Option<String>,
+    pub roles: Vec<String>,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+    pub load: Option<InstanceLoadSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayInstanceHealthResponse {
+    pub status: String,
+    pub version: Option<String>,
+    pub uptime_seconds: Option<u64>,
+    pub instance_id: Option<String>,
+    pub instance_name: Option<String>,
+    pub advertised_addr: Option<String>,
+    pub instance_roles: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub peer_count: usize,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+    pub comms_transport: Option<String>,
+    pub load: Option<InstanceLoadSummary>,
+    pub peers: Vec<PeerSummary>,
+}
+
+impl fmt::Display for GatewayInstanceHealthResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Instance health: {}", self.status)?;
+        if let Some(ref version) = self.version {
+            write!(
+                f,
+                "
+Version: {version}"
+            )?;
+        }
+        if let Some(uptime) = self.uptime_seconds {
+            write!(
+                f,
+                "
+Uptime: {uptime}s"
+            )?;
+        }
+        if let Some(ref instance_id) = self.instance_id {
+            write!(
+                f,
+                "
+Instance ID: {instance_id}"
+            )?;
+        }
+        if let Some(ref instance_name) = self.instance_name {
+            write!(
+                f,
+                "
+Instance name: {instance_name}"
+            )?;
+        }
+        if let Some(version) = self.capabilities_version {
+            write!(
+                f,
+                "
+Capabilities version: {version}"
+            )?;
+        }
+        if let Some(ref advertised_addr) = self.advertised_addr {
+            write!(
+                f,
+                "
+Advertised address: {advertised_addr}"
+            )?;
+        }
+        if !self.instance_roles.is_empty() {
+            write!(
+                f,
+                "
+Roles: {}",
+                self.instance_roles.join(", ")
+            )?;
+        }
+        if let Some(ref comms_transport) = self.comms_transport {
+            write!(
+                f,
+                "
+Comms transport: {comms_transport}"
+            )?;
+        }
+        if !self.configured_models.is_empty() {
+            write!(
+                f,
+                "
+Configured models: {}",
+                self.configured_models.join(", ")
+            )?;
+        }
+        if !self.active_projects.is_empty() {
+            write!(
+                f,
+                "
+Active projects: {}",
+                self.active_projects.join(", ")
+            )?;
+        }
+        if let Some(ref load) = self.load {
+            write!(
+                f,
+                "
+Load: sessions={}, ws_subscribers={}, ws_connections={}",
+                load.session_count, load.ws_subscribers, load.ws_connections
+            )?;
+        }
+        write!(
+            f,
+            "
+Peers: {}",
+            self.peer_count
+        )?;
+        for peer in &self.peers {
+            write!(
+                f,
+                "
+  - {} [{}]",
+                peer.id, peer.status
+            )?;
+            write!(
+                f,
+                "
+    Health URL: {}",
+                peer.health_url
+            )?;
+            write!(
+                f,
+                "
+    Detail: {}",
+                peer.detail
+            )?;
+            if let Some(ref checked_at) = peer.checked_at {
+                write!(
+                    f,
+                    "
+    Checked at: {checked_at}"
+                )?;
+            }
+            if let Some(latency_ms) = peer.latency_ms {
+                write!(
+                    f,
+                    "
+    Latency: {latency_ms}ms"
+                )?;
+            }
+            if let Some(ref advertised_addr) = peer.advertised_addr {
+                write!(
+                    f,
+                    "
+    Advertised address: {advertised_addr}"
+                )?;
+            }
+            if !peer.roles.is_empty() {
+                write!(
+                    f,
+                    "
+    Roles: {}",
+                    peer.roles.join(", ")
+                )?;
+            }
+            if !peer.configured_models.is_empty() {
+                write!(
+                    f,
+                    "
+    Models: {}",
+                    peer.configured_models.join(", ")
+                )?;
+            }
+            if !peer.active_projects.is_empty() {
+                write!(
+                    f,
+                    "
+    Projects: {}",
+                    peer.active_projects.join(", ")
+                )?;
+            }
+            if let Some(ref load) = peer.load {
+                write!(
+                    f,
+                    "
+    Load: sessions={}, ws_subscribers={}, ws_connections={}",
+                    load.session_count, load.ws_subscribers, load.ws_connections
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationPlanResponse {
+    pub strategy: String,
+    pub selected_peer: Option<PeerSummary>,
+    pub candidates: Vec<PeerSummary>,
+    pub detail: String,
+}
+
+impl fmt::Display for DelegationPlanResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Delegation strategy: {}", self.strategy)?;
+        write!(
+            f,
+            "
+Detail: {}",
+            self.detail
+        )?;
+        match &self.selected_peer {
+            Some(peer) => write!(
+                f,
+                "
+Selected peer: {} [{}]",
+                peer.id, peer.status
+            )?,
+            None => write!(
+                f,
+                "
+Selected peer: none"
+            )?,
+        }
+        write!(
+            f,
+            "
+Candidates: {}",
+            self.candidates.len()
+        )?;
+        for peer in &self.candidates {
+            write!(
+                f,
+                "
+  - {} [{}]",
+                peer.id, peer.status
+            )?;
+            if let Some(ref load) = peer.load {
+                write!(
+                    f,
+                    " sessions={}, ws={}, latency={}ms",
+                    load.session_count,
+                    load.ws_connections,
+                    peer.latency_ms.unwrap_or_default()
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for HealthResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let icon = if self.healthy { "✓" } else { "✗" };
@@ -5957,6 +6221,79 @@ mod tests {
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Gateway discovery"));
         assert!(out.contains("WebSocket URL: ws://127.0.0.1:8787/ws"));
+    }
+
+    #[test]
+    fn render_instance_health() {
+        let response = GatewayInstanceHealthResponse {
+            status: "ok".into(),
+            version: Some("0.1.0".into()),
+            uptime_seconds: Some(12),
+            instance_id: Some("inst-a".into()),
+            instance_name: Some("desktop".into()),
+            advertised_addr: Some("http://127.0.0.1:8787".into()),
+            instance_roles: vec!["gateway".into(), "scheduler".into()],
+            capabilities_version: Some(1),
+            peer_count: 1,
+            configured_models: vec!["gpt-4.1".into()],
+            active_projects: vec!["/workspace/rune".into()],
+            comms_transport: Some("filesystem".into()),
+            load: Some(InstanceLoadSummary {
+                session_count: 3,
+                ws_subscribers: 1,
+                ws_connections: 2,
+            }),
+            peers: vec![PeerSummary {
+                id: "peer-a".into(),
+                health_url: "http://peer-a:8787/api/v1/instance/health".into(),
+                status: "healthy".into(),
+                detail: "200 OK".into(),
+                checked_at: Some("2026-03-29T03:00:00Z".into()),
+                latency_ms: Some(15),
+                advertised_addr: Some("http://peer-a:8787".into()),
+                roles: vec!["gateway".into()],
+                configured_models: vec!["claude-3-7-sonnet".into()],
+                active_projects: vec!["/workspace/peer".into()],
+                load: Some(InstanceLoadSummary {
+                    session_count: 1,
+                    ws_subscribers: 0,
+                    ws_connections: 1,
+                }),
+            }],
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Instance health: ok"));
+        assert!(out.contains("Peers: 1"));
+        assert!(out.contains("peer-a [healthy]"));
+    }
+
+    #[test]
+    fn render_delegation_plan() {
+        let response = DelegationPlanResponse {
+            strategy: "least_busy".into(),
+            selected_peer: Some(PeerSummary {
+                id: "peer-a".into(),
+                health_url: "http://peer-a:8787/api/v1/instance/health".into(),
+                status: "healthy".into(),
+                detail: "200 OK".into(),
+                checked_at: Some("2026-03-29T03:00:00Z".into()),
+                latency_ms: Some(10),
+                advertised_addr: None,
+                roles: vec!["gateway".into()],
+                configured_models: vec![],
+                active_projects: vec![],
+                load: Some(InstanceLoadSummary {
+                    session_count: 1,
+                    ws_subscribers: 0,
+                    ws_connections: 1,
+                }),
+            }),
+            candidates: vec![],
+            detail: "selected least-busy healthy peer 'peer-a'".into(),
+        };
+        let out = render(&response, OutputFormat::Human);
+        assert!(out.contains("Delegation strategy: least_busy"));
+        assert!(out.contains("Selected peer: peer-a [healthy]"));
     }
 
     #[test]
