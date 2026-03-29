@@ -47,9 +47,9 @@ use rune_gateway::ms365::{
     UpdateCalendarEventRequest, UpdatePlannerTaskRequest, UpdateTodoTaskRequest, UserProfile,
     UserSummary, UsersList,
 };
+use rune_gateway::parse_memory_search_output;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
-use rune_gateway::parse_memory_search_output;
 use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
@@ -4166,7 +4166,12 @@ async fn instance_health_returns_capability_manifest() {
     assert_eq!(json["load"]["session_count"], 0);
     assert_eq!(json["load"]["ws_connections"], 0);
     assert!(json["capabilities"].is_object());
-    assert!(json["capabilities"]["updated_at"].as_str().unwrap().contains("T"));
+    assert!(
+        json["capabilities"]["updated_at"]
+            .as_str()
+            .unwrap()
+            .contains("T")
+    );
     assert_eq!(json["capabilities"]["instance_id"], "test-instance");
     assert_eq!(json["capabilities"]["instance_name"], "test-instance");
     assert_eq!(json["capabilities"]["identity"]["id"], "test-instance");
@@ -4183,11 +4188,13 @@ async fn instance_health_returns_capability_manifest() {
     assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
     assert_eq!(json["capabilities"]["peer_count"], 0);
     assert!(json["capabilities"]["configured_models"].is_array());
-    assert!(json["capabilities"]["configured_models"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|model| model.is_string()));
+    assert!(
+        json["capabilities"]["configured_models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|model| model.is_string())
+    );
     assert!(json["capabilities"]["active_projects"].is_array());
     assert_eq!(json["capabilities"]["comms_transport"], "filesystem");
 }
@@ -4378,12 +4385,22 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["routing"]["mode"], "least_busy");
     assert_eq!(json["routing"]["peer_count"], 3);
     assert_eq!(json["branch_reservation"]["required"], true);
-    assert_eq!(json["branch_reservation"]["mechanism"], "branch_reservation");
+    assert_eq!(
+        json["branch_reservation"]["mechanism"],
+        "branch_reservation"
+    );
     assert_eq!(json["file_locks"]["required"], true);
     assert_eq!(json["file_locks"]["mechanism"], "file_locks");
     assert_eq!(
         json["task_status"]["states"],
-        serde_json::json!(["submitted", "accepted", "running", "completed", "failed", "timeout"])
+        serde_json::json!([
+            "submitted",
+            "accepted",
+            "running",
+            "completed",
+            "failed",
+            "timeout"
+        ])
     );
     assert_eq!(
         json["task_status"]["terminal_states"],
@@ -4400,15 +4417,23 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     );
     assert_eq!(
         json["task_contract"]["lifecycle"],
-        serde_json::json!(["submitted", "accepted", "running", "completed", "failed", "timeout"])
+        serde_json::json!([
+            "submitted",
+            "accepted",
+            "running",
+            "completed",
+            "failed",
+            "timeout"
+        ])
     );
-    assert!(json["task_contract"]["conflict_prevention"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|entry| entry.as_str().unwrap_or_default().contains("branch names")));
+    assert!(
+        json["task_contract"]["conflict_prevention"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.as_str().unwrap_or_default().contains("branch names"))
+    );
 }
-
 
 #[tokio::test]
 async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertised_addr_is_set() {
@@ -4487,7 +4512,10 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
 
     let json = body_json(response).await;
     assert_eq!(json["selected_peer"]["id"], "peer-a");
-    assert_eq!(json["sender"]["health_url"], "http://127.0.0.1:8787/api/v1/instance/health");
+    assert_eq!(
+        json["sender"]["health_url"],
+        "http://127.0.0.1:8787/api/v1/instance/health"
+    );
     assert_eq!(json["routing"]["mode"], "named");
 }
 
@@ -4577,7 +4605,12 @@ async fn status_returns_correct_shape() {
     assert!(json["registered_tools"].is_number());
     assert!(json["session_count"].is_number());
     assert!(json["capabilities"].is_object());
-    assert!(json["capabilities"]["updated_at"].as_str().unwrap().contains("T"));
+    assert!(
+        json["capabilities"]["updated_at"]
+            .as_str()
+            .unwrap()
+            .contains("T")
+    );
     assert_eq!(json["capabilities"]["mode"], "standalone");
     assert_eq!(json["capabilities"]["storage_backend"], "test");
     assert_eq!(json["capabilities"]["pgvector"], false);
@@ -4864,7 +4897,8 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
 
 #[tokio::test]
 async fn context_assembler_uses_configured_tier_budgets() {
-    let assembler = ContextAssembler::new("You are Rune.").with_tier_budgets(1200, 3400, 5600, 7800);
+    let assembler =
+        ContextAssembler::new("You are Rune.").with_tier_budgets(1200, 3400, 5600, 7800);
     let specs = assembler.tier_specs();
 
     assert_eq!(specs[0].kind, ContextTierKind::Identity);
@@ -11191,12 +11225,9 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
             .unwrap()
             .contains("prompt cache via provider prefixes")
     );
-    assert!(
-        body["memory_hierarchy"]["l2"]
-            .as_str()
-            .unwrap()
-            .contains("memory retrieval")
-    );
+    let l2_summary = body["memory_hierarchy"]["l2"].as_str().unwrap();
+    assert!(l2_summary.contains("memory retrieval"));
+    assert!(l2_summary.contains("recall_hits="));
     assert_eq!(
         body["memory_hierarchy"]["l3"],
         "durable session logs in transcript/session storage"
@@ -11219,6 +11250,15 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
             .unwrap()
             .contains("prompt_cache_rows=")
     );
+    assert!(
+        body["memory_hierarchy"]["metrics"]
+            .as_str()
+            .unwrap()
+            .contains("l2_recall_hits=")
+    );
+    assert_eq!(body["memory_hierarchy"]["l2_recall_hits"], 0);
+    assert_eq!(body["memory_hierarchy"]["l2_hot_memories"], 0);
+    assert_eq!(body["memory_hierarchy"]["l2_total_memories"], 0);
 }
 
 #[tokio::test]

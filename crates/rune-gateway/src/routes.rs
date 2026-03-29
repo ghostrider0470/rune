@@ -286,15 +286,21 @@ pub async fn delegation_plan(
         (Some(peer), _) => format!("selected peer '{}'", peer.id),
     };
 
-    let receiver = selected_peer.as_ref().map(|peer| DelegationEndpointResponse {
-        instance_id: peer.id.clone(),
-        instance_name: peer.id.clone(),
-        transport: "http".to_string(),
-        health_url: Some(peer.health_url.clone()),
-    });
+    let receiver = selected_peer
+        .as_ref()
+        .map(|peer| DelegationEndpointResponse {
+            instance_id: peer.id.clone(),
+            instance_name: peer.id.clone(),
+            transport: "http".to_string(),
+            health_url: Some(peer.health_url.clone()),
+        });
 
     let routing = DelegationRoutingResponse {
-        mode: if strategy == "named" { "named" } else { "least_busy" },
+        mode: if strategy == "named" {
+            "named"
+        } else {
+            "least_busy"
+        },
         detail: detail.clone(),
         peer_count: peers.len(),
     };
@@ -347,7 +353,14 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
     DelegationTaskContractResponse {
         protocol_version: 1,
         submission_modes: vec!["named", "least_busy"],
-        lifecycle: vec!["submitted", "accepted", "running", "completed", "failed", "timeout"],
+        lifecycle: vec![
+            "submitted",
+            "accepted",
+            "running",
+            "completed",
+            "failed",
+            "timeout",
+        ],
         timeout_handling: vec![
             "sender supplies timeout_secs per task",
             "runtime treats deadline expiry as timeout",
@@ -359,7 +372,12 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
             "conflicts fail fast with lock metadata for operator retry",
         ],
         required_fields: vec!["task", "constraints", "expected_output", "timeout_secs"],
-        optional_fields: vec!["target_peer_id", "branch_reservation", "file_locks", "artifacts"],
+        optional_fields: vec![
+            "target_peer_id",
+            "branch_reservation",
+            "file_locks",
+            "artifacts",
+        ],
         result_fields: vec!["status", "output", "artifacts", "error", "finished_at"],
     }
 }
@@ -5984,6 +6002,9 @@ pub struct DoctorMemoryHierarchySummary {
     pub promotion: String,
     pub demotion: String,
     pub metrics: String,
+    pub l2_recall_hits: u64,
+    pub l2_hot_memories: u64,
+    pub l2_total_memories: u64,
 }
 
 #[derive(Serialize)]
@@ -6181,6 +6202,7 @@ fn doctor_topology_summary(config: &rune_config::AppConfig) -> DoctorTopologySum
 }
 
 async fn doctor_memory_hierarchy(
+    state: &AppState,
     config: &rune_config::AppConfig,
     capabilities: &rune_config::Capabilities,
     token_metrics: &TokenMetricsStore,
@@ -6210,6 +6232,24 @@ async fn doctor_memory_hierarchy(
         "keyword/file fallback"
     };
 
+    let (l2_recall_hits, l2_hot_memories, l2_total_memories) = if let Some(mem0) =
+        state.turn_executor.mem0()
+    {
+        match mem0.memory_hierarchy_metrics().await {
+            Ok(metrics) => (
+                metrics.recall_hits,
+                metrics.hot_memories,
+                metrics.total_memories,
+            ),
+            Err(error) => {
+                tracing::debug!(error = %error, "doctor: failed to load mem0 hierarchy metrics");
+                (0, 0, 0)
+            }
+        }
+    } else {
+        (0, 0, 0)
+    };
+
     DoctorMemoryHierarchySummary {
         l0: "current turn context window (active transcript + system/task/project context)"
             .to_string(),
@@ -6219,8 +6259,12 @@ async fn doctor_memory_hierarchy(
             cache_ratio
         ),
         l2: format!(
-            "{} memory retrieval ({})",
-            vector_backend, capabilities.memory_mode
+            "{} memory retrieval ({}; recall_hits={}, hot_memories={}, total_memories={})",
+            vector_backend,
+            capabilities.memory_mode,
+            l2_recall_hits,
+            l2_hot_memories,
+            l2_total_memories
         ),
         l3: "durable session logs in transcript/session storage".to_string(),
         promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions"
@@ -6230,11 +6274,17 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}",
             prompt_cache_rows.len(),
             cached_tokens,
-            total_input_tokens
+            total_input_tokens,
+            l2_recall_hits,
+            l2_hot_memories,
+            l2_total_memories
         ),
+        l2_recall_hits,
+        l2_hot_memories,
+        l2_total_memories,
     }
 }
 
@@ -6573,7 +6623,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     checks.extend(storage_path_checks(&config));
     let backend_matrix = doctor_backend_matrix(&config, &state.capabilities, provider_ok, auth_ok);
     let memory_hierarchy =
-        doctor_memory_hierarchy(&config, &state.capabilities, &state.token_metrics).await;
+        doctor_memory_hierarchy(&state, &config, &state.capabilities, &state.token_metrics).await;
     drop(config);
 
     let session_check = state.session_repo.list(1, 0).await;

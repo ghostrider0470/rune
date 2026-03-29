@@ -460,6 +460,12 @@ pub struct DoctorMemoryHierarchySummary {
     pub promotion: String,
     pub demotion: String,
     pub metrics: String,
+    #[serde(default)]
+    pub l2_recall_hits: u64,
+    #[serde(default)]
+    pub l2_hot_memories: u64,
+    #[serde(default)]
+    pub l2_total_memories: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -534,6 +540,13 @@ impl fmt::Display for DoctorReport {
             writeln!(f, "  Promotion: {}", memory_hierarchy.promotion)?;
             writeln!(f, "  Demotion: {}", memory_hierarchy.demotion)?;
             writeln!(f, "  Metrics: {}", memory_hierarchy.metrics)?;
+            writeln!(
+                f,
+                "  L2 Counters: recall_hits={}, hot_memories={}, total_memories={}",
+                memory_hierarchy.l2_recall_hits,
+                memory_hierarchy.l2_hot_memories,
+                memory_hierarchy.l2_total_memories
+            )?;
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
@@ -5720,6 +5733,9 @@ mod tests {
                 promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
                 demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
                 metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
+                l2_recall_hits: 0,
+                l2_hot_memories: 0,
+                l2_total_memories: 0,
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
@@ -6368,7 +6384,9 @@ mod tests {
                     "timeout".into(),
                 ],
                 timeout_handling: vec!["sender supplies timeout_secs per task".into()],
-                conflict_prevention: vec!["agents must reserve branch names before execution".into()],
+                conflict_prevention: vec![
+                    "agents must reserve branch names before execution".into(),
+                ],
                 required_fields: vec!["task".into()],
                 optional_fields: vec!["target_peer_id".into()],
                 result_fields: vec!["status".into()],
@@ -6378,7 +6396,11 @@ mod tests {
         assert!(out.contains("Delegation strategy: least_busy"));
         assert!(out.contains("Selected peer: peer-a [healthy]"));
         assert!(out.contains("Protocol v1"));
-        assert!(out.contains("Lifecycle: submitted → accepted → running → completed → failed → timeout"));
+        assert!(
+            out.contains(
+                "Lifecycle: submitted → accepted → running → completed → failed → timeout"
+            )
+        );
     }
 
     #[test]
