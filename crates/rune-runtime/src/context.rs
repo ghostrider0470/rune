@@ -129,6 +129,7 @@ pub struct ContextAssemblyReport {
     pub over_budget: bool,
     pub over_compaction_threshold: bool,
     pub compaction_required: bool,
+    pub l3_cold_storage_enabled: bool,
     pub tiers: Vec<ContextTierUsage>,
 }
 
@@ -437,6 +438,7 @@ impl ContextAssembler {
             over_budget,
             over_compaction_threshold,
             compaction_required: over_budget || over_compaction_threshold,
+            l3_cold_storage_enabled: l3_loaded,
             tiers,
         }
     }
