@@ -823,7 +823,6 @@ impl SessionLoop {
     }
 }
 
-
 #[cfg(test)]
 pub(crate) async fn enrich_media_content_for_test(
     session_loop: &SessionLoop,

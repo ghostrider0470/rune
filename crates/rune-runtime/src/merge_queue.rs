@@ -66,7 +66,6 @@ pub trait GitExecutor: Send + Sync {
 // MergeQueue
 // ---------------------------------------------------------------------------
 
-
 fn parse_ci_status(status: &str) -> CiStatus {
     match status.trim().to_ascii_lowercase().as_str() {
         "passed" => CiStatus::Passed,

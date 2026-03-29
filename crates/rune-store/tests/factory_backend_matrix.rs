@@ -101,7 +101,10 @@ async fn sqlite_integrated_matrix_row_builds_and_round_trips() {
     assert_eq!(info.backend_name, "sqlite");
     assert_eq!(info.database_url, None);
     assert!(!info.pgvector_available());
-    assert!(sqlite_path.exists(), "sqlite database file should be created");
+    assert!(
+        sqlite_path.exists(),
+        "sqlite database file should be created"
+    );
     assert_sqlite_result(&result);
     assert_session_round_trip(repos).await;
 }
