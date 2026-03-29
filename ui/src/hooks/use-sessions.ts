@@ -7,6 +7,7 @@ import type {
   TranscriptEntry,
   CreateSessionRequest,
   MessageResponse,
+  PatchSessionRequest,
 } from "@/lib/api-types";
 
 interface SessionFilters {
@@ -73,6 +74,22 @@ export function useCreateSession() {
       api.post<SessionResponse>("/sessions", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function usePatchSession(sessionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: PatchSessionRequest) =>
+      api.patch<SessionResponse>(`/sessions/${sessionId}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["sessions", sessionId, "status"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
