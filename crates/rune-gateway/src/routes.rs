@@ -686,6 +686,9 @@ pub struct LaneStatsResponse {
     pub subagent_capacity: usize,
     pub cron_active: usize,
     pub cron_capacity: usize,
+    pub tool_active: usize,
+    pub tool_capacity: usize,
+    pub project_tool_capacity: usize,
 }
 
 #[derive(Serialize)]
@@ -2879,6 +2882,9 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
         subagent_capacity: stats.subagent_capacity,
         cron_active: stats.cron_active,
         cron_capacity: stats.cron_capacity,
+        tool_active: stats.tool_active,
+        tool_capacity: stats.tool_capacity,
+        project_tool_capacity: stats.project_tool_capacity,
     }
 }
 
