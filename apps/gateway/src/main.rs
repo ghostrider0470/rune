@@ -748,7 +748,13 @@ async fn build_services(
 
     turn_executor = turn_executor.with_lane_queue(lane_queue.clone());
     turn_executor = turn_executor.with_approval_mode(config.approval.mode.as_str());
-    turn_executor = turn_executor.with_max_tool_iterations(config.runtime.max_tool_iterations);
+    let max_iters = if config.runtime.max_tool_iterations == 0 {
+        500
+    } else {
+        config.runtime.max_tool_iterations
+    };
+    turn_executor = turn_executor.with_max_tool_iterations(max_iters);
+    info!(max_tool_iterations = max_iters, "tool iteration limit configured");
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
 
     // Mem0 auto-capture/recall memory engine
