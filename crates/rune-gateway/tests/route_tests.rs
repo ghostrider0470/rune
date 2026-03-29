@@ -8727,7 +8727,7 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
             latest_turn_id: None,
             runtime_profile: None,
             policy_profile: None,
-            metadata: serde_json::json!({}),
+            metadata: serde_json::json!({"project_id": "phoenix"}),
             created_at: now,
             updated_at: now,
             last_activity_at: now,
@@ -8791,6 +8791,14 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
     assert_eq!(entry["request_count"], 2);
     assert_eq!(entry["estimated_cost"], "<$0.01");
     assert_eq!(json["total_estimated_cost"], "<$0.01");
+
+    assert_eq!(json["projects"].as_array().unwrap().len(), 1);
+    let project = &json["projects"][0];
+    assert_eq!(project["project_id"], "phoenix");
+    assert_eq!(project["models"], serde_json::json!(["openai/gpt-4.1"]));
+    assert_eq!(project["prompt_tokens"], 1500);
+    assert_eq!(project["completion_tokens"], 700);
+    assert_eq!(project["request_count"], 2);
 }
 
 #[tokio::test]
@@ -14673,4 +14681,3 @@ async fn get_session_returns_metadata_fields() {
     assert_eq!(body["project_id"], "festivity");
     assert_eq!(body["channel_ref"], "discord");
 }
-

@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use tracing::info;
 use uuid::Uuid;
 
@@ -5051,6 +5051,7 @@ pub struct UsageEntryResponse {
 #[derive(Serialize)]
 pub struct UsageProjectSummaryResponse {
     pub project_id: String,
+    pub models: Vec<String>,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
@@ -5181,6 +5182,7 @@ pub async fn get_dashboard_usage(
 
     let mut grouped: HashMap<(String, String), UsageEntryResponse> = HashMap::new();
     let mut project_grouped: HashMap<String, UsageProjectSummaryResponse> = HashMap::new();
+    let mut project_models: HashMap<String, BTreeSet<String>> = HashMap::new();
     let mut total_prompt_tokens = 0_u64;
     let mut total_completion_tokens = 0_u64;
     let mut total_cached_prompt_tokens = 0_u64;
@@ -5209,7 +5211,7 @@ pub async fn get_dashboard_usage(
             .entry((date.clone(), model.clone()))
             .or_insert_with(|| UsageEntryResponse {
                 date,
-                model,
+                model: model.clone(),
                 provider,
                 project_id: project_id.clone(),
                 prompt_tokens: 0,
@@ -5224,10 +5226,15 @@ pub async fn get_dashboard_usage(
         entry.request_count += 1;
 
         if let Some(project_id) = project_id {
+            project_models
+                .entry(project_id.clone())
+                .or_default()
+                .insert(model.clone());
             let project_entry = project_grouped
                 .entry(project_id.clone())
                 .or_insert_with(|| UsageProjectSummaryResponse {
                     project_id,
+                    models: Vec::new(),
                     prompt_tokens: 0,
                     completion_tokens: 0,
                     total_tokens: 0,
@@ -5254,7 +5261,16 @@ pub async fn get_dashboard_usage(
     }
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
 
-    let mut projects: Vec<_> = project_grouped.into_values().collect();
+    let mut projects: Vec<_> = project_grouped
+        .into_iter()
+        .map(|(project_id, mut summary)| {
+            summary.models = project_models
+                .remove(&project_id)
+                .map(|models| models.into_iter().collect())
+                .unwrap_or_default();
+            summary
+        })
+        .collect();
     projects.sort_by(|a, b| a.project_id.cmp(&b.project_id));
 
     let total_estimated_cost = {
