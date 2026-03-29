@@ -298,11 +298,24 @@ Peers: {}",
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationTaskContract {
+    pub protocol_version: u32,
+    pub submission_modes: Vec<String>,
+    pub lifecycle: Vec<String>,
+    pub timeout_handling: Vec<String>,
+    pub conflict_prevention: Vec<String>,
+    pub required_fields: Vec<String>,
+    pub optional_fields: Vec<String>,
+    pub result_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationPlanResponse {
     pub strategy: String,
     pub selected_peer: Option<PeerSummary>,
     pub candidates: Vec<PeerSummary>,
     pub detail: String,
+    pub task_contract: DelegationTaskContract,
 }
 
 impl fmt::Display for DelegationPlanResponse {
@@ -333,6 +346,44 @@ Selected peer: none"
 Candidates: {}",
             self.candidates.len()
         )?;
+        write!(
+            f,
+            "
+Protocol v{}",
+            self.task_contract.protocol_version
+        )?;
+        if !self.task_contract.submission_modes.is_empty() {
+            write!(
+                f,
+                "
+Submission modes: {}",
+                self.task_contract.submission_modes.join(", ")
+            )?;
+        }
+        if !self.task_contract.lifecycle.is_empty() {
+            write!(
+                f,
+                "
+Lifecycle: {}",
+                self.task_contract.lifecycle.join(" → ")
+            )?;
+        }
+        if !self.task_contract.timeout_handling.is_empty() {
+            write!(
+                f,
+                "
+Timeout handling: {}",
+                self.task_contract.timeout_handling.join("; ")
+            )?;
+        }
+        if !self.task_contract.conflict_prevention.is_empty() {
+            write!(
+                f,
+                "
+Conflict prevention: {}",
+                self.task_contract.conflict_prevention.join("; ")
+            )?;
+        }
         for peer in &self.candidates {
             write!(
                 f,
@@ -6305,10 +6356,29 @@ mod tests {
             }),
             candidates: vec![],
             detail: "selected least-busy healthy peer 'peer-a'".into(),
+            task_contract: DelegationTaskContract {
+                protocol_version: 1,
+                submission_modes: vec!["named".into(), "least_busy".into()],
+                lifecycle: vec![
+                    "submitted".into(),
+                    "accepted".into(),
+                    "running".into(),
+                    "completed".into(),
+                    "failed".into(),
+                    "timeout".into(),
+                ],
+                timeout_handling: vec!["sender supplies timeout_secs per task".into()],
+                conflict_prevention: vec!["agents must reserve branch names before execution".into()],
+                required_fields: vec!["task".into()],
+                optional_fields: vec!["target_peer_id".into()],
+                result_fields: vec!["status".into()],
+            },
         };
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Delegation strategy: least_busy"));
         assert!(out.contains("Selected peer: peer-a [healthy]"));
+        assert!(out.contains("Protocol v1"));
+        assert!(out.contains("Lifecycle: submitted → accepted → running → completed → failed → timeout"));
     }
 
     #[test]

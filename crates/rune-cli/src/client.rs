@@ -16,7 +16,7 @@ use crate::output::{
     ApprovalPoliciesResponse, ApprovalPolicySummary, ApprovalRequestSummary, ConfigFileResponse,
     ConfigGetResponse, ConfigMutationResponse, ConfigValidationResult, ConfigureResponse,
     CronJobDetailResponse, CronJobSummary, CronListResponse, CronRunSummary, CronRunsResponse,
-    CronStatusResponse, DelegationPlanResponse, DoctorReport, GatewayCallResponse,
+    CronStatusResponse, DelegationPlanResponse, DelegationTaskContract, DoctorReport, GatewayCallResponse,
     GatewayConfigResponse, GatewayDiscoverResponse, GatewayInstanceHealthResponse,
     GatewayProbeResponse, GatewayUsageCostResponse, HealthResponse, HeartbeatStatusResponse,
     InstanceLoadSummary, LogsQueryResponse, MessageSearchHit, MessageSearchResponse,
@@ -245,6 +245,7 @@ impl GatewayClient {
             selected_peer: parse_peer_summary(&body["selected_peer"]),
             candidates: parse_peer_summaries(&body["candidates"]),
             detail: body["detail"].as_str().unwrap_or_default().to_string(),
+            task_contract: parse_delegation_task_contract(&body["task_contract"]),
         })
     }
     /// `GET /config`
@@ -6909,4 +6910,32 @@ fn parse_peer_summaries(value: &serde_json::Value) -> Vec<PeerSummary> {
         .as_array()
         .map(|peers| peers.iter().filter_map(parse_peer_summary).collect())
         .unwrap_or_default()
+}
+
+fn parse_string_array(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_delegation_task_contract(value: &serde_json::Value) -> DelegationTaskContract {
+    DelegationTaskContract {
+        protocol_version: value["protocol_version"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(1),
+        submission_modes: parse_string_array(&value["submission_modes"]),
+        lifecycle: parse_string_array(&value["lifecycle"]),
+        timeout_handling: parse_string_array(&value["timeout_handling"]),
+        conflict_prevention: parse_string_array(&value["conflict_prevention"]),
+        required_fields: parse_string_array(&value["required_fields"]),
+        optional_fields: parse_string_array(&value["optional_fields"]),
+        result_fields: parse_string_array(&value["result_fields"]),
+    }
 }
