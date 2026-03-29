@@ -42,6 +42,7 @@ pub(crate) fn set_context_tiers(metadata: &Value, report: &ContextAssemblyReport
             "compaction_trigger_tokens": report.compaction_trigger_tokens,
             "over_budget": report.over_budget,
             "over_compaction_threshold": report.over_compaction_threshold,
+            "compaction_required": report.compaction_required,
         }),
     );
     Value::Object(next)
