@@ -5042,7 +5042,8 @@ async fn delegation_plan_exposes_full_task_contract_fields() {
             .unwrap_or_default()
             .contains("no healthy peers available")
     );
-    assert_eq!(json["receiver"], serde_json::Value::Null);
+    assert_eq!(json["sender"]["capabilities_version"], 1);
+    assert!(json["sender"]["capability_hash"].as_str().is_some_and(|v| !v.is_empty()));
 }
 
 #[tokio::test]
@@ -14093,6 +14094,37 @@ async fn instance_health_reports_peer_identity_and_transport_metadata_from_healt
     assert_eq!(peer["capability_hash"], "cap-peer-a-v2");
     assert_eq!(peer["capabilities_version"], 2);
     assert_eq!(peer["comms_transport"], "http");
+}
+
+#[tokio::test]
+async fn delegation_plan_exposes_sender_capability_identity_metadata() {
+    let mut config = AppConfig::default();
+    config.instance.id = "test-instance".to_string();
+    config.instance.name = "Test Instance".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["sender"]["instance_id"], "test-instance");
+    assert_eq!(json["sender"]["instance_name"], "Test Instance");
+    assert_eq!(json["sender"]["transport"], "filesystem");
+    assert_eq!(json["sender"]["capabilities_version"], 1);
+    assert!(json["sender"]["capability_hash"].as_str().is_some_and(|v| !v.is_empty()));
+    assert_eq!(
+        json["sender"]["health_url"],
+        "http://127.0.0.1:8787/api/v1/instance/health"
+    );
 }
 
 #[tokio::test]

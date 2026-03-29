@@ -176,6 +176,8 @@ pub struct DelegationEndpointResponse {
     pub instance_id: String,
     pub instance_name: String,
     pub transport: String,
+    pub capabilities_version: u32,
+    pub capability_hash: String,
     pub health_url: Option<String>,
     pub submit_url: Option<String>,
     pub result_url: Option<String>,
@@ -420,7 +422,12 @@ pub async fn delegation_plan(
         .map(|peer| DelegationEndpointResponse {
             instance_id: peer.id.clone(),
             instance_name: peer.name.clone(),
-            transport: "http".to_string(),
+            transport: peer
+                .comms_transport
+                .clone()
+                .unwrap_or_else(|| "http".to_string()),
+            capabilities_version: peer.capabilities_version.unwrap_or_default(),
+            capability_hash: peer.capability_hash.clone().unwrap_or_default(),
             health_url: Some(peer.health_url.clone()),
             submit_url: Some(format!(
                 "{}/api/v1/instance/delegations",
@@ -456,6 +463,8 @@ pub async fn delegation_plan(
             instance_id: state.capabilities.identity.id.clone(),
             instance_name: state.capabilities.identity.name.clone(),
             transport: state.capabilities.comms_transport.clone(),
+            capabilities_version: state.capabilities.identity.capabilities_version,
+            capability_hash: state.capabilities.identity.capability_hash.clone(),
             health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
                 format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
             }),
@@ -581,6 +590,8 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
         instance_id: "rune-hamza-desktop".to_string(),
         instance_name: "Hamza Desktop".to_string(),
         transport: "http".to_string(),
+        capabilities_version: 1,
+        capability_hash: "cap-rune-hamza-desktop-v1".to_string(),
         health_url: Some("http://rune-hamza-desktop:18790/api/v1/instance/health".to_string()),
         submit_url: Some("http://rune-hamza-desktop:18790/api/v1/instance/delegations".to_string()),
         result_url: Some(
