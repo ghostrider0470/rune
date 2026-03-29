@@ -27,6 +27,7 @@ import {
   WifiOff,
   Info,
   ArrowDown,
+  ListFilter,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/logs")({
@@ -106,6 +107,7 @@ function LogsPage() {
   const [filter, setFilter] = useState("");
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [targetFilter, setTargetFilter] = useState<string>("all");
+  const [isTargetStreamOnly, setIsTargetStreamOnly] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [paused, setPaused] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
@@ -120,6 +122,7 @@ function LogsPage() {
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -161,7 +164,10 @@ function LogsPage() {
       );
 
       try {
-        const ws = new WebSocket(buildWebSocketUrl("/ws/logs"));
+        const path = isTargetStreamOnly && targetFilter !== "all"
+          ? `/ws/logs?source=${encodeURIComponent(targetFilter)}`
+          : "/ws/logs";
+        const ws = new WebSocket(buildWebSocketUrl(path));
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -209,7 +215,7 @@ function LogsPage() {
       disconnectWebSocket();
       setConnectionState("disconnected");
     };
-  }, [appendLogEntry, clearReconnectTimer, disconnectWebSocket]);
+  }, [appendLogEntry, clearReconnectTimer, disconnectWebSocket, isTargetStreamOnly, targetFilter]);
 
   useEffect(() => {
     if (!autoScroll || !containerRef.current) return;
@@ -420,6 +426,15 @@ function LogsPage() {
             <Switch id="auto-scroll" checked={autoScroll} onCheckedChange={setAutoScroll} />
             <Label htmlFor="auto-scroll">Auto-scroll</Label>
           </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="target-stream-only"
+              checked={isTargetStreamOnly}
+              onCheckedChange={setIsTargetStreamOnly}
+              disabled={targetFilter === "all"}
+            />
+            <Label htmlFor="target-stream-only">Stream selected target only</Label>
+          </div>
         </div>
       </div>
 
@@ -429,6 +444,12 @@ function LogsPage() {
             <CardTitle className="flex items-center gap-2 text-base">
               <ScrollText className="h-4 w-4" />
               Stream
+              {isTargetStreamOnly && targetFilter !== "all" && (
+                <Badge variant="outline" className="text-xs">
+                  <ListFilter className="mr-1 h-3 w-3" />
+                  {targetFilter}
+                </Badge>
+              )}
               {paused && (
                 <Badge variant="secondary" className="text-xs">
                   Paused
