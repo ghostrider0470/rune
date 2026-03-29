@@ -29,7 +29,7 @@ Primary binaries:
 cp config.example.toml config.toml
 ```
 
-Then fill in the required provider, auth, and channel settings. For multi-instance work, also configure `[instance]` (name, advertised address, peers) so `/api/v1/instance/health` exposes a complete capability manifest.
+Then fill in the required provider, auth, and channel settings. For multi-instance work, also configure `[instance]` (name, advertised address, peers) so `/api/v1/instance/health` exposes a complete capability manifest. The CLI mirrors that surface with `rune gateway instance-health`, and `rune gateway delegation-plan --strategy least_busy` / `--strategy named --peer-id <peer>` lets you validate peer selection, lifecycle contract, timeout semantics, and conflict-prevention requirements before wiring actual task handoff.
 
 ## Run locally
 
