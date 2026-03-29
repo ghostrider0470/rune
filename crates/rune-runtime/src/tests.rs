@@ -2579,6 +2579,44 @@ async fn create_session_full_persists_mode_in_metadata() {
     );
 }
 
+#[tokio::test]
+async fn create_session_seeds_context_tier_metadata() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let tiers = session.metadata["context_tiers"]
+        .as_array()
+        .expect("context tiers array");
+    assert_eq!(tiers.len(), 5);
+    assert_eq!(tiers[0]["kind"], "identity");
+    assert_eq!(tiers[0]["token_budget"], 1000);
+    assert_eq!(tiers[1]["kind"], "active_task");
+    assert_eq!(tiers[2]["kind"], "project");
+    assert_eq!(tiers[3]["kind"], "shared");
+    assert_eq!(tiers[4]["kind"], "historical");
+    assert_eq!(tiers[4]["staleness_policy"], "retrieval_only");
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_budget"],
+        36000
+    );
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_estimated_tokens"],
+        0
+    );
+    assert_eq!(
+        session.metadata["context_token_usage"]["over_budget"],
+        false
+    );
+}
+
 #[test]
 fn usage_accumulator_cache_hit_ratio() {
     let mut acc = crate::usage::UsageAccumulator::new();
