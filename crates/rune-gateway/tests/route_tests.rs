@@ -9190,6 +9190,94 @@ async fn create_subagent_session_accepts_delegation_context_and_scratchpad() {
     );
 }
 
+#[tokio::test]
+async fn create_subagent_session_embeds_delegation_plan_metadata() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let parent_json = body_json(response).await;
+    let parent_id = parent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "subagent",
+                        "requester_session_id": parent_id,
+                        "delegation_context": {
+                            "task": "Implement retry budget fix"
+                        },
+                        "delegation_plan": {
+                            "strategy": "named",
+                            "sender": {
+                                "instance_id": "origin-a",
+                                "instance_name": "Origin A",
+                                "submit_url": "http://origin-a/api/v1/instance/delegations"
+                            },
+                            "receiver": {
+                                "instance_id": "peer-b",
+                                "instance_name": "Peer B",
+                                "result_url": "http://peer-b/api/v1/instance/delegations/{task_id}"
+                            },
+                            "task_contract": {
+                                "protocol_version": 1,
+                                "submission_modes": ["http_post"]
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let subagent_json = body_json(response).await;
+    let subagent_id = subagent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/sessions?kind=subagent&include_metadata=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sessions = body_json(response).await;
+    let items = sessions.as_array().unwrap();
+    let session = items
+        .iter()
+        .find(|item| item["id"] == subagent_id)
+        .expect("subagent session present");
+    assert_eq!(
+        session["metadata"]["delegation_context"]["delegation_plan"]["strategy"],
+        "named"
+    );
+    assert_eq!(
+        session["metadata"]["delegation_context"]["delegation_plan"]["sender"]["instance_id"],
+        "origin-a"
+    );
+    assert_eq!(
+        session["metadata"]["delegation_context"]["delegation_plan"]["receiver"]["instance_name"],
+        "Peer B"
+    );
+}
+
 // ── Agents (subagent kind filter) tests ───────────────────────────────────────
 
 #[tokio::test]
