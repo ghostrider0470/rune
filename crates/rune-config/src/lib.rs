@@ -2410,7 +2410,7 @@ mod tests {
         config.instance.name = "Node A".to_string();
         config.instance.advertised_addr = Some("http://10.0.0.5:8787".to_string());
         config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
-        config.instance.peers = vec![InstancePeer {
+        config.instance.peers = vec![PeerConfig {
             id: "node-b".to_string(),
             health_url: "http://10.0.0.6:8787/api/v1/instance/health".to_string(),
         }];
