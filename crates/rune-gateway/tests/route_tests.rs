@@ -9112,7 +9112,10 @@ async fn create_subagent_session_accepts_shared_scratchpad_without_delegation_co
         session["metadata"]["shared_scratchpad"]["path"],
         "agents/acme/scratchpads/findings.md"
     );
-    assert_eq!(session["metadata"]["delegation_context"], serde_json::json!({}));
+    assert_eq!(
+        session["metadata"]["delegation_context"],
+        serde_json::json!({})
+    );
 }
 #[tokio::test]
 async fn create_subagent_session_accepts_delegation_context_and_scratchpad() {
@@ -13261,7 +13264,6 @@ async fn instance_health_reports_peer_identity_and_transport_metadata_from_healt
     assert_eq!(peer["capabilities_version"], 2);
     assert_eq!(peer["comms_transport"], "http");
 }
-
 
 #[tokio::test]
 async fn doctor_run_reports_instance_topology_summary() {
