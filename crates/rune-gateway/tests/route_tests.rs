@@ -8499,6 +8499,10 @@ async fn get_session_status_surfaces_subagent_metadata() {
         json["subagent_last_note"],
         "Steering message queued for subagent/session: tighten the tests"
     );
+    assert_eq!(json["audit"]["transcript_items"], 0);
+    assert_eq!(json["audit"]["status_notes"], 0);
+    assert_eq!(json["audit"]["last_transcript_at"], Value::Null);
+    assert_eq!(json["audit"]["last_operator_note"], Value::Null);
     let unresolved = json["unresolved"].as_array().unwrap();
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("cost posture is estimate-only; provider pricing is not wired yet")));
@@ -14689,4 +14693,167 @@ async fn get_session_returns_metadata_fields() {
     assert_eq!(body["mode"], "execution");
     assert_eq!(body["project_id"], "festivity");
     assert_eq!(body["channel_ref"], "discord");
+}
+
+#[tokio::test]
+async fn session_status_route_surfaces_subagent_audit_summary() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("test");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let session_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let now = chrono::Utc::now();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: Some(
+                Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            ),
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "selected_model": "gpt-5.4",
+                "subagent_lifecycle": "steered",
+                "subagent_runtime_status": "running",
+                "subagent_runtime_attached": true,
+                "subagent_status_updated_at": "2026-03-29T12:01:00Z",
+                "subagent_last_note": "Most recent metadata note"
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id,
+            turn_id: None,
+            seq: 0,
+            kind: "message".into(),
+            payload: serde_json::json!({"content": "working"}),
+            created_at: chrono::DateTime::parse_from_rfc3339("2026-03-29T12:02:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        })
+        .await
+        .unwrap();
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id,
+            turn_id: None,
+            seq: 1,
+            kind: "status_note".into(),
+            payload: serde_json::json!({"content": "Operator asked for a tighter review pass"}),
+            created_at: chrono::DateTime::parse_from_rfc3339("2026-03-29T12:03:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        })
+        .await
+        .unwrap();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["audit"]["transcript_items"], 2);
+    assert_eq!(json["audit"]["status_notes"], 1);
+    assert_eq!(
+        json["audit"]["last_transcript_at"],
+        "2026-03-29T12:03:00+00:00"
+    );
+    assert_eq!(
+        json["audit"]["last_operator_note"],
+        "Operator asked for a tighter review pass"
+    );
 }
