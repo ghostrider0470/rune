@@ -1748,7 +1748,7 @@ impl ToolExecutor for AppToolExecutor {
                     .execute(call)
                     .await
             }
-            "comms_send" => match &self.comms {
+            "comms_send" | "comms_read" => match &self.comms {
                 Some(comms) => comms.execute(call).await,
                 None => Err(ToolError::UnknownTool {
                     name: "comms_send".to_string(),
@@ -2050,6 +2050,18 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
                     }
                 },
                 "required": ["task"]
+            }),
+            category: ToolCategory::External,
+            requires_approval: false,
+        },
+        ToolDefinition {
+            name: "comms_read".into(),
+            description: "Retrieve unread messages from Horizon AI (or another peer agent) via the .comms/ inter-agent mailbox. Use this to check your inbox for directives, questions, or status updates.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "mark_read": { "type": "boolean", "default": true }
+                }
             }),
             category: ToolCategory::External,
             requires_approval: false,
