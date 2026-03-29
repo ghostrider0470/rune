@@ -124,6 +124,7 @@ pub struct ContextTierUsage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ContextAssemblyReport {
     pub total_estimated_tokens: usize,
+    pub over_budget: bool,
     pub tiers: Vec<ContextTierUsage>,
 }
 
@@ -267,8 +268,14 @@ impl ContextAssembler {
             .collect::<Vec<_>>();
 
         let total_estimated_tokens = tiers.iter().map(|tier| tier.estimated_tokens).sum();
+        let total_budget = self
+            .tier_specs
+            .iter()
+            .map(|spec| spec.token_budget)
+            .sum::<usize>();
         ContextAssemblyReport {
             total_estimated_tokens,
+            over_budget: total_budget > 0 && total_estimated_tokens > total_budget,
             tiers,
         }
     }
@@ -290,26 +297,37 @@ impl ContextAssembler {
         // System message with optional workspace + memory context
         let mut sections = vec![self.system_instructions.clone()];
 
-        if let Some(workspace) = workspace {
-            let workspace_section = workspace.format_for_prompt();
-            if !workspace_section.is_empty() {
-                sections.push(workspace_section);
+        let context_report = self.analyze_context_usage(workspace, memory, extra_system_sections);
+        let extra_task_sections = extra_system_sections
+            .iter()
+            .filter(|section| !section.trim().is_empty())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for tier in &context_report.tiers {
+            match tier.kind {
+                ContextTierKind::Identity | ContextTierKind::Historical => {}
+                ContextTierKind::ActiveTask => {
+                    sections.extend(extra_task_sections.iter().cloned());
+                }
+                ContextTierKind::Project => {
+                    if let Some(workspace) = workspace {
+                        let workspace_section = workspace.format_for_prompt();
+                        if !workspace_section.is_empty() {
+                            sections.push(workspace_section);
+                        }
+                    }
+                }
+                ContextTierKind::Shared => {
+                    if let Some(mem) = memory {
+                        let mem_section = mem.format_for_prompt();
+                        if !mem_section.is_empty() {
+                            sections.push(mem_section);
+                        }
+                    }
+                }
             }
         }
-
-        if let Some(mem) = memory {
-            let mem_section = mem.format_for_prompt();
-            if !mem_section.is_empty() {
-                sections.push(mem_section);
-            }
-        }
-
-        sections.extend(
-            extra_system_sections
-                .iter()
-                .filter(|section| !section.trim().is_empty())
-                .cloned(),
-        );
 
         sections.push(STABLE_PREFIX_PADDING.to_string());
 
@@ -827,6 +845,7 @@ mod context_tier_tests {
         );
 
         assert!(report.total_estimated_tokens > 0);
+        assert!(!report.over_budget);
         assert!(report.identity_tokens() > 0);
         assert!(report.project_tokens() > 0);
         assert!(report.tokens_for(ContextTierKind::Shared) > 0);
@@ -837,5 +856,31 @@ mod context_tier_tests {
                 .iter()
                 .any(|tier| tier.kind == ContextTierKind::ActiveTask && tier.loaded)
         );
+    }
+}
+
+#[cfg(test)]
+mod context_budget_tests {
+    use super::*;
+
+    #[test]
+    fn analyze_context_usage_marks_over_budget_when_tier_sum_exceeded() {
+        let assembler = ContextAssembler::new("Identity instructions")
+            .with_tier_budgets(1, 1, 1, 1);
+        let workspace = WorkspaceContext {
+            files: vec![("AGENTS.md".into(), "project rules".into())],
+        };
+        let memory = MemoryContext {
+            today: Some("today note".into()),
+            ..Default::default()
+        };
+
+        let report = assembler.analyze_context_usage(
+            Some(&workspace),
+            Some(&memory),
+            &["Active task goes here".into()],
+        );
+
+        assert!(report.over_budget);
     }
 }
