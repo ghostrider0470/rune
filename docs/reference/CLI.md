@@ -19,6 +19,49 @@ Use this doc as the CLI entrypoint for:
 
 ---
 
+## `doctor` command family
+
+Operator-facing diagnostics surface for runtime readiness, backend connectivity, path layout, and context/memory tier visibility.
+
+### Shipped subcommands
+
+| Subcommand | Purpose | Status |
+|---|---|---|
+| `rune doctor run` | Execute a fresh doctor run against the gateway and return the current diagnostic report | Shipped |
+| `rune doctor results` | Fetch the most recently recorded doctor report from the gateway | Shipped |
+
+### Current behavior
+
+- `rune doctor run` calls `POST /api/doctor/run` and evaluates current gateway/runtime state.
+- `rune doctor results` fetches the latest stored report without forcing a new run.
+- Human output includes overall status, paths, topology, backend matrix, checks, and a memory hierarchy summary when available.
+- `--json` is supported for machine-readable automation output.
+
+### Memory hierarchy summary
+
+Doctor output exposes context/memory tiers so operators can see how Rune reasons about prompt state and compaction:
+
+- **L0** — current turn context window, including active transcript and injected system/task/project context
+- **L1** — provider-side prompt cache reuse via stable prompt prefixes
+- **L2** — semantic/keyword retrieval memory layer
+- **L3** — durable transcript/session storage used for later recall and compaction handoff
+
+When the gateway is queried live, doctor also reports tier counters including:
+- prompt cache totals (`prompt_cache_rows`, `cached_tokens`, `total_input_tokens`, `cache_hit_ratio_percent`)
+- retrieval counters (`l2_recall_hits`, `l2_warm_memories`, `l2_hot_memories`, `l2_total_memories`)
+- context budgeting/compaction counters (`loaded_tiers`, `total_budget`, `estimated_tokens`, `compaction_trigger_tokens`, `over_budget`, `over_compaction_threshold`, `compaction_required`)
+
+### Typical operator flow
+
+```bash
+# Run a fresh diagnostic pass
+rune --gateway-url http://127.0.0.1:8787 doctor run
+
+# Inspect the last report in JSON for automation
+rune --gateway-url http://127.0.0.1:8787 doctor results --json
+```
+
+
 ## `message` command family
 
 Operator surface for channel-targeted outbound messaging and message-level actions.
