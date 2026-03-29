@@ -262,7 +262,13 @@ impl SessionLoop {
 
                 let result = self
                     .turn_executor
-                    .execute_streaming(session.id, &final_text, None, chunk_tx)
+                    .execute_streaming_with_attachments(
+                        session.id,
+                        &final_text,
+                        msg.attachments.clone(),
+                        None,
+                        chunk_tx,
+                    )
                     .await;
 
                 // Wait for the progressive edit task to finish (it exits when

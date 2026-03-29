@@ -6,8 +6,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use rune_core::{
-    ApprovalDecision, ApprovalId, NormalizedMessage, SessionKind, SessionStatus, ToolCallId,
-    TranscriptItem, TriggerKind, TurnId, TurnStatus,
+    ApprovalDecision, ApprovalId, AttachmentRef, NormalizedMessage, SessionKind, SessionStatus,
+    ToolCallId, TranscriptItem, TriggerKind, TurnId, TurnStatus,
 };
 use rune_models::{CompletionRequest, ModelProvider, StreamEvent, Usage};
 use rune_store::models::{NewApproval, NewTranscriptItem, NewTurn, TranscriptItemRow, TurnRow};
@@ -255,9 +255,21 @@ impl TurnExecutor {
         user_message: &str,
         model_ref: Option<&str>,
     ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        self.execute_with_attachments(session_id, user_message, Vec::new(), model_ref)
+            .await
+    }
+
+    pub async fn execute_with_attachments(
+        &self,
+        session_id: Uuid,
+        user_message: &str,
+        attachments: Vec<AttachmentRef>,
+        model_ref: Option<&str>,
+    ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
         self.execute_triggered(
             session_id,
             user_message,
+            attachments,
             model_ref,
             TriggerKind::UserMessage,
             None,
@@ -278,9 +290,28 @@ impl TurnExecutor {
         model_ref: Option<&str>,
         chunk_tx: tokio::sync::mpsc::Sender<String>,
     ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        self.execute_streaming_with_attachments(
+            session_id,
+            user_message,
+            Vec::new(),
+            model_ref,
+            chunk_tx,
+        )
+        .await
+    }
+
+    pub async fn execute_streaming_with_attachments(
+        &self,
+        session_id: Uuid,
+        user_message: &str,
+        attachments: Vec<AttachmentRef>,
+        model_ref: Option<&str>,
+        chunk_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
         self.execute_triggered(
             session_id,
             user_message,
+            attachments,
             model_ref,
             TriggerKind::UserMessage,
             Some(chunk_tx),
@@ -293,6 +324,7 @@ impl TurnExecutor {
         &self,
         session_id: Uuid,
         user_message: &str,
+        attachments: Vec<AttachmentRef>,
         model_ref: Option<&str>,
         trigger_kind: TriggerKind,
         chunk_tx: Option<tokio::sync::mpsc::Sender<String>>,
@@ -343,8 +375,10 @@ impl TurnExecutor {
         debug!(turn_id = %turn_id, "turn created");
 
         // 3. Persist user message to transcript
+        let mut normalized = NormalizedMessage::new("user", user_message);
+        normalized.attachments = attachments;
         let user_item = TranscriptItem::UserMessage {
-            message: NormalizedMessage::new("user", user_message),
+            message: normalized,
         };
         self.append_transcript(session_id, Some(turn_id.into_uuid()), &user_item)
             .await?;
