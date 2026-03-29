@@ -54,8 +54,23 @@ Or wire config manually:
 ```bash
 cp config.example.toml config.toml
 # fill in your provider + channel settings
+# optional: set [instance] name/advertised_addr/peers for multi-instance discovery
 ./target/release/rune-gateway --config config.toml
 ```
+
+For multi-instance federation bring-up, configure `[instance]` in `config.toml` and inspect `GET /api/v1/instance/health`. Example:
+
+```toml
+[instance]
+name = "rune-desktop"
+advertised_addr = "http://192.168.1.10:18790"
+roles = ["gateway", "scheduler"]
+peers = [
+  { id = "rune-laptop", health_url = "http://192.168.1.20:18790/api/v1/instance/health" },
+]
+```
+
+That endpoint returns instance identity, capability manifest, live load counters, and peer health snapshots so operators can verify discovery wiring before delegation lands.
 
 Then open `http://127.0.0.1:8787/webchat` for browser chat or `http://127.0.0.1:8787/dashboard` for the admin UI. The legacy `/chat` path redirects into WebChat so old bookmarks keep working.
 

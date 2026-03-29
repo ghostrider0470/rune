@@ -29,7 +29,7 @@ Primary binaries:
 cp config.example.toml config.toml
 ```
 
-Then fill in the required provider, auth, and channel settings.
+Then fill in the required provider, auth, and channel settings. For multi-instance work, also configure `[instance]` (name, advertised address, peers) so `/api/v1/instance/health` exposes a complete capability manifest.
 
 ## Run locally
 
