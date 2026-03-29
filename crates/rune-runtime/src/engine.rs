@@ -10,7 +10,7 @@ use rune_store::repos::{SessionRepo, TranscriptRepo};
 
 use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
-use crate::session_metadata::{set_context_tiers, set_session_mode};
+use crate::session_metadata::{set_context_tiers, set_project_id, set_session_mode};
 /// Creates and manages session lifecycle. Persists state via store repo traits.
 pub struct SessionEngine {
     session_repo: Arc<dyn SessionRepo>,
@@ -73,8 +73,11 @@ impl SessionEngine {
             .as_deref()
             .map(|mode| set_session_mode(&serde_json::json!({}), mode))
             .unwrap_or_else(|| serde_json::json!({}));
+        let metadata = project_id
+            .as_deref()
+            .map(|project_id| set_project_id(&metadata, project_id))
+            .unwrap_or(metadata);
         let metadata = seed_context_tier_metadata(metadata, &self.context_assembler);
-        let _ = project_id;
 
         let new_session = NewSession {
             id: id.into_uuid(),
