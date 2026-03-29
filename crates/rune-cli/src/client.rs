@@ -6910,6 +6910,11 @@ fn parse_peer_summary(value: &serde_json::Value) -> Option<PeerSummary> {
                     .collect()
             })
             .unwrap_or_default(),
+        capabilities_version: value["capabilities_version"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok()),
+        capability_hash: value["capability_hash"].as_str().map(String::from),
+        comms_transport: value["comms_transport"].as_str().map(String::from),
         load: parse_instance_load(&value["load"]),
     })
 }
@@ -6949,6 +6954,8 @@ fn parse_delegation_endpoint(value: &serde_json::Value) -> Option<DelegationEndp
             .to_string(),
         transport: value["transport"].as_str().unwrap_or_default().to_string(),
         health_url: value["health_url"].as_str().map(str::to_string),
+        submit_url: value["submit_url"].as_str().map(str::to_string),
+        result_url: value["result_url"].as_str().map(str::to_string),
     })
 }
 

@@ -25,10 +25,7 @@ impl ModelProvider for StubProvider {
         &self,
         request: &CompletionRequest,
     ) -> Result<CompletionResponse, ModelError> {
-        self.seen_models
-            .lock()
-            .unwrap()
-            .push(request.model.clone());
+        self.seen_models.lock().unwrap().push(request.model.clone());
         match &self.result {
             StubResult::Ok(response) => Ok(response.clone()),
             StubResult::Err(ModelError::Transient(message)) => {
@@ -126,7 +123,10 @@ async fn routed_provider_uses_ollama_fallback_on_retriable_error() {
         }),
     );
 
-    let response = provider.complete(&request("cloud/gpt-4o-mini")).await.unwrap();
+    let response = provider
+        .complete(&request("cloud/gpt-4o-mini"))
+        .await
+        .unwrap();
     assert_eq!(response.content.as_deref(), Some("fallback ok"));
     assert_eq!(
         primary_seen.lock().unwrap().as_slice(),

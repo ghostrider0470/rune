@@ -101,6 +101,9 @@ pub struct PeerSummary {
     pub roles: Vec<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
+    pub comms_transport: Option<String>,
     pub load: Option<InstanceLoadSummary>,
 }
 
@@ -315,6 +318,8 @@ pub struct DelegationEndpointSummary {
     pub instance_name: String,
     pub transport: String,
     pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,6 +436,40 @@ Conflict prevention: {}",
                 self.task_contract.conflict_prevention.join("; ")
             )?;
         }
+        if let Some(sender) = &self.sender {
+            write!(
+                f,
+                "
+Sender: {} ({})",
+                sender.instance_name, sender.transport
+            )?;
+            if let Some(health_url) = &sender.health_url {
+                write!(f, " health={health_url}")?;
+            }
+            if let Some(submit_url) = &sender.submit_url {
+                write!(f, " submit={submit_url}")?;
+            }
+            if let Some(result_url) = &sender.result_url {
+                write!(f, " result={result_url}")?;
+            }
+        }
+        if let Some(receiver) = &self.receiver {
+            write!(
+                f,
+                "
+Receiver: {} ({})",
+                receiver.instance_name, receiver.transport
+            )?;
+            if let Some(health_url) = &receiver.health_url {
+                write!(f, " health={health_url}")?;
+            }
+            if let Some(submit_url) = &receiver.submit_url {
+                write!(f, " submit={submit_url}")?;
+            }
+            if let Some(result_url) = &receiver.result_url {
+                write!(f, " result={result_url}")?;
+            }
+        }
         for peer in &self.candidates {
             write!(
                 f,
@@ -446,6 +485,18 @@ Conflict prevention: {}",
                     load.ws_connections,
                     peer.latency_ms.unwrap_or_default()
                 )?;
+            }
+            if !peer.roles.is_empty() {
+                write!(f, " roles={}", peer.roles.join(","))?;
+            }
+            if let Some(version) = peer.capabilities_version {
+                write!(f, " cap_v={version}")?;
+            }
+            if let Some(hash) = &peer.capability_hash {
+                write!(f, " cap_hash={hash}")?;
+            }
+            if let Some(comms_transport) = &peer.comms_transport {
+                write!(f, " comms={comms_transport}")?;
             }
         }
         Ok(())
@@ -6404,6 +6455,9 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec!["claude-3-7-sonnet".into()],
                 active_projects: vec!["/workspace/peer".into()],
+                capabilities_version: Some(1),
+                capability_hash: Some("cap-peer-a".into()),
+                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
@@ -6432,6 +6486,9 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec![],
                 active_projects: vec![],
+                capabilities_version: Some(1),
+                capability_hash: Some("cap-peer-a".into()),
+                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
@@ -6464,12 +6521,16 @@ mod tests {
                 instance_name: "Sender A".into(),
                 transport: "filesystem".into(),
                 health_url: Some("http://sender-a/api/v1/instance/health".into()),
+                submit_url: Some("http://sender-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://sender-a/api/v1/instance/delegations/{task_id}".into()),
             }),
             receiver: Some(DelegationEndpointSummary {
                 instance_id: "peer-a".into(),
                 instance_name: "Peer A".into(),
                 transport: "http".into(),
                 health_url: Some("http://peer-a/api/v1/instance/health".into()),
+                submit_url: Some("http://peer-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://peer-a/api/v1/instance/delegations/{task_id}".into()),
             }),
             routing: Some(DelegationRoutingSummary {
                 mode: "least_busy".into(),

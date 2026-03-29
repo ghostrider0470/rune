@@ -4283,6 +4283,9 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
     assert_eq!(peer["roles"], serde_json::json!(["gateway", "coder"]));
     assert_eq!(peer["configured_models"], serde_json::json!(["gpt-4.1"]));
     assert_eq!(peer["active_projects"], serde_json::json!(["rune"]));
+    assert_eq!(peer["capabilities_version"], 1);
+    assert_eq!(peer["capability_hash"], "cap-peer-a");
+    assert_eq!(peer["comms_transport"], "filesystem");
 }
 
 #[tokio::test]
@@ -4380,6 +4383,9 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["selected_peer"]["id"], "peer-b");
     assert_eq!(json["receiver"]["instance_id"], "peer-b");
     assert_eq!(json["receiver"]["transport"], "http");
+    assert_eq!(json["selected_peer"]["capabilities_version"], 1);
+    assert_eq!(json["selected_peer"]["capability_hash"], "cap-peer-a");
+    assert_eq!(json["selected_peer"]["comms_transport"], "filesystem");
     assert_eq!(
         json["receiver"]["submit_url"],
         format!(
@@ -9227,6 +9233,32 @@ async fn agent_steer_success() {
     // Verify metadata was updated.
     let session = session_repo.find_by_id(agent_id).await.unwrap();
     assert_eq!(session.metadata["subagent_lifecycle"], "steered");
+}
+
+#[tokio::test]
+async fn create_subagent_session_with_scratchpad_only_ignores_unknown_fields() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{
+                        "kind": "subagent",
+                        "mode": "isolated",
+                        "shared_scratchpad_path": "agents/acme/scratchpads/research.md"
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let json = body_json(response).await;
+    assert_eq!(json["kind"], "subagent");
+    assert_eq!(json["mode"], "isolated");
 }
 
 #[tokio::test]

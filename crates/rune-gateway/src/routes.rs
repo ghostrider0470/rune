@@ -157,6 +157,9 @@ pub struct PeerHealthResponse {
     pub roles: Vec<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
+    pub comms_transport: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -298,8 +301,18 @@ pub async fn delegation_plan(
             instance_name: peer.id.clone(),
             transport: "http".to_string(),
             health_url: Some(peer.health_url.clone()),
-            submit_url: Some(format!("{}/api/v1/instance/delegations", peer.health_url.trim_end_matches("/api/v1/instance/health").trim_end_matches('/'))),
-            result_url: Some(format!("{}/api/v1/instance/delegations/{{task_id}}", peer.health_url.trim_end_matches("/api/v1/instance/health").trim_end_matches('/'))),
+            submit_url: Some(format!(
+                "{}/api/v1/instance/delegations",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
+            result_url: Some(format!(
+                "{}/api/v1/instance/delegations/{{task_id}}",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
         });
 
     let routing = DelegationRoutingResponse {
@@ -462,6 +475,9 @@ async fn collect_peer_health(
                     roles: Vec::new(),
                     configured_models: Vec::new(),
                     active_projects: Vec::new(),
+                    capabilities_version: None,
+                    capability_hash: None,
+                    comms_transport: None,
                 })
                 .collect();
         }
@@ -493,6 +509,11 @@ async fn collect_peer_health(
                         roles: payload.capabilities.identity.roles,
                         configured_models: payload.capabilities.configured_models,
                         active_projects: payload.capabilities.active_projects,
+                        capabilities_version: Some(
+                            payload.capabilities.identity.capabilities_version,
+                        ),
+                        capability_hash: Some(payload.capabilities.identity.capability_hash),
+                        comms_transport: Some(payload.capabilities.comms_transport),
                     },
                     Err(error) => PeerHealthResponse {
                         id: peer.id,
@@ -506,6 +527,9 @@ async fn collect_peer_health(
                         roles: Vec::new(),
                         configured_models: Vec::new(),
                         active_projects: Vec::new(),
+                        capabilities_version: None,
+                        capability_hash: None,
+                        comms_transport: None,
                     },
                 }
             }
@@ -521,6 +545,9 @@ async fn collect_peer_health(
                 roles: Vec::new(),
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
+                capabilities_version: None,
+                capability_hash: None,
+                comms_transport: None,
             },
         };
         results.push(item);
