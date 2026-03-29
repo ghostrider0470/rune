@@ -1,6 +1,7 @@
 #![doc = "Layered application configuration for Rune."]
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -433,10 +434,37 @@ impl Default for InstanceConfig {
 }
 
 fn default_instance_id() -> String {
+    load_or_create_persisted_instance_id().unwrap_or_else(fallback_instance_id)
+}
+
+fn fallback_instance_id() -> String {
     std::env::var("HOSTNAME")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "rune-local".to_string())
+}
+
+fn persisted_instance_id_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".rune").join("instance-id"))
+}
+
+fn load_or_create_persisted_instance_id() -> Option<String> {
+    let path = persisted_instance_id_path()?;
+
+    if let Ok(existing) = fs::read_to_string(&path) {
+        let id = existing.trim();
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+
+    let parent = path.parent()?;
+    fs::create_dir_all(parent).ok()?;
+
+    let id = uuid::Uuid::new_v4().to_string();
+    fs::write(&path, format!("{id}\n")).ok()?;
+    Some(id)
 }
 
 fn default_instance_name() -> String {
@@ -2259,6 +2287,31 @@ mod tests {
     }
 
     #[test]
+    fn load_or_create_persisted_instance_id_reads_existing_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "rune-instance-id-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("instance-id");
+        fs::write(&path, "node-123\n").unwrap();
+
+        let existing = fs::read_to_string(&path).unwrap();
+        assert_eq!(existing.trim(), "node-123");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn app_config_default_generates_non_empty_instance_id() {
+        let config = AppConfig::default();
+        assert!(!config.instance.id.trim().is_empty());
+    }
+
+    #[test]
     fn capabilities_detect_embeds_instance_identity_manifest() {
         let mut config = AppConfig::default();
         config.instance.id = "node-a".to_string();
@@ -2266,7 +2319,8 @@ mod tests {
         config.instance.advertised_addr = Some("http://10.0.0.5:8787".to_string());
         config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
 
-        let capabilities = Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 7);
+        let capabilities =
+            Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 7);
         assert_eq!(capabilities.identity.id, "node-a");
         assert_eq!(capabilities.identity.name, "Node A");
         assert_eq!(
