@@ -12811,7 +12811,7 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
     assert_eq!(body["memory_hierarchy"]["cached_tokens"], 0);
     assert_eq!(body["memory_hierarchy"]["total_input_tokens"], 10);
     assert_eq!(body["memory_hierarchy"]["cache_hit_ratio_percent"], 0.0);
-    assert_eq!(body["memory_hierarchy"]["context_total_budget"], 36000);
+    assert_eq!(body["memory_hierarchy"]["context_total_budget"], 44000);
     assert_eq!(
         body["memory_hierarchy"]["context_total_estimated_tokens"],
         7
@@ -12830,6 +12830,7 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
         false
     );
     assert_eq!(body["memory_hierarchy"]["loaded_tier_count"], 5);
+    assert_eq!(body["memory_hierarchy"]["last_checkpoint_at"], serde_json::Value::Null);
     let tiers = body["memory_hierarchy"]["context_tier_counters"]
         .as_array()
         .unwrap();

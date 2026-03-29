@@ -1366,6 +1366,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     config.runtime.compaction.compress_after
                 )
             },
+            last_checkpoint_at: None,
             prompt_cache_rows: 0,
             cached_tokens: 0,
             total_input_tokens: 0,
