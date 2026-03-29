@@ -104,9 +104,6 @@ pub struct PeerSummary {
     pub comms_transport: Option<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
-    pub capabilities_version: Option<u32>,
-    pub capability_hash: Option<String>,
-    pub comms_transport: Option<String>,
     pub load: Option<InstanceLoadSummary>,
 }
 
@@ -6758,9 +6755,6 @@ mod tests {
                 comms_transport: Some("http".into()),
                 configured_models: vec!["claude-3-7-sonnet".into()],
                 active_projects: vec!["/workspace/peer".into()],
-                capabilities_version: Some(1),
-                capability_hash: Some("cap-peer-a".into()),
-                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
@@ -6795,9 +6789,6 @@ mod tests {
                 comms_transport: None,
                 configured_models: vec![],
                 active_projects: vec![],
-                capabilities_version: Some(1),
-                capability_hash: Some("cap-peer-a".into()),
-                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
