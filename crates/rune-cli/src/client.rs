@@ -6893,6 +6893,11 @@ fn parse_peer_summary(value: &serde_json::Value) -> Option<PeerSummary> {
                     .collect()
             })
             .unwrap_or_default(),
+        capability_hash: value["capability_hash"].as_str().map(String::from),
+        capabilities_version: value["capabilities_version"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok()),
+        comms_transport: value["comms_transport"].as_str().map(String::from),
         configured_models: value["configured_models"]
             .as_array()
             .map(|models| {
