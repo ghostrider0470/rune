@@ -358,7 +358,11 @@ pub async fn delegation_plan(
 
     let capability_match = evaluate_capability_match(&state.capabilities, selected_peer.as_ref());
 
-    let detail = match (&selected_peer, strategy.as_str(), capability_match.compatible) {
+    let detail = match (
+        &selected_peer,
+        strategy.as_str(),
+        capability_match.compatible,
+    ) {
         (Some(peer), "named", true) => format!("selected named peer '{}'", peer.id),
         (Some(peer), "named", false) => format!(
             "selected named peer '{}' with capability mismatch: {}",
@@ -1344,6 +1348,7 @@ pub struct DashboardMemoryHierarchyDiagnostics {
     pub l2_recall_hits: u64,
     pub l2_warm_memories: u64,
     pub l2_hot_memories: u64,
+    pub l2_cold_memories: u64,
     pub l2_total_memories: u64,
     pub context_total_budget: u64,
     pub context_total_estimated_tokens: u64,
@@ -1605,6 +1610,7 @@ pub async fn dashboard_diagnostics(
         l2_recall_hits: memory_hierarchy_summary.l2_recall_hits,
         l2_warm_memories: memory_hierarchy_summary.l2_warm_memories,
         l2_hot_memories: memory_hierarchy_summary.l2_hot_memories,
+        l2_cold_memories: memory_hierarchy_summary.l2_cold_memories,
         l2_total_memories: memory_hierarchy_summary.l2_total_memories,
         context_total_budget: memory_hierarchy_summary.context_total_budget,
         context_total_estimated_tokens: memory_hierarchy_summary.context_total_estimated_tokens,
@@ -6445,6 +6451,7 @@ pub struct DoctorMemoryHierarchySummary {
     pub l2_recall_hits: u64,
     pub l2_warm_memories: u64,
     pub l2_hot_memories: u64,
+    pub l2_cold_memories: u64,
     pub l2_total_memories: u64,
     pub context_total_budget: u64,
     pub context_total_estimated_tokens: u64,
@@ -6691,24 +6698,24 @@ async fn doctor_memory_hierarchy(
         "keyword/file fallback"
     };
 
-    let (l2_recall_hits, l2_warm_memories, l2_hot_memories, l2_total_memories) = if let Some(mem0) =
-        state.turn_executor.mem0()
-    {
-        match mem0.memory_hierarchy_metrics().await {
-            Ok(metrics) => (
-                metrics.recall_hits,
-                metrics.warm_memories,
-                metrics.hot_memories,
-                metrics.total_memories,
-            ),
-            Err(error) => {
-                tracing::debug!(error = %error, "doctor: failed to load mem0 hierarchy metrics");
-                (0, 0, 0, 0)
+    let (l2_recall_hits, l2_warm_memories, l2_hot_memories, l2_cold_memories, l2_total_memories) =
+        if let Some(mem0) = state.turn_executor.mem0() {
+            match mem0.memory_hierarchy_metrics().await {
+                Ok(metrics) => (
+                    metrics.recall_hits,
+                    metrics.warm_memories,
+                    metrics.hot_memories,
+                    metrics.cold_memories,
+                    metrics.total_memories,
+                ),
+                Err(error) => {
+                    tracing::debug!(error = %error, "doctor: failed to load mem0 hierarchy metrics");
+                    (0, 0, 0, 0, 0)
+                }
             }
-        }
-    } else {
-        (0, 0, 0, 0)
-    };
+        } else {
+            (0, 0, 0, 0, 0)
+        };
 
     let context_total_budget = context_report.total_budget as u64;
     let context_total_estimated_tokens = context_report.total_estimated_tokens as u64;
@@ -6747,12 +6754,13 @@ async fn doctor_memory_hierarchy(
             cache_ratio
         ),
         l2: format!(
-            "{} memory retrieval ({}; recall_hits={}, warm_memories={}, hot_memories={}, total_memories={})",
+            "{} memory retrieval ({}; recall_hits={}, warm_memories={}, hot_memories={}, cold_memories={}, total_memories={})",
             vector_backend,
             capabilities.memory_mode,
             l2_recall_hits,
             l2_warm_memories,
             l2_hot_memories,
+            l2_cold_memories,
             l2_total_memories
         ),
         l3: if l3_cold_storage_enabled {
@@ -6794,6 +6802,7 @@ async fn doctor_memory_hierarchy(
         l2_recall_hits,
         l2_warm_memories,
         l2_hot_memories,
+        l2_cold_memories,
         l2_total_memories,
         context_total_budget,
         context_total_estimated_tokens,

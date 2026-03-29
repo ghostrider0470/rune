@@ -782,6 +782,8 @@ pub struct DoctorMemoryHierarchySummary {
     #[serde(default)]
     pub l2_hot_memories: u64,
     #[serde(default)]
+    pub l2_cold_memories: u64,
+    #[serde(default)]
     pub l2_total_memories: u64,
     #[serde(default)]
     pub context_total_budget: u64,
@@ -883,10 +885,11 @@ impl fmt::Display for DoctorReport {
             )?;
             writeln!(
                 f,
-                "  L2 Counters: recall_hits={}, warm_memories={}, hot_memories={}, total_memories={}",
+                "  L2 Counters: recall_hits={}, warm_memories={}, hot_memories={}, cold_memories={}, total_memories={}",
                 memory_hierarchy.l2_recall_hits,
                 memory_hierarchy.l2_warm_memories,
                 memory_hierarchy.l2_hot_memories,
+                memory_hierarchy.l2_cold_memories,
                 memory_hierarchy.l2_total_memories
             )?;
             writeln!(
@@ -6109,6 +6112,7 @@ mod tests {
                 l2_recall_hits: 0,
                 l2_warm_memories: 0,
                 l2_hot_memories: 0,
+                l2_cold_memories: 0,
                 l2_total_memories: 0,
                 context_total_budget: 36_000,
                 context_total_estimated_tokens: 0,
