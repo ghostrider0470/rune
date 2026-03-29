@@ -704,7 +704,12 @@ async fn build_services(
         model_provider.clone(),
         tool_executor,
         tool_registry,
-        ContextAssembler::new(&system_prompt),
+        ContextAssembler::new(&system_prompt).with_tier_budgets(
+            config.context.identity,
+            config.context.task,
+            config.context.project,
+            config.context.shared,
+        ),
         {
             let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
                 TokenBudgetCompaction::new(
