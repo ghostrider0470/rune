@@ -103,6 +103,7 @@ impl RpcDispatcher {
             "cron.status" => self.cron_status(params).await,
             "runtime.lanes" => self.runtime_lanes().await,
             "runtime.context_budget" => self.runtime_context_budget(params).await,
+            "runtime.context_budget.gc" => self.runtime_context_budget_gc(params).await,
             "agent.steer" => self.agent_steer(params).await,
             "agent.kill" => self.agent_kill(params).await,
             "skills.list" => self.skills_list().await,
@@ -985,60 +986,7 @@ impl RpcDispatcher {
     }
 
     async fn runtime_context_budget(&self, params: Value) -> Result<Value, RpcError> {
-        let total_capacity = params
-            .get("total_capacity")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(8192)
-            .clamp(1, 1_000_000) as usize;
-
-        let mut budget = rune_runtime::TokenBudget::new(total_capacity);
-
-        if let Some(items) = params.get("items").and_then(|value| value.as_array()) {
-            for item in items {
-                let partition = parse_partition(
-                    item.get("partition")
-                        .and_then(|value| value.as_str())
-                        .ok_or_else(|| {
-                            RpcError::bad_request(
-                                "context budget items require partition values like objective/history/decision_log/background/reserve",
-                            )
-                        })?,
-                )?;
-
-                let id = item
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        RpcError::bad_request("context budget items require a non-empty id")
-                    })?;
-
-                let token_count = item
-                    .get("token_count")
-                    .and_then(|value| value.as_u64())
-                    .ok_or_else(|| {
-                        RpcError::bad_request(
-                            "context budget items require token_count as a non-negative integer",
-                        )
-                    })? as usize;
-
-                let importance = item
-                    .get("importance")
-                    .and_then(|value| value.as_f64())
-                    .unwrap_or(0.5) as f32;
-
-                let mut budget_item = rune_runtime::BudgetItem::new(id, token_count, importance);
-                if item
-                    .get("summarized")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false)
-                {
-                    budget_item.summarized = true;
-                }
-                budget.add_item(partition, budget_item);
-            }
-        }
-
+        let mut budget = build_context_budget(&params)?;
         let report = rune_runtime::BudgetReport::from(&budget);
         let checkpoint = params.get("checkpoint").map(|value| {
             let status = value
@@ -1102,6 +1050,45 @@ impl RpcDispatcher {
                     "staleness_policy": "retrieval_only"
                 }
             }
+        }))
+    }
+
+
+    async fn runtime_context_budget_gc(&self, params: Value) -> Result<Value, RpcError> {
+        let mut budget = build_context_budget(&params)?;
+        let checkpoint_status = params
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or("ready");
+        let key_decisions = params
+            .get("key_decisions")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let next_step = params
+            .get("next_step")
+            .and_then(|value| value.as_str())
+            .unwrap_or("continue");
+
+        let before = rune_runtime::BudgetReport::from(&budget);
+        let (checkpoint, gc_result) = rune_runtime::heartbeat_gc(
+            &mut budget,
+            checkpoint_status,
+            key_decisions,
+            next_step,
+        );
+        let after = rune_runtime::BudgetReport::from(&budget);
+
+        Ok(json!({
+            "before": before,
+            "after": after,
+            "checkpoint": checkpoint,
+            "gc": gc_result,
         }))
     }
 
@@ -1692,6 +1679,65 @@ fn require_string<'a>(params: &'a Value, key: &str) -> Result<&'a str, RpcError>
         .and_then(|v| v.as_str())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| RpcError::bad_request(format!("missing required param: {key}")))
+}
+
+
+fn build_context_budget(params: &Value) -> Result<rune_runtime::TokenBudget, RpcError> {
+    let total_capacity = params
+        .get("total_capacity")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(8192)
+        .clamp(1, 1_000_000) as usize;
+
+    let mut budget = rune_runtime::TokenBudget::new(total_capacity);
+
+    if let Some(items) = params.get("items").and_then(|value| value.as_array()) {
+        for item in items {
+            let partition = parse_partition(
+                item.get("partition")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| {
+                        RpcError::bad_request(
+                            "context budget items require partition values like objective/history/decision_log/background/reserve",
+                        )
+                    })?,
+            )?;
+
+            let id = item
+                .get("id")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    RpcError::bad_request("context budget items require a non-empty id")
+                })?;
+
+            let token_count = item
+                .get("token_count")
+                .and_then(|value| value.as_u64())
+                .ok_or_else(|| {
+                    RpcError::bad_request(
+                        "context budget items require token_count as a non-negative integer",
+                    )
+                })? as usize;
+
+            let importance = item
+                .get("importance")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.5) as f32;
+
+            let mut budget_item = rune_runtime::BudgetItem::new(id, token_count, importance);
+            if item
+                .get("summarized")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                budget_item.summarized = true;
+            }
+            budget.add_item(partition, budget_item);
+        }
+    }
+
+    Ok(budget)
 }
 
 fn parse_partition(value: &str) -> Result<rune_runtime::Partition, RpcError> {
