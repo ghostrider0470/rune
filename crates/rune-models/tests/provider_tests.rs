@@ -2,9 +2,10 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
-    AnthropicProvider, AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
-    FunctionDefinition, GoogleProvider, ImageUrlPart, MessagePart, ModelError, ModelProvider,
-    OpenAiProvider, Role, RoutedModelProvider, StreamEvent, ToolDefinition, provider_from_config,
+    AnthropicProvider, AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest,
+    FinishReason, FunctionDefinition, GoogleProvider, ImageUrlPart, MessagePart, ModelError,
+    ModelProvider, OpenAiProvider, Role, RoutedModelProvider, StreamEvent, ToolDefinition,
+    provider_from_config,
 };
 use wiremock::matchers::{body_partial_json, header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
