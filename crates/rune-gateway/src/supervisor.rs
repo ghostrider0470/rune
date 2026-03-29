@@ -633,7 +633,14 @@ async fn run_heartbeat(
 
     let (_turn, _usage) = deps
         .turn_executor
-        .execute_triggered(session.id, prompt, None, TriggerKind::Heartbeat, None)
+        .execute_triggered(
+            session.id,
+            prompt,
+            Vec::new(),
+            None,
+            TriggerKind::Heartbeat,
+            None,
+        )
         .await?;
 
     // Read the last assistant message from transcript
@@ -812,7 +819,7 @@ async fn execute_in_session(
 
     let (_turn, _usage) = deps
         .turn_executor
-        .execute_triggered(session.id, message, model, trigger_kind, None)
+        .execute_triggered(session.id, message, Vec::new(), model, trigger_kind, None)
         .await?;
 
     let items = deps
