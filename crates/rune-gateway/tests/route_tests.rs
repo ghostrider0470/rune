@@ -11500,6 +11500,36 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
 
     let (app, _) = build_test_app_parts(config, Some("secret-token".into()));
 
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let session_id = body_json(create_response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let send_response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/sessions/{session_id}/messages"))
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"content":"hello"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(send_response.status(), StatusCode::OK);
+
     let response = app
         .oneshot(
             Request::post("/api/doctor/run")
@@ -11555,9 +11585,9 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
             .unwrap()
             .contains("l2_recall_hits=")
     );
-    assert_eq!(body["memory_hierarchy"]["prompt_cache_rows"], 0);
+    assert_eq!(body["memory_hierarchy"]["prompt_cache_rows"], 1);
     assert_eq!(body["memory_hierarchy"]["cached_tokens"], 0);
-    assert_eq!(body["memory_hierarchy"]["total_input_tokens"], 0);
+    assert_eq!(body["memory_hierarchy"]["total_input_tokens"], 10);
     assert_eq!(body["memory_hierarchy"]["cache_hit_ratio_percent"], 0.0);
     assert_eq!(body["memory_hierarchy"]["context_total_budget"], 36000);
     assert_eq!(
