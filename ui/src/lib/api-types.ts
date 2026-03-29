@@ -201,6 +201,8 @@ export interface CronJobResponse {
   name: string | null;
   schedule: CronSchedule;
   payload: CronPayload;
+  delivery_mode?: string;
+  webhook_url?: string | null;
   session_target: string;
   enabled: boolean;
   created_at: string;
@@ -213,6 +215,7 @@ export interface CronRunResponse {
   job_id: string;
   started_at: string;
   finished_at: string | null;
+  trigger_kind?: string;
   status: string;
   output: string | null;
 }
