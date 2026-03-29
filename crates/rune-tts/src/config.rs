@@ -27,6 +27,12 @@ pub struct TtsConfig {
     /// API key for the chosen provider.
     pub api_key: Option<String>,
 
+    /// Optional base URL for OpenAI-compatible providers.
+    pub base_url: Option<String>,
+
+    /// Optional API version for Azure OpenAI-compatible endpoints.
+    pub api_version: Option<String>,
+
     /// Default voice identifier.
     pub voice: String,
 
@@ -43,6 +49,8 @@ impl Default for TtsConfig {
             enabled: false,
             provider: "openai".to_owned(),
             api_key: None,
+            base_url: None,
+            api_version: None,
             voice: "alloy".to_owned(),
             model: "tts-1".to_owned(),
             auto_mode: TtsAutoMode::Off,
