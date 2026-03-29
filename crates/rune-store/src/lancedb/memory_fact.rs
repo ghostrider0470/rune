@@ -237,6 +237,7 @@ impl MemoryFactRepo for LanceStore {
                 "updated_at".into(),
                 "access_count".into(),
             ]))
+            .limit(i32::MAX as usize)
             .execute()
             .await
             .map_err(|e| StoreError::Database(format!("lancedb list_all: {e}")))?;
@@ -306,6 +307,7 @@ impl MemoryFactRepo for LanceStore {
                 "fact_id".into(),
                 "embedding".into(),
             ]))
+            .limit(i32::MAX as usize)
             .execute()
             .await
             .map_err(|e| StoreError::Database(format!("lancedb graph: {e}")))?;
@@ -356,7 +358,6 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     if d == 0.0 { 0.0 } else { dot / d }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,7 +375,14 @@ mod tests {
         let updated_at = created_at + chrono::Duration::minutes(1);
 
         store
-            .insert(id, "original fact", "workflow", "[1.0,0.0]", None, created_at)
+            .insert(
+                id,
+                "original fact",
+                "workflow",
+                "[1.0,0.0]",
+                None,
+                created_at,
+            )
             .await
             .expect("insert should succeed");
         store
@@ -383,7 +391,11 @@ mod tests {
             .expect("update should succeed");
 
         let listed = store.list_all().await.expect("list_all should succeed");
-        assert_eq!(listed.len(), 1, "list_all should deduplicate append-only rows");
+        assert_eq!(
+            listed.len(),
+            1,
+            "list_all should deduplicate append-only rows"
+        );
         assert_eq!(listed[0].id, id);
         assert_eq!(listed[0].fact, "updated fact");
         assert_eq!(listed[0].category, "operational");
@@ -404,11 +416,25 @@ mod tests {
         let newer_created = Utc::now() - chrono::Duration::minutes(1);
 
         store
-            .insert(older_id, "older", "workflow", "[1.0,0.0]", None, older_created)
+            .insert(
+                older_id,
+                "older",
+                "workflow",
+                "[1.0,0.0]",
+                None,
+                older_created,
+            )
             .await
             .expect("older insert should succeed");
         store
-            .insert(newer_id, "newer", "operational", "[0.0,1.0]", None, newer_created)
+            .insert(
+                newer_id,
+                "newer",
+                "operational",
+                "[0.0,1.0]",
+                None,
+                newer_created,
+            )
             .await
             .expect("newer insert should succeed");
 

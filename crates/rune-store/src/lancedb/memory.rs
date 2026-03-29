@@ -169,6 +169,7 @@ impl MemoryEmbeddingRepo for LanceStore {
                 "file_path".to_string(),
             ]))
             .only_if(project_filter(project_id))
+            .limit(i32::MAX as usize)
             .execute()
             .await
             .map_err(|e| StoreError::Database(format!("lancedb list files: {e}")))?;

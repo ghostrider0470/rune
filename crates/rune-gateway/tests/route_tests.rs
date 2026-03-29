@@ -2316,6 +2316,9 @@ async fn ws_rpc_runtime_context_budget_reports_partition_usage_and_checkpoint() 
     assert_eq!(payload["report"]["total_capacity"], 1000);
     assert_eq!(payload["report"]["total_used"], 250);
     assert_eq!(payload["checkpoint"]["status"], "planning");
+    assert_eq!(payload["tiers"]["identity"]["token_budget"], 1000);
+    assert_eq!(payload["tiers"]["task"]["staleness_policy"], "per_turn");
+    assert_eq!(payload["tiers"]["historical"]["priority"], 4);
     assert_eq!(payload["checkpoint"]["next_step"], "wire runtime");
     assert_eq!(
         payload["checkpoint"]["partition_snapshot"]["Objective"],
@@ -4281,7 +4284,6 @@ async fn dashboard_models_lists_provider_inventory() {
     assert!(items.iter().any(|item| item["is_default"] == true));
 }
 
-
 #[tokio::test]
 async fn list_models_marks_configured_inventory_as_not_discovered() {
     let mut config = AppConfig::default();
@@ -4314,7 +4316,7 @@ async fn list_models_marks_configured_inventory_as_not_discovered() {
 
 #[tokio::test]
 async fn scan_models_uses_ollama_provider_discovery() {
-    use axum::{routing::get, Json, Router};
+    use axum::{Json, Router, routing::get};
     use serde_json::json;
     use tokio::net::TcpListener;
 
@@ -7101,7 +7103,11 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
         .unwrap();
 
     let response = app
-        .oneshot(Request::get("/api/dashboard/usage").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/api/dashboard/usage")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -10681,28 +10687,44 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
 
-    assert_eq!(body["memory_hierarchy"]["l0"], "current turn context window (active transcript + system/task/project context)");
-    assert!(body["memory_hierarchy"]["l1"]
-        .as_str()
-        .unwrap()
-        .contains("prompt cache via provider prefixes"));
-    assert!(body["memory_hierarchy"]["l2"]
-        .as_str()
-        .unwrap()
-        .contains("memory retrieval"));
-    assert_eq!(body["memory_hierarchy"]["l3"], "durable session logs in transcript/session storage");
-    assert!(body["memory_hierarchy"]["promotion"]
-        .as_str()
-        .unwrap()
-        .contains("L2 hits become L1 candidates"));
-    assert!(body["memory_hierarchy"]["demotion"]
-        .as_str()
-        .unwrap()
-        .contains("compaction checkpoints persist stale L0 context"));
-    assert!(body["memory_hierarchy"]["metrics"]
-        .as_str()
-        .unwrap()
-        .contains("prompt_cache_rows="));
+    assert_eq!(
+        body["memory_hierarchy"]["l0"],
+        "current turn context window (active transcript + system/task/project context)"
+    );
+    assert!(
+        body["memory_hierarchy"]["l1"]
+            .as_str()
+            .unwrap()
+            .contains("prompt cache via provider prefixes")
+    );
+    assert!(
+        body["memory_hierarchy"]["l2"]
+            .as_str()
+            .unwrap()
+            .contains("memory retrieval")
+    );
+    assert_eq!(
+        body["memory_hierarchy"]["l3"],
+        "durable session logs in transcript/session storage"
+    );
+    assert!(
+        body["memory_hierarchy"]["promotion"]
+            .as_str()
+            .unwrap()
+            .contains("L2 hits become L1 candidates")
+    );
+    assert!(
+        body["memory_hierarchy"]["demotion"]
+            .as_str()
+            .unwrap()
+            .contains("compaction checkpoints persist stale L0 context")
+    );
+    assert!(
+        body["memory_hierarchy"]["metrics"]
+            .as_str()
+            .unwrap()
+            .contains("prompt_cache_rows=")
+    );
 }
 
 #[tokio::test]
@@ -11383,7 +11405,6 @@ async fn api_tool_execution_route_returns_persisted_execution() {
     assert_eq!(json["result_summary"], "ok");
 }
 
-
 #[tokio::test]
 async fn tts_synthesize_rejects_empty_text() {
     let app = build_test_app(None);
@@ -11402,7 +11423,10 @@ async fn tts_synthesize_rejects_empty_text() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = body_json(response).await;
-    assert_eq!(json["message"], "bad request: text is required for TTS synthesis");
+    assert_eq!(
+        json["message"],
+        "bad request: text is required for TTS synthesis"
+    );
 }
 
 #[tokio::test]
