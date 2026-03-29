@@ -2102,6 +2102,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.gateway_discover().await?;
                 println!("{}", render(&result, format));
             }
+            GatewayAction::InstanceHealth => {
+                let result = client.gateway_instance_health().await?;
+                println!("{}", render(&result, format));
+            }
+            GatewayAction::DelegationPlan { strategy, peer_id } => {
+                let result = client
+                    .gateway_delegation_plan(&strategy, peer_id.as_deref())
+                    .await?;
+                println!("{}", render(&result, format));
+            }
             GatewayAction::Logs(LogsArgs {
                 level,
                 source,
