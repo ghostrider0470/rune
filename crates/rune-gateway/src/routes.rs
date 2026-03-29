@@ -225,6 +225,7 @@ pub struct PeerHealthResponse {
     pub detail: String,
     pub checked_at: String,
     pub latency_ms: Option<u128>,
+    pub consecutive_failures: u32,
     pub load: Option<InstanceLoadResponse>,
     pub advertised_addr: Option<String>,
     pub roles: Vec<String>,
@@ -358,7 +359,11 @@ pub async fn delegation_plan(
 
     let capability_match = evaluate_capability_match(&state.capabilities, selected_peer.as_ref());
 
-    let detail = match (&selected_peer, strategy.as_str(), capability_match.compatible) {
+    let detail = match (
+        &selected_peer,
+        strategy.as_str(),
+        capability_match.compatible,
+    ) {
         (Some(peer), "named", true) => format!("selected named peer '{}'", peer.id),
         (Some(peer), "named", false) => format!(
             "selected named peer '{}' with capability mismatch: {}",
@@ -699,6 +704,7 @@ async fn collect_peer_health(
                     detail: format!("client init failed: {error}"),
                     checked_at: checked_at.clone(),
                     latency_ms: None,
+                    consecutive_failures: 0,
                     load: None,
                     advertised_addr: None,
                     roles: Vec::new(),
@@ -734,6 +740,7 @@ async fn collect_peer_health(
                         detail: status_code.to_string(),
                         checked_at,
                         latency_ms,
+                        consecutive_failures: if status_code.is_success() { 0 } else { 1 },
                         load: Some(payload.load),
                         advertised_addr: payload.capabilities.identity.advertised_addr,
                         roles: payload.capabilities.identity.roles,
@@ -753,6 +760,7 @@ async fn collect_peer_health(
                         detail: format!("{} (invalid health payload: {error})", status_code),
                         checked_at,
                         latency_ms,
+                        consecutive_failures: 1,
                         load: None,
                         advertised_addr: None,
                         roles: Vec::new(),
@@ -772,6 +780,7 @@ async fn collect_peer_health(
                 detail: error.to_string(),
                 checked_at,
                 latency_ms: None,
+                consecutive_failures: 1,
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
@@ -5958,7 +5967,6 @@ pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
         })
         .collect()
 }
-
 
 #[derive(Serialize, Deserialize)]
 struct RemoteMemorySearchResponse {

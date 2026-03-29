@@ -4886,7 +4886,6 @@ async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
     assert_eq!(json["selected_peer"]["comms_transport"], "http");
 }
 
-
 #[tokio::test]
 async fn delegation_plan_rejects_named_strategy_when_peer_has_capability_mismatch() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -4972,8 +4971,14 @@ async fn delegation_plan_rejects_named_strategy_when_peer_has_capability_mismatc
     let json = body_json(response).await;
     assert_eq!(json["selected_peer"]["id"], "peer-b");
     assert_eq!(json["capability_match"]["compatible"], false);
-    assert_eq!(json["capability_match"]["missing_roles"], serde_json::json!(["coder"]));
-    assert_eq!(json["capability_match"]["missing_projects"], serde_json::json!(["rune"]));
+    assert_eq!(
+        json["capability_match"]["missing_roles"],
+        serde_json::json!(["coder"])
+    );
+    assert_eq!(
+        json["capability_match"]["missing_projects"],
+        serde_json::json!(["rune"])
+    );
 }
 
 #[tokio::test]
@@ -13707,4 +13712,30 @@ async fn delegation_status_route_returns_trackable_task_status() {
         json["receiver"]["result_url"],
         "/api/v1/instance/delegations/delegation-421"
     );
+}
+
+#[tokio::test]
+async fn instance_health_marks_unreachable_peer_and_reports_failure_count() {
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-down".to_string(),
+        health_url: "http://127.0.0.1:9/api/v1/instance/health".to_string(),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peer = json["peers"].as_array().unwrap().first().unwrap();
+    assert_eq!(peer["status"], "unreachable");
+    assert_eq!(peer["consecutive_failures"], 1);
+    assert!(!peer["detail"].as_str().unwrap().is_empty());
 }

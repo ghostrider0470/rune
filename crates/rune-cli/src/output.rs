@@ -92,11 +92,13 @@ pub struct InstanceLoadSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerSummary {
     pub id: String,
+    pub name: Option<String>,
     pub health_url: String,
     pub status: String,
     pub detail: String,
     pub checked_at: Option<String>,
     pub latency_ms: Option<u128>,
+    pub consecutive_failures: Option<u32>,
     pub advertised_addr: Option<String>,
     pub roles: Vec<String>,
     pub configured_models: Vec<String>,
@@ -228,7 +230,8 @@ Peers: {}",
                 f,
                 "
   - {} [{}]",
-                peer.id, peer.status
+                peer.name.as_deref().unwrap_or(&peer.id),
+                peer.status
             )?;
             write!(
                 f,
@@ -254,6 +257,13 @@ Peers: {}",
                     f,
                     "
     Latency: {latency_ms}ms"
+                )?;
+            }
+            if let Some(consecutive_failures) = peer.consecutive_failures {
+                write!(
+                    f,
+                    "
+    Consecutive failures: {consecutive_failures}"
                 )?;
             }
             if let Some(ref advertised_addr) = peer.advertised_addr {
@@ -688,7 +698,8 @@ Result timestamps: accepted={}, started={}, finished={}",
                 f,
                 "
   - {} [{}]",
-                peer.id, peer.status
+                peer.name.as_deref().unwrap_or(&peer.id),
+                peer.status
             )?;
             if let Some(ref load) = peer.load {
                 write!(

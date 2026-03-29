@@ -6878,11 +6878,15 @@ fn parse_peer_summary(value: &serde_json::Value) -> Option<PeerSummary> {
 
     Some(PeerSummary {
         id: value["id"].as_str().unwrap_or_default().to_string(),
+        name: value["name"].as_str().map(String::from),
         health_url: value["health_url"].as_str().unwrap_or_default().to_string(),
         status: value["status"].as_str().unwrap_or("unknown").to_string(),
         detail: value["detail"].as_str().unwrap_or_default().to_string(),
         checked_at: value["checked_at"].as_str().map(String::from),
         latency_ms: value["latency_ms"].as_u64().map(u128::from),
+        consecutive_failures: value["consecutive_failures"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok()),
         advertised_addr: value["advertised_addr"].as_str().map(String::from),
         roles: value["roles"]
             .as_array()
