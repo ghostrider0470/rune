@@ -2625,6 +2625,22 @@ pub struct SessionTreeNode {
     pub mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orchestration_status: Option<String>,
+    #[serde(default)]
+    pub delegation_roles: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegation_depth: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_lifecycle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_runtime_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_runtime_attached: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_status_updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_last_note: Option<String>,
     pub created_at: String,
     pub turn_count: u32,
     pub children: Vec<SessionTreeNode>,
@@ -2697,12 +2713,47 @@ pub async fn get_session_tree(
                     .collect()
             })
             .unwrap_or_default();
+        let orchestration_status = metadata_string(&row.metadata, "orchestration_status")
+            .or_else(|| metadata_string(&row.metadata, "subagent_lifecycle"));
+        let delegation_roles = row
+            .metadata
+            .get("delegation_roles")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let delegation_depth = if row.requester_session_id.is_some() {
+            Some(
+                row.metadata
+                    .get("delegation_depth")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as u32)
+                    .unwrap_or(1),
+            )
+        } else {
+            row.metadata
+                .get("delegation_depth")
+                .and_then(|value| value.as_u64())
+                .map(|value| value as u32)
+        };
         SessionTreeNode {
             id: row.id.to_string(),
             kind: row.kind.clone(),
             status: row.status.clone(),
             mode: metadata_string(&row.metadata, "mode"),
             channel: row.channel_ref.clone(),
+            orchestration_status,
+            delegation_roles,
+            delegation_depth,
+            subagent_lifecycle: metadata_string(&row.metadata, "subagent_lifecycle"),
+            subagent_runtime_status: metadata_string(&row.metadata, "subagent_runtime_status"),
+            subagent_runtime_attached: metadata_bool(&row.metadata, "subagent_runtime_attached"),
+            subagent_status_updated_at: metadata_string(&row.metadata, "subagent_status_updated_at"),
+            subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
             children,
