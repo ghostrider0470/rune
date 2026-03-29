@@ -309,6 +309,16 @@ pub fn heartbeat_gc(
     key_decisions: Vec<String>,
     next_step: impl Into<String>,
 ) -> (Checkpoint, GcResult) {
+    heartbeat_gc_with_store(budget, status, key_decisions, next_step, None)
+}
+
+pub fn heartbeat_gc_with_store(
+    budget: &mut TokenBudget,
+    status: impl Into<String>,
+    key_decisions: Vec<String>,
+    next_step: impl Into<String>,
+    checkpoint_store: Option<&CheckpointStore>,
+) -> (Checkpoint, GcResult) {
     let checkpoint = budget.create_checkpoint(status, key_decisions, next_step);
     if budget.usage_pct() < 0.80 {
         return (checkpoint, GcResult::NoAction);
@@ -321,11 +331,14 @@ pub fn heartbeat_gc(
         freed += budget.compact_background();
     }
     budget.mark_gc();
+    let persisted_checkpoint = checkpoint_store
+        .map(|store| store.persist(&checkpoint).is_ok())
+        .unwrap_or(false);
     (
         checkpoint,
         GcResult::Compacted {
             freed_tokens: freed,
-            persisted_checkpoint: false,
+            persisted_checkpoint,
         },
     )
 }
@@ -391,6 +404,47 @@ mod tests {
         assert_eq!(budget.partitions[&Partition::History].items.len(), 5);
         assert_eq!(budget.partitions[&Partition::Background].items.len(), 0);
         assert!(budget.last_gc.is_some());
+    }
+
+    #[test]
+    fn heartbeat_gc_persists_checkpoint_when_store_is_provided() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(dir.path().join("gc-checkpoint.json"));
+
+        let mut budget = TokenBudget::new(100);
+        for idx in 0..8 {
+            budget.add_item(
+                Partition::History,
+                BudgetItem::new(format!("h{idx}"), 10, 0.5),
+            );
+        }
+        let mut summarized = BudgetItem::new("bg", 15, 0.1);
+        summarized.summarized = true;
+        budget.add_item(Partition::Background, summarized);
+
+        let (checkpoint, gc) = heartbeat_gc_with_store(
+            &mut budget,
+            "busy",
+            vec!["persist latest checkpoint".into()],
+            "continue",
+            Some(&store),
+        );
+
+        match gc {
+            GcResult::Compacted {
+                freed_tokens,
+                persisted_checkpoint,
+            } => {
+                assert!(freed_tokens >= 45);
+                assert!(persisted_checkpoint);
+            }
+            GcResult::NoAction => panic!("expected compaction"),
+        }
+
+        let recovered = recover_checkpoint(&store)
+            .unwrap()
+            .expect("checkpoint should exist");
+        assert_eq!(recovered, checkpoint);
     }
 
     #[test]

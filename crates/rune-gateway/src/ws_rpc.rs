@@ -1053,7 +1053,6 @@ impl RpcDispatcher {
         }))
     }
 
-
     async fn runtime_context_budget_gc(&self, params: Value) -> Result<Value, RpcError> {
         let mut budget = build_context_budget(&params)?;
         let checkpoint_status = params
@@ -1075,19 +1074,29 @@ impl RpcDispatcher {
             .and_then(|value| value.as_str())
             .unwrap_or("continue");
 
+        let checkpoint_store = params
+            .get("checkpoint_store_path")
+            .and_then(|value| value.as_str())
+            .map(rune_runtime::CheckpointStore::new);
+
         let before = rune_runtime::BudgetReport::from(&budget);
-        let (checkpoint, gc_result) = rune_runtime::heartbeat_gc(
+        let (checkpoint, gc_result) = rune_runtime::heartbeat_gc_with_store(
             &mut budget,
             checkpoint_status,
             key_decisions,
             next_step,
+            checkpoint_store.as_ref(),
         );
         let after = rune_runtime::BudgetReport::from(&budget);
+        let checkpoint_storage_key = checkpoint_store
+            .as_ref()
+            .map(|store| store.path().display().to_string());
 
         Ok(json!({
             "before": before,
             "after": after,
             "checkpoint": checkpoint,
+            "checkpoint_storage_key": checkpoint_storage_key,
             "gc": gc_result,
         }))
     }
@@ -1680,7 +1689,6 @@ fn require_string<'a>(params: &'a Value, key: &str) -> Result<&'a str, RpcError>
         .filter(|value| !value.is_empty())
         .ok_or_else(|| RpcError::bad_request(format!("missing required param: {key}")))
 }
-
 
 fn build_context_budget(params: &Value) -> Result<rune_runtime::TokenBudget, RpcError> {
     let total_capacity = params
