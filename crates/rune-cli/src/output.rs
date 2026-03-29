@@ -101,9 +101,6 @@ pub struct PeerSummary {
     pub roles: Vec<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
-    pub capabilities_version: Option<u32>,
-    pub capability_hash: Option<String>,
-    pub comms_transport: Option<String>,
     pub load: Option<InstanceLoadSummary>,
 }
 
@@ -313,6 +310,15 @@ pub struct DelegationTaskContract {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationCapabilityMatch {
+    pub compatible: bool,
+    pub missing_roles: Vec<String>,
+    pub missing_projects: Vec<String>,
+    pub model_overlap: Vec<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationEndpointSummary {
     pub instance_id: String,
     pub instance_name: String,
@@ -355,15 +361,6 @@ pub struct DelegationResultContractSummary {
     pub accepted_at_field: String,
     pub started_at_field: String,
     pub task_id_field: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DelegationCapabilityMatch {
-    pub compatible: bool,
-    pub missing_roles: Vec<String>,
-    pub missing_projects: Vec<String>,
-    pub model_overlap: Vec<String>,
-    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,21 +446,79 @@ Conflict prevention: {}",
                 self.task_contract.conflict_prevention.join("; ")
             )?;
         }
+        write!(
+            f,
+            "
+Capability match: {}",
+            if self.capability_match.compatible {
+                "compatible"
+            } else {
+                "mismatch"
+            }
+        )?;
+        write!(
+            f,
+            "
+Capability detail: {}",
+            self.capability_match.detail
+        )?;
+        if !self.capability_match.model_overlap.is_empty() {
+            write!(
+                f,
+                "
+Model overlap: {}",
+                self.capability_match.model_overlap.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_roles.is_empty() {
+            write!(
+                f,
+                "
+Missing roles: {}",
+                self.capability_match.missing_roles.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_projects.is_empty() {
+            write!(
+                f,
+                "
+Missing projects: {}",
+                self.capability_match.missing_projects.join(", ")
+            )?;
+        }
         if let Some(sender) = &self.sender {
             write!(
                 f,
                 "
 Sender: {} ({})",
-                sender.instance_name, sender.transport
+                sender.instance_name, sender.instance_id
+            )?;
+            write!(
+                f,
+                "
+  Transport: {}",
+                sender.transport
             )?;
             if let Some(health_url) = &sender.health_url {
-                write!(f, " health={health_url}")?;
+                write!(
+                    f,
+                    "
+  Health URL: {health_url}"
+                )?;
             }
             if let Some(submit_url) = &sender.submit_url {
-                write!(f, " submit={submit_url}")?;
+                write!(
+                    f,
+                    "
+  Submit URL: {submit_url}"
+                )?;
             }
             if let Some(result_url) = &sender.result_url {
-                write!(f, " result={result_url}")?;
+                write!(
+                    f,
+                    "
+  Result URL: {result_url}"
+                )?;
             }
         }
         if let Some(receiver) = &self.receiver {
@@ -471,17 +526,159 @@ Sender: {} ({})",
                 f,
                 "
 Receiver: {} ({})",
-                receiver.instance_name, receiver.transport
+                receiver.instance_name, receiver.instance_id
+            )?;
+            write!(
+                f,
+                "
+  Transport: {}",
+                receiver.transport
             )?;
             if let Some(health_url) = &receiver.health_url {
-                write!(f, " health={health_url}")?;
+                write!(
+                    f,
+                    "
+  Health URL: {health_url}"
+                )?;
             }
             if let Some(submit_url) = &receiver.submit_url {
-                write!(f, " submit={submit_url}")?;
+                write!(
+                    f,
+                    "
+  Submit URL: {submit_url}"
+                )?;
             }
             if let Some(result_url) = &receiver.result_url {
-                write!(f, " result={result_url}")?;
+                write!(
+                    f,
+                    "
+  Result URL: {result_url}"
+                )?;
             }
+        }
+        if let Some(routing) = &self.routing {
+            write!(
+                f,
+                "
+Routing: {}",
+                routing.mode
+            )?;
+            write!(
+                f,
+                "
+Routing detail: {}",
+                routing.detail
+            )?;
+            write!(
+                f,
+                "
+Routing peer count: {}",
+                routing.peer_count
+            )?;
+        }
+        if let Some(branch_reservation) = &self.branch_reservation {
+            write!(
+                f,
+                "
+Branch reservation: {} via {} ({})",
+                if branch_reservation.required {
+                    "required"
+                } else {
+                    "optional"
+                },
+                branch_reservation.mechanism,
+                branch_reservation.enforced_by
+            )?;
+            write!(
+                f,
+                "
+  {}",
+                branch_reservation.detail
+            )?;
+        }
+        if let Some(file_locks) = &self.file_locks {
+            write!(
+                f,
+                "
+File locks: {} via {} ({})",
+                if file_locks.required {
+                    "required"
+                } else {
+                    "optional"
+                },
+                file_locks.mechanism,
+                file_locks.enforced_by
+            )?;
+            write!(
+                f,
+                "
+  {}",
+                file_locks.detail
+            )?;
+        }
+        if let Some(task_status) = &self.task_status {
+            write!(
+                f,
+                "
+Task states: {}",
+                task_status.states.join(" → ")
+            )?;
+            write!(
+                f,
+                "
+Terminal states: {}",
+                task_status.terminal_states.join(", ")
+            )?;
+            write!(
+                f,
+                "
+Sender visibility: {}",
+                task_status.sender_visibility
+            )?;
+            write!(
+                f,
+                "
+Timeout behavior: {}",
+                task_status.timeout_behavior
+            )?;
+            write!(
+                f,
+                "
+Failure behavior: {}",
+                task_status.failure_behavior
+            )?;
+        }
+        if let Some(result) = &self.result {
+            write!(
+                f,
+                "
+Result status field: {}",
+                result.status_field
+            )?;
+            write!(
+                f,
+                "
+Result artifact field: {}",
+                result.artifact_field
+            )?;
+            write!(
+                f,
+                "
+Result error field: {}",
+                result.error_field
+            )?;
+            write!(
+                f,
+                "
+Result task id field: {}",
+                result.task_id_field
+            )?;
+            write!(
+                f,
+                "
+Result timestamps: accepted={}, started={}, finished={}",
+                result.accepted_at_field, result.started_at_field, result.finished_at_field
+            )?;
         }
         for peer in &self.candidates {
             write!(
@@ -498,18 +695,6 @@ Receiver: {} ({})",
                     load.ws_connections,
                     peer.latency_ms.unwrap_or_default()
                 )?;
-            }
-            if !peer.roles.is_empty() {
-                write!(f, " roles={}", peer.roles.join(","))?;
-            }
-            if let Some(version) = peer.capabilities_version {
-                write!(f, " cap_v={version}")?;
-            }
-            if let Some(hash) = &peer.capability_hash {
-                write!(f, " cap_hash={hash}")?;
-            }
-            if let Some(comms_transport) = &peer.comms_transport {
-                write!(f, " comms={comms_transport}")?;
             }
         }
         Ok(())
@@ -567,7 +752,7 @@ pub struct DoctorContextTierCounter {
     pub kind: String,
     pub token_budget: u64,
     pub estimated_tokens: u64,
-    pub priority: u64,
+    pub priority: u8,
     pub staleness_policy: String,
     pub loaded: bool,
     pub source: String,
@@ -593,9 +778,9 @@ pub struct DoctorMemoryHierarchySummary {
     #[serde(default)]
     pub l2_recall_hits: u64,
     #[serde(default)]
-    pub l2_hot_memories: u64,
-    #[serde(default)]
     pub l2_warm_memories: u64,
+    #[serde(default)]
+    pub l2_hot_memories: u64,
     #[serde(default)]
     pub l2_total_memories: u64,
     #[serde(default)]
@@ -698,11 +883,39 @@ impl fmt::Display for DoctorReport {
             )?;
             writeln!(
                 f,
-                "  L2 Counters: recall_hits={}, hot_memories={}, total_memories={}",
+                "  L2 Counters: recall_hits={}, warm_memories={}, hot_memories={}, total_memories={}",
                 memory_hierarchy.l2_recall_hits,
+                memory_hierarchy.l2_warm_memories,
                 memory_hierarchy.l2_hot_memories,
                 memory_hierarchy.l2_total_memories
             )?;
+            writeln!(
+                f,
+                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}",
+                memory_hierarchy.loaded_tier_count,
+                memory_hierarchy.context_total_budget,
+                memory_hierarchy.context_total_estimated_tokens,
+                memory_hierarchy.context_compaction_trigger_tokens,
+                memory_hierarchy.context_over_budget,
+                memory_hierarchy.context_over_compaction_threshold,
+                memory_hierarchy.context_compaction_required
+            )?;
+            if !memory_hierarchy.context_tier_counters.is_empty() {
+                writeln!(f, "  Context Tier Details:")?;
+                for tier in &memory_hierarchy.context_tier_counters {
+                    writeln!(
+                        f,
+                        "    - {}: loaded={}, budget={}, estimated_tokens={}, priority={}, staleness_policy={}, source={}",
+                        tier.kind,
+                        tier.loaded,
+                        tier.token_budget,
+                        tier.estimated_tokens,
+                        tier.priority,
+                        tier.staleness_policy,
+                        tier.source
+                    )?;
+                }
+            }
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
@@ -5894,16 +6107,16 @@ mod tests {
                 total_input_tokens: 0,
                 cache_hit_ratio_percent: 0.0,
                 l2_recall_hits: 0,
-                l2_hot_memories: 0,
                 l2_warm_memories: 0,
+                l2_hot_memories: 0,
                 l2_total_memories: 0,
-                context_total_budget: 0,
+                context_total_budget: 36_000,
                 context_total_estimated_tokens: 0,
-                context_compaction_trigger_tokens: 0,
+                context_compaction_trigger_tokens: 96_000,
                 context_over_budget: false,
                 context_over_compaction_threshold: false,
                 context_compaction_required: false,
-                loaded_tier_count: 0,
+                loaded_tier_count: 4,
                 context_tier_counters: vec![],
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
@@ -5921,6 +6134,7 @@ mod tests {
         assert!(out.contains("Memory Hierarchy:"));
         assert!(out.contains("L1: prompt cache via provider prefixes"));
         assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
+        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
@@ -6506,9 +6720,6 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec!["claude-3-7-sonnet".into()],
                 active_projects: vec!["/workspace/peer".into()],
-                capabilities_version: Some(1),
-                capability_hash: Some("cap-peer-a".into()),
-                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
@@ -6537,9 +6748,6 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec![],
                 active_projects: vec![],
-                capabilities_version: Some(1),
-                capability_hash: Some("cap-peer-a".into()),
-                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
@@ -6572,7 +6780,8 @@ mod tests {
                 missing_roles: vec![],
                 missing_projects: vec![],
                 model_overlap: vec!["gpt-4.1".into()],
-                detail: "peer satisfies requested delegation constraints".into(),
+                detail: "receiver matches advertised roles/projects with 1 overlapping model(s)"
+                    .into(),
             },
             sender: Some(DelegationEndpointSummary {
                 instance_id: "sender-a".into(),
