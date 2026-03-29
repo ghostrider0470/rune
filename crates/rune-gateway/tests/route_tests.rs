@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -14595,3 +14595,82 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
         "Review result routing before resuming"
     );
 }
+
+#[tokio::test]
+async fn create_session_returns_metadata_fields_from_request() {
+    let app = build_test_app(None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "direct",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "mode": "planning",
+                        "project_id": "phoenix",
+                        "channel_ref": "telegram",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = body_json(response).await;
+    assert_eq!(body["mode"], "planning");
+    assert_eq!(body["project_id"], "phoenix");
+    assert_eq!(body["channel_ref"], "telegram");
+    assert!(body.get("requester_session_id").is_none() || body["requester_session_id"].is_null());
+}
+
+#[tokio::test]
+async fn get_session_returns_metadata_fields() {
+    let app = build_test_app(None);
+
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "direct",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "mode": "execution",
+                        "project_id": "festivity",
+                        "channel_ref": "discord",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = body_json(create).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["mode"], "execution");
+    assert_eq!(body["project_id"], "festivity");
+    assert_eq!(body["channel_ref"], "discord");
+}
+
