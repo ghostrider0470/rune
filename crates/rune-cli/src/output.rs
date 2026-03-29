@@ -310,6 +310,15 @@ pub struct DelegationTaskContract {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationCapabilityMatch {
+    pub compatible: bool,
+    pub missing_roles: Vec<String>,
+    pub missing_projects: Vec<String>,
+    pub model_overlap: Vec<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationEndpointSummary {
     pub instance_id: String,
     pub instance_name: String,
@@ -361,6 +370,7 @@ pub struct DelegationPlanResponse {
     pub candidates: Vec<PeerSummary>,
     pub detail: String,
     pub task_contract: DelegationTaskContract,
+    pub capability_match: DelegationCapabilityMatch,
     pub sender: Option<DelegationEndpointSummary>,
     pub receiver: Option<DelegationEndpointSummary>,
     pub routing: Option<DelegationRoutingSummary>,
@@ -434,6 +444,46 @@ Timeout handling: {}",
                 "
 Conflict prevention: {}",
                 self.task_contract.conflict_prevention.join("; ")
+            )?;
+        }
+        write!(
+            f,
+            "
+Capability match: {}",
+            if self.capability_match.compatible {
+                "compatible"
+            } else {
+                "mismatch"
+            }
+        )?;
+        write!(
+            f,
+            "
+Capability detail: {}",
+            self.capability_match.detail
+        )?;
+        if !self.capability_match.model_overlap.is_empty() {
+            write!(
+                f,
+                "
+Model overlap: {}",
+                self.capability_match.model_overlap.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_roles.is_empty() {
+            write!(
+                f,
+                "
+Missing roles: {}",
+                self.capability_match.missing_roles.join(", ")
+            )?;
+        }
+        if !self.capability_match.missing_projects.is_empty() {
+            write!(
+                f,
+                "
+Missing projects: {}",
+                self.capability_match.missing_projects.join(", ")
             )?;
         }
         for peer in &self.candidates {
@@ -6530,6 +6580,14 @@ mod tests {
                 required_fields: vec!["task".into()],
                 optional_fields: vec!["target_peer_id".into()],
                 result_fields: vec!["status".into()],
+            },
+            capability_match: DelegationCapabilityMatch {
+                compatible: true,
+                missing_roles: vec![],
+                missing_projects: vec![],
+                model_overlap: vec!["gpt-4.1".into()],
+                detail: "receiver matches advertised roles/projects with 1 overlapping model(s)"
+                    .into(),
             },
             sender: Some(DelegationEndpointSummary {
                 instance_id: "sender-a".into(),
