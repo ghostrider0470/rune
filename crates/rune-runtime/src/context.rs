@@ -677,8 +677,18 @@ fn build_user_message_parts(
 ) -> Option<Vec<MessagePart>> {
     let trimmed = content.trim();
     let mut parts = Vec::new();
+    let has_images = attachments.iter().any(|attachment| attachment_image_ref(attachment).is_some());
 
-    if !trimmed.is_empty() {
+    if has_images {
+        let prompt_text = if trimmed.is_empty() {
+            "The user sent this image. Describe what you see and respond to their message.".to_string()
+        } else {
+            format!(
+                "The user sent this image. Describe what you see and respond to their message. User message: {trimmed}"
+            )
+        };
+        parts.push(MessagePart::Text { text: prompt_text });
+    } else if !trimmed.is_empty() {
         parts.push(MessagePart::Text {
             text: trimmed.to_string(),
         });
@@ -919,7 +929,28 @@ mod attachment_prompt_tests {
         )
         .expect("expected multimodal parts");
 
-        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message. User message: Describe this image"));
+        assert!(
+            matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg")
+        );
+        assert_eq!(parts.len(), 2);
+    }
+
+    #[test]
+    fn builds_multimodal_parts_with_default_image_prompt_when_text_missing() {
+        let parts = build_user_message_parts(
+            "   ",
+            &[AttachmentRef {
+                name: "photo.jpg".into(),
+                mime_type: Some("image/jpeg".into()),
+                size_bytes: Some(42),
+                url: Some("https://example.test/photo.jpg".into()),
+                provider_file_id: None,
+            }],
+        )
+        .expect("expected multimodal parts");
+
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message."));
         assert!(
             matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg")
         );
