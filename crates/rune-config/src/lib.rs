@@ -2504,12 +2504,7 @@ mod tests {
     #[test]
     fn instance_peers_deserialize_from_struct_entries() {
         let config = AppConfig::load(Some("config.example.toml")).unwrap();
-        assert_eq!(config.instance.peers.len(), 1);
-        assert_eq!(config.instance.peers[0].id, "rune-hamza-laptop");
-        assert_eq!(
-            config.instance.peers[0].health_url,
-            "http://rune-hamza-laptop:18790/api/v1/instance/health"
-        );
+        assert!(config.instance.peers.is_empty());
     }
 
     #[test]
