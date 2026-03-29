@@ -10,7 +10,7 @@ use rune_store::repos::{SessionRepo, TranscriptRepo};
 
 use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
-use crate::session_metadata::{set_context_tiers, set_session_mode};
+use crate::session_metadata::{MemoryHierarchySnapshot, set_context_tiers, set_memory_hierarchy, set_session_mode};
 /// Creates and manages session lifecycle. Persists state via store repo traits.
 pub struct SessionEngine {
     session_repo: Arc<dyn SessionRepo>,
@@ -74,6 +74,7 @@ impl SessionEngine {
             .map(|mode| set_session_mode(&serde_json::json!({}), mode))
             .unwrap_or_else(|| serde_json::json!({}));
         let metadata = seed_context_tier_metadata(metadata, &self.context_assembler);
+        let metadata = seed_memory_hierarchy_metadata(metadata, false);
         let _ = project_id;
 
         let new_session = NewSession {
@@ -304,4 +305,17 @@ fn seed_context_tier_metadata(
 ) -> serde_json::Value {
     let report = context_assembler.analyze_context_usage(None, None, &[], 0, false);
     set_context_tiers(&metadata, &report)
+}
+
+fn seed_memory_hierarchy_metadata(
+    metadata: serde_json::Value,
+    l3_cold_storage_enabled: bool,
+) -> serde_json::Value {
+    let snapshot = MemoryHierarchySnapshot {
+        l0_loaded: true,
+        l1_prompt_cache_enabled: true,
+        l2_vector_memory_enabled: true,
+        l3_cold_storage_enabled,
+    };
+    set_memory_hierarchy(&metadata, &snapshot)
 }
