@@ -4576,14 +4576,14 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
         "http://127.0.0.1:8787/api/v1/instance/delegations/{task_id}"
     );
     assert_eq!(json["routing"]["mode"], "named");
-    assert_eq!(json["capability_match"]["compatible"], false);
+    assert_eq!(json["capability_match"]["compatible"], true);
     assert_eq!(
         json["capability_match"]["missing_roles"],
-        serde_json::json!(["scheduler"])
+        serde_json::json!([])
     );
     assert_eq!(
         json["capability_match"]["detail"],
-        "receiver capability mismatch (missing roles: scheduler)"
+        "receiver matches advertised roles/projects but no configured model overlap was declared"
     );
 }
 
