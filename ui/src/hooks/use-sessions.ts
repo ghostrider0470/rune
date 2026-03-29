@@ -13,6 +13,11 @@ import type {
 interface SessionFilters {
   active_minutes?: number;
   channel?: string;
+  kind?: string;
+  parent?: string;
+  project?: string;
+  include_metadata?: boolean;
+  session_token?: string;
   limit?: number;
 }
 
@@ -25,6 +30,11 @@ export function useSessions(filters?: SessionFilters) {
   const params = new URLSearchParams();
   if (filters?.active_minutes) params.set("active", String(filters.active_minutes));
   if (filters?.channel) params.set("channel", filters.channel);
+  if (filters?.kind) params.set("kind", filters.kind);
+  if (filters?.parent) params.set("parent", filters.parent);
+  if (filters?.project) params.set("project", filters.project);
+  if (filters?.include_metadata) params.set("include_metadata", "true");
+  if (filters?.session_token) params.set("session_token", filters.session_token);
   if (filters?.limit) params.set("limit", String(filters.limit));
   const qs = params.toString();
 
@@ -113,8 +123,10 @@ export function useSendMessage(sessionId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (content: string) =>
-      api.post<MessageResponse>(`/sessions/${sessionId}/messages`, { content }),
+    mutationFn: (payload: string | { content: string; model?: string }) => {
+      const body = typeof payload === "string" ? { content: payload } : payload;
+      return api.post<MessageResponse>(`/sessions/${sessionId}/messages`, body);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sessions", sessionId, "transcript"] });
       queryClient.invalidateQueries({ queryKey: ["sessions", sessionId] });
