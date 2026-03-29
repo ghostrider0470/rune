@@ -90,6 +90,53 @@ pub struct DelegationPlanResponse {
     pub candidates: Vec<PeerHealthResponse>,
     pub detail: String,
     pub task_contract: DelegationTaskContractResponse,
+    pub sender: DelegationEndpointResponse,
+    pub receiver: Option<DelegationEndpointResponse>,
+    pub routing: DelegationRoutingResponse,
+    pub branch_reservation: DelegationConflictCapabilityResponse,
+    pub file_locks: DelegationConflictCapabilityResponse,
+    pub task_status: DelegationTaskStatusResponse,
+    pub result: DelegationResultContractResponse,
+}
+
+#[derive(Serialize)]
+pub struct DelegationEndpointResponse {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub transport: String,
+    pub health_url: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct DelegationRoutingResponse {
+    pub mode: &'static str,
+    pub detail: String,
+    pub peer_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct DelegationConflictCapabilityResponse {
+    pub required: bool,
+    pub mechanism: &'static str,
+    pub enforced_by: &'static str,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
+pub struct DelegationTaskStatusResponse {
+    pub states: Vec<&'static str>,
+    pub terminal_states: Vec<&'static str>,
+    pub sender_visibility: &'static str,
+    pub timeout_behavior: &'static str,
+    pub failure_behavior: &'static str,
+}
+
+#[derive(Serialize)]
+pub struct DelegationResultContractResponse {
+    pub status_field: &'static str,
+    pub artifact_field: &'static str,
+    pub error_field: &'static str,
+    pub finished_at_field: &'static str,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -208,9 +255,12 @@ pub async fn delegation_plan(
     Query(query): Query<DelegationPlanQuery>,
 ) -> Result<Json<DelegationPlanResponse>, GatewayError> {
     let peers = collect_peer_health(state.capabilities.peers.clone()).await;
-    let strategy = query.strategy.as_deref().unwrap_or("least_busy");
+    let strategy = query
+        .strategy
+        .clone()
+        .unwrap_or_else(|| "least_busy".to_string());
 
-    let selected_peer = match strategy {
+    let selected_peer = match strategy.as_str() {
         "named" => {
             let target = query.peer_id.as_deref().ok_or_else(|| {
                 GatewayError::BadRequest("peer_id is required when strategy=named".to_string())
@@ -225,7 +275,7 @@ pub async fn delegation_plan(
         }
     };
 
-    let detail = match (&selected_peer, strategy) {
+    let detail = match (&selected_peer, strategy.as_str()) {
         (Some(peer), "named") => format!("selected named peer '{}'", peer.id),
         (Some(peer), "least_busy") => format!("selected least-busy healthy peer '{}'", peer.id),
         (None, "named") => format!(
@@ -236,12 +286,60 @@ pub async fn delegation_plan(
         (Some(peer), _) => format!("selected peer '{}'", peer.id),
     };
 
+    let receiver = selected_peer.as_ref().map(|peer| DelegationEndpointResponse {
+        instance_id: peer.id.clone(),
+        instance_name: peer.id.clone(),
+        transport: "http".to_string(),
+        health_url: Some(peer.health_url.clone()),
+    });
+
+    let routing = DelegationRoutingResponse {
+        mode: if strategy == "named" { "named" } else { "least_busy" },
+        detail: detail.clone(),
+        peer_count: peers.len(),
+    };
+
     Ok(Json(DelegationPlanResponse {
-        strategy: strategy.to_string(),
+        strategy: strategy.clone(),
         selected_peer,
         candidates: peers,
         detail,
         task_contract: delegation_task_contract(),
+        sender: DelegationEndpointResponse {
+            instance_id: state.capabilities.identity.id.clone(),
+            instance_name: state.capabilities.identity.name.clone(),
+            transport: state.capabilities.comms_transport.clone(),
+            health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+            }),
+        },
+        receiver,
+        routing,
+        branch_reservation: DelegationConflictCapabilityResponse {
+            required: true,
+            mechanism: "branch_reservation",
+            enforced_by: "orchestrator",
+            detail: "delegated coding tasks must reserve a branch name before execution to avoid cross-instance branch collisions".to_string(),
+        },
+        file_locks: DelegationConflictCapabilityResponse {
+            required: true,
+            mechanism: "file_locks",
+            enforced_by: "orchestrator",
+            detail: "delegated coding tasks must acquire orchestrator file locks before mutating overlapping repo paths".to_string(),
+        },
+        task_status: DelegationTaskStatusResponse {
+            states: vec!["submitted", "accepted", "running", "completed", "failed", "timeout"],
+            terminal_states: vec!["completed", "failed", "timeout"],
+            sender_visibility: "sender tracks lifecycle via structured status transitions and terminal result envelope",
+            timeout_behavior: "deadline expiry transitions the task to timeout and returns structured error detail to the sender",
+            failure_behavior: "execution failures preserve terminal status, error detail, and any declared artifacts",
+        },
+        result: DelegationResultContractResponse {
+            status_field: "status",
+            artifact_field: "artifacts",
+            error_field: "error",
+            finished_at_field: "finished_at",
+        },
     }))
 }
 

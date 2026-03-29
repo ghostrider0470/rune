@@ -4336,6 +4336,8 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     let peer_b_url = spawn_peer(2, 1, "peer-b").await;
 
     let mut config = AppConfig::default();
+    config.instance.id = "rune-test-instance".to_string();
+    config.instance.name = "Rune Test Instance".to_string();
     config.instance.peers = vec![
         rune_config::PeerConfig {
             id: "peer-a".to_string(),
@@ -4365,8 +4367,32 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     let json = body_json(response).await;
     assert_eq!(json["strategy"], "least_busy");
     assert_eq!(json["selected_peer"]["id"], "peer-b");
+    assert_eq!(json["receiver"]["instance_id"], "peer-b");
+    assert_eq!(json["receiver"]["transport"], "http");
     assert_eq!(json["selected_peer"]["load"]["session_count"], 2);
     assert_eq!(json["candidates"].as_array().unwrap().len(), 3);
+    assert_eq!(json["sender"]["instance_id"], "rune-test-instance");
+    assert_eq!(json["sender"]["instance_name"], "Rune Test Instance");
+    assert_eq!(json["sender"]["transport"], "filesystem");
+    assert_eq!(json["sender"]["health_url"], serde_json::Value::Null);
+    assert_eq!(json["routing"]["mode"], "least_busy");
+    assert_eq!(json["routing"]["peer_count"], 3);
+    assert_eq!(json["branch_reservation"]["required"], true);
+    assert_eq!(json["branch_reservation"]["mechanism"], "branch_reservation");
+    assert_eq!(json["file_locks"]["required"], true);
+    assert_eq!(json["file_locks"]["mechanism"], "file_locks");
+    assert_eq!(
+        json["task_status"]["states"],
+        serde_json::json!(["submitted", "accepted", "running", "completed", "failed", "timeout"])
+    );
+    assert_eq!(
+        json["task_status"]["terminal_states"],
+        serde_json::json!(["completed", "failed", "timeout"])
+    );
+    assert_eq!(json["result"]["status_field"], "status");
+    assert_eq!(json["result"]["artifact_field"], "artifacts");
+    assert_eq!(json["result"]["error_field"], "error");
+    assert_eq!(json["result"]["finished_at_field"], "finished_at");
     assert_eq!(json["task_contract"]["protocol_version"], 1);
     assert_eq!(
         json["task_contract"]["submission_modes"],
@@ -4381,6 +4407,88 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
         .unwrap()
         .iter()
         .any(|entry| entry.as_str().unwrap_or_default().contains("branch names")));
+}
+
+
+#[tokio::test]
+async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertised_addr_is_set() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "peer-a",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway"],
+                    "capabilities_version": 1,
+                    "capability_hash": "cap-peer-a"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "peer-a",
+                "peer_count": 0,
+                "configured_models": [],
+                "active_projects": [],
+                "comms_transport": "filesystem"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787/".to_string());
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["selected_peer"]["id"], "peer-a");
+    assert_eq!(json["sender"]["health_url"], "http://127.0.0.1:8787/api/v1/instance/health");
+    assert_eq!(json["routing"]["mode"], "named");
 }
 
 #[tokio::test]
