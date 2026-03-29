@@ -8,8 +8,9 @@ use rune_store::StoreError;
 use rune_store::models::{NewSession, SessionRow};
 use rune_store::repos::{SessionRepo, TranscriptRepo};
 
+use crate::context::ContextAssembler;
 use crate::error::RuntimeError;
-use crate::session_metadata::set_session_mode;
+use crate::session_metadata::{set_context_tiers, set_session_mode};
 
 /// Creates and manages session lifecycle. Persists state via store repo traits.
 pub struct SessionEngine {
@@ -65,6 +66,7 @@ impl SessionEngine {
             .as_deref()
             .map(|mode| set_session_mode(&serde_json::json!({}), mode))
             .unwrap_or_else(|| serde_json::json!({}));
+        let metadata = seed_context_tier_metadata(metadata);
 
         let new_session = NewSession {
             id: id.into_uuid(),
@@ -248,4 +250,9 @@ fn merge_json(target: &mut serde_json::Value, patch: serde_json::Value) {
             *target_slot = patch_value;
         }
     }
+}
+
+fn seed_context_tier_metadata(metadata: serde_json::Value) -> serde_json::Value {
+    let report = ContextAssembler::new("").analyze_context_usage(None, None, &[], 0);
+    set_context_tiers(&metadata, &report)
 }
