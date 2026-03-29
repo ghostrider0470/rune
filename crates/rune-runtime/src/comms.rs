@@ -433,6 +433,7 @@ impl CommsClient {
     ) -> Result<Vec<CommsMessageSummary>, String> {
         let messages = self.transport.receive(&self.agent_id).await?;
         let mut summaries = Vec::with_capacity(messages.len());
+        let mut ack_paths = Vec::with_capacity(messages.len());
         for (path, msg) in messages {
             summaries.push(CommsMessageSummary {
                 id: msg.id.clone(),
@@ -444,9 +445,16 @@ impl CommsClient {
             });
 
             if mark_read {
+                ack_paths.push(path);
+            }
+        }
+
+        if mark_read {
+            for path in ack_paths {
                 self.transport.ack(&path).await?;
             }
         }
+
         Ok(summaries)
     }
 
