@@ -1,6 +1,6 @@
 //! HTTP route handlers for the gateway API.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use axum::Json;
@@ -233,6 +233,15 @@ pub struct PeerHealthResponse {
     pub comms_transport: Option<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
+    pub transition: Option<PeerHealthTransitionResponse>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PeerHealthTransitionResponse {
+    pub previous_status: Option<String>,
+    pub changed: bool,
+    pub alert_sent: bool,
+    pub alert_detail: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -287,7 +296,8 @@ pub async fn instance_health(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
-    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+    let config = state.config.read().await.clone();
+    let peers = collect_peer_health(&config, state.capabilities.peers.clone()).await;
 
     Ok(Json(InstanceHealthResponse {
         status: "ok".to_string(),
@@ -335,7 +345,8 @@ pub async fn delegation_plan(
     State(state): State<AppState>,
     Query(query): Query<DelegationPlanQuery>,
 ) -> Result<Json<DelegationPlanResponse>, GatewayError> {
-    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+    let config = state.config.read().await.clone();
+    let peers = collect_peer_health(&config, state.capabilities.peers.clone()).await;
     let strategy = query
         .strategy
         .clone()
@@ -660,6 +671,7 @@ fn select_least_busy_peer(peers: &[PeerHealthResponse]) -> Option<PeerHealthResp
 }
 
 async fn collect_peer_health(
+    config: &rune_config::AppConfig,
     peers: Vec<rune_config::PeerCapabilityTarget>,
 ) -> Vec<PeerHealthResponse> {
     if peers.is_empty() {
@@ -691,16 +703,21 @@ async fn collect_peer_health(
                     comms_transport: None,
                     configured_models: Vec::new(),
                     active_projects: Vec::new(),
+                    transition: None,
                 })
                 .collect();
         }
     };
 
     let mut results = Vec::with_capacity(peers.len());
+    let alert_chat_id = std::env::var("RUNE_INSTANCE_ALERT_TELEGRAM_CHAT_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     for peer in peers {
         let started = Instant::now();
         let checked_at = Utc::now().to_rfc3339();
-        let item = match client.get(&peer.health_url).send().await {
+        let mut item = match client.get(&peer.health_url).send().await {
             Ok(response) => {
                 let latency_ms = Some(started.elapsed().as_millis());
                 let status_code = response.status();
@@ -728,6 +745,7 @@ async fn collect_peer_health(
                         comms_transport: Some(payload.capabilities.comms_transport),
                         configured_models: payload.capabilities.configured_models,
                         active_projects: payload.capabilities.active_projects,
+                        transition: None,
                     },
                     Err(error) => PeerHealthResponse {
                         id: peer.id.clone(),
@@ -745,6 +763,7 @@ async fn collect_peer_health(
                         comms_transport: None,
                         configured_models: Vec::new(),
                         active_projects: Vec::new(),
+                        transition: None,
                     },
                 }
             }
@@ -764,12 +783,88 @@ async fn collect_peer_health(
                 comms_transport: None,
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
+                transition: None,
             },
         };
+        let previous_status = peer_health_status_store()
+            .lock()
+            .ok()
+            .and_then(|store| store.get(&item.id).cloned());
+        let changed = previous_status.as_deref() != Some(item.status.as_str());
+        let mut alert_sent = false;
+        let mut alert_detail = None;
+
+        if changed && item.status == "unreachable" {
+            match maybe_send_peer_unreachable_alert(config, alert_chat_id.as_deref(), &item).await {
+                Ok(sent) => {
+                    alert_sent = sent;
+                    if !sent {
+                        alert_detail = Some("alert skipped: telegram token or chat id not configured".to_string());
+                    }
+                }
+                Err(error) => {
+                    alert_detail = Some(format!("alert send failed: {error}"));
+                }
+            }
+        }
+
+        if let Ok(mut store) = peer_health_status_store().lock() {
+            store.insert(item.id.clone(), item.status.clone());
+        }
+        item.transition = Some(PeerHealthTransitionResponse {
+            previous_status,
+            changed,
+            alert_sent,
+            alert_detail,
+        });
+
         results.push(item);
     }
 
     results
+}
+
+fn peer_health_status_store() -> &'static Mutex<HashMap<String, String>> {
+    static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+async fn maybe_send_peer_unreachable_alert(
+    config: &rune_config::AppConfig,
+    chat_id: Option<&str>,
+    peer: &PeerHealthResponse,
+) -> Result<bool, String> {
+    let Some(token) = config.channels.telegram_token.as_deref() else {
+        return Ok(false);
+    };
+    let Some(chat_id) = chat_id else {
+        return Ok(false);
+    };
+
+    let body = serde_json::json!({
+        "chat_id": chat_id,
+        "text": format!(
+            "Rune peer unreachable: {} ({})\nhealth_url={}\ndetail={}",
+            peer.name, peer.id, peer.health_url, peer.detail
+        ),
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .post(format!("https://api.telegram.org/bot{token}/sendMessage"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    if response.status().is_success() {
+        Ok(true)
+    } else {
+        Err(format!("telegram returned {}", response.status()))
+    }
 }
 
 /// Prompt cache token metrics grouped by provider/model.

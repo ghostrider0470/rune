@@ -4338,7 +4338,7 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
                         "id": id,
                         "name": id,
                         "advertised_addr": null,
-                        "roles": ["gateway"],
+                        "roles": ["gateway", "scheduler"],
                         "capabilities_version": 1,
                     "capability_hash": "cap-peer-a"
                     },
@@ -4512,7 +4512,7 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
                     "id": "peer-a",
                     "name": "peer-a",
                     "advertised_addr": "http://peer-a:8787",
-                    "roles": ["gateway"],
+                    "roles": ["gateway", "scheduler"],
                     "capabilities_version": 1,
                     "capability_hash": "cap-peer-a"
                 },
@@ -4570,14 +4570,14 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
         "http://127.0.0.1:8787/api/v1/instance/delegations/{task_id}"
     );
     assert_eq!(json["routing"]["mode"], "named");
-    assert_eq!(json["capability_match"]["compatible"], false);
+    assert_eq!(json["capability_match"]["compatible"], true);
     assert_eq!(
         json["capability_match"]["missing_roles"],
-        serde_json::json!(["scheduler"])
+        serde_json::json!([])
     );
     assert_eq!(
         json["capability_match"]["detail"],
-        "receiver capability mismatch (missing roles: scheduler)"
+        "receiver matches advertised roles/projects but no configured model overlap was declared"
     );
 }
 
@@ -13294,4 +13294,35 @@ async fn doctor_run_reports_instance_topology_summary() {
     assert_eq!(body["topology"]["database"], "azure-or-external-postgres");
     assert_eq!(body["topology"]["models"], "azure");
     assert_eq!(body["topology"]["search"], "semantic-hybrid");
+}
+
+#[tokio::test]
+async fn instance_health_reports_peer_transition_for_unreachable_peer() {
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: "http://127.0.0.1:9/api/v1/instance/health".to_string(),
+    }];
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let transition = &json["peers"][0]["transition"];
+    assert_eq!(json["peers"][0]["status"], "unreachable");
+    assert_eq!(transition["previous_status"], Value::Null);
+    assert_eq!(transition["changed"], true);
+    assert_eq!(transition["alert_sent"], false);
+    assert_eq!(
+        transition["alert_detail"],
+        "alert skipped: telegram token or chat id not configured"
+    );
 }
