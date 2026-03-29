@@ -5635,7 +5635,7 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(context_budget["usable_prompt_budget"], 113000);
     assert_eq!(context_budget["auto_inject_project"], true);
     assert_eq!(context_budget["memory_search_k"], 10);
-    assert_eq!(context_budget["total_tier_budget"], 36000);
+    assert_eq!(context_budget["total_tier_budget"], 44000);
     assert_eq!(context_budget["exceeds_usable_budget"], false);
     let context_tiers = &json["context_tiers"];
     assert_eq!(context_tiers["identity"], 1000);
@@ -5651,12 +5651,19 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(memory_hierarchy["l2_hot_memories"], 0);
     assert_eq!(memory_hierarchy["l2_cold_memories"], 0);
     assert_eq!(memory_hierarchy["l2_total_memories"], 0);
-    assert_eq!(memory_hierarchy["context_total_budget"], 36000);
+    assert_eq!(memory_hierarchy["context_total_budget"], 44000);
     assert_eq!(memory_hierarchy["context_compaction_trigger_tokens"], 50000);
     assert_eq!(memory_hierarchy["context_over_budget"], false);
     assert_eq!(memory_hierarchy["context_over_compaction_threshold"], false);
     assert_eq!(memory_hierarchy["context_compaction_required"], false);
     assert_eq!(memory_hierarchy["loaded_tier_count"], 5);
+    let context_tier_counters = memory_hierarchy["context_tier_counters"].as_array().unwrap();
+    assert_eq!(context_tier_counters.len(), 5);
+    assert_eq!(context_tier_counters[0]["kind"], "identity");
+    assert_eq!(context_tier_counters[0]["token_budget"], 1000);
+    assert_eq!(context_tier_counters[0]["loaded"], true);
+    assert_eq!(context_tier_counters[4]["kind"], "historical");
+    assert_eq!(context_tier_counters[4]["loaded"], true);
     assert!(
         items
             .iter()
