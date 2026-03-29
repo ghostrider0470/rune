@@ -359,15 +359,31 @@ pub async fn delegation_plan(
         }
     };
 
-    let detail = match (&selected_peer, strategy.as_str()) {
-        (Some(peer), "named") => format!("selected named peer '{}'", peer.id),
-        (Some(peer), "least_busy") => format!("selected least-busy healthy peer '{}'", peer.id),
-        (None, "named") => format!(
+    let capability_match = evaluate_capability_match(&state.capabilities, selected_peer.as_ref());
+
+    let detail = match (&selected_peer, strategy.as_str(), capability_match.compatible) {
+        (Some(peer), "named", true) => format!("selected named peer '{}'", peer.id),
+        (Some(peer), "named", false) => format!(
+            "selected named peer '{}' with capability mismatch: {}",
+            peer.id, capability_match.detail
+        ),
+        (Some(peer), "least_busy", true) => {
+            format!("selected least-busy healthy peer '{}'", peer.id)
+        }
+        (Some(peer), "least_busy", false) => format!(
+            "selected least-busy healthy peer '{}' with capability mismatch: {}",
+            peer.id, capability_match.detail
+        ),
+        (None, "named", _) => format!(
             "named peer '{}' was not found or is unavailable",
             query.peer_id.as_deref().unwrap_or_default()
         ),
-        (None, _) => "no healthy peers available for delegation".to_string(),
-        (Some(peer), _) => format!("selected peer '{}'", peer.id),
+        (None, _, _) => "no healthy peers available for delegation".to_string(),
+        (Some(peer), _, true) => format!("selected peer '{}'", peer.id),
+        (Some(peer), _, false) => format!(
+            "selected peer '{}' with capability mismatch: {}",
+            peer.id, capability_match.detail
+        ),
     };
 
     let receiver = selected_peer
@@ -451,7 +467,7 @@ pub async fn delegation_plan(
             started_at_field: "started_at",
             task_id_field: "task_id",
         },
-        capability_match: evaluate_capability_match(&state.capabilities, selected_peer.as_ref()),
+        capability_match,
     }))
 }
 
