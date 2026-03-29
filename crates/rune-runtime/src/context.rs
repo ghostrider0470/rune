@@ -195,7 +195,8 @@ impl ContextAssemblyReport {
 }
 
 fn parse_staleness_policy(value: &str) -> Option<ContextStalenessPolicy> {
-    match value.trim().to_ascii_lowercase().as_str() {
+    let normalized = value.trim().to_ascii_lowercase().replace(['-', ' '], "_");
+    match normalized.as_str() {
         "always_fresh" => Some(ContextStalenessPolicy::AlwaysFresh),
         "per_turn" => Some(ContextStalenessPolicy::PerTurn),
         "per_session" => Some(ContextStalenessPolicy::PerSession),
@@ -1262,5 +1263,34 @@ mod context_budget_tests {
 
         assert!(report.over_compaction_threshold);
         assert_eq!(report.compaction_trigger_tokens, 10);
+    }
+}
+
+#[cfg(test)]
+mod context_staleness_parse_tests {
+    use super::*;
+
+    #[test]
+    fn parse_staleness_policy_accepts_hyphen_and_space_variants() {
+        assert_eq!(
+            parse_staleness_policy("always-fresh"),
+            Some(ContextStalenessPolicy::AlwaysFresh)
+        );
+        assert_eq!(
+            parse_staleness_policy("per turn"),
+            Some(ContextStalenessPolicy::PerTurn)
+        );
+        assert_eq!(
+            parse_staleness_policy("per-session"),
+            Some(ContextStalenessPolicy::PerSession)
+        );
+        assert_eq!(
+            parse_staleness_policy("on demand"),
+            Some(ContextStalenessPolicy::OnDemand)
+        );
+        assert_eq!(
+            parse_staleness_policy("retrieval-only"),
+            Some(ContextStalenessPolicy::RetrievalOnly)
+        );
     }
 }
