@@ -859,6 +859,8 @@ pub struct ContextConfig {
     pub project: usize,
     #[serde(default = "default_context_shared_tokens")]
     pub shared: usize,
+    #[serde(default = "default_context_historical_tokens")]
+    pub historical: usize,
 }
 
 fn default_context_identity_tokens() -> usize {
@@ -873,6 +875,9 @@ fn default_context_project_tokens() -> usize {
 fn default_context_shared_tokens() -> usize {
     5_000
 }
+fn default_context_historical_tokens() -> usize {
+    0
+}
 
 impl Default for ContextConfig {
     fn default() -> Self {
@@ -881,6 +886,7 @@ impl Default for ContextConfig {
             task: default_context_task_tokens(),
             project: default_context_project_tokens(),
             shared: default_context_shared_tokens(),
+            historical: default_context_historical_tokens(),
         }
     }
 }
@@ -896,6 +902,7 @@ mod context_config_tests {
         assert_eq!(cfg.task, 10_000);
         assert_eq!(cfg.project, 20_000);
         assert_eq!(cfg.shared, 5_000);
+        assert_eq!(cfg.historical, 0);
     }
 }
 

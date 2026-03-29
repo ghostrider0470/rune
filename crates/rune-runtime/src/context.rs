@@ -280,7 +280,7 @@ impl ContextAssembler {
             ContextTierSpec::new(ContextTierKind::ActiveTask, config.task),
             ContextTierSpec::new(ContextTierKind::Project, config.project),
             ContextTierSpec::new(ContextTierKind::Shared, config.shared),
-            ContextTierSpec::new(ContextTierKind::Historical, 0),
+            ContextTierSpec::new(ContextTierKind::Historical, config.historical),
         ];
         self
     }
@@ -965,6 +965,7 @@ mod context_tier_tests {
             task: 222,
             project: 333,
             shared: 444,
+            historical: 555,
         };
 
         let assembler = ContextAssembler::new("Identity instructions").with_context_config(&config);
@@ -975,7 +976,7 @@ mod context_tier_tests {
         assert_eq!(specs[1].token_budget, 222);
         assert_eq!(specs[2].token_budget, 333);
         assert_eq!(specs[3].token_budget, 444);
-        assert_eq!(specs[4].token_budget, 0);
+        assert_eq!(specs[4].token_budget, 555);
     }
 
     #[test]
