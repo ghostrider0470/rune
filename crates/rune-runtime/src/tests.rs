@@ -20,7 +20,7 @@ use rune_tools::{
     approval::{ApprovalRequest, ApprovalScope, RiskLevel},
 };
 
-use crate::compaction::NoOpCompaction;
+use crate::compaction::{CompactionStrategy, NoOpCompaction};
 use crate::context::ContextAssembler;
 use crate::engine::SessionEngine;
 use crate::executor::TurnExecutor;
@@ -2634,6 +2634,10 @@ async fn create_session_seeds_context_tier_metadata() {
         session.metadata["context_token_usage"]["over_budget"],
         false
     );
+    assert_eq!(session.metadata["memory_hierarchy"]["l0"]["loaded"], true);
+    assert_eq!(session.metadata["memory_hierarchy"]["l1"]["loaded"], true);
+    assert_eq!(session.metadata["memory_hierarchy"]["l2"]["loaded"], true);
+    assert_eq!(session.metadata["memory_hierarchy"]["l3"]["loaded"], false);
 }
 
 #[tokio::test]
@@ -2666,6 +2670,57 @@ async fn create_session_seeds_context_tier_metadata_from_custom_assembler() {
         session.metadata["context_token_usage"]["total_budget"],
         27_250
     );
+}
+
+#[test]
+fn memory_hierarchy_snapshot_serializes_expected_levels() {
+    let metadata = crate::session_metadata::set_memory_hierarchy(
+        &serde_json::json!({}),
+        &crate::session_metadata::MemoryHierarchySnapshot {
+            l0_loaded: true,
+            l1_prompt_cache_enabled: true,
+            l2_vector_memory_enabled: true,
+            l3_cold_storage_enabled: true,
+        },
+    );
+
+    assert_eq!(metadata["memory_hierarchy"]["l0"]["loaded"], true);
+    assert_eq!(metadata["memory_hierarchy"]["l1"]["loaded"], true);
+    assert_eq!(metadata["memory_hierarchy"]["l2"]["loaded"], true);
+    assert_eq!(metadata["memory_hierarchy"]["l3"]["loaded"], true);
+    assert_eq!(
+        metadata["memory_hierarchy"]["l3"]["description"],
+        "cold transcript storage / compaction handoff available"
+    );
+}
+
+#[test]
+fn token_budget_compaction_enables_l3_memory_hierarchy_snapshot() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let compaction = crate::TokenBudgetCompaction::new(100, 2).with_memory_flush(tmp.path());
+
+    let snapshot = crate::session_metadata::MemoryHierarchySnapshot {
+        l0_loaded: true,
+        l1_prompt_cache_enabled: true,
+        l2_vector_memory_enabled: true,
+        l3_cold_storage_enabled: compaction.persists_compacted_context(),
+    };
+
+    let metadata = crate::session_metadata::set_memory_hierarchy(&serde_json::json!({}), &snapshot);
+    assert_eq!(metadata["memory_hierarchy"]["l3"]["loaded"], true);
+}
+
+#[test]
+fn no_op_compaction_leaves_l3_memory_hierarchy_snapshot_disabled() {
+    let snapshot = crate::session_metadata::MemoryHierarchySnapshot {
+        l0_loaded: true,
+        l1_prompt_cache_enabled: true,
+        l2_vector_memory_enabled: true,
+        l3_cold_storage_enabled: crate::NoOpCompaction.persists_compacted_context(),
+    };
+
+    let metadata = crate::session_metadata::set_memory_hierarchy(&serde_json::json!({}), &snapshot);
+    assert_eq!(metadata["memory_hierarchy"]["l3"]["loaded"], false);
 }
 
 #[test]

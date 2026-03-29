@@ -46,6 +46,7 @@ pub use context::{
     ContextAssembler, ContextAssemblyReport, ContextStalenessPolicy, ContextTierKind,
     ContextTierSpec, ContextTierUsage,
 };
+pub use session_metadata::MemoryHierarchySnapshot;
 pub use context_budget::{
     BudgetItem, BudgetReport, Checkpoint, CheckpointStore, GcResult, Partition, PartitionBudget,
     PartitionReport, TokenBudget, heartbeat_gc, persist_checkpoint, recover_checkpoint,
