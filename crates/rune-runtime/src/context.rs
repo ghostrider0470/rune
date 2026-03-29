@@ -719,24 +719,42 @@ fn build_user_message_parts(
     attachments: &[AttachmentRef],
 ) -> Option<Vec<MessagePart>> {
     let trimmed = content.trim();
+    let image_refs = collect_image_refs(attachments);
     let mut parts = Vec::new();
 
-    if !trimmed.is_empty() {
-        parts.push(MessagePart::Text {
-            text: trimmed.to_string(),
-        });
+    let text = multimodal_user_text(trimmed, !image_refs.is_empty());
+    if !text.is_empty() {
+        parts.push(MessagePart::Text { text });
     }
 
-    for attachment in attachments {
-        let Some(image_ref) = attachment_image_ref(attachment) else {
-            continue;
-        };
+    for image_ref in image_refs {
         parts.push(MessagePart::ImageUrl {
             image_url: ImageUrlPart { url: image_ref },
         });
     }
 
     if parts.is_empty() { None } else { Some(parts) }
+}
+
+fn collect_image_refs(attachments: &[AttachmentRef]) -> Vec<String> {
+    attachments
+        .iter()
+        .filter_map(attachment_image_ref)
+        .collect()
+}
+
+fn multimodal_user_text(content: &str, has_images: bool) -> String {
+    if has_images {
+        if content.is_empty() {
+            "The user sent this image. Describe what you see and respond to their message.".into()
+        } else {
+            format!(
+                "The user sent this image. Describe what you see and respond to their message. User message: {content}"
+            )
+        }
+    } else {
+        content.to_string()
+    }
 }
 
 fn attachment_image_ref(attachment: &AttachmentRef) -> Option<String> {
@@ -962,10 +980,29 @@ mod attachment_prompt_tests {
         )
         .expect("expected multimodal parts");
 
-        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "Describe this image"));
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message. User message: Describe this image"));
         assert!(
             matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg")
         );
+        assert_eq!(parts.len(), 2);
+    }
+
+    #[test]
+    fn builds_multimodal_parts_for_attachment_only_image_messages() {
+        let parts = build_user_message_parts(
+            "",
+            &[AttachmentRef {
+                name: "photo.jpg".into(),
+                mime_type: Some("image/jpeg".into()),
+                size_bytes: Some(42),
+                url: Some("https://example.test/photo.jpg".into()),
+                provider_file_id: None,
+            }],
+        )
+        .expect("expected multimodal parts");
+
+        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message."));
+        assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg"));
         assert_eq!(parts.len(), 2);
     }
 }
