@@ -237,6 +237,24 @@ pub struct PeerHealthResponse {
     pub active_projects: Vec<String>,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PeerHealthAlert {
+    pub severity: String,
+    pub peer_id: String,
+    pub peer_name: String,
+    pub status: String,
+    pub detail: String,
+    pub checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PeerHealthAlertsResponse {
+    pub status: String,
+    pub alerts: Vec<PeerHealthAlert>,
+    pub checked_at: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InstanceLoadResponse {
     pub session_count: usize,
@@ -808,6 +826,40 @@ async fn collect_peer_health(
     }
 
     results
+}
+
+
+pub async fn peer_health_alerts(
+    State(state): State<AppState>,
+) -> Result<Json<PeerHealthAlertsResponse>, GatewayError> {
+    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+    Ok(Json(peer_health_alerts_from_peers(peers)))
+}
+
+
+fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAlertsResponse {
+    let checked_at = Utc::now().to_rfc3339();
+    let alerts = peers
+        .into_iter()
+        .filter(|peer| peer.status != "healthy")
+        .map(|peer| PeerHealthAlert {
+            severity: match peer.status.as_str() {
+                "unreachable" => "critical".to_string(),
+                _ => "warning".to_string(),
+            },
+            peer_id: peer.id,
+            peer_name: peer.name,
+            status: peer.status,
+            detail: peer.detail,
+            checked_at: peer.checked_at,
+        })
+        .collect::<Vec<_>>();
+    let status = if alerts.is_empty() { "ok" } else { "degraded" };
+    PeerHealthAlertsResponse {
+        status: status.to_string(),
+        alerts,
+        checked_at,
+    }
 }
 
 /// Prompt cache token metrics grouped by provider/model.
@@ -7901,6 +7953,79 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn peer_health_alerts_empty_when_all_peers_healthy() {
+        let response = peer_health_alerts_from_peers(vec![PeerHealthResponse {
+            id: "peer-a".to_string(),
+            name: "Peer A".to_string(),
+            health_url: "http://peer-a/api/v1/instance/health".to_string(),
+            status: "healthy".to_string(),
+            detail: "200 OK".to_string(),
+            checked_at: "2026-03-29T00:00:00Z".to_string(),
+            latency_ms: Some(12),
+            load: Some(InstanceLoadResponse {
+                session_count: 1,
+                ws_subscribers: 0,
+                ws_connections: 0,
+            }),
+            advertised_addr: Some("http://peer-a".to_string()),
+            roles: vec!["gateway".to_string()],
+            capability_hash: Some("abc".to_string()),
+            capabilities_version: Some(1),
+            comms_transport: Some("http".to_string()),
+            configured_models: vec!["gpt-4.1".to_string()],
+            active_projects: vec!["/workspace/rune".to_string()],
+        }]);
+        assert_eq!(response.status, "ok");
+        assert!(response.alerts.is_empty());
+    }
+
+    #[test]
+    fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
+        let response = peer_health_alerts_from_peers(vec![
+            PeerHealthResponse {
+                id: "peer-a".to_string(),
+                name: "Peer A".to_string(),
+                health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                status: "unreachable".to_string(),
+                detail: "connection refused".to_string(),
+                checked_at: "2026-03-29T00:00:00Z".to_string(),
+                latency_ms: None,
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
+            },
+            PeerHealthResponse {
+                id: "peer-b".to_string(),
+                name: "Peer B".to_string(),
+                health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                status: "degraded".to_string(),
+                detail: "500 Internal Server Error".to_string(),
+                checked_at: "2026-03-29T00:00:03Z".to_string(),
+                latency_ms: Some(55),
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
+            },
+        ]);
+        assert_eq!(response.status, "degraded");
+        assert_eq!(response.alerts.len(), 2);
+        assert_eq!(response.alerts[0].severity, "critical");
+        assert_eq!(response.alerts[0].peer_id, "peer-a");
+        assert_eq!(response.alerts[1].severity, "warning");
+        assert_eq!(response.alerts[1].peer_id, "peer-b");
+    }
+
 }
 
 pub fn storage_path_checks_for_tests(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
