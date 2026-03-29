@@ -343,6 +343,13 @@ impl ModelProvider for OllamaProvider {
     ) -> Result<CompletionResponse, ModelError> {
         self.inner.complete(request).await
     }
+
+    async fn complete_stream(
+        &self,
+        request: &CompletionRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<crate::types::StreamEvent>, ModelError> {
+        self.inner.complete_stream(request).await
+    }
 }
 
 #[cfg(test)]
