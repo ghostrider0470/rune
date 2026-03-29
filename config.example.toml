@@ -11,6 +11,7 @@ name = "rune-local"
 # peers = [
 #   { id = "rune-laptop", health_url = "http://192.168.1.50:18790/api/v1/instance/health" },
 # ]
+
 [database]
 run_migrations = true
 # database_url = "postgresql://user:pass@localhost/rune"

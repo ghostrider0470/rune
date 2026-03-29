@@ -2410,6 +2410,10 @@ mod tests {
         config.instance.name = "Node A".to_string();
         config.instance.advertised_addr = Some("http://10.0.0.5:8787".to_string());
         config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+        config.instance.peers = vec![InstancePeer {
+            id: "node-b".to_string(),
+            health_url: "http://10.0.0.6:8787/api/v1/instance/health".to_string(),
+        }];
 
         let capabilities =
             Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 7);
@@ -2424,6 +2428,18 @@ mod tests {
             vec!["gateway".to_string(), "scheduler".to_string()]
         );
         assert_eq!(capabilities.identity.capabilities_version, 1);
+        assert_eq!(capabilities.peer_count, 1);
+    }
+
+    #[test]
+    fn instance_peers_deserialize_from_struct_entries() {
+        let config = AppConfig::load(Some("config.example.toml")).unwrap();
+        assert_eq!(config.instance.peers.len(), 1);
+        assert_eq!(config.instance.peers[0].id, "rune-hamza-laptop");
+        assert_eq!(
+            config.instance.peers[0].health_url,
+            "http://rune-hamza-laptop:18790/api/v1/instance/health"
+        );
     }
 
     #[test]
