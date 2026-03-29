@@ -15,8 +15,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::output::{
-    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorMemoryHierarchySummary,
-    DoctorPathSummary, DoctorReport, DoctorTopologySummary,
+    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorContextTierCounter,
+    DoctorMemoryHierarchySummary, DoctorPathSummary, DoctorReport, DoctorTopologySummary,
 };
 use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
@@ -1380,6 +1380,53 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             context_over_compaction_threshold: false,
             context_compaction_required: false,
             loaded_tier_count: 5,
+            context_tier_counters: vec![
+                DoctorContextTierCounter {
+                    kind: "identity".to_string(),
+                    token_budget: config.context.identity as u64,
+                    estimated_tokens: 0,
+                    priority: 100,
+                    staleness_policy: "pinned".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "task".to_string(),
+                    token_budget: config.context.task as u64,
+                    estimated_tokens: 0,
+                    priority: 90,
+                    staleness_policy: "active".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "project".to_string(),
+                    token_budget: config.context.project as u64,
+                    estimated_tokens: 0,
+                    priority: 80,
+                    staleness_policy: "refresh_on_project_switch".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "shared".to_string(),
+                    token_budget: config.context.shared as u64,
+                    estimated_tokens: 0,
+                    priority: 70,
+                    staleness_policy: "refresh_periodic".to_string(),
+                    loaded: true,
+                    source: "config".to_string(),
+                },
+                DoctorContextTierCounter {
+                    kind: "memory".to_string(),
+                    token_budget: 0,
+                    estimated_tokens: 0,
+                    priority: 60,
+                    staleness_policy: "on_demand".to_string(),
+                    loaded: true,
+                    source: "runtime".to_string(),
+                },
+            ],
         }),
         run_at: chrono::Utc::now().to_rfc3339(),
     }
