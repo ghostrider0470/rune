@@ -5911,12 +5911,17 @@ pub struct MemorySearchQuery {
     pub _limit: Option<usize>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MemorySearchResult {
     pub source: String,
     pub file_path: String,
     pub line: usize,
     pub snippet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_name: Option<String>,
+    pub remote: bool,
 }
 
 #[derive(Serialize)]
@@ -5924,6 +5929,9 @@ pub struct MemorySearchResponse {
     pub query: String,
     pub results: Vec<MemorySearchResult>,
     pub message: String,
+    pub local_results: usize,
+    pub remote_results: usize,
+    pub remote_pending: usize,
 }
 
 pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
@@ -5943,9 +5951,103 @@ pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
                 file_path,
                 line,
                 snippet: snippet.trim().to_string(),
+                instance_id: None,
+                instance_name: None,
+                remote: false,
             })
         })
         .collect()
+}
+
+
+#[derive(Serialize, Deserialize)]
+struct RemoteMemorySearchResponse {
+    pub query: String,
+    #[serde(default)]
+    pub results: Vec<MemorySearchResult>,
+    #[serde(default)]
+    pub message: String,
+}
+
+async fn federated_memory_search(
+    state: &AppState,
+    query: &str,
+    limit: usize,
+    local_results: Vec<MemorySearchResult>,
+) -> (Vec<MemorySearchResult>, usize) {
+    let peers = {
+        let config = state.config.read().await;
+        config.instance.peers.clone()
+    };
+
+    if peers.is_empty() {
+        return (local_results, 0);
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(750))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return (local_results, peers.len()),
+    };
+
+    let mut merged = Vec::new();
+    let mut remote_pending = 0usize;
+
+    for peer in peers {
+        let base = peer
+            .health_url
+            .trim_end_matches("/api/v1/instance/health")
+            .trim_end_matches('/');
+        let endpoint = format!(
+            "{base}/api/memory/search?q={}&limit={limit}",
+            urlencoding::encode(query),
+        );
+
+        let response = match client.get(&endpoint).send().await {
+            Ok(response) => response,
+            Err(_) => {
+                remote_pending += 1;
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            remote_pending += 1;
+            continue;
+        }
+
+        let payload = match response.json::<RemoteMemorySearchResponse>().await {
+            Ok(payload) => payload,
+            Err(_) => {
+                remote_pending += 1;
+                continue;
+            }
+        };
+
+        let mut peer_results = payload
+            .results
+            .into_iter()
+            .map(|mut result| {
+                result.remote = true;
+                if result.instance_id.is_none() {
+                    result.instance_id = Some(peer.id.clone());
+                }
+                if result.instance_name.is_none() {
+                    result.instance_name = Some(peer.id.clone());
+                }
+                result
+            })
+            .collect::<Vec<_>>();
+        merged.append(&mut peer_results);
+    }
+
+    let local_count = local_results.len();
+    let mut combined = local_results;
+    combined.extend(merged);
+    combined.truncate(limit.max(local_count));
+    (combined, remote_pending)
 }
 
 fn parse_memory_source(source: &str) -> (String, usize) {
@@ -6007,9 +6109,19 @@ pub async fn memory_search(
         .execute(call)
         .await
         .map_err(|error| GatewayError::Internal(error.to_string()))?;
-    let results = parse_memory_search_output(&result.output);
+    let local_results = parse_memory_search_output(&result.output);
+    let local_count = local_results.len();
+    let (results, remote_pending) = federated_memory_search(&state, &q, limit, local_results).await;
+    let remote_results = results.iter().filter(|result| result.remote).count();
     let message = if results.is_empty() {
         format!("No results found for query: {q}")
+    } else if remote_results > 0 {
+        format!(
+            "Found {} memory result(s) ({} local, {} remote)",
+            results.len(),
+            local_count,
+            remote_results
+        )
     } else {
         format!("Found {} memory result(s)", results.len())
     };
@@ -6018,6 +6130,9 @@ pub async fn memory_search(
         query: q,
         results,
         message,
+        local_results: local_count,
+        remote_results,
+        remote_pending,
     }))
 }
 
