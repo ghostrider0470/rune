@@ -4352,7 +4352,7 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
         },
         rune_config::PeerConfig {
             id: "peer-b".to_string(),
-            health_url: peer_b_url,
+            health_url: peer_b_url.clone(),
         },
         rune_config::PeerConfig {
             id: "peer-down".to_string(),
@@ -4376,12 +4376,26 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["selected_peer"]["id"], "peer-b");
     assert_eq!(json["receiver"]["instance_id"], "peer-b");
     assert_eq!(json["receiver"]["transport"], "http");
+    assert_eq!(
+        json["receiver"]["submit_url"],
+        format!("{}/api/v1/instance/delegations", peer_b_url.trim_end_matches("/api/v1/instance/health"))
+    );
+    assert_eq!(
+        json["receiver"]["result_url"],
+        format!(
+            "{}/api/v1/instance/delegations/{task_id}",
+            peer_b_url.trim_end_matches("/api/v1/instance/health"),
+            task_id = "{task_id}"
+        )
+    );
     assert_eq!(json["selected_peer"]["load"]["session_count"], 2);
     assert_eq!(json["candidates"].as_array().unwrap().len(), 3);
     assert_eq!(json["sender"]["instance_id"], "rune-test-instance");
     assert_eq!(json["sender"]["instance_name"], "Rune Test Instance");
     assert_eq!(json["sender"]["transport"], "filesystem");
     assert_eq!(json["sender"]["health_url"], serde_json::Value::Null);
+    assert_eq!(json["sender"]["submit_url"], serde_json::Value::Null);
+    assert_eq!(json["sender"]["result_url"], serde_json::Value::Null);
     assert_eq!(json["routing"]["mode"], "least_busy");
     assert_eq!(json["routing"]["peer_count"], 3);
     assert_eq!(json["branch_reservation"]["required"], true);
@@ -4410,6 +4424,9 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["result"]["artifact_field"], "artifacts");
     assert_eq!(json["result"]["error_field"], "error");
     assert_eq!(json["result"]["finished_at_field"], "finished_at");
+    assert_eq!(json["result"]["accepted_at_field"], "accepted_at");
+    assert_eq!(json["result"]["started_at_field"], "started_at");
+    assert_eq!(json["result"]["task_id_field"], "task_id");
     assert_eq!(json["task_contract"]["protocol_version"], 1);
     assert_eq!(
         json["task_contract"]["submission_modes"],
@@ -4515,6 +4532,14 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
     assert_eq!(
         json["sender"]["health_url"],
         "http://127.0.0.1:8787/api/v1/instance/health"
+    );
+    assert_eq!(
+        json["sender"]["submit_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations"
+    );
+    assert_eq!(
+        json["sender"]["result_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations/{task_id}"
     );
     assert_eq!(json["routing"]["mode"], "named");
 }
