@@ -486,6 +486,200 @@ Missing projects: {}",
                 self.capability_match.missing_projects.join(", ")
             )?;
         }
+        if let Some(sender) = &self.sender {
+            write!(
+                f,
+                "
+Sender: {} ({})",
+                sender.instance_name, sender.instance_id
+            )?;
+            write!(
+                f,
+                "
+  Transport: {}",
+                sender.transport
+            )?;
+            if let Some(health_url) = &sender.health_url {
+                write!(
+                    f,
+                    "
+  Health URL: {health_url}"
+                )?;
+            }
+            if let Some(submit_url) = &sender.submit_url {
+                write!(
+                    f,
+                    "
+  Submit URL: {submit_url}"
+                )?;
+            }
+            if let Some(result_url) = &sender.result_url {
+                write!(
+                    f,
+                    "
+  Result URL: {result_url}"
+                )?;
+            }
+        }
+        if let Some(receiver) = &self.receiver {
+            write!(
+                f,
+                "
+Receiver: {} ({})",
+                receiver.instance_name, receiver.instance_id
+            )?;
+            write!(
+                f,
+                "
+  Transport: {}",
+                receiver.transport
+            )?;
+            if let Some(health_url) = &receiver.health_url {
+                write!(
+                    f,
+                    "
+  Health URL: {health_url}"
+                )?;
+            }
+            if let Some(submit_url) = &receiver.submit_url {
+                write!(
+                    f,
+                    "
+  Submit URL: {submit_url}"
+                )?;
+            }
+            if let Some(result_url) = &receiver.result_url {
+                write!(
+                    f,
+                    "
+  Result URL: {result_url}"
+                )?;
+            }
+        }
+        if let Some(routing) = &self.routing {
+            write!(
+                f,
+                "
+Routing: {}",
+                routing.mode
+            )?;
+            write!(
+                f,
+                "
+Routing detail: {}",
+                routing.detail
+            )?;
+            write!(
+                f,
+                "
+Routing peer count: {}",
+                routing.peer_count
+            )?;
+        }
+        if let Some(branch_reservation) = &self.branch_reservation {
+            write!(
+                f,
+                "
+Branch reservation: {} via {} ({})",
+                if branch_reservation.required {
+                    "required"
+                } else {
+                    "optional"
+                },
+                branch_reservation.mechanism,
+                branch_reservation.enforced_by
+            )?;
+            write!(
+                f,
+                "
+  {}",
+                branch_reservation.detail
+            )?;
+        }
+        if let Some(file_locks) = &self.file_locks {
+            write!(
+                f,
+                "
+File locks: {} via {} ({})",
+                if file_locks.required {
+                    "required"
+                } else {
+                    "optional"
+                },
+                file_locks.mechanism,
+                file_locks.enforced_by
+            )?;
+            write!(
+                f,
+                "
+  {}",
+                file_locks.detail
+            )?;
+        }
+        if let Some(task_status) = &self.task_status {
+            write!(
+                f,
+                "
+Task states: {}",
+                task_status.states.join(" → ")
+            )?;
+            write!(
+                f,
+                "
+Terminal states: {}",
+                task_status.terminal_states.join(", ")
+            )?;
+            write!(
+                f,
+                "
+Sender visibility: {}",
+                task_status.sender_visibility
+            )?;
+            write!(
+                f,
+                "
+Timeout behavior: {}",
+                task_status.timeout_behavior
+            )?;
+            write!(
+                f,
+                "
+Failure behavior: {}",
+                task_status.failure_behavior
+            )?;
+        }
+        if let Some(result) = &self.result {
+            write!(
+                f,
+                "
+Result status field: {}",
+                result.status_field
+            )?;
+            write!(
+                f,
+                "
+Result artifact field: {}",
+                result.artifact_field
+            )?;
+            write!(
+                f,
+                "
+Result error field: {}",
+                result.error_field
+            )?;
+            write!(
+                f,
+                "
+Result task id field: {}",
+                result.task_id_field
+            )?;
+            write!(
+                f,
+                "
+Result timestamps: accepted={}, started={}, finished={}",
+                result.accepted_at_field, result.started_at_field, result.finished_at_field
+            )?;
+        }
         for peer in &self.candidates {
             write!(
                 f,
