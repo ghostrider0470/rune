@@ -191,6 +191,8 @@ export interface SessionListItem {
   id: string;
   kind: string;
   status: string;
+  project_id?: string | null;
+  mode?: string | null;
   requester_session_id?: string | null;
   channel: string | null;
   created_at: string;
@@ -207,6 +209,8 @@ export interface SessionResponse {
   id: string;
   kind: string;
   status: string;
+  project_id: string | null;
+  mode: string | null;
   requester_session_id: string | null;
   channel_ref: string | null;
   created_at: string;
@@ -217,6 +221,13 @@ export interface SessionResponse {
   usage_completion_tokens: number;
   last_turn_started_at: string | null;
   last_turn_ended_at: string | null;
+}
+
+export interface PatchSessionRequest {
+  label?: string | null;
+  thinking_level?: string | null;
+  verbose?: boolean | null;
+  reasoning?: string | null;
 }
 
 export interface SessionStatusResponse {

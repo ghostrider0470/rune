@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,8 @@ import {
   useSessionStatus,
   useSessionTranscript,
   useSendMessage,
+  usePatchSession,
+  useDeleteSession,
   type SessionTranscriptFilters,
 } from "@/hooks/use-sessions";
 import { useSessionEvents } from "@/lib/websocket";
@@ -37,6 +39,8 @@ import {
   WifiOff,
   Wrench,
   Zap,
+  Save,
+  Trash2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/sessions/$id")({
@@ -185,11 +189,16 @@ function renderSystemEntry(entry: TranscriptEntry, isLive = false) {
 
 function SessionDetailPage() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<TranscriptKindFilter>("all");
   const [sortDirection, setSortDirection] = useState<SortDirection>("oldest");
   const [limit, setLimit] = useState(200);
+  const [label, setLabel] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState("off");
+  const [reasoning, setReasoning] = useState("off");
+  const [verbose, setVerbose] = useState(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   const transcriptFilters = useMemo<SessionTranscriptFilters>(() => ({ limit }), [limit]);
@@ -198,6 +207,8 @@ function SessionDetailPage() {
   const { data: status } = useSessionStatus(id);
   const { data: transcript, isLoading: transcriptLoading, isFetching: transcriptFetching } = useSessionTranscript(id, transcriptFilters);
   const sendMessage = useSendMessage(id);
+  const patchSession = usePatchSession(id);
+  const deleteSession = useDeleteSession();
   const { events, connected } = useSessionEvents(id);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -240,10 +251,35 @@ function SessionDetailPage() {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [filteredEntries.length, liveAssistantText]);
 
+  useEffect(() => {
+    if (!session) return;
+    const metadata = (session as { metadata?: Record<string, unknown> }).metadata ?? {};
+    setLabel(typeof metadata.label === "string" ? metadata.label : "");
+    setThinkingLevel(typeof metadata.thinking_level === "string" ? metadata.thinking_level : "off");
+    setReasoning(typeof metadata.reasoning === "string" ? metadata.reasoning : status?.reasoning ?? "off");
+    setVerbose(typeof metadata.verbose === "boolean" ? metadata.verbose : status?.verbose ?? false);
+  }, [session, status]);
+
   const handleSend = () => {
     if (!message.trim()) return;
     sendMessage.mutate(message.trim(), {
       onSuccess: () => setMessage(""),
+    });
+  };
+
+  const handleSaveMetadata = () => {
+    patchSession.mutate({
+      label: label.trim() || null,
+      thinking_level: thinkingLevel,
+      reasoning,
+      verbose,
+    });
+  };
+
+  const handleDeleteSession = () => {
+    if (!window.confirm(`Delete session ${id}? This removes transcript history too.`)) return;
+    deleteSession.mutate(id, {
+      onSuccess: () => navigate({ to: "/sessions" }),
     });
   };
 
@@ -464,6 +500,56 @@ function SessionDetailPage() {
         </div>
 
         <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Session controls</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Label</label>
+                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Operator label" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Thinking level</label>
+                <Select value={thinkingLevel} onValueChange={setThinkingLevel}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">off</SelectItem>
+                    <SelectItem value="low">low</SelectItem>
+                    <SelectItem value="medium">medium</SelectItem>
+                    <SelectItem value="high">high</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Reasoning</label>
+                <Select value={reasoning} onValueChange={setReasoning}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">off</SelectItem>
+                    <SelectItem value="low">low</SelectItem>
+                    <SelectItem value="medium">medium</SelectItem>
+                    <SelectItem value="high">high</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <label className="flex items-center justify-between rounded-xl border bg-muted/20 px-3 py-2">
+                <span className="text-muted-foreground">Verbose runtime output</span>
+                <input type="checkbox" checked={verbose} onChange={(e) => setVerbose(e.target.checked)} className="h-4 w-4" />
+              </label>
+              <div className="flex gap-2">
+                <Button onClick={handleSaveMetadata} disabled={patchSession.isPending} className="flex-1">
+                  {patchSession.isPending ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save
+                </Button>
+                <Button variant="destructive" onClick={handleDeleteSession} disabled={deleteSession.isPending}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Session stats</CardTitle>
