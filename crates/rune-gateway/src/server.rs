@@ -671,6 +671,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/health", get(routes::health))
         .route("/api/ready", get(routes::ready))
         .route("/api/status", get(routes::status))
+        .route("/api/peers/alerts", get(routes::peer_health_alerts))
         .route("/api/dashboard/usage", get(routes::get_dashboard_usage))
         .route("/ws", get(ws::ws_handler))
         // Channel routes
