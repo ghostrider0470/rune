@@ -14538,6 +14538,22 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
         })
         .await
         .unwrap();
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id: child_id,
+            turn_id: None,
+            seq: 0,
+            kind: "subagent_result".into(),
+            payload: serde_json::json!({
+                "content": "Delegated architect found the missing result-routing summary and attached an audit-friendly excerpt for the parent tree."
+            }),
+            created_at: chrono::DateTime::parse_from_rfc3339("2026-03-29T12:05:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        })
+        .await
+        .unwrap();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -14614,6 +14630,11 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
     assert_eq!(
         child["subagent_last_note"],
         "Review result routing before resuming"
+    );
+    assert_eq!(child["last_subagent_result_at"], "2026-03-29T12:05:00+00:00");
+    assert_eq!(
+        child["last_subagent_result_excerpt"],
+        "Delegated architect found the missing result-routing summary and attached an audit-friendly excerpt for the parent tree."
     );
 }
 
