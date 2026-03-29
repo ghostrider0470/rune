@@ -467,11 +467,7 @@ pub struct UpdateStatusResponse {
 
 #[derive(Serialize, Deserialize)]
 pub struct CapabilitiesResponse {
-<<<<<<< HEAD
     pub mode: String,
-=======
-    pub mode: &'static str,
->>>>>>> 205d07b (feat(runtime): timestamp capability manifests (#420))
     pub updated_at: String,
     pub storage_backend: String,
     pub pgvector: bool,

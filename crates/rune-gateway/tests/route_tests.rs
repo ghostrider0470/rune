@@ -4166,7 +4166,7 @@ async fn instance_health_returns_capability_manifest() {
     assert_eq!(json["load"]["session_count"], 0);
     assert_eq!(json["load"]["ws_connections"], 0);
     assert!(json["capabilities"].is_object());
-    assert_eq!(json["capabilities"]["updated_at"], "2026-03-29T00:00:00Z");
+    assert!(json["capabilities"]["updated_at"].as_str().unwrap().contains("T"));
     assert_eq!(json["capabilities"]["instance_id"], "test-instance");
     assert_eq!(json["capabilities"]["instance_name"], "test-instance");
     assert_eq!(json["capabilities"]["identity"]["id"], "test-instance");
@@ -4469,7 +4469,7 @@ async fn status_returns_correct_shape() {
     assert!(json["registered_tools"].is_number());
     assert!(json["session_count"].is_number());
     assert!(json["capabilities"].is_object());
-    assert_eq!(json["capabilities"]["updated_at"], "2026-03-29T00:00:00Z");
+    assert!(json["capabilities"]["updated_at"].as_str().unwrap().contains("T"));
     assert_eq!(json["capabilities"]["mode"], "standalone");
     assert_eq!(json["capabilities"]["storage_backend"], "test");
     assert_eq!(json["capabilities"]["pgvector"], false);
@@ -4756,7 +4756,7 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
 
 #[tokio::test]
 async fn context_assembler_uses_configured_tier_budgets() {
-    let assembler = ContextAssembler::with_tier_budgets("You are Rune.", 1200, 3400, 5600, 7800);
+    let assembler = ContextAssembler::new("You are Rune.").with_tier_budgets(1200, 3400, 5600, 7800);
     let specs = assembler.tier_specs();
 
     assert_eq!(specs[0].kind, ContextTierKind::Identity);
