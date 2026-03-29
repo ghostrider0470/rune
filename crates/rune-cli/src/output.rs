@@ -799,6 +799,8 @@ pub struct DoctorMemoryHierarchySummary {
     #[serde(default)]
     pub context_compaction_required: bool,
     #[serde(default)]
+    pub l3_cold_storage_enabled: bool,
+    #[serde(default)]
     pub loaded_tier_count: u64,
     #[serde(default)]
     pub context_tier_counters: Vec<DoctorContextTierCounter>,
@@ -894,14 +896,15 @@ impl fmt::Display for DoctorReport {
             )?;
             writeln!(
                 f,
-                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}",
+                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}, l3_cold_storage_enabled={}",
                 memory_hierarchy.loaded_tier_count,
                 memory_hierarchy.context_total_budget,
                 memory_hierarchy.context_total_estimated_tokens,
                 memory_hierarchy.context_compaction_trigger_tokens,
                 memory_hierarchy.context_over_budget,
                 memory_hierarchy.context_over_compaction_threshold,
-                memory_hierarchy.context_compaction_required
+                memory_hierarchy.context_compaction_required,
+                memory_hierarchy.l3_cold_storage_enabled
             )?;
             if !memory_hierarchy.context_tier_counters.is_empty() {
                 writeln!(f, "  Context Tier Details:")?;
@@ -6119,6 +6122,7 @@ mod tests {
                 context_over_budget: false,
                 context_over_compaction_threshold: false,
                 context_compaction_required: false,
+                l3_cold_storage_enabled: true,
                 loaded_tier_count: 4,
                 context_tier_counters: vec![],
             }),
@@ -6137,7 +6141,7 @@ mod tests {
         assert!(out.contains("Memory Hierarchy:"));
         assert!(out.contains("L1: prompt cache via provider prefixes"));
         assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
-        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false"));
+        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false, l3_cold_storage_enabled=true"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
@@ -6723,6 +6727,9 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec!["claude-3-7-sonnet".into()],
                 active_projects: vec!["/workspace/peer".into()],
+                capabilities_version: Some(1),
+                capability_hash: Some("cap-peer-a".into()),
+                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,
@@ -6751,6 +6758,9 @@ mod tests {
                 roles: vec!["gateway".into()],
                 configured_models: vec![],
                 active_projects: vec![],
+                capabilities_version: Some(1),
+                capability_hash: Some("cap-peer-a".into()),
+                comms_transport: Some("filesystem".into()),
                 load: Some(InstanceLoadSummary {
                     session_count: 1,
                     ws_subscribers: 0,

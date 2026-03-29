@@ -1380,6 +1380,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             context_over_budget: false,
             context_over_compaction_threshold: false,
             context_compaction_required: false,
+            l3_cold_storage_enabled: l3_ready,
             loaded_tier_count: 5,
             context_tier_counters: vec![
                 DoctorContextTierCounter {
