@@ -52,7 +52,7 @@ For non-interactive CI/script usage, add `--non-interactive`. `rune setup` defau
 cp config.example.toml config.toml
 ```
 
-Then set the provider/channel/auth values needed for your environment.
+Then set the provider/channel/auth values needed for your environment. If you are testing federation, also fill `[instance]` with a human-readable `name`, optional `advertised_addr`, and `peers = [{ id, health_url }]`.
 
 ## Run
 

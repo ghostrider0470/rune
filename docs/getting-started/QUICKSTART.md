@@ -61,8 +61,11 @@ If you want to wire config yourself:
 
 ```bash
 cp config.example.toml config.toml
+# optional: set [instance] name / advertised_addr / peers for multi-instance discovery
 ./target/release/rune-gateway --config config.toml
 ```
+
+If you are wiring multiple Rune instances together, set `[instance]` in `config.toml` and check `http://127.0.0.1:8787/api/v1/instance/health` after startup to confirm identity, capability manifest, and peer reachability.
 
 Open:
 
