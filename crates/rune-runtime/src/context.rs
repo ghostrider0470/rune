@@ -168,14 +168,36 @@ impl ContextAssembler {
     pub fn new(system_instructions: impl Into<String>) -> Self {
         Self {
             system_instructions: system_instructions.into(),
-            tier_specs: vec![
-                ContextTierSpec::new(ContextTierKind::Identity, 1_000),
-                ContextTierSpec::new(ContextTierKind::ActiveTask, 10_000),
-                ContextTierSpec::new(ContextTierKind::Project, 20_000),
-                ContextTierSpec::new(ContextTierKind::Shared, 5_000),
-                ContextTierSpec::new(ContextTierKind::Historical, 0),
-            ],
+            tier_specs: Self::default_tier_specs(),
         }
+    }
+
+    fn default_tier_specs() -> Vec<ContextTierSpec> {
+        vec![
+            ContextTierSpec::new(ContextTierKind::Identity, 1_000),
+            ContextTierSpec::new(ContextTierKind::ActiveTask, 10_000),
+            ContextTierSpec::new(ContextTierKind::Project, 20_000),
+            ContextTierSpec::new(ContextTierKind::Shared, 5_000),
+            ContextTierSpec::new(ContextTierKind::Historical, 0),
+        ]
+    }
+
+    #[must_use]
+    pub fn with_tier_budgets(
+        mut self,
+        identity: usize,
+        active_task: usize,
+        project: usize,
+        shared: usize,
+    ) -> Self {
+        self.tier_specs = vec![
+            ContextTierSpec::new(ContextTierKind::Identity, identity),
+            ContextTierSpec::new(ContextTierKind::ActiveTask, active_task),
+            ContextTierSpec::new(ContextTierKind::Project, project),
+            ContextTierSpec::new(ContextTierKind::Shared, shared),
+            ContextTierSpec::new(ContextTierKind::Historical, 0),
+        ];
+        self
     }
 
     #[must_use]
@@ -772,6 +794,20 @@ mod context_tier_tests {
             specs[4],
             ContextTierSpec::new(ContextTierKind::Historical, 0)
         );
+    }
+
+    #[test]
+    fn with_tier_budgets_overrides_defaults() {
+        let assembler = ContextAssembler::new("Identity instructions")
+            .with_tier_budgets(750, 8_000, 16_000, 2_500);
+        let specs = assembler.tier_specs();
+
+        assert_eq!(specs.len(), 5);
+        assert_eq!(specs[0].token_budget, 750);
+        assert_eq!(specs[1].token_budget, 8_000);
+        assert_eq!(specs[2].token_budget, 16_000);
+        assert_eq!(specs[3].token_budget, 2_500);
+        assert_eq!(specs[4].token_budget, 0);
     }
 
     #[test]
