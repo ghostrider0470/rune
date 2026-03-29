@@ -22,7 +22,7 @@ use rune_runtime::scheduler::{
     SessionTarget, compute_initial_next_run,
 };
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
-use rune_store::models::{SessionRow, TurnRow};
+use rune_store::models::{SessionRow, TranscriptItemRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
 use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
 use rune_tools::{ToolCall, ToolExecutor};
@@ -2443,6 +2443,12 @@ pub struct SessionAuditSummary {
     pub last_operator_note: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ParentSubagentResultSummary {
+    pub session_id: String,
+    pub summary: String,
+}
+
 #[derive(Serialize)]
 pub struct SessionStatusResponse {
     pub session_id: String,
@@ -2493,6 +2499,7 @@ pub struct SessionStatusResponse {
     pub subagent_last_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audit: Option<SessionAuditSummary>,
+    pub latest_subagent_result: Option<ParentSubagentResultSummary>,
     pub unresolved: Vec<String>,
 }
 
@@ -2631,6 +2638,8 @@ pub async fn get_session_status(
         None
     };
 
+    let latest_subagent_result = latest_subagent_result(&transcript_items);
+
     let mut unresolved = Vec::new();
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
     if approval_mode == "on-miss" {
@@ -2684,6 +2693,7 @@ pub async fn get_session_status(
         subagent_status_updated_at,
         subagent_last_note,
         audit,
+        latest_subagent_result,
         unresolved,
     }))
 }
@@ -3444,6 +3454,29 @@ fn metadata_string(metadata: &Value, key: &str) -> Option<String> {
 
 fn metadata_bool(metadata: &Value, key: &str) -> Option<bool> {
     metadata.get(key).and_then(Value::as_bool)
+}
+
+fn latest_subagent_result(
+    transcript_items: &[TranscriptItemRow],
+) -> Option<ParentSubagentResultSummary> {
+    transcript_items.iter().rev().find_map(|item| {
+        if item.kind != "subagent_result" {
+            return None;
+        }
+
+        let session_id = item
+            .payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)?;
+        let summary = item
+            .payload
+            .get("summary")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_default();
+        Some(ParentSubagentResultSummary { session_id, summary })
+    })
 }
 
 fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
