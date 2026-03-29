@@ -300,6 +300,6 @@ fn seed_context_tier_metadata(
     metadata: serde_json::Value,
     context_assembler: &ContextAssembler,
 ) -> serde_json::Value {
-    let report = context_assembler.analyze_context_usage(None, None, &[], 0);
+    let report = context_assembler.analyze_context_usage(None, None, &[], 0, false);
     set_context_tiers(&metadata, &report)
 }

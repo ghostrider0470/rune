@@ -1276,6 +1276,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
     } else {
         "L2 promotion to L1 candidates depends on stable prompt-prefix reuse on later turns/sessions".to_string()
     };
+    let l3_ready = !config.paths.sessions_dir.as_os_str().is_empty();
     let demotion_target = if config.mem0.enabled {
         "warm/cold memory (Mem0 + transcript archive)"
     } else {
@@ -1341,7 +1342,11 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             l1: "prompt cache via provider prefixes (offline doctor cannot inspect live cache metrics)"
                 .to_string(),
             l2: format!("{} ({})", l2_backend, effective_memory_mode),
-            l3: "durable session logs in transcript/session storage".to_string(),
+            l3: if l3_ready {
+                "durable session logs in transcript/session storage (ready for compaction handoff)".to_string()
+            } else {
+                "durable session logs in transcript/session storage".to_string()
+            },
             promotion,
             demotion: format!(
                 "compaction checkpoints persist stale L0 context to {} after {} tokens",
@@ -1350,13 +1355,13 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             ),
             metrics: if config.mem0.enabled {
                 format!(
-                    "offline doctor has no live cache metrics; Mem0 access_count persists hot-memory reuse. Context tiers ship static budgets: loaded_tiers=4, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false; gateway doctor exposes prompt_cache_rows/cached_tokens totals",
+                    "offline doctor has no live cache metrics; Mem0 access_count persists hot-memory reuse. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false; gateway doctor exposes prompt_cache_rows/cached_tokens totals",
                     36_000,
                     config.runtime.compaction.compress_after
                 )
             } else {
                 format!(
-                    "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals. Context tiers ship static budgets: loaded_tiers=4, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false",
+                    "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals. Context tiers ship static budgets: loaded_tiers=5, total_budget={}, estimated_tokens=0, compaction_trigger_tokens={}, over_budget=false, over_compaction_threshold=false, compaction_required=false",
                     36_000,
                     config.runtime.compaction.compress_after
                 )
@@ -1374,7 +1379,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             context_over_budget: false,
             context_over_compaction_threshold: false,
             context_compaction_required: false,
-            loaded_tier_count: 4,
+            loaded_tier_count: 5,
         }),
         run_at: chrono::Utc::now().to_rfc3339(),
     }
