@@ -220,9 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_process_handles_status ON process_handles (status
 -- Add latest_turn_id to sessions for quick access to the most recent turn.
 ALTER TABLE sessions ADD COLUMN latest_turn_id TEXT;
 
--- Add approval linkage and execution mode to tool_executions.
-ALTER TABLE tool_executions ADD COLUMN approval_id TEXT;
-ALTER TABLE tool_executions ADD COLUMN execution_mode TEXT;
+-- approval_id and execution_mode now exist in the base tool_executions schema.
 "#,
     },
     Migration {
