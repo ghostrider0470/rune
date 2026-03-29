@@ -43,6 +43,10 @@ Rune commands:
 /// Maps channel routing key → session_id.
 type SessionIndex = HashMap<String, Uuid>;
 
+type EventPriority = u8;
+const PRIORITY_USER_MESSAGE: EventPriority = 0;
+const PRIORITY_BACKGROUND: EventPriority = 4;
+
 /// The main session loop that ties channels to the runtime.
 pub struct SessionLoop {
     engine: Arc<SessionEngine>,
@@ -171,6 +175,22 @@ impl SessionLoop {
                 error!(error = %e, "failed to handle inbound event");
             }
         }
+    }
+
+    fn classify_event_priority(event: &InboundEvent) -> EventPriority {
+        match event {
+            InboundEvent::Message(_) => PRIORITY_USER_MESSAGE,
+            InboundEvent::Reaction { .. }
+            | InboundEvent::Edit { .. }
+            | InboundEvent::Delete { .. }
+            | InboundEvent::MemberJoin { .. }
+            | InboundEvent::MemberLeave { .. } => PRIORITY_BACKGROUND,
+        }
+    }
+
+    #[must_use]
+    pub fn event_priority_for_test(event: &InboundEvent) -> EventPriority {
+        Self::classify_event_priority(event)
     }
 
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {

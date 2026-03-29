@@ -2897,3 +2897,28 @@ async fn create_subagent_session_with_context_persists_delegation_slice_and_scra
         "agents/acme/scratchpads/subagent-1.md"
     );
 }
+
+#[test]
+fn session_loop_prioritizes_user_messages_above_background_events() {
+    let message = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "hamza".to_string(),
+        content: "urgent".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-1".to_string(),
+    });
+    let reaction = rune_channels::InboundEvent::Reaction {
+        channel_id: rune_core::ChannelId::new(),
+        message_id: "msg-2".to_string(),
+        emoji: "🔥".to_string(),
+        user: "peer".to_string(),
+    };
+
+    let user_priority = crate::session_loop::SessionLoop::event_priority_for_test(&message);
+    let background_priority = crate::session_loop::SessionLoop::event_priority_for_test(&reaction);
+
+    assert!(user_priority < background_priority);
+    assert_eq!(user_priority, 0);
+}
