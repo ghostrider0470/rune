@@ -1371,6 +1371,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             total_input_tokens: 0,
             cache_hit_ratio_percent: 0.0,
             l2_recall_hits: 0,
+            l2_warm_memories: 0,
             l2_hot_memories: 0,
             l2_total_memories: 0,
             context_total_budget: (config.context.identity + config.context.task + config.context.project + config.context.shared) as u64,
