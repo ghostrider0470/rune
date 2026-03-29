@@ -72,11 +72,24 @@ pub struct InstanceHealthResponse {
 }
 
 #[derive(Serialize)]
+pub struct DelegationTaskContractResponse {
+    pub protocol_version: u32,
+    pub submission_modes: Vec<&'static str>,
+    pub lifecycle: Vec<&'static str>,
+    pub timeout_handling: Vec<&'static str>,
+    pub conflict_prevention: Vec<&'static str>,
+    pub required_fields: Vec<&'static str>,
+    pub optional_fields: Vec<&'static str>,
+    pub result_fields: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
 pub struct DelegationPlanResponse {
     pub strategy: String,
     pub selected_peer: Option<PeerHealthResponse>,
     pub candidates: Vec<PeerHealthResponse>,
     pub detail: String,
+    pub task_contract: DelegationTaskContractResponse,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -228,7 +241,29 @@ pub async fn delegation_plan(
         selected_peer,
         candidates: peers,
         detail,
+        task_contract: delegation_task_contract(),
     }))
+}
+
+fn delegation_task_contract() -> DelegationTaskContractResponse {
+    DelegationTaskContractResponse {
+        protocol_version: 1,
+        submission_modes: vec!["named", "least_busy"],
+        lifecycle: vec!["submitted", "accepted", "running", "completed", "failed", "timeout"],
+        timeout_handling: vec![
+            "sender supplies timeout_secs per task",
+            "runtime treats deadline expiry as timeout",
+            "timeout yields terminal status and structured error detail",
+        ],
+        conflict_prevention: vec![
+            "agents must reserve branch names before execution",
+            "agents must acquire orchestrator file locks before mutating repo paths",
+            "conflicts fail fast with lock metadata for operator retry",
+        ],
+        required_fields: vec!["task", "constraints", "expected_output", "timeout_secs"],
+        optional_fields: vec!["target_peer_id", "branch_reservation", "file_locks", "artifacts"],
+        result_fields: vec!["status", "output", "artifacts", "error", "finished_at"],
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -4365,6 +4365,20 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["selected_peer"]["id"], "peer-b");
     assert_eq!(json["selected_peer"]["load"]["session_count"], 2);
     assert_eq!(json["candidates"].as_array().unwrap().len(), 3);
+    assert_eq!(json["task_contract"]["protocol_version"], 1);
+    assert_eq!(
+        json["task_contract"]["submission_modes"],
+        serde_json::json!(["named", "least_busy"])
+    );
+    assert_eq!(
+        json["task_contract"]["lifecycle"],
+        serde_json::json!(["submitted", "accepted", "running", "completed", "failed", "timeout"])
+    );
+    assert!(json["task_contract"]["conflict_prevention"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry.as_str().unwrap_or_default().contains("branch names")));
 }
 
 #[tokio::test]
