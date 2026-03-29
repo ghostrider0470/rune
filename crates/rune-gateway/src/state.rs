@@ -85,6 +85,7 @@ pub struct TokenMetricsStore {
 pub struct DelegationTaskRecord {
     pub request: crate::routes::DelegationTaskRequest,
     pub result: crate::routes::DelegationTaskResultResponse,
+    pub deadline_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -108,7 +109,9 @@ impl DelegationTaskStore {
                 request.task_id
             )),
             Entry::Vacant(slot) => {
-                let accepted_at = chrono::Utc::now().to_rfc3339();
+                let now = chrono::Utc::now();
+                let accepted_at = now.to_rfc3339();
+                let deadline_at = now + chrono::TimeDelta::seconds(request.task.timeout_secs as i64);
                 let result = crate::routes::DelegationTaskResultResponse {
                     task_id: request.task_id.clone(),
                     status: "accepted".to_string(),
@@ -122,6 +125,7 @@ impl DelegationTaskStore {
                 slot.insert(DelegationTaskRecord {
                     request,
                     result: result.clone(),
+                    deadline_at,
                 });
                 Ok(result)
             }
@@ -129,8 +133,24 @@ impl DelegationTaskStore {
     }
 
     pub async fn get(&self, task_id: &str) -> Option<DelegationTaskRecord> {
-        let inner = self.inner.lock().await;
-        inner.get(task_id).cloned()
+        let mut inner = self.inner.lock().await;
+        let record = inner.get_mut(task_id)?;
+
+        if !matches!(record.result.status.as_str(), "completed" | "failed" | "timeout")
+            && chrono::Utc::now() >= record.deadline_at
+        {
+            record.result.status = "timeout".to_string();
+            record.result.error = Some(crate::routes::DelegationErrorResponse {
+                code: "deadline_exceeded".to_string(),
+                message: format!(
+                    "delegation task '{}' exceeded timeout of {} seconds",
+                    record.request.task_id, record.request.task.timeout_secs
+                ),
+            });
+            record.result.finished_at = Some(chrono::Utc::now().to_rfc3339());
+        }
+
+        Some(record.clone())
     }
 }
 

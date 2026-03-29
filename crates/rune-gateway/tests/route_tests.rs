@@ -4674,7 +4674,9 @@ async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
 
 #[tokio::test]
 async fn delegation_plan_exposes_full_task_contract_fields() {
-    let app = build_test_app(None);
+    let mut config = AppConfig::default();
+    config.instance.name = "test-instance".to_string();
+    let app = build_test_app_with_config(config, None);
     let response = app
         .oneshot(
             Request::get("/api/v1/instance/delegation-plan")
@@ -4729,7 +4731,9 @@ async fn delegation_plan_exposes_full_task_contract_fields() {
 
 #[tokio::test]
 async fn delegation_plan_requires_peer_id_for_named_strategy() {
-    let app = build_test_app(None);
+    let mut config = AppConfig::default();
+    config.instance.name = "test-instance".to_string();
+    let app = build_test_app_with_config(config, None);
     let response = app
         .oneshot(
             Request::get("/api/v1/instance/delegation-plan?strategy=named")
@@ -13003,4 +13007,116 @@ async fn admin_token_metrics_aggregates_cached_and_uncached_tokens() {
     assert_eq!(entry["cached_tokens"], 0);
     assert_eq!(entry["uncached_tokens"], 10);
     assert_eq!(entry["cache_hit_ratio_percent"], 0.0);
+}
+
+#[tokio::test]
+async fn create_and_get_delegation_task_returns_accepted_record() {
+    let mut config = AppConfig::default();
+    config.instance.name = "test-instance".to_string();
+    let app = build_test_app_with_config(config, None);
+    let payload = serde_json::json!({
+        "task_id": "delegation-accepted-1",
+        "protocol_version": 1,
+        "submitted_at": "2026-03-29T00:00:00Z",
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "health_url": "http://sender-a:8787/api/v1/instance/health",
+            "submit_url": "http://sender-a:8787/api/v1/instance/delegations",
+            "result_url": "http://sender-a:8787/api/v1/instance/delegations/{task_id}"
+        },
+        "task": {
+            "task": "Run cargo check",
+            "constraints": ["Stay in rune-gateway"],
+            "expected_output": "status summary",
+            "timeout_secs": 60,
+            "branch_reservation": "agent/rune/delegation-421",
+            "file_locks": ["crates/rune-gateway/src/routes.rs"],
+            "artifacts": [
+                {
+                    "name": "cargo-check.log",
+                    "kind": "log",
+                    "content_type": "text/plain",
+                    "description": "verification log"
+                }
+            ]
+        }
+    });
+
+    let response = app.clone().oneshot(
+        Request::post("/api/v1/instance/delegations")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap(),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let json = body_json(response).await;
+    assert_eq!(json["result"]["task_id"], "delegation-accepted-1");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert!(json["receiver"]["instance_id"].as_str().unwrap_or_default().len() > 10);
+    assert_eq!(json["receiver"]["instance_name"], "test-instance");
+
+    let response = app.oneshot(
+        Request::get("/api/v1/instance/delegations/delegation-accepted-1")
+            .body(Body::empty())
+            .unwrap(),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["result"]["task_id"], "delegation-accepted-1");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert_eq!(json["result"]["artifacts"].as_array().unwrap().len(), 1);
+    assert!(json["result"]["accepted_at"].as_str().unwrap_or_default().contains('T'));
+}
+
+#[tokio::test]
+async fn get_delegation_task_transitions_to_timeout_after_deadline() {
+    let mut config = AppConfig::default();
+    config.instance.name = "test-instance".to_string();
+    let app = build_test_app_with_config(config, None);
+    let payload = serde_json::json!({
+        "task_id": "delegation-timeout-1",
+        "protocol_version": 1,
+        "submitted_at": "2026-03-29T00:00:00Z",
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "health_url": null,
+            "submit_url": null,
+            "result_url": null
+        },
+        "task": {
+            "task": "Do something slow",
+            "constraints": [],
+            "expected_output": "done",
+            "timeout_secs": 1
+        }
+    });
+
+    let response = app.clone().oneshot(
+        Request::post("/api/v1/instance/delegations")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap(),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let response = app.oneshot(
+        Request::get("/api/v1/instance/delegations/delegation-timeout-1")
+            .body(Body::empty())
+            .unwrap(),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["result"]["status"], "timeout");
+    assert_eq!(json["result"]["error"]["code"], "deadline_exceeded");
+    assert!(json["result"]["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("exceeded timeout"));
+    assert!(json["result"]["finished_at"].as_str().unwrap_or_default().contains('T'));
 }
