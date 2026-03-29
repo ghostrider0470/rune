@@ -711,6 +711,14 @@ async fn build_services(
                     config.runtime.compaction.context_window,
                     config.runtime.compaction.preserve_tail,
                 )
+                .with_budget_settings(
+                    config.runtime.compaction.effective_warn_at_tokens(),
+                    config.runtime.compaction.effective_compress_after(),
+                    config.runtime.compaction.reserved_system,
+                    config.runtime.compaction.reserved_task,
+                    config.runtime.compaction.auto_inject_project,
+                    config.runtime.compaction.memory_search_k,
+                )
                 .with_memory_flush(&workspace_root),
             );
             compaction
