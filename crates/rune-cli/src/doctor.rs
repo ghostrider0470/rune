@@ -1256,7 +1256,11 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
         .memory
         .capability_mode(config.memory.semantic_search_enabled);
     let l2_backend = if config.mem0.enabled
-        && config.mem0.postgres_url.as_ref().is_some_and(|v| !v.trim().is_empty())
+        && config
+            .mem0
+            .postgres_url
+            .as_ref()
+            .is_some_and(|v| !v.trim().is_empty())
     {
         "Mem0 + pgvector"
     } else {
@@ -1349,6 +1353,9 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
             } else {
                 "offline doctor has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".to_string()
             },
+            l2_recall_hits: 0,
+            l2_hot_memories: 0,
+            l2_total_memories: 0,
         }),
         run_at: chrono::Utc::now().to_rfc3339(),
     }

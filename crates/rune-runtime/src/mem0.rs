@@ -39,6 +39,13 @@ pub struct MemoryCaptureMetadata {
     pub trigger: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryHierarchyMetrics {
+    pub recall_hits: u64,
+    pub hot_memories: u64,
+    pub total_memories: u64,
+}
+
 /// A graph of memories: nodes + similarity edges for visualization.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryGraph {
@@ -287,6 +294,27 @@ impl Mem0Engine {
     }
 
     /// Return all memories (for graph visualization and admin dashboards).
+    pub async fn memory_hierarchy_metrics(
+        &self,
+    ) -> Result<MemoryHierarchyMetrics, rune_store::StoreError> {
+        let memories = self.repo.list_all().await?;
+        let total_memories = memories.len() as u64;
+        let hot_memories = memories
+            .iter()
+            .filter(|memory| memory.access_count > 0)
+            .count() as u64;
+        let recall_hits = memories
+            .iter()
+            .map(|memory| u64::try_from(memory.access_count.max(0)).unwrap_or(0))
+            .sum();
+
+        Ok(MemoryHierarchyMetrics {
+            recall_hits,
+            hot_memories,
+            total_memories,
+        })
+    }
+
     pub async fn list_all(&self) -> Vec<Memory> {
         match self.repo.list_all().await {
             Ok(facts) => facts.into_iter().map(Memory::from).collect(),
