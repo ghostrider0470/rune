@@ -28,11 +28,11 @@
 //! }
 //! ```
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 use tracing::{debug, error, info};
 
-use crate::protocol::{JsonRpcRequest, JsonRpcResponse, JsonRpcError, MCP_PROTOCOL_VERSION};
+use crate::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MCP_PROTOCOL_VERSION};
 
 /// Default Rune gateway URL for the memory API.
 ///

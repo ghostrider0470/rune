@@ -12,7 +12,6 @@ pub(crate) fn selected_model(session: &SessionRow) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-
 pub(crate) fn set_selected_model(metadata: &Value, model: &str) -> Value {
     let mut next = metadata.as_object().cloned().unwrap_or_default();
     next.insert(SELECTED_MODEL_KEY.to_string(), json!(model));

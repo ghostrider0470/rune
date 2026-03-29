@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, parse_doc, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, parse_doc};
 use crate::error::StoreError;
 use crate::models::{ApprovalRow, NewApproval};
 use crate::repos::ApprovalRepo;
@@ -118,7 +118,10 @@ impl ApprovalRepo for CosmosStore {
                     StoreError::Database(msg)
                 }
             })?;
-        let doc: ApprovalDoc = parse_doc(resp.into_model().map_err(|e| StoreError::Database(e.to_string()))?)?;
+        let doc: ApprovalDoc = parse_doc(
+            resp.into_model()
+                .map_err(|e| StoreError::Database(e.to_string()))?,
+        )?;
         Ok(ApprovalRow::from(doc))
     }
 

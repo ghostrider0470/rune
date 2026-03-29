@@ -1,8 +1,8 @@
 //! Shared response parsing and error mapping for OpenAI-compatible APIs.
 
 use reqwest::Response;
-use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::ModelError;
 use crate::types::{CompletionResponse, FinishReason, ToolCallRequest, Usage};
@@ -103,7 +103,6 @@ pub(crate) async fn map_error_response(resp: Response) -> ModelError {
     }
 }
 
-
 fn parse_retry_after_header(value: &str) -> Option<u64> {
     let trimmed = value.trim();
     if let Ok(secs) = trimmed.parse::<u64>() {
@@ -112,11 +111,15 @@ fn parse_retry_after_header(value: &str) -> Option<u64> {
 
     let retry_at = httpdate::parse_http_date(trimmed).ok()?;
     let now = SystemTime::now();
-    retry_at.duration_since(now).ok().map(|d| d.as_secs()).or_else(|| {
-        let retry_epoch = retry_at.duration_since(UNIX_EPOCH).ok()?.as_secs();
-        let now_epoch = now.duration_since(UNIX_EPOCH).ok()?.as_secs();
-        Some(retry_epoch.saturating_sub(now_epoch))
-    })
+    retry_at
+        .duration_since(now)
+        .ok()
+        .map(|d| d.as_secs())
+        .or_else(|| {
+            let retry_epoch = retry_at.duration_since(UNIX_EPOCH).ok()?.as_secs();
+            let now_epoch = now.duration_since(UNIX_EPOCH).ok()?.as_secs();
+            Some(retry_epoch.saturating_sub(now_epoch))
+        })
 }
 
 /// Parse a successful API response body.

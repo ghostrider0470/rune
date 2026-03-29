@@ -49,8 +49,7 @@ use rune_runtime::{
 };
 use rune_spells_code_review::{CodeReviewToolExecutor, code_review_tool_definition};
 use rune_spells_rust_patterns::{
-    RustPatternsToolExecutor, rust_patterns_tool_definition,
-    rust_patterns_validate_tool_definition,
+    RustPatternsToolExecutor, rust_patterns_tool_definition, rust_patterns_validate_tool_definition,
 };
 use rune_spells_security_audit::security_audit_tool_definition;
 use rune_store::models::{NewToolExecution, SessionRow, TurnRow};
@@ -1391,8 +1390,22 @@ impl CommsOps for CommsClientOps {
         self.client.send(msg_type, subject, body, priority).await
     }
 
-    async fn read_inbox(&self, mark_read: bool) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
-        self.client.read_inbox_summary(mark_read).await.map(|msgs| msgs.into_iter().map(|msg| rune_tools::comms_tool::CommsMessageSummary { id: msg.id, from: msg.from, subject: msg.subject, body: msg.body, priority: msg.priority, created_at: msg.created_at, }).collect())
+    async fn read_inbox(
+        &self,
+        mark_read: bool,
+    ) -> Result<Vec<rune_tools::comms_tool::CommsMessageSummary>, String> {
+        self.client.read_inbox_summary(mark_read).await.map(|msgs| {
+            msgs.into_iter()
+                .map(|msg| rune_tools::comms_tool::CommsMessageSummary {
+                    id: msg.id,
+                    from: msg.from,
+                    subject: msg.subject,
+                    body: msg.body,
+                    priority: msg.priority,
+                    created_at: msg.created_at,
+                })
+                .collect()
+        })
     }
 }
 

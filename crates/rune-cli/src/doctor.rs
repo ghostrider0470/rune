@@ -15,13 +15,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::output::{
-    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorMemoryHierarchySummary, DoctorPathSummary, DoctorReport,
-    DoctorTopologySummary,
+    DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorMemoryHierarchySummary,
+    DoctorPathSummary, DoctorReport, DoctorTopologySummary,
 };
 use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
 use std::collections::BTreeMap;
-
 
 /// Result of a single diagnostic check.
 #[derive(Clone, Debug, Serialize)]

@@ -22,7 +22,7 @@ fn simple_request() -> CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
-                content_parts: None,
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -322,7 +322,7 @@ async fn azure_request_golden_shape_full() {
         stable_prefix_messages: Some(vec![ChatMessage {
             role: Role::System,
             content: Some("You are helpful.".into()),
-                content_parts: None,
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2224,7 +2224,7 @@ fn claude_request() -> CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
-                content_parts: None,
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2547,7 +2547,7 @@ async fn azure_request_prepends_stable_prefix_messages() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
-                content_parts: None,
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2592,7 +2592,7 @@ async fn openai_request_prepends_stable_prefix_messages() {
         messages: vec![ChatMessage {
             role: Role::User,
             content: Some("Hello".into()),
-                content_parts: None,
+            content_parts: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -2708,10 +2708,13 @@ async fn openai_serializes_multimodal_user_content_parts() {
     let request = CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
-            content: Some("Describe this image
+            content: Some(
+                "Describe this image
 
 [Attachments]
-- photo.jpg (image/jpeg, url=https://example.test/photo.jpg)".into()),
+- photo.jpg (image/jpeg, url=https://example.test/photo.jpg)"
+                    .into(),
+            ),
             content_parts: Some(vec![
                 MessagePart::Text {
                     text: "Describe this image".into(),
@@ -2742,7 +2745,10 @@ async fn openai_serializes_multimodal_user_content_parts() {
     assert_eq!(content[0]["type"], "text");
     assert_eq!(content[0]["text"], "Describe this image");
     assert_eq!(content[1]["type"], "image_url");
-    assert_eq!(content[1]["image_url"]["url"], "https://example.test/photo.jpg");
+    assert_eq!(
+        content[1]["image_url"]["url"],
+        "https://example.test/photo.jpg"
+    );
 }
 
 #[tokio::test]
@@ -2759,10 +2765,13 @@ async fn azure_serializes_multimodal_user_content_parts() {
     let request = CompletionRequest {
         messages: vec![ChatMessage {
             role: Role::User,
-            content: Some("Describe this image
+            content: Some(
+                "Describe this image
 
 [Attachments]
-- photo.jpg (image/jpeg, url=https://example.test/photo.jpg)".into()),
+- photo.jpg (image/jpeg, url=https://example.test/photo.jpg)"
+                    .into(),
+            ),
             content_parts: Some(vec![
                 MessagePart::Text {
                     text: "Describe this image".into(),
@@ -2792,5 +2801,8 @@ async fn azure_serializes_multimodal_user_content_parts() {
     let content = body["messages"][0]["content"].as_array().unwrap();
     assert_eq!(content[0]["type"], "text");
     assert_eq!(content[1]["type"], "image_url");
-    assert_eq!(content[1]["image_url"]["url"], "https://example.test/photo.jpg");
+    assert_eq!(
+        content[1]["image_url"]["url"],
+        "https://example.test/photo.jpg"
+    );
 }

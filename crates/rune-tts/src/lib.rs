@@ -183,7 +183,6 @@ mod tests {
         assert!(matches!(err, TtsError::Config(_)));
     }
 
-
     #[tokio::test]
     async fn convert_with_without_key_returns_config_error() {
         let config = TtsConfig {

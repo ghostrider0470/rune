@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, pk, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, pk};
 use crate::error::StoreError;
 use crate::models::{NewProcessHandle, ProcessHandleRow};
 use crate::repos::ProcessHandleRepo;
@@ -89,7 +89,10 @@ fn process_row_to_doc(row: &ProcessHandleRow) -> ProcessHandleDoc {
 }
 
 /// Read a process handle by ID. Cross-partition since we may not know session_id.
-async fn read_process(store: &CosmosStore, process_id: Uuid) -> Result<ProcessHandleDoc, StoreError> {
+async fn read_process(
+    store: &CosmosStore,
+    process_id: Uuid,
+) -> Result<ProcessHandleDoc, StoreError> {
     let query = format!(
         "SELECT * FROM c WHERE c.type = 'process_handle' AND c.process_id = '{}'",
         process_id
@@ -136,13 +139,9 @@ impl ProcessHandleRepo for CosmosStore {
         Ok(row)
     }
 
-    async fn list_by_session(
-        &self,
-        session_id: Uuid,
-    ) -> Result<Vec<ProcessHandleRow>, StoreError> {
+    async fn list_by_session(&self, session_id: Uuid) -> Result<Vec<ProcessHandleRow>, StoreError> {
         let pk_val = session_id.to_string();
-        let query =
-            "SELECT * FROM c WHERE c.type = 'process_handle' ORDER BY c.started_at DESC";
+        let query = "SELECT * FROM c WHERE c.type = 'process_handle' ORDER BY c.started_at DESC";
         let stream = self
             .container()
             .query_items::<serde_json::Value>(query, pk(&pk_val), None)
@@ -152,8 +151,7 @@ impl ProcessHandleRepo for CosmosStore {
     }
 
     async fn list_active(&self) -> Result<Vec<ProcessHandleRow>, StoreError> {
-        let query =
-            "SELECT * FROM c WHERE c.type = 'process_handle' \
+        let query = "SELECT * FROM c WHERE c.type = 'process_handle' \
              AND c.status IN ('running', 'backgrounded')";
         let docs: Vec<ProcessHandleDoc> = self.query_cross_partition(query).await?;
         Ok(docs.into_iter().map(ProcessHandleRow::from).collect())

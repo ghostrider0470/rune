@@ -63,9 +63,12 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), StoreError> {
         .is_some();
 
     if diesel_exists {
-        warn!("detected old Diesel schema — dropping all tables for clean tokio-postgres migration");
-        client.batch_execute(
-            "DROP TABLE IF EXISTS __diesel_schema_migrations CASCADE;
+        warn!(
+            "detected old Diesel schema — dropping all tables for clean tokio-postgres migration"
+        );
+        client
+            .batch_execute(
+                "DROP TABLE IF EXISTS __diesel_schema_migrations CASCADE;
              DROP TABLE IF EXISTS _rune_pg_migrations CASCADE;
              DROP TABLE IF EXISTS transcript_items CASCADE;
              DROP TABLE IF EXISTS tool_executions CASCADE;
@@ -78,8 +81,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), StoreError> {
              DROP TABLE IF EXISTS jobs CASCADE;
              DROP TABLE IF EXISTS paired_devices CASCADE;
              DROP TABLE IF EXISTS pairing_requests CASCADE;
-             DROP TABLE IF EXISTS memory_embeddings CASCADE;"
-        ).await.map_err(|e| StoreError::Migration(format!("failed to drop old tables: {e}")))?;
+             DROP TABLE IF EXISTS memory_embeddings CASCADE;",
+            )
+            .await
+            .map_err(|e| StoreError::Migration(format!("failed to drop old tables: {e}")))?;
         info!("old tables dropped — clean slate for migration");
     }
 
@@ -116,7 +121,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), StoreError> {
             .collect();
 
         if !diesel_versions.is_empty() {
-            info!(count = diesel_versions.len(), "detected prior Diesel migrations, seeding tracker");
+            info!(
+                count = diesel_versions.len(),
+                "detected prior Diesel migrations, seeding tracker"
+            );
             for version in &diesel_versions {
                 let _ = client
                     .execute(
@@ -130,10 +138,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), StoreError> {
 
     // Get already-applied migrations
     let applied: Vec<String> = client
-        .query(
-            "SELECT name FROM _rune_pg_migrations ORDER BY name",
-            &[],
-        )
+        .query("SELECT name FROM _rune_pg_migrations ORDER BY name", &[])
         .await
         .map_err(|e| StoreError::Migration(format!("failed to read applied migrations: {e}")))?
         .iter()

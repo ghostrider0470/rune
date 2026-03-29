@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, pk, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, pk};
 use crate::error::StoreError;
 use crate::models::{NewTranscriptItem, TranscriptItemRow};
 use crate::repos::TranscriptRepo;
@@ -72,8 +72,7 @@ impl TranscriptRepo for CosmosStore {
         session_id: Uuid,
     ) -> Result<Vec<TranscriptItemRow>, StoreError> {
         let pk_val = session_id.to_string();
-        let query =
-            "SELECT * FROM c WHERE c.type = 'transcript_item' ORDER BY c.seq ASC";
+        let query = "SELECT * FROM c WHERE c.type = 'transcript_item' ORDER BY c.seq ASC";
         let stream = self
             .container()
             .query_items::<serde_json::Value>(query, pk(&pk_val), None)
@@ -84,8 +83,7 @@ impl TranscriptRepo for CosmosStore {
 
     async fn delete_by_session(&self, session_id: Uuid) -> Result<usize, StoreError> {
         let pk_val = session_id.to_string();
-        let query =
-            "SELECT c.id FROM c WHERE c.type = 'transcript_item'";
+        let query = "SELECT c.id FROM c WHERE c.type = 'transcript_item'";
         let stream = self
             .container()
             .query_items::<serde_json::Value>(query, pk(&pk_val), None)

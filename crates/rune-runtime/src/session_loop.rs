@@ -136,7 +136,10 @@ impl SessionLoop {
             }
         }
         if !sessions.is_empty() {
-            info!(count = sessions.len(), "restored active channel sessions from DB");
+            info!(
+                count = sessions.len(),
+                "restored active channel sessions from DB"
+            );
         }
         Ok(())
     }

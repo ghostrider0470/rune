@@ -1287,7 +1287,11 @@ Delta echo foxtrot.
             Ok(())
         }
 
-        async fn delete_by_file(&self, _project_id: Option<&str>, file_path: &str) -> Result<usize, StoreError> {
+        async fn delete_by_file(
+            &self,
+            _project_id: Option<&str>,
+            file_path: &str,
+        ) -> Result<usize, StoreError> {
             self.deleted_files
                 .lock()
                 .unwrap()
@@ -1317,7 +1321,10 @@ Delta echo foxtrot.
             Ok(0)
         }
 
-        async fn list_indexed_files(&self, _project_id: Option<&str>) -> Result<Vec<String>, StoreError> {
+        async fn list_indexed_files(
+            &self,
+            _project_id: Option<&str>,
+        ) -> Result<Vec<String>, StoreError> {
             Ok(Vec::new())
         }
 
