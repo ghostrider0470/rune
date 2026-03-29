@@ -1237,6 +1237,7 @@ pub struct DashboardMemoryHierarchyDiagnostics {
     pub context_over_compaction_threshold: bool,
     pub context_compaction_required: bool,
     pub loaded_tier_count: u64,
+    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 // SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
@@ -1497,6 +1498,7 @@ pub async fn dashboard_diagnostics(
             .context_over_compaction_threshold,
         context_compaction_required: memory_hierarchy_summary.context_compaction_required,
         loaded_tier_count: memory_hierarchy_summary.loaded_tier_count,
+        context_tier_counters: memory_hierarchy_summary.context_tier_counters.clone(),
     };
 
     items.push(DashboardDiagnosticItem {
@@ -6274,6 +6276,17 @@ pub struct DoctorBackendMatrixEntry {
     pub fix_hint: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DoctorContextTierCounter {
+    pub kind: String,
+    pub token_budget: u64,
+    pub estimated_tokens: u64,
+    pub priority: u8,
+    pub staleness_policy: String,
+    pub loaded: bool,
+    pub source: String,
+}
+
 #[derive(Clone, Serialize)]
 pub struct DoctorMemoryHierarchySummary {
     pub l0: String,
@@ -6297,6 +6310,7 @@ pub struct DoctorMemoryHierarchySummary {
     pub context_over_compaction_threshold: bool,
     pub context_compaction_required: bool,
     pub loaded_tier_count: u64,
+    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 #[derive(Serialize)]
@@ -6558,6 +6572,19 @@ async fn doctor_memory_hierarchy(
     let context_over_compaction_threshold = context_report.over_compaction_threshold;
     let context_compaction_required = context_report.compaction_required;
     let loaded_tier_count = context_report.tiers.len() as u64;
+    let context_tier_counters = context_report
+        .tiers
+        .iter()
+        .map(|tier| DoctorContextTierCounter {
+            kind: format!("{:?}", tier.kind).to_lowercase(),
+            token_budget: tier.token_budget as u64,
+            estimated_tokens: tier.estimated_tokens as u64,
+            priority: tier.priority,
+            staleness_policy: format!("{:?}", tier.staleness_policy).to_lowercase(),
+            loaded: tier.loaded,
+            source: tier.source.to_string(),
+        })
+        .collect::<Vec<_>>();
 
     DoctorMemoryHierarchySummary {
         l0: format!(
@@ -6617,6 +6644,7 @@ async fn doctor_memory_hierarchy(
         context_over_compaction_threshold,
         context_compaction_required,
         loaded_tier_count,
+        context_tier_counters,
     }
 }
 

@@ -504,6 +504,17 @@ pub struct DoctorTopologySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DoctorContextTierCounter {
+    pub kind: String,
+    pub token_budget: u64,
+    pub estimated_tokens: u64,
+    pub priority: u8,
+    pub staleness_policy: String,
+    pub loaded: bool,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorMemoryHierarchySummary {
     pub l0: String,
     pub l1: String,
@@ -540,6 +551,8 @@ pub struct DoctorMemoryHierarchySummary {
     pub context_compaction_required: bool,
     #[serde(default)]
     pub loaded_tier_count: u64,
+    #[serde(default)]
+    pub context_tier_counters: Vec<DoctorContextTierCounter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -640,6 +653,22 @@ impl fmt::Display for DoctorReport {
                 memory_hierarchy.context_over_compaction_threshold,
                 memory_hierarchy.context_compaction_required
             )?;
+            if !memory_hierarchy.context_tier_counters.is_empty() {
+                writeln!(f, "  Context Tier Details:")?;
+                for tier in &memory_hierarchy.context_tier_counters {
+                    writeln!(
+                        f,
+                        "    - {}: loaded={}, budget={}, estimated_tokens={}, priority={}, staleness_policy={}, source={}",
+                        tier.kind,
+                        tier.loaded,
+                        tier.token_budget,
+                        tier.estimated_tokens,
+                        tier.priority,
+                        tier.staleness_policy,
+                        tier.source
+                    )?;
+                }
+            }
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
         for check in &self.checks {
@@ -5840,6 +5869,7 @@ mod tests {
                 context_over_compaction_threshold: false,
                 context_compaction_required: false,
                 loaded_tier_count: 4,
+                context_tier_counters: vec![],
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
