@@ -298,8 +298,18 @@ pub async fn delegation_plan(
             instance_name: peer.id.clone(),
             transport: "http".to_string(),
             health_url: Some(peer.health_url.clone()),
-            submit_url: Some(format!("{}/api/v1/instance/delegations", peer.health_url.trim_end_matches("/api/v1/instance/health").trim_end_matches('/'))),
-            result_url: Some(format!("{}/api/v1/instance/delegations/{{task_id}}", peer.health_url.trim_end_matches("/api/v1/instance/health").trim_end_matches('/'))),
+            submit_url: Some(format!(
+                "{}/api/v1/instance/delegations",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
+            result_url: Some(format!(
+                "{}/api/v1/instance/delegations/{{task_id}}",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
         });
 
     let routing = DelegationRoutingResponse {
@@ -1049,6 +1059,8 @@ pub struct ContextBudgetDiagnostics {
     pub usable_prompt_budget: usize,
     pub auto_inject_project: bool,
     pub memory_search_k: usize,
+    pub total_tier_budget: usize,
+    pub exceeds_usable_budget: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1273,15 +1285,22 @@ pub async fn dashboard_diagnostics(
     }
 
     let compaction = &config.runtime.compaction;
+    let total_tier_budget = config.context.identity
+        + config.context.task
+        + config.context.project
+        + config.context.shared;
+    let usable_prompt_budget = compaction.usable_prompt_budget();
     let context_budget = ContextBudgetDiagnostics {
         max_tokens: compaction.effective_max_tokens(),
         warn_at_tokens: compaction.effective_warn_at_tokens(),
         compress_after: compaction.effective_compress_after(),
         reserved_system: compaction.reserved_system,
         reserved_task: compaction.reserved_task,
-        usable_prompt_budget: compaction.usable_prompt_budget(),
+        usable_prompt_budget,
         auto_inject_project: compaction.auto_inject_project,
         memory_search_k: compaction.memory_search_k,
+        total_tier_budget,
+        exceeds_usable_budget: total_tier_budget > usable_prompt_budget,
     };
 
     let context_tiers = ContextTierDiagnostics {
@@ -1295,7 +1314,7 @@ pub async fn dashboard_diagnostics(
         level: "info",
         source: "context",
         message: format!(
-            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={}",
+            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={} tier_total={} exceeds_usable_budget={}",
             context_budget.max_tokens,
             context_budget.warn_at_tokens,
             context_budget.compress_after,
@@ -1304,6 +1323,8 @@ pub async fn dashboard_diagnostics(
             context_budget.reserved_task,
             context_budget.auto_inject_project,
             context_budget.memory_search_k,
+            context_budget.total_tier_budget,
+            context_budget.exceeds_usable_budget,
         ),
         observed_at: now.clone(),
     });
