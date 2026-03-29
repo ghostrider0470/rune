@@ -7774,6 +7774,330 @@ async fn get_session_status_returns_parity_card_fields() {
 }
 
 #[tokio::test]
+async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let root_id = Uuid::now_v7();
+    let child_id = Uuid::now_v7();
+    let grandchild_id = Uuid::now_v7();
+    let sibling_id = Uuid::now_v7();
+    let unrelated_id = Uuid::now_v7();
+    let now = chrono::Utc::now();
+
+    session_repo
+        .create(NewSession {
+            id: root_id,
+            kind: "direct".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: Some("telegram/chat/123".into()),
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "mode": "inbound"
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    session_repo
+        .create(NewSession {
+            id: child_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: Some(root_id),
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "mode": "batch",
+                "subagent_lifecycle": "attached",
+                "subagent_runtime_status": "running",
+                "subagent_runtime_attached": true,
+                "subagent_status_updated_at": "2026-03-29T10:00:00Z",
+                "subagent_last_note": "Child subagent attached"
+            }),
+            created_at: now + chrono::TimeDelta::seconds(1),
+            updated_at: now + chrono::TimeDelta::seconds(1),
+            last_activity_at: now + chrono::TimeDelta::seconds(1),
+        })
+        .await
+        .unwrap();
+
+    session_repo
+        .create(NewSession {
+            id: grandchild_id,
+            kind: "subagent".into(),
+            status: "ready".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: Some(child_id),
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "subagent_lifecycle": "queued",
+                "subagent_runtime_status": "not_attached",
+                "subagent_runtime_attached": false,
+                "subagent_last_note": "Waiting for runtime"
+            }),
+            created_at: now + chrono::TimeDelta::seconds(2),
+            updated_at: now + chrono::TimeDelta::seconds(2),
+            last_activity_at: now + chrono::TimeDelta::seconds(2),
+        })
+        .await
+        .unwrap();
+
+    session_repo
+        .create(NewSession {
+            id: sibling_id,
+            kind: "subagent".into(),
+            status: "completed".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: Some(root_id),
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({}),
+            created_at: now + chrono::TimeDelta::seconds(3),
+            updated_at: now + chrono::TimeDelta::seconds(3),
+            last_activity_at: now + chrono::TimeDelta::seconds(3),
+        })
+        .await
+        .unwrap();
+
+    session_repo
+        .create(NewSession {
+            id: unrelated_id,
+            kind: "direct".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({}),
+            created_at: now + chrono::TimeDelta::seconds(4),
+            updated_at: now + chrono::TimeDelta::seconds(4),
+            last_activity_at: now + chrono::TimeDelta::seconds(4),
+        })
+        .await
+        .unwrap();
+
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id: root_id,
+            trigger_kind: "user_message".into(),
+            status: "completed".into(),
+            model_ref: Some("fake-model".into()),
+            started_at: now,
+            ended_at: Some(now),
+            usage_prompt_tokens: Some(10),
+            usage_completion_tokens: Some(5),
+            usage_cached_prompt_tokens: Some(0),
+        })
+        .await
+        .unwrap();
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id: root_id,
+            trigger_kind: "user_message".into(),
+            status: "completed".into(),
+            model_ref: Some("fake-model".into()),
+            started_at: now + chrono::TimeDelta::milliseconds(1),
+            ended_at: Some(now + chrono::TimeDelta::milliseconds(1)),
+            usage_prompt_tokens: Some(8),
+            usage_completion_tokens: Some(3),
+            usage_cached_prompt_tokens: Some(0),
+        })
+        .await
+        .unwrap();
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id: child_id,
+            trigger_kind: "subagent_result".into(),
+            status: "completed".into(),
+            model_ref: Some("fake-model".into()),
+            started_at: now + chrono::TimeDelta::milliseconds(2),
+            ended_at: Some(now + chrono::TimeDelta::milliseconds(2)),
+            usage_prompt_tokens: Some(4),
+            usage_completion_tokens: Some(2),
+            usage_cached_prompt_tokens: Some(0),
+        })
+        .await
+        .unwrap();
+    turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id: unrelated_id,
+            trigger_kind: "user_message".into(),
+            status: "completed".into(),
+            model_ref: Some("fake-model".into()),
+            started_at: now + chrono::TimeDelta::milliseconds(3),
+            ended_at: Some(now + chrono::TimeDelta::milliseconds(3)),
+            usage_prompt_tokens: Some(7),
+            usage_completion_tokens: Some(1),
+            usage_cached_prompt_tokens: Some(0),
+        })
+        .await
+        .unwrap();
+
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{root_id}/tree"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+
+    assert_eq!(json["id"], root_id.to_string());
+    assert_eq!(json["kind"], "direct");
+    assert_eq!(json["status"], "running");
+    assert_eq!(json["mode"], "inbound");
+    assert_eq!(json["channel"], "telegram/chat/123");
+    assert_eq!(json["turn_count"], 2);
+
+    let children = json["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2);
+
+    let child = children
+        .iter()
+        .find(|node| node["id"] == child_id.to_string())
+        .unwrap();
+    assert_eq!(child["kind"], "subagent");
+    assert_eq!(child["status"], "running");
+    assert_eq!(child["mode"], "batch");
+    assert_eq!(child["turn_count"], 1);
+    assert_eq!(child["subagent_lifecycle"], "attached");
+    assert_eq!(child["subagent_runtime_status"], "running");
+    assert_eq!(child["subagent_runtime_attached"], true);
+    assert_eq!(child["subagent_status_updated_at"], "2026-03-29T10:00:00Z");
+    assert_eq!(child["subagent_last_note"], "Child subagent attached");
+
+    let grandchild = child["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == grandchild_id.to_string())
+        .unwrap();
+    assert_eq!(grandchild["kind"], "subagent");
+    assert_eq!(grandchild["status"], "ready");
+    assert_eq!(grandchild["turn_count"], 0);
+    assert_eq!(grandchild["subagent_lifecycle"], "queued");
+    assert_eq!(grandchild["subagent_runtime_status"], "not_attached");
+    assert_eq!(grandchild["subagent_runtime_attached"], false);
+    assert_eq!(grandchild["subagent_last_note"], "Waiting for runtime");
+    assert_eq!(grandchild["children"].as_array().unwrap().len(), 0);
+
+    let sibling = children
+        .iter()
+        .find(|node| node["id"] == sibling_id.to_string())
+        .unwrap();
+    assert_eq!(sibling["kind"], "subagent");
+    assert_eq!(sibling["status"], "completed");
+    assert_eq!(sibling["turn_count"], 0);
+    assert_eq!(sibling["children"].as_array().unwrap().len(), 0);
+
+    assert!(children
+        .iter()
+        .all(|node| node["id"] != unrelated_id.to_string()));
+}
+
+#[tokio::test]
 async fn get_session_status_surfaces_subagent_metadata() {
     let session_repo = Arc::new(MemSessionRepo::new());
     let turn_repo = Arc::new(MemTurnRepo::new());
