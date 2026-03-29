@@ -352,6 +352,9 @@ pub struct DelegationResultContractSummary {
     pub artifact_field: String,
     pub error_field: String,
     pub finished_at_field: String,
+    pub accepted_at_field: String,
+    pub started_at_field: String,
+    pub task_id_field: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6568,6 +6571,9 @@ mod tests {
                 artifact_field: "artifacts".into(),
                 error_field: "error".into(),
                 finished_at_field: "finished_at".into(),
+                accepted_at_field: "accepted_at".into(),
+                started_at_field: "started_at".into(),
+                task_id_field: "task_id".into(),
             }),
         };
         let out = render(&response, OutputFormat::Human);
