@@ -253,6 +253,7 @@ impl ContextAssembler {
         memory: Option<&MemoryContext>,
         extra_system_sections: &[String],
         compaction_trigger_tokens: usize,
+        l3_loaded: bool,
     ) -> ContextAssemblyReport {
         let identity_section = self.system_instructions.trim();
         let active_task_section = extra_system_sections
@@ -293,7 +294,7 @@ impl ContextAssembler {
                         !shared_section.is_empty(),
                         "memory_context",
                     ),
-                    ContextTierKind::Historical => (0, false, "transcript_history"),
+                    ContextTierKind::Historical => (0, l3_loaded, "transcript_history"),
                 };
 
                 ContextTierUsage {
@@ -346,8 +347,13 @@ impl ContextAssembler {
         // System message with optional workspace + memory context
         let mut sections = vec![self.system_instructions.clone()];
 
-        let context_report =
-            self.analyze_context_usage(workspace, memory, extra_system_sections, 0);
+        let context_report = self.analyze_context_usage(
+            workspace,
+            memory,
+            extra_system_sections,
+            0,
+            compaction.persists_compacted_context(),
+        );
         let extra_task_sections = extra_system_sections
             .iter()
             .filter(|section| !section.trim().is_empty())
@@ -893,6 +899,7 @@ mod context_tier_tests {
             Some(&memory),
             &["Active task goes here".into()],
             50_000,
+            true,
         );
 
         assert!(report.total_estimated_tokens > 0);
@@ -904,6 +911,12 @@ mod context_tier_tests {
         assert!(report.project_tokens() > 0);
         assert!(report.tokens_for(ContextTierKind::Shared) > 0);
         assert_eq!(report.tokens_for(ContextTierKind::Historical), 0);
+        assert!(
+            report
+                .tiers
+                .iter()
+                .any(|tier| tier.kind == ContextTierKind::Historical && tier.loaded)
+        );
         assert!(
             report
                 .tiers
@@ -934,6 +947,7 @@ mod context_budget_tests {
             Some(&memory),
             &["Active task goes here".into()],
             50_000,
+            false,
         );
 
         assert!(report.over_budget);
@@ -947,6 +961,7 @@ mod context_budget_tests {
             None,
             &["This active task section is deliberately long enough to exceed a tiny compaction trigger.".repeat(8)],
             10,
+            false,
         );
 
         assert!(report.over_compaction_threshold);

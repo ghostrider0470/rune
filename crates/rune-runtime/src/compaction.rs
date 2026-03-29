@@ -9,6 +9,12 @@ pub trait CompactionStrategy: Send + Sync {
     /// Compact the given messages, returning a (possibly shorter) message list.
     /// The implementation may summarize, drop, or leave messages unchanged.
     fn compact(&self, messages: Vec<ChatMessage>) -> Vec<ChatMessage>;
+
+    /// Returns whether this strategy can persist compacted transcript context into
+    /// durable warm/cold storage before older messages are dropped.
+    fn persists_compacted_context(&self) -> bool {
+        false
+    }
 }
 
 /// No-op compaction: passes messages through unchanged.
@@ -18,6 +24,10 @@ pub struct NoOpCompaction;
 impl CompactionStrategy for NoOpCompaction {
     fn compact(&self, messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
         messages
+    }
+
+    fn persists_compacted_context(&self) -> bool {
+        false
     }
 }
 
@@ -369,6 +379,10 @@ impl CompactionStrategy for TokenBudgetCompaction {
         result.extend_from_slice(recent);
         result
     }
+
+    fn persists_compacted_context(&self) -> bool {
+        self.workspace_root.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -594,6 +608,19 @@ mod tests {
             "original system message must be preserved, got: {}",
             result[0].content.as_ref().unwrap()
         );
+    }
+
+    #[test]
+    fn token_budget_compaction_reports_when_memory_flush_enabled() {
+        let tmp = TempDir::new().unwrap();
+        let compaction = TokenBudgetCompaction::new(100, 2).with_memory_flush(tmp.path());
+
+        assert!(compaction.persists_compacted_context());
+    }
+
+    #[test]
+    fn no_op_compaction_reports_no_durable_compaction_storage() {
+        assert!(!NoOpCompaction.persists_compacted_context());
     }
 
     #[test]
