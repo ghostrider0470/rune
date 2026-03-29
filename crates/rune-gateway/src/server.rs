@@ -433,6 +433,14 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
             "/api/v1/instance/delegation-plan",
             get(routes::delegation_plan),
         )
+        .route(
+            "/api/v1/instance/delegations",
+            post(routes::submit_delegation_task),
+        )
+        .route(
+            "/api/v1/instance/delegations/{task_id}",
+            get(routes::delegation_task_status),
+        )
         .route("/chat", get(webchat::legacy_chat_redirect))
         .route("/webchat", get(webchat::webchat_handler))
         .route("/assets/{path}", get(routes::branded_asset))

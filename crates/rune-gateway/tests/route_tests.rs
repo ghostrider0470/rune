@@ -13302,3 +13302,101 @@ async fn doctor_run_reports_instance_topology_summary() {
     assert_eq!(body["topology"]["models"], "azure");
     assert_eq!(body["topology"]["search"], "semantic-hybrid");
 }
+
+#[tokio::test]
+async fn delegation_submission_accepts_task_and_returns_receiver_metadata() {
+    let mut config = AppConfig::default();
+    config.instance.id = "sender-a".to_string();
+    config.instance.name = "Sender A".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787/".to_string());
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::post("/api/v1/instance/delegations")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "task_id": "delegation-123",
+                        "protocol_version": 1,
+                        "submitted_at": "2026-03-29T00:00:00Z",
+                        "sender": {
+                            "instance_id": "origin-a",
+                            "instance_name": "Origin A",
+                            "transport": "http",
+                            "health_url": "http://origin-a/api/v1/instance/health",
+                            "submit_url": "http://origin-a/api/v1/instance/delegations",
+                            "result_url": "http://origin-a/api/v1/instance/delegations/{task_id}"
+                        },
+                        "task": {
+                            "task": "Implement issue #421 receiver stub",
+                            "constraints": ["Run cargo check"],
+                            "expected_output": "Structured accepted response",
+                            "timeout_secs": 600,
+                            "target_peer_id": "sender-a",
+                            "branch_reservation": "agent/rune/issue-421",
+                            "file_locks": ["crates/rune-gateway/src/routes.rs"],
+                            "artifacts": []
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "sender-a");
+    assert_eq!(json["receiver"]["instance_name"], "Sender A");
+    assert_eq!(json["receiver"]["transport"], "filesystem");
+    assert_eq!(
+        json["receiver"]["health_url"],
+        "http://127.0.0.1:8787/api/v1/instance/health"
+    );
+    assert_eq!(
+        json["receiver"]["submit_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations"
+    );
+    assert_eq!(
+        json["receiver"]["result_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations/{task_id}"
+    );
+    assert_eq!(json["result"]["task_id"], "delegation-123");
+    assert_eq!(json["result"]["status"], "accepted");
+    assert_eq!(json["result"]["started_at"], serde_json::Value::Null);
+    assert_eq!(json["result"]["error"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn delegation_status_returns_not_implemented_failure_envelope() {
+    let mut config = AppConfig::default();
+    config.instance.id = "receiver-a".to_string();
+    config.instance.name = "Receiver A".to_string();
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegations/delegation-404")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "receiver-a");
+    assert_eq!(json["receiver"]["instance_name"], "Receiver A");
+    assert_eq!(json["result"]["task_id"], "delegation-404");
+    assert_eq!(json["result"]["status"], "failed");
+    assert_eq!(json["result"]["error"]["code"], "not_implemented");
+    assert!(
+        json["result"]["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("protocol surface")
+    );
+    assert!(json["result"]["finished_at"].is_string());
+}

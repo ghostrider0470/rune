@@ -632,6 +632,107 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
     }
 }
 
+pub async fn submit_delegation_task(
+    State(state): State<AppState>,
+    Json(payload): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
+    let accepted_at = Utc::now().to_rfc3339();
+    let result = DelegationTaskResultResponse {
+        task_id: payload.task_id,
+        status: "accepted".to_string(),
+        accepted_at,
+        started_at: None,
+        output: None,
+        artifacts: Vec::new(),
+        error: None,
+        finished_at: None,
+    };
+
+    let receiver = DelegationEndpointResponse {
+        instance_id: state.capabilities.identity.id.clone(),
+        instance_name: state.capabilities.identity.name.clone(),
+        transport: state.capabilities.comms_transport.clone(),
+        health_url: state
+            .capabilities
+            .identity
+            .advertised_addr
+            .as_ref()
+            .map(|addr| format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))),
+        submit_url: state
+            .capabilities
+            .identity
+            .advertised_addr
+            .as_ref()
+            .map(|addr| format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))),
+        result_url: state
+            .capabilities
+            .identity
+            .advertised_addr
+            .as_ref()
+            .map(|addr| {
+                format!(
+                    "{}/api/v1/instance/delegations/{{task_id}}",
+                    addr.trim_end_matches('/')
+                )
+            }),
+    };
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(DelegationTaskStatusEnvelope { receiver, result }),
+    ))
+}
+
+pub async fn delegation_task_status(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
+    let result = DelegationTaskResultResponse {
+        task_id: task_id.clone(),
+        status: "failed".to_string(),
+        accepted_at: Utc::now().to_rfc3339(),
+        started_at: None,
+        output: None,
+        artifacts: Vec::new(),
+        error: Some(DelegationErrorResponse {
+            code: "not_implemented".to_string(),
+            message: "delegation execution is not implemented yet; only the protocol surface is available".to_string(),
+        }),
+        finished_at: Some(Utc::now().to_rfc3339()),
+    };
+
+    let receiver = DelegationEndpointResponse {
+        instance_id: state.capabilities.identity.id.clone(),
+        instance_name: state.capabilities.identity.name.clone(),
+        transport: state.capabilities.comms_transport.clone(),
+        health_url: state
+            .capabilities
+            .identity
+            .advertised_addr
+            .as_ref()
+            .map(|addr| format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))),
+        submit_url: state
+            .capabilities
+            .identity
+            .advertised_addr
+            .as_ref()
+            .map(|addr| format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))),
+        result_url: state
+            .capabilities
+            .identity
+            .advertised_addr
+            .as_ref()
+            .map(|addr| {
+                format!(
+                    "{}/api/v1/instance/delegations/{task_id}",
+                    addr.trim_end_matches('/')
+                )
+            }),
+    };
+
+    Ok(Json(DelegationTaskStatusEnvelope { receiver, result }))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DelegationPlanQuery {
     pub strategy: Option<String>,
