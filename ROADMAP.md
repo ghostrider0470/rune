@@ -65,7 +65,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | WebSocket Gateway | ✅ 2026-03-28 | Req/res/event framing, sequence numbering, gap detection, stateVersion tracking, and RPC dispatch landed; broader parity work remains |
 | Multi-channel Routing | ✅ 2026-03-16 | Telegram plus Discord/Slack/WhatsApp/Signal adapters landed with factory wiring, inbound normalization, outbound delivery flows, and adapter test coverage |
 | Device Pairing | ✅ 2026-03-16 | Ed25519 challenge-response pairing, PostgreSQL-backed device/request persistence, SHA-256 token storage, supervisor pruning, and route/integration coverage landed |
-| LaneQueue Concurrency | ✅ 2026-03-16 | LaneQueue implemented with per-lane caps, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
+| LaneQueue Concurrency | ✅ 2026-03-29 | LaneQueue implemented with priority-aware per-lane caps, dedicated heartbeat/tool isolation, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
 | File-based Identity | ✅ Done | SOUL.md, USER.md, AGENTS.md, TOOLS.md, IDENTITY.md |
 | Session History | ✅ Done | PostgreSQL-based (not JSONL) |
 | Hybrid Memory Search | ✅ 2026-03-16 | Persisted pgvector + tsvector hybrid search landed with MemoryEmbeddingRepo, RRF retrieval, startup bootstrap indexing, and change-driven workspace reindexing |
@@ -107,7 +107,7 @@ We can also inspect other community Rust rewrites of OpenClaw — Panther, ZeroC
 Core architectural pillars to recreate:
 
 1. **WebSocket Gateway & Routing Engine** — Async WebSocket server (default port 18789) as the central control plane. Strict JSON framing: requests `{type:"req", id, method, params}` and events `{type:"event", event, payload}`. Multi-channel routing (Telegram, Discord, Slack, WhatsApp). Device pairing with Ed25519 challenge nonces.
-2. **LaneQueue Concurrency Model** — FIFO queue enforcing “Default Serial, Explicit Parallel”. Per-lane caps: `main=4`, `subagent=8`, `cron=independent`, `nested=recursive`.
+2. **LaneQueue Concurrency Model** — Priority-aware queue enforcing “Default Serial, Explicit Parallel”. Shipped lanes isolate `main`, `subagent`, `cron`, and `heartbeat` execution, preserve FIFO within a priority tier, and keep tool concurrency on separate global/per-project semaphores.
 3. **State, Memory, and Identity Management** — File-based identity via `SOUL.md`, `USER.md`, `AGENTS.md`. Session history in plain `.jsonl` in OpenClaw; Rune currently uses PostgreSQL. Hybrid memory search should combine vector embeddings with keyword matching (Rune should use PostgreSQL `pgvector` + `tsvector`).
 4. **Extensibility and Tooling** — Hot-reloading skills via `SKILL.md` directory scanning with fast parsing and dynamic system prompt injection. MCP client with STDIO + HTTP transports. PTY execution sandbox with `allowlist` / `deny` / `full` security modes for interactive CLI support.
 5. **Proactive Autonomy** — Heartbeat cron loop (30 min default) with silent evaluation via `HEARTBEAT.md` checklist and `HEARTBEAT_OK` suppression. Sub-agent spawning in isolated sessions for parallel tasks.
@@ -204,25 +204,28 @@ Implementation note (2026-03-16): the roadmap originally called for Discord Gate
 
 Status: ✅ Completed 2026-03-29
 
-Rune already ships lane-based FIFO concurrency control in the runtime. This pass verified the implementation on current `main` and updated roadmap bookkeeping to reflect the code that is already landed rather than re-implementing it.
+Rune already ships lane-based FIFO concurrency control in the runtime. Follow-up work for #418 added priority-aware wait queues plus dedicated heartbeat/tool isolation, and this pass updates roadmap bookkeeping to reflect the current shipped implementation rather than older lane-model text.
 
 **Landed work**
 - `crates/rune-runtime/src/lane_queue.rs`
-  - `Lane` enum with `Main`, `Subagent`, and `Cron` routing derived from `SessionKind`
-  - per-lane semaphore caps with FIFO waiter queues implemented via `tokio::sync::Semaphore` + `VecDeque`
-  - fair permit acquisition/release flow plus lane utilization stats
-  - global and per-project tool concurrency controls via `ToolConcurrencyQueue`
+  - `Lane` enum with `Main`, `Subagent`, `Cron`, and `Heartbeat` execution lanes
+  - priority-aware waiter ordering using `WorkPriority` / `WorkSource`, with FIFO preserved within the same priority level
+  - per-lane semaphore caps plus cancellation-safe release flow and lane utilization stats
+  - global and per-project tool concurrency controls via `ToolConcurrencyQueue`, isolated from turn lanes
 - `crates/rune-runtime/src/executor.rs`
-  - turn execution and approval resume paths acquire lane permits before running
+  - turn execution, approvals, and triggered work acquire the appropriate lane permits before running
+  - heartbeat-triggered turns route through the dedicated heartbeat lane
   - operator-facing lane stats surfaced when a `LaneQueue` is attached
+- `crates/rune-gateway/src/supervisor.rs`
+  - supervisor heartbeat execution routes through `TriggerKind::Heartbeat` so health checks bypass normal background contention
 - `crates/rune-runtime/src/lib.rs`
-  - public re-exports for lane queue types
+  - public re-exports for lane queue scheduling primitives
 
 **Validation**
 - `cargo check -p rune-runtime`
 - `cargo test -p rune-runtime lane_queue -- --nocapture`
 
-Implementation note (2026-03-29): the original roadmap text mentioned a `Nested` lane and explicit task-handle submission API. The shipped implementation instead uses lane permits integrated directly into `TurnExecutor`, with main/subagent/cron lanes plus dedicated tool concurrency controls. The roadmap is now aligned to repo reality.
+Implementation note (2026-03-29): the original roadmap text mentioned a `Nested` lane and explicit task-handle submission API. The shipped implementation instead uses lane permits integrated directly into `TurnExecutor`, with priority-aware scheduling across main/subagent/cron work, a dedicated heartbeat lane, and separate tool concurrency controls. Full active-turn interruption / stop-preemption is still tracked under #418 and is not claimed as shipped by this roadmap note.
 
 ---
 
