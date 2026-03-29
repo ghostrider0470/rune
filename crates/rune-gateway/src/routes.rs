@@ -239,7 +239,6 @@ pub struct PeerHealthResponse {
     pub active_projects: Vec<String>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerHealthAlert {
     pub severity: String,
@@ -839,14 +838,12 @@ async fn collect_peer_health(
     results
 }
 
-
 pub async fn peer_health_alerts(
     State(state): State<AppState>,
 ) -> Result<Json<PeerHealthAlertsResponse>, GatewayError> {
     let peers = collect_peer_health(state.capabilities.peers.clone()).await;
     Ok(Json(peer_health_alerts_from_peers(peers)))
 }
-
 
 fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAlertsResponse {
     let checked_at = Utc::now().to_rfc3339();
@@ -2771,7 +2768,10 @@ pub async fn get_session_tree(
             subagent_lifecycle: metadata_string(&row.metadata, "subagent_lifecycle"),
             subagent_runtime_status: metadata_string(&row.metadata, "subagent_runtime_status"),
             subagent_runtime_attached: metadata_bool(&row.metadata, "subagent_runtime_attached"),
-            subagent_status_updated_at: metadata_string(&row.metadata, "subagent_status_updated_at"),
+            subagent_status_updated_at: metadata_string(
+                &row.metadata,
+                "subagent_status_updated_at",
+            ),
             subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
@@ -5018,6 +5018,17 @@ pub struct UsageEntryResponse {
     pub date: String,
     pub model: String,
     pub provider: String,
+    pub project_id: Option<String>,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+    pub request_count: u64,
+    pub estimated_cost: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UsageProjectSummaryResponse {
+    pub project_id: String,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
@@ -5028,6 +5039,7 @@ pub struct UsageEntryResponse {
 #[derive(Serialize)]
 pub struct UsageSummaryResponse {
     pub entries: Vec<UsageEntryResponse>,
+    pub projects: Vec<UsageProjectSummaryResponse>,
     pub total_prompt_tokens: u64,
     pub total_completion_tokens: u64,
     pub total_tokens: u64,
@@ -5132,7 +5144,21 @@ pub async fn get_dashboard_usage(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
+    let sessions = state
+        .session_repo
+        .list(10_000, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let session_projects: HashMap<Uuid, String> = sessions
+        .into_iter()
+        .filter_map(|session| {
+            metadata_string(&session.metadata, "project_id")
+                .map(|project_id| (session.id, project_id))
+        })
+        .collect();
+
     let mut grouped: HashMap<(String, String), UsageEntryResponse> = HashMap::new();
+    let mut project_grouped: HashMap<String, UsageProjectSummaryResponse> = HashMap::new();
     let mut total_prompt_tokens = 0_u64;
     let mut total_completion_tokens = 0_u64;
     let mut total_cached_prompt_tokens = 0_u64;
@@ -5147,6 +5173,7 @@ pub async fn get_dashboard_usage(
             .unwrap_or("unknown")
             .to_string();
         let provider = model.split('/').next().unwrap_or("unknown").to_string();
+        let project_id = session_projects.get(&turn.session_id).cloned();
         let prompt = turn.usage_prompt_tokens.unwrap_or(0).max(0) as u64;
         let completion = turn.usage_completion_tokens.unwrap_or(0).max(0) as u64;
         let cached = turn.usage_cached_prompt_tokens.unwrap_or(0).max(0) as u64;
@@ -5162,6 +5189,7 @@ pub async fn get_dashboard_usage(
                 date,
                 model,
                 provider,
+                project_id: project_id.clone(),
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,
@@ -5172,6 +5200,23 @@ pub async fn get_dashboard_usage(
         entry.completion_tokens += completion;
         entry.total_tokens += prompt + completion;
         entry.request_count += 1;
+
+        if let Some(project_id) = project_id {
+            let project_entry = project_grouped
+                .entry(project_id.clone())
+                .or_insert_with(|| UsageProjectSummaryResponse {
+                    project_id,
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    request_count: 0,
+                    estimated_cost: None,
+                });
+            project_entry.prompt_tokens += prompt;
+            project_entry.completion_tokens += completion;
+            project_entry.total_tokens += prompt + completion;
+            project_entry.request_count += 1;
+        }
     }
 
     let mut entries: Vec<_> = grouped.into_values().collect();
@@ -5186,6 +5231,9 @@ pub async fn get_dashboard_usage(
         .map(format_cost);
     }
     entries.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.model.cmp(&b.model)));
+
+    let mut projects: Vec<_> = project_grouped.into_values().collect();
+    projects.sort_by(|a, b| a.project_id.cmp(&b.project_id));
 
     let total_estimated_cost = {
         let cost: f64 = entries
@@ -5203,6 +5251,7 @@ pub async fn get_dashboard_usage(
 
     Ok(Json(UsageSummaryResponse {
         entries,
+        projects,
         total_prompt_tokens,
         total_completion_tokens,
         total_tokens: total_prompt_tokens + total_completion_tokens,
@@ -8115,7 +8164,6 @@ mod tests {
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
     }
-
 }
 
 pub fn storage_path_checks_for_tests(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {

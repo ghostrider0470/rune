@@ -2500,7 +2500,6 @@ async fn ws_rpc_runtime_context_budget_gc_compacts_and_returns_before_after_repo
     assert!(payload["after"]["last_gc"].is_null());
 }
 
-
 #[tokio::test]
 async fn ws_rpc_runtime_context_budget_gc_persists_checkpoint_when_store_path_is_provided() {
     use rune_gateway::logging::LogStore;
@@ -2623,7 +2622,8 @@ async fn ws_rpc_runtime_context_budget_gc_persists_checkpoint_when_store_path_is
     );
     assert_eq!(payload["gc"]["Compacted"]["persisted_checkpoint"], true);
     assert!(payload["after"]["last_gc"].is_string());
-    let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(&checkpoint_path).unwrap()).unwrap();
+    let stored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&checkpoint_path).unwrap()).unwrap();
     assert_eq!(stored["status"], "busy");
 }
 
@@ -5175,7 +5175,11 @@ async fn delegation_plan_exposes_full_task_contract_fields() {
             .contains("no healthy peers available")
     );
     assert_eq!(json["sender"]["capabilities_version"], 1);
-    assert!(json["sender"]["capability_hash"].as_str().is_some_and(|v| !v.is_empty()));
+    assert!(
+        json["sender"]["capability_hash"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty())
+    );
 }
 
 #[tokio::test]
@@ -5657,7 +5661,9 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(memory_hierarchy["context_over_compaction_threshold"], false);
     assert_eq!(memory_hierarchy["context_compaction_required"], false);
     assert_eq!(memory_hierarchy["loaded_tier_count"], 5);
-    let context_tier_counters = memory_hierarchy["context_tier_counters"].as_array().unwrap();
+    let context_tier_counters = memory_hierarchy["context_tier_counters"]
+        .as_array()
+        .unwrap();
     assert_eq!(context_tier_counters.len(), 5);
     assert_eq!(context_tier_counters[0]["kind"], "identity");
     assert_eq!(context_tier_counters[0]["token_budget"], 1000);
@@ -8329,9 +8335,11 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     assert_eq!(sibling["turn_count"], 0);
     assert_eq!(sibling["children"].as_array().unwrap().len(), 0);
 
-    assert!(children
-        .iter()
-        .all(|node| node["id"] != unrelated_id.to_string()));
+    assert!(
+        children
+            .iter()
+            .all(|node| node["id"] != unrelated_id.to_string())
+    );
 }
 
 #[tokio::test]
@@ -12830,7 +12838,10 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
         false
     );
     assert_eq!(body["memory_hierarchy"]["loaded_tier_count"], 5);
-    assert_eq!(body["memory_hierarchy"]["last_checkpoint_at"], serde_json::Value::Null);
+    assert_eq!(
+        body["memory_hierarchy"]["last_checkpoint_at"],
+        serde_json::Value::Null
+    );
     let tiers = body["memory_hierarchy"]["context_tier_counters"]
         .as_array()
         .unwrap();
@@ -14261,7 +14272,11 @@ async fn delegation_plan_exposes_sender_capability_identity_metadata() {
     assert_eq!(json["sender"]["instance_name"], "Test Instance");
     assert_eq!(json["sender"]["transport"], "filesystem");
     assert_eq!(json["sender"]["capabilities_version"], 1);
-    assert!(json["sender"]["capability_hash"].as_str().is_some_and(|v| !v.is_empty()));
+    assert!(
+        json["sender"]["capability_hash"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty())
+    );
     assert_eq!(
         json["sender"]["health_url"],
         "http://127.0.0.1:8787/api/v1/instance/health"
@@ -14566,11 +14581,17 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
     assert_eq!(child["parent_session_id"], root_id.to_string());
     assert_eq!(child["mode"], "architect");
     assert_eq!(child["orchestration_status"], "delegated");
-    assert_eq!(child["delegation_roles"], serde_json::json!(["architect", "coder"]));
+    assert_eq!(
+        child["delegation_roles"],
+        serde_json::json!(["architect", "coder"])
+    );
     assert_eq!(child["delegation_depth"], 1);
     assert_eq!(child["subagent_lifecycle"], "steered");
     assert_eq!(child["subagent_runtime_status"], "not_attached");
     assert_eq!(child["subagent_runtime_attached"], false);
     assert_eq!(child["subagent_status_updated_at"], "2026-03-29T12:00:00Z");
-    assert_eq!(child["subagent_last_note"], "Review result routing before resuming");
+    assert_eq!(
+        child["subagent_last_note"],
+        "Review result routing before resuming"
+    );
 }

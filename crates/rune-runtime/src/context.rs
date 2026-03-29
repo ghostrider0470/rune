@@ -992,7 +992,9 @@ mod attachment_prompt_tests {
         )
         .expect("expected multimodal parts");
 
-        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message. User message: Describe this image"));
+        assert!(
+            matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message. User message: Describe this image")
+        );
         assert!(
             matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg")
         );
@@ -1013,8 +1015,12 @@ mod attachment_prompt_tests {
         )
         .expect("expected multimodal parts");
 
-        assert!(matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message."));
-        assert!(matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg"));
+        assert!(
+            matches!(&parts[0], MessagePart::Text { text } if text == "The user sent this image. Describe what you see and respond to their message.")
+        );
+        assert!(
+            matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg")
+        );
         assert_eq!(parts.len(), 2);
     }
 }
@@ -1058,7 +1064,8 @@ mod context_tier_tests {
             None,
             &["## Active task
 
-Ship this slice.".into()],
+Ship this slice."
+                .into()],
             0,
             false,
         );

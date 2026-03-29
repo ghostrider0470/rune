@@ -2611,7 +2611,6 @@ async fn enrich_media_content_ignores_image_placeholders_for_multimodal_attachme
     assert_eq!(enriched, "what's in this image?");
 }
 
-
 #[tokio::test]
 async fn create_session_full_persists_mode_in_metadata() {
     let h = TestHarness::new();
@@ -2837,7 +2836,6 @@ async fn subagent_prompt_includes_delegation_context_and_shared_scratchpad() {
     assert!(system.contains("## Shared Scratchpad"));
     assert!(system.contains("agents/acme/scratchpads/retry-fix.md"));
 }
-
 
 #[tokio::test]
 async fn create_subagent_session_with_context_persists_delegation_slice_and_scratchpad() {

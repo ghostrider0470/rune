@@ -932,7 +932,10 @@ impl fmt::Display for DoctorReport {
                 memory_hierarchy.context_over_compaction_threshold,
                 memory_hierarchy.context_compaction_required,
                 memory_hierarchy.l3_cold_storage_enabled,
-                memory_hierarchy.last_checkpoint_at.as_deref().unwrap_or("never")
+                memory_hierarchy
+                    .last_checkpoint_at
+                    .as_deref()
+                    .unwrap_or("never")
             )?;
             if !memory_hierarchy.context_tier_counters.is_empty() {
                 writeln!(f, "  Context Tier Details:")?;
