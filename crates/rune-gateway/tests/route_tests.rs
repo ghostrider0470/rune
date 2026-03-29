@@ -2339,6 +2339,10 @@ async fn ws_rpc_runtime_context_budget_reports_partition_usage_and_checkpoint() 
 
     assert_eq!(payload["report"]["total_capacity"], 1000);
     assert_eq!(payload["report"]["total_used"], 250);
+    assert_eq!(payload["assembly"]["total_budget"], 36_000);
+    assert_eq!(payload["assembly"]["compaction_trigger_tokens"], 50_000);
+    assert_eq!(payload["assembly"]["warn_at_tokens"], 102_400);
+    assert_eq!(payload["assembly"]["usable_prompt_budget"], 113_000);
     assert_eq!(payload["checkpoint"]["status"], "planning");
     assert_eq!(payload["tiers"]["identity"]["token_budget"], 1000);
     assert_eq!(payload["tiers"]["task"]["staleness_policy"], "per_turn");
@@ -4378,7 +4382,10 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["receiver"]["transport"], "http");
     assert_eq!(
         json["receiver"]["submit_url"],
-        format!("{}/api/v1/instance/delegations", peer_b_url.trim_end_matches("/api/v1/instance/health"))
+        format!(
+            "{}/api/v1/instance/delegations",
+            peer_b_url.trim_end_matches("/api/v1/instance/health")
+        )
     );
     assert_eq!(
         json["receiver"]["result_url"],

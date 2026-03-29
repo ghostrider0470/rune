@@ -125,7 +125,9 @@ pub struct ContextTierUsage {
 pub struct ContextAssemblyReport {
     pub total_estimated_tokens: usize,
     pub total_budget: usize,
+    pub compaction_trigger_tokens: usize,
     pub over_budget: bool,
+    pub over_compaction_threshold: bool,
     pub tiers: Vec<ContextTierUsage>,
 }
 
@@ -219,6 +221,7 @@ impl ContextAssembler {
         workspace: Option<&WorkspaceContext>,
         memory: Option<&MemoryContext>,
         extra_system_sections: &[String],
+        compaction_trigger_tokens: usize,
     ) -> ContextAssemblyReport {
         let identity_section = self.system_instructions.trim();
         let active_task_section = extra_system_sections
@@ -283,7 +286,10 @@ impl ContextAssembler {
         ContextAssemblyReport {
             total_estimated_tokens,
             total_budget,
+            compaction_trigger_tokens,
             over_budget: total_budget > 0 && total_estimated_tokens > total_budget,
+            over_compaction_threshold: compaction_trigger_tokens > 0
+                && total_estimated_tokens > compaction_trigger_tokens,
             tiers,
         }
     }
@@ -305,7 +311,8 @@ impl ContextAssembler {
         // System message with optional workspace + memory context
         let mut sections = vec![self.system_instructions.clone()];
 
-        let context_report = self.analyze_context_usage(workspace, memory, extra_system_sections);
+        let context_report =
+            self.analyze_context_usage(workspace, memory, extra_system_sections, 0);
         let extra_task_sections = extra_system_sections
             .iter()
             .filter(|section| !section.trim().is_empty())
@@ -850,11 +857,14 @@ mod context_tier_tests {
             Some(&workspace),
             Some(&memory),
             &["Active task goes here".into()],
+            50_000,
         );
 
         assert!(report.total_estimated_tokens > 0);
         assert_eq!(report.total_budget, 36_000);
         assert!(!report.over_budget);
+        assert_eq!(report.compaction_trigger_tokens, 50_000);
+        assert!(!report.over_compaction_threshold);
         assert!(report.identity_tokens() > 0);
         assert!(report.project_tokens() > 0);
         assert!(report.tokens_for(ContextTierKind::Shared) > 0);
@@ -874,8 +884,8 @@ mod context_budget_tests {
 
     #[test]
     fn analyze_context_usage_marks_over_budget_when_tier_sum_exceeded() {
-        let assembler = ContextAssembler::new("Identity instructions")
-            .with_tier_budgets(1, 1, 1, 1);
+        let assembler =
+            ContextAssembler::new("Identity instructions").with_tier_budgets(1, 1, 1, 1);
         let workspace = WorkspaceContext {
             files: vec![("AGENTS.md".into(), "project rules".into())],
         };
@@ -888,8 +898,23 @@ mod context_budget_tests {
             Some(&workspace),
             Some(&memory),
             &["Active task goes here".into()],
+            50_000,
         );
 
         assert!(report.over_budget);
+        assert!(!report.over_compaction_threshold);
+    }
+    #[test]
+    fn analyze_context_usage_marks_compaction_threshold_exceeded() {
+        let assembler = ContextAssembler::new("Identity instructions");
+        let report = assembler.analyze_context_usage(
+            None,
+            None,
+            &["This active task section is deliberately long enough to exceed a tiny compaction trigger.".repeat(8)],
+            10,
+        );
+
+        assert!(report.over_compaction_threshold);
+        assert_eq!(report.compaction_trigger_tokens, 10);
     }
 }
