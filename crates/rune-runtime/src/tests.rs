@@ -794,6 +794,7 @@ impl TestHarness {
     fn session_engine(&self) -> SessionEngine {
         SessionEngine::new(self.session_repo.clone())
             .with_transcript_repo(self.transcript_repo.clone())
+            .with_context_assembler(ContextAssembler::new("You are a helpful assistant."))
     }
 }
 
@@ -2609,11 +2610,43 @@ async fn create_session_seeds_context_tier_metadata() {
     );
     assert_eq!(
         session.metadata["context_token_usage"]["total_estimated_tokens"],
-        0
+        7
     );
     assert_eq!(
         session.metadata["context_token_usage"]["over_budget"],
         false
+    );
+}
+
+#[tokio::test]
+async fn create_session_seeds_context_tier_metadata_from_custom_assembler() {
+    let h = TestHarness::new();
+    let engine = SessionEngine::new(h.session_repo.clone())
+        .with_transcript_repo(h.transcript_repo.clone())
+        .with_context_assembler(
+            ContextAssembler::new("You are a helpful assistant.")
+                .with_tier_budgets(750, 8_000, 16_000, 2_500),
+        );
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let tiers = session.metadata["context_tiers"]
+        .as_array()
+        .expect("context tiers array");
+    assert_eq!(tiers[0]["token_budget"], 750);
+    assert_eq!(tiers[1]["token_budget"], 8000);
+    assert_eq!(tiers[2]["token_budget"], 16000);
+    assert_eq!(tiers[3]["token_budget"], 2500);
+    assert_eq!(tiers[4]["token_budget"], 0);
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_budget"],
+        27_250
     );
 }
 
