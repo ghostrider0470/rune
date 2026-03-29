@@ -71,7 +71,67 @@ pub struct InstanceHealthResponse {
     pub peers: Vec<PeerHealthResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationArtifactResponse {
+    pub name: String,
+    pub kind: String,
+    pub uri: Option<String>,
+    pub content_type: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskPayload {
+    pub task: String,
+    pub constraints: Vec<String>,
+    pub expected_output: String,
+    pub timeout_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_peer_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_reservation: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_locks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<DelegationArtifactResponse>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskRequest {
+    pub task_id: String,
+    pub protocol_version: u32,
+    pub submitted_at: String,
+    pub sender: DelegationEndpointResponse,
+    pub task: DelegationTaskPayload,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationErrorResponse {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskResultResponse {
+    pub task_id: String,
+    pub status: String,
+    pub accepted_at: String,
+    pub started_at: Option<String>,
+    pub output: Option<String>,
+    #[serde(default)]
+    pub artifacts: Vec<DelegationArtifactResponse>,
+    pub error: Option<DelegationErrorResponse>,
+    pub finished_at: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DelegationTaskStatusEnvelope {
+    pub receiver: DelegationEndpointResponse,
+    pub result: DelegationTaskResultResponse,
+}
+
+#[derive(Clone, Serialize)]
 pub struct DelegationTaskContractResponse {
     pub protocol_version: u32,
     pub submission_modes: Vec<&'static str>,
@@ -81,6 +141,8 @@ pub struct DelegationTaskContractResponse {
     pub required_fields: Vec<&'static str>,
     pub optional_fields: Vec<&'static str>,
     pub result_fields: Vec<&'static str>,
+    pub example_request: DelegationTaskRequest,
+    pub example_result: DelegationTaskResultResponse,
 }
 
 #[derive(Serialize)]
@@ -99,7 +161,7 @@ pub struct DelegationPlanResponse {
     pub result: DelegationResultContractResponse,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DelegationEndpointResponse {
     pub instance_id: String,
     pub instance_name: String,
@@ -383,6 +445,66 @@ pub async fn delegation_plan(
 }
 
 fn delegation_task_contract() -> DelegationTaskContractResponse {
+    let sender = DelegationEndpointResponse {
+        instance_id: "rune-hamza-desktop".to_string(),
+        instance_name: "Hamza Desktop".to_string(),
+        transport: "http".to_string(),
+        health_url: Some("http://rune-hamza-desktop:18790/api/v1/instance/health".to_string()),
+        submit_url: Some("http://rune-hamza-desktop:18790/api/v1/instance/delegations".to_string()),
+        result_url: Some(
+            "http://rune-hamza-desktop:18790/api/v1/instance/delegations/{task_id}".to_string(),
+        ),
+    };
+
+    let example_request = DelegationTaskRequest {
+        task_id: "delegation-123".to_string(),
+        protocol_version: 1,
+        submitted_at: "2026-03-29T00:00:00Z".to_string(),
+        sender: sender.clone(),
+        task: DelegationTaskPayload {
+            task: "Implement issue #421 acceptance-test shim".to_string(),
+            constraints: vec![
+                "Run cargo check before returning".to_string(),
+                "Do not touch unrelated crates".to_string(),
+            ],
+            expected_output: "Commit SHA plus summary of changed files".to_string(),
+            timeout_secs: 1800,
+            target_peer_id: Some("rune-hamza-laptop".to_string()),
+            branch_reservation: Some("agent/rune/delegation-421".to_string()),
+            file_locks: vec![
+                "crates/rune-gateway/src/routes.rs".to_string(),
+                "crates/rune-runtime/src/orchestrator.rs".to_string(),
+            ],
+            artifacts: vec![DelegationArtifactResponse {
+                name: "patch.diff".to_string(),
+                kind: "diff".to_string(),
+                uri: None,
+                content_type: Some("text/x-diff".to_string()),
+                description: Some("Optional diff artifact returned on failure".to_string()),
+            }],
+        },
+    };
+
+    let example_result = DelegationTaskResultResponse {
+        task_id: "delegation-123".to_string(),
+        status: "completed".to_string(),
+        accepted_at: "2026-03-29T00:00:05Z".to_string(),
+        started_at: Some("2026-03-29T00:00:10Z".to_string()),
+        output: Some(
+            "Committed agent/rune/delegation-421 at abc1234 and uploaded verification log"
+                .to_string(),
+        ),
+        artifacts: vec![DelegationArtifactResponse {
+            name: "cargo-check.log".to_string(),
+            kind: "log".to_string(),
+            uri: Some("artifact://cargo-check.log".to_string()),
+            content_type: Some("text/plain".to_string()),
+            description: Some("Verification output captured by receiver".to_string()),
+        }],
+        error: None,
+        finished_at: Some("2026-03-29T00:02:00Z".to_string()),
+    };
+
     DelegationTaskContractResponse {
         protocol_version: 1,
         submission_modes: vec!["named", "least_busy"],
@@ -421,6 +543,8 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
             "error",
             "finished_at",
         ],
+        example_request,
+        example_result,
     }
 }
 
