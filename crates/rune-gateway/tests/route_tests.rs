@@ -4660,6 +4660,61 @@ async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
 }
 
 #[tokio::test]
+async fn delegation_plan_exposes_full_task_contract_fields() {
+    let app = build_test_app(None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(
+        json["task_contract"]["required_fields"],
+        serde_json::json!(["task", "constraints", "expected_output", "timeout_secs"])
+    );
+    assert_eq!(
+        json["task_contract"]["optional_fields"],
+        serde_json::json!([
+            "target_peer_id",
+            "branch_reservation",
+            "file_locks",
+            "artifacts"
+        ])
+    );
+    assert_eq!(
+        json["task_contract"]["timeout_handling"],
+        serde_json::json!([
+            "sender supplies timeout_secs per task",
+            "runtime treats deadline expiry as timeout",
+            "timeout yields terminal status and structured error detail"
+        ])
+    );
+    assert_eq!(
+        json["task_contract"]["result_fields"],
+        serde_json::json!([
+            "task_id",
+            "status",
+            "accepted_at",
+            "started_at",
+            "output",
+            "artifacts",
+            "error",
+            "finished_at"
+        ])
+    );
+    assert!(json["routing"]["detail"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("no healthy peers available"));
+    assert_eq!(json["receiver"], serde_json::Value::Null);
+}
+
+#[tokio::test]
 async fn delegation_plan_requires_peer_id_for_named_strategy() {
     let app = build_test_app(None);
     let response = app
