@@ -732,8 +732,10 @@ impl SessionLoop {
     }
 
     /// Inspect message attachments for `telegram-file:` URLs and enrich the
-    /// message content with transcriptions (audio) or placeholders (images).
-    async fn enrich_media_content(&self, msg: &rune_channels::ChannelMessage) -> String {
+    /// message content with transcriptions (audio). Image attachments are kept
+    /// as first-class multimodal parts and should not be flattened into text
+    /// placeholders here.
+    pub(crate) async fn enrich_media_content(&self, msg: &rune_channels::ChannelMessage) -> String {
         let mut extra_parts: Vec<String> = Vec::new();
 
         for attachment in &msg.attachments {
@@ -758,8 +760,7 @@ impl SessionLoop {
                     }
                 }
             } else if mime.starts_with(IMAGE_MIME_PREFIX) {
-                info!(file_id = %file_id, mime = %mime, "image attachment detected");
-                extra_parts.push("[Image attached]".to_string());
+                info!(file_id = %file_id, mime = %mime, "image attachment detected; preserving multimodal attachment without text placeholder");
             }
         }
 
@@ -822,6 +823,14 @@ impl SessionLoop {
     }
 }
 
+
+#[cfg(test)]
+pub(crate) async fn enrich_media_content_for_test(
+    session_loop: &SessionLoop,
+    msg: &rune_channels::ChannelMessage,
+) -> String {
+    session_loop.enrich_media_content(msg).await
+}
 // ── Streaming helpers ───────────────────────────────────────────────
 
 /// Progressively edit a Telegram placeholder message as text chunks arrive.
