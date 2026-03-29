@@ -752,11 +752,26 @@ mod context_tier_tests {
         let assembler = ContextAssembler::new("You are Rune.");
         let specs = assembler.tier_specs();
         assert_eq!(specs.len(), 5);
-        assert_eq!(specs[0], ContextTierSpec::new(ContextTierKind::Identity, 1_000));
-        assert_eq!(specs[1], ContextTierSpec::new(ContextTierKind::ActiveTask, 10_000));
-        assert_eq!(specs[2], ContextTierSpec::new(ContextTierKind::Project, 20_000));
-        assert_eq!(specs[3], ContextTierSpec::new(ContextTierKind::Shared, 5_000));
-        assert_eq!(specs[4], ContextTierSpec::new(ContextTierKind::Historical, 0));
+        assert_eq!(
+            specs[0],
+            ContextTierSpec::new(ContextTierKind::Identity, 1_000)
+        );
+        assert_eq!(
+            specs[1],
+            ContextTierSpec::new(ContextTierKind::ActiveTask, 10_000)
+        );
+        assert_eq!(
+            specs[2],
+            ContextTierSpec::new(ContextTierKind::Project, 20_000)
+        );
+        assert_eq!(
+            specs[3],
+            ContextTierSpec::new(ContextTierKind::Shared, 5_000)
+        );
+        assert_eq!(
+            specs[4],
+            ContextTierSpec::new(ContextTierKind::Historical, 0)
+        );
     }
 
     #[test]
@@ -780,9 +795,11 @@ mod context_tier_tests {
         assert!(report.project_tokens() > 0);
         assert!(report.tokens_for(ContextTierKind::Shared) > 0);
         assert_eq!(report.tokens_for(ContextTierKind::Historical), 0);
-        assert!(report
-            .tiers
-            .iter()
-            .any(|tier| tier.kind == ContextTierKind::ActiveTask && tier.loaded));
+        assert!(
+            report
+                .tiers
+                .iter()
+                .any(|tier| tier.kind == ContextTierKind::ActiveTask && tier.loaded)
+        );
     }
 }

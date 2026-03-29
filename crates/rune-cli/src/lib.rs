@@ -4126,11 +4126,18 @@ mod tests {
         let registry = ProjectRegistry::new();
         registry.save(workspace).unwrap();
 
-        unsafe { std::env::set_var("RUNE_WORKSPACE", workspace); }
+        unsafe {
+            std::env::set_var("RUNE_WORKSPACE", workspace);
+        }
         let err = handle_projects_remove("missing".to_string()).unwrap_err();
-        unsafe { std::env::remove_var("RUNE_WORKSPACE"); }
+        unsafe {
+            std::env::remove_var("RUNE_WORKSPACE");
+        }
 
-        assert!(err.to_string().contains("project 'missing' is not registered"));
+        assert!(
+            err.to_string()
+                .contains("project 'missing' is not registered")
+        );
     }
 
     #[test]
@@ -4138,7 +4145,9 @@ mod tests {
         let cli = Cli::try_parse_from(["rune", "projects", "remove", "alpha"]).unwrap();
 
         match cli.command {
-            Command::Projects { action: ProjectsAction::Remove { name } } => {
+            Command::Projects {
+                action: ProjectsAction::Remove { name },
+            } => {
                 assert_eq!(name, "alpha");
             }
             other => panic!("unexpected command: {other:?}"),
@@ -4167,9 +4176,13 @@ mod tests {
         registry.switch_active("alpha").unwrap();
         registry.save(workspace).unwrap();
 
-        unsafe { std::env::set_var("RUNE_WORKSPACE", workspace); }
+        unsafe {
+            std::env::set_var("RUNE_WORKSPACE", workspace);
+        }
         handle_projects_remove("alpha".to_string()).unwrap();
-        unsafe { std::env::remove_var("RUNE_WORKSPACE"); }
+        unsafe {
+            std::env::remove_var("RUNE_WORKSPACE");
+        }
 
         let updated = ProjectRegistry::load(workspace).unwrap();
         assert!(updated.is_empty());

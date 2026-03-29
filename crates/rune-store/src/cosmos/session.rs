@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{parse_doc, pk, CosmosStore};
+use crate::cosmos::{CosmosStore, parse_doc, pk};
 use crate::error::StoreError;
 use crate::models::{NewSession, SessionRow};
 use crate::repos::SessionRepo;
@@ -125,7 +125,10 @@ impl SessionRepo for CosmosStore {
                     StoreError::Database(msg)
                 }
             })?;
-        let doc: SessionDoc = parse_doc(resp.into_model().map_err(|e| StoreError::Database(e.to_string()))?)?;
+        let doc: SessionDoc = parse_doc(
+            resp.into_model()
+                .map_err(|e| StoreError::Database(e.to_string()))?,
+        )?;
         Ok(SessionRow::from(doc))
     }
 
@@ -226,11 +229,7 @@ impl SessionRepo for CosmosStore {
 
     async fn delete(&self, id: Uuid) -> Result<bool, StoreError> {
         let sid = id.to_string();
-        match self
-            .container()
-            .delete_item(pk(&sid), &sid, None)
-            .await
-        {
+        match self.container().delete_item(pk(&sid), &sid, None).await {
             Ok(_) => Ok(true),
             Err(e) => {
                 let msg = e.to_string();
@@ -244,8 +243,7 @@ impl SessionRepo for CosmosStore {
     }
 
     async fn list_active_channel_sessions(&self) -> Result<Vec<SessionRow>, StoreError> {
-        let query =
-            "SELECT * FROM c WHERE c.type = 'session' AND IS_DEFINED(c.channel_ref) \
+        let query = "SELECT * FROM c WHERE c.type = 'session' AND IS_DEFINED(c.channel_ref) \
              AND c.channel_ref != null \
              AND c.status NOT IN ('completed', 'failed', 'cancelled')";
         let docs: Vec<SessionDoc> = self.query_cross_partition(query).await?;

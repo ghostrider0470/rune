@@ -844,7 +844,6 @@ mod tests {
     use rune_core::JobId;
     use rune_runtime::scheduler::{Job, JobPayload, JobRunStatus, Schedule, SessionTarget};
 
-
     #[tokio::test]
     async fn supervisor_starts_and_stops_cleanly() {
         let mut supervisor = BackgroundSupervisor::new();

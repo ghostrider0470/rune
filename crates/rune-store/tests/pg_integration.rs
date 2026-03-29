@@ -87,12 +87,13 @@ async fn setup() -> Option<(PgPool, PgVectorStatus)> {
         }
     };
 
-    if let Err(err) = conn.batch_execute(
-        "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
+    if let Err(err) = conn
+        .batch_execute(
+            "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
          tool_executions, channel_deliveries, paired_devices, pairing_requests, \
          memory_embeddings CASCADE",
-    )
-    .await
+        )
+        .await
     {
         eprintln!("skipping rune-store pg integration tests: truncate failed: {err}");
         return None;
@@ -250,7 +251,10 @@ async fn memory_embedding_repo_round_trip_search_and_cleanup() {
             vec!["memory/preferences.md", "memory/tasks.md"]
         );
 
-        let deleted = repo.delete_by_file(None, "memory/preferences.md").await.unwrap();
+        let deleted = repo
+            .delete_by_file(None, "memory/preferences.md")
+            .await
+            .unwrap();
         assert_eq!(deleted, 1);
         assert_eq!(repo.count(None).await.unwrap(), 1);
     } else {
@@ -269,7 +273,10 @@ async fn memory_embedding_repo_round_trip_search_and_cleanup() {
         assert_eq!(keyword_hits.len(), 1);
         assert_eq!(keyword_hits[0].file_path, "memory/preferences.md");
 
-        let deleted = repo.delete_by_file(None, "memory/preferences.md").await.unwrap();
+        let deleted = repo
+            .delete_by_file(None, "memory/preferences.md")
+            .await
+            .unwrap();
         assert_eq!(deleted, 1);
         assert_eq!(repo.count(None).await.unwrap(), 0);
     }

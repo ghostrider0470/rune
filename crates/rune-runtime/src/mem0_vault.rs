@@ -49,8 +49,8 @@ impl VaultIndex {
     async fn save(&self, vault_dir: &Path) -> Result<(), String> {
         let path = vault_dir.join(".vault-index.json");
         let tmp = vault_dir.join(".vault-index.json.tmp");
-        let data = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("index serialize: {e}"))?;
+        let data =
+            serde_json::to_string_pretty(self).map_err(|e| format!("index serialize: {e}"))?;
         tokio::fs::write(&tmp, data)
             .await
             .map_err(|e| format!("index write: {e}"))?;
@@ -155,8 +155,14 @@ fn render_fact_md(memory: &Memory, related: &[(String, f64)]) -> String {
     md.push_str("---\n");
     md.push_str(&format!("id: \"{}\"\n", memory.id));
     md.push_str(&format!("category: \"{}\"\n", memory.category));
-    md.push_str(&format!("created_at: \"{}\"\n", memory.created_at.to_rfc3339()));
-    md.push_str(&format!("updated_at: \"{}\"\n", memory.updated_at.to_rfc3339()));
+    md.push_str(&format!(
+        "created_at: \"{}\"\n",
+        memory.created_at.to_rfc3339()
+    ));
+    md.push_str(&format!(
+        "updated_at: \"{}\"\n",
+        memory.updated_at.to_rfc3339()
+    ));
     md.push_str(&format!("access_count: {}\n", memory.access_count));
     if let Some(ref sid) = memory.source_session_id {
         md.push_str(&format!("source_session_id: \"{sid}\"\n"));
@@ -174,10 +180,7 @@ fn render_fact_md(memory: &Memory, related: &[(String, f64)]) -> String {
     if !related.is_empty() {
         md.push_str("\n## Related\n\n");
         for (slug, similarity) in related {
-            md.push_str(&format!(
-                "- [[{slug}]] ({:.0}%)\n",
-                similarity * 100.0
-            ));
+            md.push_str(&format!("- [[{slug}]] ({:.0}%)\n", similarity * 100.0));
         }
     }
 
@@ -339,7 +342,8 @@ impl VaultSyncer {
                             id_to_slug.get(target_id).map(|s| (s.clone(), *sim))
                         })
                         .collect();
-                    links.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    links
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     links
                 })
                 .unwrap_or_default();
@@ -369,8 +373,7 @@ impl VaultSyncer {
         }
 
         // Prune orphaned files (in index but not in current memories).
-        let live_ids: std::collections::HashSet<Uuid> =
-            memories.iter().map(|m| m.id).collect();
+        let live_ids: std::collections::HashSet<Uuid> = memories.iter().map(|m| m.id).collect();
         let mut idx = self.index.write().await;
         let orphans: Vec<Uuid> = idx
             .entries
@@ -430,7 +433,10 @@ mod tests {
 
     #[test]
     fn slug_basic() {
-        assert_eq!(generate_slug("User prefers dark mode"), "user-prefers-dark-mode");
+        assert_eq!(
+            generate_slug("User prefers dark mode"),
+            "user-prefers-dark-mode"
+        );
     }
 
     #[test]
@@ -577,11 +583,9 @@ mod tests {
         assert_eq!(report.created, 2);
 
         // Check wikilinks are present.
-        let content_a = tokio::fs::read_to_string(
-            tmp.path().join("rune-is-written-in-rust.md"),
-        )
-        .await
-        .unwrap();
+        let content_a = tokio::fs::read_to_string(tmp.path().join("rune-is-written-in-rust.md"))
+            .await
+            .unwrap();
         assert!(content_a.contains("[[project-uses-tokio-for-async]]"));
         assert!(content_a.contains("72%"));
 

@@ -569,7 +569,11 @@ mod tests {
             unreachable!()
         }
 
-        async fn delete_by_file(&self, _project_id: Option<&str>, _file_path: &str) -> Result<usize, StoreError> {
+        async fn delete_by_file(
+            &self,
+            _project_id: Option<&str>,
+            _file_path: &str,
+        ) -> Result<usize, StoreError> {
             unreachable!()
         }
 
@@ -595,7 +599,10 @@ mod tests {
             Ok((self.keyword_hits.len().max(self.vector_hits.len())) as i64)
         }
 
-        async fn list_indexed_files(&self, _project_id: Option<&str>) -> Result<Vec<String>, StoreError> {
+        async fn list_indexed_files(
+            &self,
+            _project_id: Option<&str>,
+        ) -> Result<Vec<String>, StoreError> {
             Ok(Vec::new())
         }
 
@@ -762,11 +769,16 @@ mod tests {
     #[tokio::test]
     async fn evergreen_memory_file_outranks_equally_matching_daily_note() {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::write(tmp.path().join("MEMORY.md"), "- prefers rust and dark mode
-")
+        tokio::fs::write(
+            tmp.path().join("MEMORY.md"),
+            "- prefers rust and dark mode
+",
+        )
+        .await
+        .unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory"))
             .await
             .unwrap();
-        tokio::fs::create_dir_all(tmp.path().join("memory")).await.unwrap();
         tokio::fs::write(
             tmp.path().join("memory/2026-03-13.md"),
             "- prefers rust and dark mode
@@ -782,7 +794,11 @@ mod tests {
         );
         let result = exec.execute(call).await.unwrap();
 
-        assert!(result.output.contains("Source: MEMORY.md#1"), "{0}", result.output);
+        assert!(
+            result.output.contains("Source: MEMORY.md#1"),
+            "{0}",
+            result.output
+        );
     }
 
     #[tokio::test]

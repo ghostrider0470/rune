@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::mem0_vault::{VaultSyncer, VaultSyncReport};
+use crate::mem0_vault::{VaultSyncReport, VaultSyncer};
 
 /// A single remembered fact.
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::cosmos::{collect_query, parse_doc, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, parse_doc};
 use crate::error::StoreError;
 use crate::repos::{ToolApprovalPolicy, ToolApprovalPolicyRepo};
 use azure_data_cosmos::PartitionKey;
@@ -53,8 +53,10 @@ impl ToolApprovalPolicyRepo for CosmosStore {
             .await
         {
             Ok(resp) => {
-                let doc: ToolPolicyDoc =
-                    parse_doc(resp.into_model().map_err(|e| StoreError::Database(e.to_string()))?)?;
+                let doc: ToolPolicyDoc = parse_doc(
+                    resp.into_model()
+                        .map_err(|e| StoreError::Database(e.to_string()))?,
+                )?;
                 Ok(Some(ToolApprovalPolicy::from(doc)))
             }
             Err(e) => {

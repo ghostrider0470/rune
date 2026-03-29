@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cosmos::{collect_query, pk, CosmosStore};
+use crate::cosmos::{CosmosStore, collect_query, pk};
 use crate::error::StoreError;
 use crate::models::{JobRunRow, NewJobRun};
 use crate::repos::JobRunRepo;

@@ -141,15 +141,16 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
                 )
             }
             rune_runtime::CommsTransportKind::Http => {
-                let http = services
-                    .config
-                    .comms
-                    .http
-                    .clone()
-                    .ok_or_else(|| GatewayError::BadRequest("comms.http config is required for HTTP transport".to_string()))?;
-                let base_url = http
-                    .base_url
-                    .ok_or_else(|| GatewayError::BadRequest("comms.http.base_url is required for HTTP transport".to_string()))?;
+                let http = services.config.comms.http.clone().ok_or_else(|| {
+                    GatewayError::BadRequest(
+                        "comms.http config is required for HTTP transport".to_string(),
+                    )
+                })?;
+                let base_url = http.base_url.ok_or_else(|| {
+                    GatewayError::BadRequest(
+                        "comms.http.base_url is required for HTTP transport".to_string(),
+                    )
+                })?;
                 CommsClient::with_http_transport(
                     base_url,
                     http.auth_token,
@@ -664,7 +665,10 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/v1/memory/store", post(routes::v1_memory_store))
         .route("/api/v1/memory/list", get(routes::v1_memory_list))
         .route("/api/v1/memory/{id}", delete(routes::v1_memory_delete))
-        .route("/api/v1/memory/vault/sync", post(routes::v1_memory_vault_sync))
+        .route(
+            "/api/v1/memory/vault/sync",
+            post(routes::v1_memory_vault_sync),
+        )
         // Log routes
         .route("/api/logs", get(routes::query_logs))
         // Doctor routes

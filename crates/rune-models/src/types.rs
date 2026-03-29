@@ -4,12 +4,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessagePart {
-    Text {
-        text: String,
-    },
-    ImageUrl {
-        image_url: ImageUrlPart,
-    },
+    Text { text: String },
+    ImageUrl { image_url: ImageUrlPart },
 }
 
 /// OpenAI-compatible image URL content block.
@@ -32,7 +28,10 @@ pub enum Role {
 #[derive(Clone, Debug, Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
-    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "serialize_message_content")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_message_content"
+    )]
     pub content: Option<String>,
     #[serde(skip)]
     pub content_parts: Option<Vec<MessagePart>>,

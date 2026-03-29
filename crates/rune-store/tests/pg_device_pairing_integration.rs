@@ -81,11 +81,12 @@ async fn setup() -> Option<PgPool> {
         }
     };
 
-    if let Err(err) = conn.batch_execute(
-        "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
+    if let Err(err) = conn
+        .batch_execute(
+            "TRUNCATE sessions, turns, transcript_items, jobs, approvals, \
          tool_executions, channel_deliveries, paired_devices, pairing_requests CASCADE",
-    )
-    .await
+        )
+        .await
     {
         eprintln!("skipping rune-store device pairing integration tests: truncate failed: {err}");
         return None;

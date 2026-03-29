@@ -85,7 +85,9 @@ impl CosmosStore {
         let resource_link = "dbs/rune/colls/rune";
 
         // Step 1: get partition key ranges
-        let pk_ranges = self.get_partition_key_ranges(&client, resource_link).await?;
+        let pk_ranges = self
+            .get_partition_key_ranges(&client, resource_link)
+            .await?;
 
         // Step 2: query each range, paginating with continuation
         let url = format!("{}/{}/docs", self.endpoint, resource_link);
@@ -169,8 +171,7 @@ impl CosmosStore {
         let date = chrono::Utc::now()
             .format("%a, %d %b %Y %H:%M:%S GMT")
             .to_string();
-        let auth_token =
-            generate_auth_token(&self.key, "get", "pkranges", resource_link, &date)?;
+        let auth_token = generate_auth_token(&self.key, "get", "pkranges", resource_link, &date)?;
 
         let resp = client
             .get(&url)
