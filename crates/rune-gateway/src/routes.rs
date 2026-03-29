@@ -2862,6 +2862,13 @@ pub async fn agent_steer(
         .await
         .map_err(|_| GatewayError::SessionNotFound(format!("agent session {id} not found")))?;
 
+    if session.kind != "subagent" {
+        return Err(GatewayError::BadRequest(format!(
+            "agent controls require a subagent session; found kind {}",
+            session.kind
+        )));
+    }
+
     let now = chrono::Utc::now();
     let note = format!("[steer] operator instruction injected: {}", body.message);
 
@@ -2922,6 +2929,13 @@ pub async fn agent_kill(
         .find_by_id(id)
         .await
         .map_err(|_| GatewayError::SessionNotFound(format!("agent session {id} not found")))?;
+
+    if session.kind != "subagent" {
+        return Err(GatewayError::BadRequest(format!(
+            "agent controls require a subagent session; found kind {}",
+            session.kind
+        )));
+    }
 
     let now = chrono::Utc::now();
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
