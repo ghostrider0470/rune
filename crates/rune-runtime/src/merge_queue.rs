@@ -66,6 +66,26 @@ pub trait GitExecutor: Send + Sync {
 // MergeQueue
 // ---------------------------------------------------------------------------
 
+
+fn parse_ci_status(status: &str) -> CiStatus {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "passed" => CiStatus::Passed,
+        "failed" => CiStatus::Failed,
+        "running" => CiStatus::Running,
+        _ => CiStatus::Pending,
+    }
+}
+
+fn parse_review_status(status: &str) -> ReviewStatus {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "approved" => ReviewStatus::Approved,
+        "changesrequested" | "changes_requested" | "changes-requested" => {
+            ReviewStatus::ChangesRequested
+        }
+        _ => ReviewStatus::Pending,
+    }
+}
+
 pub struct MergeQueue {
     entries: Vec<MergeQueueEntry>,
     default_branch: String,
@@ -74,11 +94,18 @@ pub struct MergeQueue {
 impl MergeQueue {
     /// Create a new queue from an [`OrchestratorState`].
     pub fn from_state(state: &OrchestratorState) -> Self {
-        // Re-parse merge_queue entries from orchestrator state. The orchestrator
-        // stores them as its own MergeQueueEntry type (simple strings for
-        // status). We maintain our own typed copy.
         Self {
-            entries: Vec::new(),
+            entries: state
+                .merge_queue
+                .iter()
+                .map(|entry| MergeQueueEntry {
+                    branch: entry.branch.clone(),
+                    pr_number: entry.pr_number,
+                    ci_status: parse_ci_status(&entry.ci_status),
+                    review_status: parse_review_status(&entry.review_status),
+                    queued_at: entry.queued_at,
+                })
+                .collect(),
             default_branch: state.default_branch.clone(),
         }
     }
@@ -272,6 +299,45 @@ mod tests {
                 .push(format!("checkout {branch}"));
             Ok(())
         }
+    }
+
+    #[test]
+    fn from_state_restores_entries_and_statuses() {
+        let state = OrchestratorState {
+            project: "test-project".into(),
+            repo: "org/repo".into(),
+            default_branch: "main".into(),
+            build_command: "cargo build".into(),
+            test_command: "cargo test".into(),
+            lint_command: None,
+            repo_path: std::path::PathBuf::from("/tmp/repo"),
+            active_agents: vec![],
+            file_locks: std::collections::HashMap::new(),
+            merge_queue: vec![
+                crate::orchestrator::MergeQueueEntry {
+                    branch: "feat/a".into(),
+                    pr_number: 1,
+                    ci_status: "passed".into(),
+                    review_status: "approved".into(),
+                    queued_at: Utc::now(),
+                },
+                crate::orchestrator::MergeQueueEntry {
+                    branch: "feat/b".into(),
+                    pr_number: 2,
+                    ci_status: "weird".into(),
+                    review_status: "changes-requested".into(),
+                    queued_at: Utc::now(),
+                },
+            ],
+            last_merge_to_default: None,
+        };
+
+        let q = MergeQueue::from_state(&state);
+        assert_eq!(q.entries().len(), 2);
+        assert_eq!(q.entries()[0].ci_status, CiStatus::Passed);
+        assert_eq!(q.entries()[0].review_status, ReviewStatus::Approved);
+        assert_eq!(q.entries()[1].ci_status, CiStatus::Pending);
+        assert_eq!(q.entries()[1].review_status, ReviewStatus::ChangesRequested);
     }
 
     #[test]
