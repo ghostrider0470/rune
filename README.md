@@ -72,6 +72,8 @@ peers = [
 
 That endpoint returns instance identity, capability manifest, live load counters, and peer health snapshots so operators can verify discovery wiring before delegation lands.
 
+You can inspect the same surface from the CLI with `rune gateway instance-health` and preview delegation targeting with `rune gateway delegation-plan --strategy least_busy`.
+
 Then open `http://127.0.0.1:8787/webchat` for browser chat or `http://127.0.0.1:8787/dashboard` for the admin UI. The legacy `/chat` path redirects into WebChat so old bookmarks keep working.
 
 WebChat keeps browser sessions isolated by channel token: use `?session_token=my-browser` to keep one browser's session list separate from another, and `?session_id=<uuid>` to reopen a specific thread directly. When gateway auth is enabled, the browser flow also accepts `?api_key=...` (and `?auth=...` for WebSocket bearer-header compatibility) so the embedded chat can be used without a custom proxy.

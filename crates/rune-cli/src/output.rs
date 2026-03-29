@@ -101,6 +101,9 @@ pub struct PeerSummary {
     pub roles: Vec<String>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
+    pub capabilities_version: Option<u32>,
+    pub capability_hash: Option<String>,
+    pub comms_transport: Option<String>,
     pub load: Option<InstanceLoadSummary>,
 }
 
