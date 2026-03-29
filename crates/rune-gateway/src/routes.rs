@@ -177,6 +177,7 @@ pub async fn instance_health(
                 advertised_addr: state.capabilities.identity.advertised_addr.clone(),
                 roles: state.capabilities.identity.roles.clone(),
                 capabilities_version: state.capabilities.identity.capabilities_version,
+                capability_hash: state.capabilities.identity.capability_hash.clone(),
             },
             instance_id: state.capabilities.identity.id.clone(),
             instance_name: state.capabilities.identity.name.clone(),
@@ -241,8 +242,16 @@ fn select_least_busy_peer(peers: &[PeerHealthResponse]) -> Option<PeerHealthResp
         .iter()
         .filter(|peer| peer.status == "healthy")
         .min_by_key(|peer| {
-            let session_count = peer.load.as_ref().map(|load| load.session_count).unwrap_or(usize::MAX);
-            let ws_connections = peer.load.as_ref().map(|load| load.ws_connections).unwrap_or(usize::MAX);
+            let session_count = peer
+                .load
+                .as_ref()
+                .map(|load| load.session_count)
+                .unwrap_or(usize::MAX);
+            let ws_connections = peer
+                .load
+                .as_ref()
+                .map(|load| load.ws_connections)
+                .unwrap_or(usize::MAX);
             let latency = peer.latency_ms.unwrap_or(u128::MAX);
             (session_count, ws_connections, latency, peer.id.as_str())
         })
@@ -451,6 +460,7 @@ pub struct InstanceIdentityResponse {
     pub advertised_addr: Option<String>,
     pub roles: Vec<String>,
     pub capabilities_version: u32,
+    pub capability_hash: String,
 }
 
 #[derive(Serialize)]
@@ -616,6 +626,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
                 advertised_addr: state.capabilities.identity.advertised_addr.clone(),
                 roles: state.capabilities.identity.roles.clone(),
                 capabilities_version: state.capabilities.identity.capabilities_version,
+                capability_hash: state.capabilities.identity.capability_hash.clone(),
             },
             instance_id: state.capabilities.identity.id.clone(),
             instance_name: state.capabilities.identity.name.clone(),

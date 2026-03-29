@@ -407,6 +407,7 @@ pub struct InstanceIdentity {
     pub advertised_addr: Option<String>,
     pub roles: Vec<String>,
     pub capabilities_version: u32,
+    pub capability_hash: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -456,6 +457,72 @@ fn fallback_instance_id() -> String {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "rune-local".to_string())
+}
+
+fn capability_hash_from_config(config: &AppConfig) -> String {
+    use sha2::{Digest, Sha256};
+
+    let fingerprint = serde_json::json!({
+        "mode": config.mode.as_str(),
+        "database": {
+            "backend": format!("{:?}", config.database.backend),
+            "database_url_configured": config.database.database_url.is_some(),
+            "sqlite_path": config.database.sqlite_path,
+            "cosmos_endpoint_configured": config.database.cosmos_endpoint.is_some(),
+        },
+        "vector": {
+            "backend": format!("{:?}", config.vector.backend),
+            "lancedb_uri": config.vector.lancedb_uri,
+            "embedding_dims": config.vector.embedding_dims,
+        },
+        "memory": {
+            "level": format!("{:?}", config.memory.level),
+            "semantic_search_enabled": config.memory.semantic_search_enabled,
+        },
+        "mem0": {
+            "enabled": config.mem0.enabled,
+            "postgres_configured": config
+                .mem0
+                .postgres_url
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty()),
+        },
+        "browser": config.browser.enabled,
+        "tts": config.media.tts.enabled,
+        "stt": config.media.stt.enabled,
+        "channels": config.channels.enabled,
+        "approval_mode": config.approval.mode.as_str(),
+        "security_posture": config.security.posture().to_string(),
+        "instance": {
+            "id": config.instance.id,
+            "name": config.instance.name,
+            "advertised_addr": config.instance.advertised_addr,
+            "roles": config.instance.roles,
+            "peer_ids": config
+                .instance
+                .peers
+                .iter()
+                .map(|peer| peer.id.clone())
+                .collect::<Vec<_>>(),
+        },
+        "models": config
+            .models
+            .providers
+            .iter()
+            .flat_map(|provider| provider.models.iter().map(|model| model.id().to_string()))
+            .collect::<Vec<_>>(),
+        "projects": config
+            .agents
+            .list
+            .iter()
+            .filter_map(|agent| config.agents.effective_workspace(agent).map(str::to_string))
+            .collect::<Vec<_>>(),
+        "comms_transport": config.comms.transport,
+    });
+
+    let encoded = serde_json::to_vec(&fingerprint).unwrap_or_default();
+    let digest = Sha256::digest(encoded);
+    hex::encode(digest)
 }
 
 fn persisted_instance_id_path() -> Option<PathBuf> {
@@ -546,6 +613,7 @@ impl Capabilities {
                 advertised_addr: config.instance.advertised_addr.clone(),
                 roles: config.instance.roles.clone(),
                 capabilities_version: 1,
+                capability_hash: capability_hash_from_config(config),
             },
             peer_count: config.instance.peers.len(),
             peers: config
