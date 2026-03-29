@@ -69,9 +69,24 @@ cargo test -p rune-runtime     # single crate tests
 cargo build --release -p rune-gateway-app  # release build
 ```
 
+## Worktrees — MANDATORY
+
+**Never edit files in the main worktree. Always use a git worktree.**
+
+Multiple sessions run concurrently via tmux, and LSP plugins (rust-analyzer, typescript-lsp) revert uncommitted changes between tool calls. This has destroyed work repeatedly.
+
+Before ANY file edit:
+1. `git worktree add ../rune-work-<feature> -b <branch>`
+2. Do all edits and commits in the worktree
+3. Push from the worktree
+4. Use `isolation: "worktree"` on Agent/subagent calls
+
+No exceptions. Not even for one-liners.
+
 ## Red Lines
 
 - Never commit secrets, credentials, API keys, or tokens
 - Never push directly to main
 - Never delete branches with unmerged work without asking
+- Never edit files in the main worktree (use git worktrees)
 - When in doubt, ask via comms
