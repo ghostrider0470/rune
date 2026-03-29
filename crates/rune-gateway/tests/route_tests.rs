@@ -16,7 +16,8 @@ use uuid::Uuid;
 use chrono::Timelike;
 
 use rune_config::{
-    AppConfig, Capabilities, ConfiguredModel, InstanceIdentity, LaneQueueConfig, ModelProviderConfig, RuntimeMode,
+    AppConfig, Capabilities, ConfiguredModel, InstanceIdentity, LaneQueueConfig,
+    ModelProviderConfig, RuntimeMode,
 };
 use rune_models::{
     CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider, Usage,
@@ -4147,12 +4148,24 @@ async fn instance_health_returns_capability_manifest() {
     assert_eq!(json["capabilities"]["instance_name"], "test-instance");
     assert_eq!(json["capabilities"]["identity"]["id"], "test-instance");
     assert_eq!(json["capabilities"]["identity"]["name"], "test-instance");
-    assert_eq!(json["capabilities"]["identity"]["advertised_addr"], "http://127.0.0.1:8787");
-    assert_eq!(json["capabilities"]["identity"]["roles"], serde_json::json!(["gateway", "scheduler"]));
+    assert_eq!(
+        json["capabilities"]["identity"]["advertised_addr"],
+        "http://127.0.0.1:8787"
+    );
+    assert_eq!(
+        json["capabilities"]["identity"]["roles"],
+        serde_json::json!(["gateway", "scheduler"])
+    );
     assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 1);
     assert_eq!(json["capabilities"]["peer_count"], 0);
-    assert_eq!(json["capabilities"]["configured_models"], serde_json::json!([]));
-    assert_eq!(json["capabilities"]["active_projects"], serde_json::json!([]));
+    assert_eq!(
+        json["capabilities"]["configured_models"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        json["capabilities"]["active_projects"],
+        serde_json::json!([])
+    );
 }
 
 #[tokio::test]
@@ -4182,7 +4195,10 @@ async fn status_returns_correct_shape() {
     assert_eq!(json["capabilities"]["stt"], false);
     assert_eq!(json["capabilities"]["channels"], serde_json::json!([]));
     assert_eq!(json["capabilities"]["identity"]["id"], "test-instance");
-    assert_eq!(json["capabilities"]["identity"]["roles"], serde_json::json!(["gateway", "scheduler"]));
+    assert_eq!(
+        json["capabilities"]["identity"]["roles"],
+        serde_json::json!(["gateway", "scheduler"])
+    );
 }
 
 #[tokio::test]
