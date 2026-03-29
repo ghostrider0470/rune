@@ -2624,7 +2624,7 @@ async fn create_session_seeds_context_tier_metadata() {
     assert_eq!(tiers[4]["staleness_policy"], "retrieval_only");
     assert_eq!(
         session.metadata["context_token_usage"]["total_budget"],
-        36000
+        44000
     );
     assert_eq!(
         session.metadata["context_token_usage"]["total_estimated_tokens"],
@@ -2661,10 +2661,10 @@ async fn create_session_seeds_context_tier_metadata_from_custom_assembler() {
     assert_eq!(tiers[1]["token_budget"], 8000);
     assert_eq!(tiers[2]["token_budget"], 16000);
     assert_eq!(tiers[3]["token_budget"], 2500);
-    assert_eq!(tiers[4]["token_budget"], 0);
+    assert_eq!(tiers[4]["token_budget"], 8000);
     assert_eq!(
         session.metadata["context_token_usage"]["total_budget"],
-        27_250
+        35_250
     );
 }
 

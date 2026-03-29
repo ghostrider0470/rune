@@ -875,6 +875,8 @@ pub struct ContextConfig {
     pub shared_priority: u8,
     #[serde(default = "default_context_shared_staleness_policy")]
     pub shared_staleness_policy: String,
+    #[serde(default = "default_context_historical_tokens")]
+    pub historical: usize,
     #[serde(default = "default_context_historical_priority")]
     pub historical_priority: u8,
     #[serde(default = "default_context_historical_staleness_policy")]
@@ -904,6 +906,9 @@ fn default_context_project_priority() -> u8 {
 }
 fn default_context_shared_priority() -> u8 {
     3
+}
+fn default_context_historical_tokens() -> usize {
+    8_000
 }
 fn default_context_historical_priority() -> u8 {
     4
@@ -939,6 +944,7 @@ impl Default for ContextConfig {
             shared: default_context_shared_tokens(),
             shared_priority: default_context_shared_priority(),
             shared_staleness_policy: default_context_shared_staleness_policy(),
+            historical: default_context_historical_tokens(),
             historical_priority: default_context_historical_priority(),
             historical_staleness_policy: default_context_historical_staleness_policy(),
         }
@@ -964,6 +970,7 @@ mod context_config_tests {
         assert_eq!(cfg.shared, 5_000);
         assert_eq!(cfg.shared_priority, 3);
         assert_eq!(cfg.shared_staleness_policy, "on_demand");
+        assert_eq!(cfg.historical, 8_000);
         assert_eq!(cfg.historical_priority, 4);
         assert_eq!(cfg.historical_staleness_policy, "retrieval_only");
     }
