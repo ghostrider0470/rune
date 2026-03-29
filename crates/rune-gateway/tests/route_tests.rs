@@ -11682,6 +11682,14 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
         false
     );
     assert_eq!(body["memory_hierarchy"]["loaded_tier_count"], 5);
+    let tiers = body["memory_hierarchy"]["context_tier_counters"].as_array().unwrap();
+    assert_eq!(tiers.len(), 5);
+    assert_eq!(tiers[0]["kind"], "identity");
+    assert_eq!(tiers[0]["token_budget"], 1000);
+    assert_eq!(tiers[0]["priority"], 0);
+    assert_eq!(tiers[0]["staleness_policy"], "always_fresh");
+    assert_eq!(tiers[0]["loaded"], true);
+    assert_eq!(tiers[0]["source"], "system_instructions");
     assert_eq!(body["memory_hierarchy"]["l2_recall_hits"], 0);
     assert_eq!(body["memory_hierarchy"]["l2_hot_memories"], 0);
     assert_eq!(body["memory_hierarchy"]["l2_total_memories"], 0);
