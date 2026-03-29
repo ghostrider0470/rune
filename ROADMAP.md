@@ -202,18 +202,23 @@ Implementation note (2026-03-16): the roadmap originally called for Discord Gate
 
 ### Phase 4 — LaneQueue Concurrency Model (Backend)
 
-Replace sequential per-session execution with lane-based FIFO queuing.
+Status: ✅ Re-verified 2026-03-29
 
-**New file**
+LaneQueue remains shipped and correct on the current main lineage. The implementation provides independent FIFO-backed concurrency lanes for direct/channel, subagent, and scheduled sessions, plus project-scoped tool concurrency limits used by the runtime tool executor path.
+
+**Landed work**
 - `crates/rune-runtime/src/lane_queue.rs`
-  - `Lane` enum: `Main`, `Subagent`, `Cron`, `Nested`
-  - Per-lane semaphore caps: `Main=4`, `Subagent=8`, `Cron=independent`, `Nested=recursive`
-  - FIFO queue per lane using `tokio::sync::Semaphore` + `VecDeque`
-  - Task submission returning a handle/future
-  - Lane routing based on session kind
+  - `Lane` enum: `Main`, `Subagent`, `Cron`
+  - Per-lane semaphore caps: `Main=4`, `Subagent=8`, `Cron=1024`
+  - FIFO waiter queues per lane using `tokio::sync::Semaphore` + `VecDeque`
+  - cancellation-safe wakeup behavior covered by tests
+  - global + per-project tool concurrency caps via `ToolConcurrencyQueue`
+  - lane routing helpers from `SessionKind`
+- `crates/rune-runtime/src/executor.rs`
+  - turn execution acquires a lane permit before session transition/model loop
+  - runtime surfaces expose lane stats for operators
 
-**Modify**
-- `crates/rune-runtime/src/executor.rs` — Route turn execution through `LaneQueue`
+Implementation note (2026-03-29): audited against issue #617. No code changes were required; targeted `lane_queue` tests and full `cargo check` passed on the current branch, and this roadmap entry was updated to match the implementation that actually shipped.
 
 ---
 
