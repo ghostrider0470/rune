@@ -1428,6 +1428,7 @@ pub struct DoctorContextTierCounter {
     pub priority: u8,
     pub staleness_policy: String,
     pub loaded: bool,
+    pub refresh_required: bool,
     pub source: String,
 }
 
@@ -7014,6 +7015,7 @@ async fn doctor_memory_hierarchy(
                 .and_then(|value| value.as_str().map(ToOwned::to_owned))
                 .unwrap_or_else(|| format!("{:?}", tier.staleness_policy).to_lowercase()),
             loaded: tier.loaded,
+            refresh_required: tier.refresh_required,
             source: tier.source.to_string(),
         })
         .collect::<Vec<_>>();

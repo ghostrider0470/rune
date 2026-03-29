@@ -12840,6 +12840,7 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
     assert_eq!(tiers[0]["priority"], 0);
     assert_eq!(tiers[0]["staleness_policy"], "always_fresh");
     assert_eq!(tiers[0]["loaded"], true);
+    assert_eq!(tiers[0]["refresh_required"], true);
     assert_eq!(tiers[0]["source"], "system_instructions");
     assert_eq!(body["memory_hierarchy"]["l2_recall_hits"], 0);
     assert_eq!(body["memory_hierarchy"]["l2_hot_memories"], 0);
