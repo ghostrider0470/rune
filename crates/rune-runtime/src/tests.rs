@@ -794,6 +794,7 @@ impl TestHarness {
     fn session_engine(&self) -> SessionEngine {
         SessionEngine::new(self.session_repo.clone())
             .with_transcript_repo(self.transcript_repo.clone())
+            .with_context_assembler(ContextAssembler::new("You are a helpful assistant."))
     }
 }
 
@@ -1930,6 +1931,7 @@ async fn session_parent_linkage() {
             Some(parent.id),
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1944,6 +1946,7 @@ async fn session_parent_linkage() {
             None,
             None,
             Some("telegram".to_string()),
+            None,
             None,
         )
         .await
@@ -1960,6 +1963,7 @@ async fn session_parent_linkage() {
             None,
             Some("system:scheduled-main".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1969,6 +1973,7 @@ async fn session_parent_linkage() {
             SessionKind::Subagent,
             Some("/workspace".to_string()),
             Some(scheduled_main.id),
+            None,
             None,
             None,
         )
@@ -2016,7 +2021,13 @@ async fn direct_session_prompt_includes_workspace_and_memory_context() {
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("SOUL.md"));
     assert!(system.contains("USER.md"));
@@ -2037,6 +2048,7 @@ async fn channel_session_prompt_excludes_long_term_memory() {
             None,
             Some("telegram".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -2054,7 +2066,13 @@ async fn channel_session_prompt_excludes_long_term_memory() {
     executor.execute(session.id, "ping", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
     assert!(system.contains("AGENTS.md"));
     assert!(system.contains("Today's Notes"));
     assert!(!system.contains("Long-term Memory"));
@@ -2135,7 +2153,13 @@ async fn enabled_skills_are_injected_into_system_prompt() {
     executor.execute(session.id, "hello", None).await.unwrap();
 
     let requests = model_handle.requests().await;
-    let system = requests[0].messages[0].content.clone().unwrap();
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
     assert!(system.contains("## Available Spells"));
     assert!(system.contains("skill-alpha"));
     assert!(system.contains("Alpha description"));
@@ -2451,6 +2475,7 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
             None,
             Some("chat-2:user-2".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -2502,6 +2527,7 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
             None,
             Some("chat-1:user-1".to_string()),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -2541,17 +2567,9 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
     let sent = sent.lock().await.clone();
     assert_eq!(
         sent.len(),
-        1,
-        "notice should be sent once per restored session state"
+        0,
+        "notice is only sent for startup-restored channel sessions"
     );
-    match &sent[0] {
-        rune_channels::OutboundAction::Reply { content, .. } => {
-            assert!(content.contains("Resumed session"));
-            assert!(content.contains(&existing.id.to_string()));
-            assert!(content.contains("do not resume in place"));
-        }
-        other => panic!("expected reply notice, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -2566,6 +2584,7 @@ async fn create_session_full_persists_mode_in_metadata() {
             None,
             None,
             Some("architect".to_string()),
+            None,
         )
         .await
         .unwrap();
@@ -2576,6 +2595,76 @@ async fn create_session_full_persists_mode_in_metadata() {
             .get("mode")
             .and_then(|value| value.as_str()),
         Some("architect")
+    );
+}
+
+#[tokio::test]
+async fn create_session_seeds_context_tier_metadata() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let tiers = session.metadata["context_tiers"]
+        .as_array()
+        .expect("context tiers array");
+    assert_eq!(tiers.len(), 5);
+    assert_eq!(tiers[0]["kind"], "identity");
+    assert_eq!(tiers[0]["token_budget"], 1000);
+    assert_eq!(tiers[1]["kind"], "active_task");
+    assert_eq!(tiers[2]["kind"], "project");
+    assert_eq!(tiers[3]["kind"], "shared");
+    assert_eq!(tiers[4]["kind"], "historical");
+    assert_eq!(tiers[4]["staleness_policy"], "retrieval_only");
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_budget"],
+        36000
+    );
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_estimated_tokens"],
+        7
+    );
+    assert_eq!(
+        session.metadata["context_token_usage"]["over_budget"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn create_session_seeds_context_tier_metadata_from_custom_assembler() {
+    let h = TestHarness::new();
+    let engine = SessionEngine::new(h.session_repo.clone())
+        .with_transcript_repo(h.transcript_repo.clone())
+        .with_context_assembler(
+            ContextAssembler::new("You are a helpful assistant.")
+                .with_tier_budgets(750, 8_000, 16_000, 2_500),
+        );
+
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let tiers = session.metadata["context_tiers"]
+        .as_array()
+        .expect("context tiers array");
+    assert_eq!(tiers[0]["token_budget"], 750);
+    assert_eq!(tiers[1]["token_budget"], 8000);
+    assert_eq!(tiers[2]["token_budget"], 16000);
+    assert_eq!(tiers[3]["token_budget"], 2500);
+    assert_eq!(tiers[4]["token_budget"], 0);
+    assert_eq!(
+        session.metadata["context_token_usage"]["total_budget"],
+        27_250
     );
 }
 
@@ -2646,4 +2735,126 @@ async fn prompt_prefix_is_stable_across_consecutive_turns() {
         .unwrap();
     assert_eq!(first_system, second_system);
     assert!(first_system.contains("## Prompt Cache Padding"));
+}
+
+#[tokio::test]
+async fn subagent_prompt_includes_delegation_context_and_shared_scratchpad() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+
+    let parent = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    let session = engine
+        .create_subagent_session_with_context(
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            Some(parent.id),
+            Some("orchestrator:acme".to_string()),
+            Some("isolated".to_string()),
+            serde_json::json!({
+                "task": "Implement retry budget fix",
+                "budget": { "token_budget": 1536 },
+                "file_summaries": [
+                    {"path": "src/retry.rs", "summary": "retry budget enforcement"}
+                ],
+                "memories": ["customer escalated retries looping forever"]
+            }),
+            Some("agents/acme/scratchpads/retry-fix.md".to_string()),
+        )
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("Delegation context loaded"),
+    ]));
+    let executor = h.turn_executor(
+        model.clone(),
+        Arc::new(FakeToolExecutor::new(vec![])),
+        ToolRegistry::new(),
+    );
+
+    executor
+        .execute(session.id, "continue", None)
+        .await
+        .unwrap();
+
+    let requests = model.requests().await;
+    let system = requests[0]
+        .stable_prefix_messages
+        .as_ref()
+        .expect("stable prefix messages")[0]
+        .content
+        .clone()
+        .unwrap();
+    assert!(system.contains("## Delegation Context"));
+    assert!(system.contains("Implement retry budget fix"));
+    assert!(system.contains("src/retry.rs"));
+    assert!(system.contains("customer escalated retries looping forever"));
+    assert!(system.contains("## Shared Scratchpad"));
+    assert!(system.contains("agents/acme/scratchpads/retry-fix.md"));
+}
+
+#[tokio::test]
+async fn create_subagent_session_with_context_persists_delegation_slice_and_scratchpad() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let parent = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let session = engine
+        .create_subagent_session_with_context(
+            Some(h.workspace_root.to_string_lossy().to_string()),
+            Some(parent.id),
+            Some("orchestrator:acme".to_string()),
+            Some("isolated".to_string()),
+            serde_json::json!({
+                "task": "Fix auth timeout regression",
+                "budget": {
+                    "token_budget": 2048,
+                    "partitions": [
+                        {"id": "objective", "partition": "objective", "token_count": 180},
+                        {"id": "history-1", "partition": "history", "token_count": 420},
+                        {"id": "background-1", "partition": "background", "token_count": 260}
+                    ]
+                },
+                "file_summaries": [
+                    {"path": "src/auth.rs", "summary": "timeout logic and retry budget"}
+                ],
+                "memories": ["customer escalated timeout failures after retry patch"]
+            }),
+            Some("agents/acme/scratchpads/subagent-1.md".to_string()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(session.kind, "subagent");
+    assert_eq!(session.status, "ready");
+    assert_eq!(session.requester_session_id, Some(parent.id));
+    assert_eq!(session.channel_ref.as_deref(), Some("orchestrator:acme"));
+    assert_eq!(session.metadata["mode"], "isolated");
+    assert_eq!(
+        session.metadata["delegation_context"]["task"],
+        "Fix auth timeout regression"
+    );
+    assert_eq!(
+        session.metadata["delegation_context"]["budget"]["token_budget"],
+        2048
+    );
+    assert_eq!(
+        session.metadata["delegation_context"]["file_summaries"][0]["path"],
+        "src/auth.rs"
+    );
+    assert_eq!(
+        session.metadata["shared_scratchpad"]["path"],
+        "agents/acme/scratchpads/subagent-1.md"
+    );
 }

@@ -24,7 +24,7 @@ const STABLE_PREFIX_PADDING: &str = concat!(
     "Cache padding block 57. Cache padding block 58. Cache padding block 59. Cache padding block 60.\n"
 );
 
-use rune_core::{AttachmentRef, TranscriptItem};
+use rune_core::{AttachmentRef, SessionKind, TranscriptItem};
 use rune_models::{ChatMessage, FunctionCall, ImageUrlPart, MessagePart, Role, ToolCallRequest};
 use rune_store::models::TranscriptItemRow;
 use tracing::warn;
@@ -124,11 +124,45 @@ pub struct ContextTierUsage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ContextAssemblyReport {
     pub total_estimated_tokens: usize,
+    pub total_budget: usize,
+    pub compaction_trigger_tokens: usize,
     pub over_budget: bool,
+    pub over_compaction_threshold: bool,
+    pub compaction_required: bool,
     pub tiers: Vec<ContextTierUsage>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextTierSnapshot {
+    pub kind: ContextTierKind,
+    pub token_budget: usize,
+    pub priority: u8,
+    pub staleness_policy: ContextStalenessPolicy,
+    pub loaded: bool,
+    pub estimated_tokens: usize,
+    pub source: String,
+}
+
+impl From<&ContextTierUsage> for ContextTierSnapshot {
+    fn from(value: &ContextTierUsage) -> Self {
+        Self {
+            kind: value.kind.clone(),
+            token_budget: value.token_budget,
+            priority: value.priority,
+            staleness_policy: value.staleness_policy.clone(),
+            loaded: value.loaded,
+            estimated_tokens: value.estimated_tokens,
+            source: value.source.to_string(),
+        }
+    }
+}
+
 impl ContextAssemblyReport {
+    #[must_use]
+    pub fn snapshots(&self) -> Vec<ContextTierSnapshot> {
+        self.tiers.iter().map(ContextTierSnapshot::from).collect()
+    }
+
     #[must_use]
     pub fn identity_tokens(&self) -> usize {
         self.tokens_for(ContextTierKind::Identity)
@@ -166,6 +200,62 @@ pub struct ContextAssembler {
 }
 
 impl ContextAssembler {
+    #[must_use]
+    pub fn delegation_context_section(
+        &self,
+        delegation_context: &serde_json::Value,
+    ) -> Option<String> {
+        if !delegation_context.is_object() {
+            return None;
+        }
+
+        let pretty = serde_json::to_string_pretty(delegation_context).ok()?;
+        Some(format!(
+            "## Delegation Context\n\nThe orchestrator preloaded this context slice. Use it before re-reading files.\n\n```json\n{pretty}\n```"
+        ))
+    }
+
+    #[must_use]
+    pub fn shared_scratchpad_section(
+        &self,
+        shared_scratchpad: &serde_json::Value,
+    ) -> Option<String> {
+        let path = shared_scratchpad.get("path")?.as_str()?.trim();
+        if path.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "## Shared Scratchpad\n\nCoordinate via this shared scratchpad path when you need to leave structured findings for the orchestrator:\n- `{path}`"
+        ))
+    }
+
+    #[must_use]
+    pub fn session_metadata_sections(
+        &self,
+        session_kind: SessionKind,
+        session_metadata: &serde_json::Value,
+    ) -> Vec<String> {
+        if !matches!(session_kind, SessionKind::Subagent) {
+            return Vec::new();
+        }
+
+        let mut sections = Vec::new();
+        if let Some(section) = session_metadata
+            .get("delegation_context")
+            .and_then(|value| self.delegation_context_section(value))
+        {
+            sections.push(section);
+        }
+        if let Some(section) = session_metadata
+            .get("shared_scratchpad")
+            .and_then(|value| self.shared_scratchpad_section(value))
+        {
+            sections.push(section);
+        }
+        sections
+    }
+
     pub fn new(system_instructions: impl Into<String>) -> Self {
         Self {
             system_instructions: system_instructions.into(),
@@ -184,6 +274,17 @@ impl ContextAssembler {
     }
 
     #[must_use]
+    pub fn with_context_config(mut self, config: &rune_config::ContextConfig) -> Self {
+        self.tier_specs = vec![
+            ContextTierSpec::new(ContextTierKind::Identity, config.identity),
+            ContextTierSpec::new(ContextTierKind::ActiveTask, config.task),
+            ContextTierSpec::new(ContextTierKind::Project, config.project),
+            ContextTierSpec::new(ContextTierKind::Shared, config.shared),
+            ContextTierSpec::new(ContextTierKind::Historical, 0),
+        ];
+        self
+    }
+
     pub fn with_tier_budgets(
         mut self,
         identity: usize,
@@ -202,6 +303,12 @@ impl ContextAssembler {
     }
 
     #[must_use]
+    pub fn with_tier_specs(mut self, tier_specs: Vec<ContextTierSpec>) -> Self {
+        self.tier_specs = tier_specs;
+        self
+    }
+
+    #[must_use]
     pub fn tier_specs(&self) -> &[ContextTierSpec] {
         &self.tier_specs
     }
@@ -212,6 +319,8 @@ impl ContextAssembler {
         workspace: Option<&WorkspaceContext>,
         memory: Option<&MemoryContext>,
         extra_system_sections: &[String],
+        compaction_trigger_tokens: usize,
+        l3_loaded: bool,
     ) -> ContextAssemblyReport {
         let identity_section = self.system_instructions.trim();
         let active_task_section = extra_system_sections
@@ -221,7 +330,10 @@ impl ContextAssembler {
             .collect::<Vec<_>>()
             .join("\n\n");
         let project_section = workspace
-            .map(WorkspaceContext::format_for_prompt)
+            .map(|workspace| WorkspaceContext {
+                files: workspace.project_tier_files(),
+            })
+            .map(|workspace| workspace.format_for_prompt())
             .unwrap_or_default();
         let shared_section = memory
             .map(MemoryContext::format_for_prompt)
@@ -252,7 +364,7 @@ impl ContextAssembler {
                         !shared_section.is_empty(),
                         "memory_context",
                     ),
-                    ContextTierKind::Historical => (0, false, "transcript_history"),
+                    ContextTierKind::Historical => (0, l3_loaded, "transcript_history"),
                 };
 
                 ContextTierUsage {
@@ -273,9 +385,17 @@ impl ContextAssembler {
             .iter()
             .map(|spec| spec.token_budget)
             .sum::<usize>();
+        let over_budget = total_budget > 0 && total_estimated_tokens > total_budget;
+        let over_compaction_threshold =
+            compaction_trigger_tokens > 0 && total_estimated_tokens > compaction_trigger_tokens;
+
         ContextAssemblyReport {
             total_estimated_tokens,
-            over_budget: total_budget > 0 && total_estimated_tokens > total_budget,
+            total_budget,
+            compaction_trigger_tokens,
+            over_budget,
+            over_compaction_threshold,
+            compaction_required: over_budget || over_compaction_threshold,
             tiers,
         }
     }
@@ -297,7 +417,13 @@ impl ContextAssembler {
         // System message with optional workspace + memory context
         let mut sections = vec![self.system_instructions.clone()];
 
-        let context_report = self.analyze_context_usage(workspace, memory, extra_system_sections);
+        let context_report = self.analyze_context_usage(
+            workspace,
+            memory,
+            extra_system_sections,
+            0,
+            compaction.persists_compacted_context(),
+        );
         let extra_task_sections = extra_system_sections
             .iter()
             .filter(|section| !section.trim().is_empty())
@@ -815,6 +941,26 @@ mod context_tier_tests {
     }
 
     #[test]
+    fn with_context_config_uses_runtime_context_tiers() {
+        let config = rune_config::ContextConfig {
+            identity: 111,
+            task: 222,
+            project: 333,
+            shared: 444,
+        };
+
+        let assembler = ContextAssembler::new("Identity instructions").with_context_config(&config);
+        let specs = assembler.tier_specs();
+
+        assert_eq!(specs.len(), 5);
+        assert_eq!(specs[0].token_budget, 111);
+        assert_eq!(specs[1].token_budget, 222);
+        assert_eq!(specs[2].token_budget, 333);
+        assert_eq!(specs[3].token_budget, 444);
+        assert_eq!(specs[4].token_budget, 0);
+    }
+
+    #[test]
     fn with_tier_budgets_overrides_defaults() {
         let assembler = ContextAssembler::new("Identity instructions")
             .with_tier_budgets(750, 8_000, 16_000, 2_500);
@@ -842,14 +988,25 @@ mod context_tier_tests {
             Some(&workspace),
             Some(&memory),
             &["Active task goes here".into()],
+            50_000,
+            true,
         );
 
         assert!(report.total_estimated_tokens > 0);
+        assert_eq!(report.total_budget, 36_000);
         assert!(!report.over_budget);
+        assert_eq!(report.compaction_trigger_tokens, 50_000);
+        assert!(!report.over_compaction_threshold);
         assert!(report.identity_tokens() > 0);
         assert!(report.project_tokens() > 0);
         assert!(report.tokens_for(ContextTierKind::Shared) > 0);
         assert_eq!(report.tokens_for(ContextTierKind::Historical), 0);
+        assert!(
+            report
+                .tiers
+                .iter()
+                .any(|tier| tier.kind == ContextTierKind::Historical && tier.loaded)
+        );
         assert!(
             report
                 .tiers
@@ -879,8 +1036,25 @@ mod context_budget_tests {
             Some(&workspace),
             Some(&memory),
             &["Active task goes here".into()],
+            50_000,
+            false,
         );
 
         assert!(report.over_budget);
+        assert!(!report.over_compaction_threshold);
+    }
+    #[test]
+    fn analyze_context_usage_marks_compaction_threshold_exceeded() {
+        let assembler = ContextAssembler::new("Identity instructions");
+        let report = assembler.analyze_context_usage(
+            None,
+            None,
+            &["This active task section is deliberately long enough to exceed a tiny compaction trigger.".repeat(8)],
+            10,
+            false,
+        );
+
+        assert!(report.over_compaction_threshold);
+        assert_eq!(report.compaction_trigger_tokens, 10);
     }
 }

@@ -696,6 +696,13 @@ async fn build_services(
         .unwrap_or("You are Rune, a Rust-powered AI assistant built for speed and reliability.")
         .to_string();
 
+    let context_assembler = ContextAssembler::new(&system_prompt).with_tier_budgets(
+        config.context.identity,
+        config.context.task,
+        config.context.project,
+        config.context.shared,
+    );
+
     let mut turn_executor = TurnExecutor::new(
         session_repo.clone(),
         turn_repo.clone(),
@@ -704,12 +711,20 @@ async fn build_services(
         model_provider.clone(),
         tool_executor,
         tool_registry,
-        ContextAssembler::new(&system_prompt),
+        context_assembler,
         {
             let compaction: Arc<dyn rune_runtime::CompactionStrategy> = Arc::new(
                 TokenBudgetCompaction::new(
                     config.runtime.compaction.context_window,
                     config.runtime.compaction.preserve_tail,
+                )
+                .with_budget_settings(
+                    config.runtime.compaction.effective_warn_at_tokens(),
+                    config.runtime.compaction.effective_compress_after(),
+                    config.runtime.compaction.reserved_system,
+                    config.runtime.compaction.reserved_task,
+                    config.runtime.compaction.auto_inject_project,
+                    config.runtime.compaction.memory_search_k,
                 )
                 .with_memory_flush(&workspace_root),
             );
@@ -2429,6 +2444,7 @@ impl SessionSpawner for LiveSessionSpawner {
                 rune_core::SessionKind::Subagent,
                 Some(self.workspace_root.display().to_string()),
                 requester_session_id,
+                None,
                 None,
                 None,
             )

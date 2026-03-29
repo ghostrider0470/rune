@@ -318,6 +318,7 @@ impl RpcDispatcher {
                 requester_session_id,
                 Some(channel_ref.to_string()),
                 None,
+                None,
             )
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -386,6 +387,7 @@ impl RpcDispatcher {
                 requester_session_id,
                 channel_ref,
                 mode,
+                None,
             )
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -968,6 +970,11 @@ impl RpcDispatcher {
                     "active": stats.cron_active,
                     "capacity": stats.cron_capacity,
                 },
+                "tools": {
+                    "active": stats.tool_active,
+                    "capacity": stats.tool_capacity,
+                    "per_project_capacity": stats.project_tool_capacity,
+                },
             })
         });
 
@@ -1055,10 +1062,18 @@ impl RpcDispatcher {
             budget.create_checkpoint(status, key_decisions, next_step)
         });
 
-        let context = &self.state.config.read().await.context;
+        let config = self.state.config.read().await;
+        let context = &config.context;
+        let compaction = &config.runtime.compaction;
 
         Ok(json!({
             "report": report,
+            "assembly": {
+                "total_budget": context.identity + context.task + context.project + context.shared,
+                "compaction_trigger_tokens": compaction.effective_compress_after(),
+                "warn_at_tokens": compaction.effective_warn_at_tokens(),
+                "usable_prompt_budget": compaction.usable_prompt_budget()
+            },
             "checkpoint": checkpoint,
             "tiers": {
                 "identity": {

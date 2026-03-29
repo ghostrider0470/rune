@@ -319,6 +319,51 @@ pub struct DelegationCapabilityMatch {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationEndpointSummary {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub transport: String,
+    pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationRoutingSummary {
+    pub mode: String,
+    pub detail: String,
+    pub peer_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationConflictCapabilitySummary {
+    pub required: bool,
+    pub mechanism: String,
+    pub enforced_by: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationTaskStatusSummary {
+    pub states: Vec<String>,
+    pub terminal_states: Vec<String>,
+    pub sender_visibility: String,
+    pub timeout_behavior: String,
+    pub failure_behavior: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationResultContractSummary {
+    pub status_field: String,
+    pub artifact_field: String,
+    pub error_field: String,
+    pub finished_at_field: String,
+    pub accepted_at_field: String,
+    pub started_at_field: String,
+    pub task_id_field: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationPlanResponse {
     pub strategy: String,
     pub selected_peer: Option<PeerSummary>,
@@ -326,6 +371,13 @@ pub struct DelegationPlanResponse {
     pub detail: String,
     pub task_contract: DelegationTaskContract,
     pub capability_match: DelegationCapabilityMatch,
+    pub sender: Option<DelegationEndpointSummary>,
+    pub receiver: Option<DelegationEndpointSummary>,
+    pub routing: Option<DelegationRoutingSummary>,
+    pub branch_reservation: Option<DelegationConflictCapabilitySummary>,
+    pub file_locks: Option<DelegationConflictCapabilitySummary>,
+    pub task_status: Option<DelegationTaskStatusSummary>,
+    pub result: Option<DelegationResultContractSummary>,
 }
 
 impl fmt::Display for DelegationPlanResponse {
@@ -511,11 +563,33 @@ pub struct DoctorMemoryHierarchySummary {
     pub demotion: String,
     pub metrics: String,
     #[serde(default)]
+    pub prompt_cache_rows: u64,
+    #[serde(default)]
+    pub cached_tokens: u64,
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    #[serde(default)]
+    pub cache_hit_ratio_percent: f64,
+    #[serde(default)]
     pub l2_recall_hits: u64,
     #[serde(default)]
     pub l2_hot_memories: u64,
     #[serde(default)]
     pub l2_total_memories: u64,
+    #[serde(default)]
+    pub context_total_budget: u64,
+    #[serde(default)]
+    pub context_total_estimated_tokens: u64,
+    #[serde(default)]
+    pub context_compaction_trigger_tokens: u64,
+    #[serde(default)]
+    pub context_over_budget: bool,
+    #[serde(default)]
+    pub context_over_compaction_threshold: bool,
+    #[serde(default)]
+    pub context_compaction_required: bool,
+    #[serde(default)]
+    pub loaded_tier_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -592,10 +666,29 @@ impl fmt::Display for DoctorReport {
             writeln!(f, "  Metrics: {}", memory_hierarchy.metrics)?;
             writeln!(
                 f,
+                "  L1 Counters: prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}",
+                memory_hierarchy.prompt_cache_rows,
+                memory_hierarchy.cached_tokens,
+                memory_hierarchy.total_input_tokens,
+                memory_hierarchy.cache_hit_ratio_percent
+            )?;
+            writeln!(
+                f,
                 "  L2 Counters: recall_hits={}, hot_memories={}, total_memories={}",
                 memory_hierarchy.l2_recall_hits,
                 memory_hierarchy.l2_hot_memories,
                 memory_hierarchy.l2_total_memories
+            )?;
+            writeln!(
+                f,
+                "  Context Tier Counters: loaded_tiers={}, total_budget={}, estimated_tokens={}, compaction_trigger_tokens={}, over_budget={}, over_compaction_threshold={}, compaction_required={}",
+                memory_hierarchy.loaded_tier_count,
+                memory_hierarchy.context_total_budget,
+                memory_hierarchy.context_total_estimated_tokens,
+                memory_hierarchy.context_compaction_trigger_tokens,
+                memory_hierarchy.context_over_budget,
+                memory_hierarchy.context_over_compaction_threshold,
+                memory_hierarchy.context_compaction_required
             )?;
         }
         writeln!(f, "Run at:   {}", self.run_at)?;
@@ -5783,9 +5876,20 @@ mod tests {
                 promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
                 demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
                 metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
+                prompt_cache_rows: 0,
+                cached_tokens: 0,
+                total_input_tokens: 0,
+                cache_hit_ratio_percent: 0.0,
                 l2_recall_hits: 0,
                 l2_hot_memories: 0,
                 l2_total_memories: 0,
+                context_total_budget: 36_000,
+                context_total_estimated_tokens: 0,
+                context_compaction_trigger_tokens: 96_000,
+                context_over_budget: false,
+                context_over_compaction_threshold: false,
+                context_compaction_required: false,
+                loaded_tier_count: 4,
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
@@ -5801,6 +5905,8 @@ mod tests {
         assert!(out.contains("storage: sqlite (connected) — 4 repo surfaces configured"));
         assert!(out.contains("Memory Hierarchy:"));
         assert!(out.contains("L1: prompt cache via provider prefixes"));
+        assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
+        assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
@@ -6449,6 +6555,62 @@ mod tests {
                 detail: "receiver matches advertised roles/projects with 1 overlapping model(s)"
                     .into(),
             },
+            sender: Some(DelegationEndpointSummary {
+                instance_id: "sender-a".into(),
+                instance_name: "Sender A".into(),
+                transport: "filesystem".into(),
+                health_url: Some("http://sender-a/api/v1/instance/health".into()),
+                submit_url: Some("http://sender-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://sender-a/api/v1/instance/delegations/{task_id}".into()),
+            }),
+            receiver: Some(DelegationEndpointSummary {
+                instance_id: "peer-a".into(),
+                instance_name: "Peer A".into(),
+                transport: "http".into(),
+                health_url: Some("http://peer-a/api/v1/instance/health".into()),
+                submit_url: Some("http://peer-a/api/v1/instance/delegations".into()),
+                result_url: Some("http://peer-a/api/v1/instance/delegations/{task_id}".into()),
+            }),
+            routing: Some(DelegationRoutingSummary {
+                mode: "least_busy".into(),
+                detail: "selected least-busy healthy peer 'peer-a'".into(),
+                peer_count: 1,
+            }),
+            branch_reservation: Some(DelegationConflictCapabilitySummary {
+                required: true,
+                mechanism: "branch_reservation".into(),
+                enforced_by: "orchestrator".into(),
+                detail: "reserve branch names".into(),
+            }),
+            file_locks: Some(DelegationConflictCapabilitySummary {
+                required: true,
+                mechanism: "file_locks".into(),
+                enforced_by: "orchestrator".into(),
+                detail: "acquire file locks".into(),
+            }),
+            task_status: Some(DelegationTaskStatusSummary {
+                states: vec![
+                    "submitted".into(),
+                    "accepted".into(),
+                    "running".into(),
+                    "completed".into(),
+                    "failed".into(),
+                    "timeout".into(),
+                ],
+                terminal_states: vec!["completed".into(), "failed".into(), "timeout".into()],
+                sender_visibility: "tracked".into(),
+                timeout_behavior: "timeout".into(),
+                failure_behavior: "failed".into(),
+            }),
+            result: Some(DelegationResultContractSummary {
+                status_field: "status".into(),
+                artifact_field: "artifacts".into(),
+                error_field: "error".into(),
+                finished_at_field: "finished_at".into(),
+                accepted_at_field: "accepted_at".into(),
+                started_at_field: "started_at".into(),
+                task_id_field: "task_id".into(),
+            }),
         };
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Delegation strategy: least_busy"));

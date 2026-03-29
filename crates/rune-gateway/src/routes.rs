@@ -115,6 +115,8 @@ pub struct DelegationEndpointResponse {
     pub instance_name: String,
     pub transport: String,
     pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -147,6 +149,9 @@ pub struct DelegationResultContractResponse {
     pub artifact_field: &'static str,
     pub error_field: &'static str,
     pub finished_at_field: &'static str,
+    pub accepted_at_field: &'static str,
+    pub started_at_field: &'static str,
+    pub task_id_field: &'static str,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -307,6 +312,18 @@ pub async fn delegation_plan(
             instance_name: peer.name.clone(),
             transport: "http".to_string(),
             health_url: Some(peer.health_url.clone()),
+            submit_url: Some(format!(
+                "{}/api/v1/instance/delegations",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
+            result_url: Some(format!(
+                "{}/api/v1/instance/delegations/{{task_id}}",
+                peer.health_url
+                    .trim_end_matches("/api/v1/instance/health")
+                    .trim_end_matches('/')
+            )),
         });
 
     let routing = DelegationRoutingResponse {
@@ -331,6 +348,12 @@ pub async fn delegation_plan(
             transport: state.capabilities.comms_transport.clone(),
             health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
                 format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+            }),
+            submit_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+            }),
+            result_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
             }),
         },
         receiver,
@@ -359,6 +382,9 @@ pub async fn delegation_plan(
             artifact_field: "artifacts",
             error_field: "error",
             finished_at_field: "finished_at",
+            accepted_at_field: "accepted_at",
+            started_at_field: "started_at",
+            task_id_field: "task_id",
         },
         capability_match: evaluate_capability_match(&state.capabilities, selected_peer.as_ref()),
     }))
@@ -469,7 +495,16 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
             "file_locks",
             "artifacts",
         ],
-        result_fields: vec!["status", "output", "artifacts", "error", "finished_at"],
+        result_fields: vec![
+            "task_id",
+            "status",
+            "accepted_at",
+            "started_at",
+            "output",
+            "artifacts",
+            "error",
+            "finished_at",
+        ],
     }
 }
 
@@ -549,7 +584,7 @@ async fn collect_peer_health(
                 match payload {
                     Ok(payload) => PeerHealthResponse {
                         id: peer.id,
-                        name: payload.capabilities.identity.name,
+                        name: payload.capabilities.identity.name.clone(),
                         health_url: peer.health_url,
                         status: if status_code.is_success() {
                             "healthy".to_string()
@@ -738,6 +773,9 @@ pub struct LaneStatsResponse {
     pub subagent_capacity: usize,
     pub cron_active: usize,
     pub cron_capacity: usize,
+    pub tool_active: usize,
+    pub tool_capacity: usize,
+    pub project_tool_capacity: usize,
 }
 
 #[derive(Serialize)]
@@ -1121,6 +1159,7 @@ pub struct DashboardDiagnosticsResponse {
     pub items: Vec<DashboardDiagnosticItem>,
     pub context_budget: ContextBudgetDiagnostics,
     pub context_tiers: ContextTierDiagnostics,
+    pub memory_hierarchy: DashboardMemoryHierarchyDiagnostics,
 }
 
 #[derive(Serialize)]
@@ -1133,6 +1172,8 @@ pub struct ContextBudgetDiagnostics {
     pub usable_prompt_budget: usize,
     pub auto_inject_project: bool,
     pub memory_search_k: usize,
+    pub total_tier_budget: usize,
+    pub exceeds_usable_budget: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1141,6 +1182,24 @@ pub struct ContextTierDiagnostics {
     pub task: usize,
     pub project: usize,
     pub shared: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DashboardMemoryHierarchyDiagnostics {
+    pub prompt_cache_rows: u64,
+    pub cached_tokens: u64,
+    pub total_input_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
+    pub l2_recall_hits: u64,
+    pub l2_hot_memories: u64,
+    pub l2_total_memories: u64,
+    pub context_total_budget: u64,
+    pub context_total_estimated_tokens: u64,
+    pub context_compaction_trigger_tokens: u64,
+    pub context_over_budget: bool,
+    pub context_over_compaction_threshold: bool,
+    pub context_compaction_required: bool,
+    pub loaded_tier_count: u64,
 }
 
 // SPA serving - runtime UI dist lookup so cargo check works even when ui/dist is absent.
@@ -1357,15 +1416,22 @@ pub async fn dashboard_diagnostics(
     }
 
     let compaction = &config.runtime.compaction;
+    let total_tier_budget = config.context.identity
+        + config.context.task
+        + config.context.project
+        + config.context.shared;
+    let usable_prompt_budget = compaction.usable_prompt_budget();
     let context_budget = ContextBudgetDiagnostics {
         max_tokens: compaction.effective_max_tokens(),
         warn_at_tokens: compaction.effective_warn_at_tokens(),
         compress_after: compaction.effective_compress_after(),
         reserved_system: compaction.reserved_system,
         reserved_task: compaction.reserved_task,
-        usable_prompt_budget: compaction.usable_prompt_budget(),
+        usable_prompt_budget,
         auto_inject_project: compaction.auto_inject_project,
         memory_search_k: compaction.memory_search_k,
+        total_tier_budget,
+        exceeds_usable_budget: total_tier_budget > usable_prompt_budget,
     };
 
     let context_tiers = ContextTierDiagnostics {
@@ -1375,11 +1441,32 @@ pub async fn dashboard_diagnostics(
         shared: config.context.shared,
     };
 
+    let memory_hierarchy_summary =
+        doctor_memory_hierarchy(&state, &config, &state.capabilities, &state.token_metrics).await;
+    let memory_hierarchy = DashboardMemoryHierarchyDiagnostics {
+        prompt_cache_rows: memory_hierarchy_summary.prompt_cache_rows,
+        cached_tokens: memory_hierarchy_summary.cached_tokens,
+        total_input_tokens: memory_hierarchy_summary.total_input_tokens,
+        cache_hit_ratio_percent: memory_hierarchy_summary.cache_hit_ratio_percent,
+        l2_recall_hits: memory_hierarchy_summary.l2_recall_hits,
+        l2_hot_memories: memory_hierarchy_summary.l2_hot_memories,
+        l2_total_memories: memory_hierarchy_summary.l2_total_memories,
+        context_total_budget: memory_hierarchy_summary.context_total_budget,
+        context_total_estimated_tokens: memory_hierarchy_summary.context_total_estimated_tokens,
+        context_compaction_trigger_tokens: memory_hierarchy_summary
+            .context_compaction_trigger_tokens,
+        context_over_budget: memory_hierarchy_summary.context_over_budget,
+        context_over_compaction_threshold: memory_hierarchy_summary
+            .context_over_compaction_threshold,
+        context_compaction_required: memory_hierarchy_summary.context_compaction_required,
+        loaded_tier_count: memory_hierarchy_summary.loaded_tier_count,
+    };
+
     items.push(DashboardDiagnosticItem {
         level: "info",
         source: "context",
         message: format!(
-            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={}",
+            "Context budget: max={} warn={} compact={} usable={} reserved(system={}, task={}) auto_inject_project={} memory_search_k={} tier_total={} exceeds_usable_budget={}",
             context_budget.max_tokens,
             context_budget.warn_at_tokens,
             context_budget.compress_after,
@@ -1388,6 +1475,27 @@ pub async fn dashboard_diagnostics(
             context_budget.reserved_task,
             context_budget.auto_inject_project,
             context_budget.memory_search_k,
+            context_budget.total_tier_budget,
+            context_budget.exceeds_usable_budget,
+        ),
+        observed_at: now.clone(),
+    });
+
+    items.push(DashboardDiagnosticItem {
+        level: if memory_hierarchy.context_compaction_required { "warn" } else { "info" },
+        source: "memory_hierarchy",
+        message: format!(
+            "Memory hierarchy: prompt_cache_rows={} cache_hit_ratio_percent={:.1} l2_recall_hits={} l2_hot_memories={} l2_total_memories={} loaded_tiers={} context_estimated_tokens={} compaction_trigger={} over_budget={} compaction_required={}",
+            memory_hierarchy.prompt_cache_rows,
+            memory_hierarchy.cache_hit_ratio_percent,
+            memory_hierarchy.l2_recall_hits,
+            memory_hierarchy.l2_hot_memories,
+            memory_hierarchy.l2_total_memories,
+            memory_hierarchy.loaded_tier_count,
+            memory_hierarchy.context_total_estimated_tokens,
+            memory_hierarchy.context_compaction_trigger_tokens,
+            memory_hierarchy.context_over_budget,
+            memory_hierarchy.context_compaction_required,
         ),
         observed_at: now.clone(),
     });
@@ -1408,6 +1516,7 @@ pub async fn dashboard_diagnostics(
         items,
         context_budget,
         context_tiers,
+        memory_hierarchy,
     }))
 }
 
@@ -1809,6 +1918,12 @@ pub struct CreateSessionRequest {
     pub channel_ref: Option<String>,
     /// Optional agent mode hint stored in session metadata.
     pub mode: Option<String>,
+    /// Optional project identifier for project-scoped context loading.
+    pub project_id: Option<String>,
+    /// Optional preloaded delegation context for subagent handoff.
+    pub delegation_context: Option<serde_json::Value>,
+    /// Optional shared scratchpad path used by parent and subagent.
+    pub shared_scratchpad_path: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -1962,17 +2077,33 @@ pub async fn create_session(
 ) -> Result<(StatusCode, Json<SessionResponse>), GatewayError> {
     let kind = parse_session_kind(&body.kind)?;
 
-    let row = state
-        .session_engine
-        .create_session_full(
-            kind,
-            body.workspace_root,
-            body.requester_session_id,
-            body.channel_ref,
-            body.mode,
-        )
-        .await
-        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let row = if kind == SessionKind::Subagent && body.delegation_context.is_some() {
+        state
+            .session_engine
+            .create_subagent_session_with_context(
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                body.delegation_context.unwrap_or(serde_json::json!({})),
+                body.shared_scratchpad_path,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    } else {
+        state
+            .session_engine
+            .create_session_full(
+                kind,
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                body.project_id,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    };
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: row.id.to_string(),
@@ -2917,6 +3048,9 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
         subagent_capacity: stats.subagent_capacity,
         cron_active: stats.cron_active,
         cron_capacity: stats.cron_capacity,
+        tool_active: stats.tool_active,
+        tool_capacity: stats.tool_capacity,
+        project_tool_capacity: stats.project_tool_capacity,
     }
 }
 
@@ -3745,6 +3879,7 @@ pub async fn telegram_webhook(
                     workspace,
                     None,
                     Some(routing_key.clone()),
+                    None,
                     None,
                 )
                 .await
@@ -6111,9 +6246,20 @@ pub struct DoctorMemoryHierarchySummary {
     pub promotion: String,
     pub demotion: String,
     pub metrics: String,
+    pub prompt_cache_rows: u64,
+    pub cached_tokens: u64,
+    pub total_input_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
     pub l2_recall_hits: u64,
     pub l2_hot_memories: u64,
     pub l2_total_memories: u64,
+    pub context_total_budget: u64,
+    pub context_total_estimated_tokens: u64,
+    pub context_compaction_trigger_tokens: u64,
+    pub context_over_budget: bool,
+    pub context_over_compaction_threshold: bool,
+    pub context_compaction_required: bool,
+    pub loaded_tier_count: u64,
 }
 
 #[derive(Serialize)]
@@ -6316,6 +6462,15 @@ async fn doctor_memory_hierarchy(
     capabilities: &rune_config::Capabilities,
     token_metrics: &TokenMetricsStore,
 ) -> DoctorMemoryHierarchySummary {
+    let context_report = rune_runtime::ContextAssembler::new("Rune doctor identity context")
+        .with_context_config(&config.context)
+        .analyze_context_usage(
+            None,
+            None,
+            &[],
+            config.runtime.compaction.compress_after,
+            true,
+        );
     let prompt_cache_rows = token_metrics.snapshot().await;
     let (cached_tokens, total_input_tokens) =
         prompt_cache_rows
@@ -6359,9 +6514,20 @@ async fn doctor_memory_hierarchy(
         (0, 0, 0)
     };
 
+    let context_total_budget = context_report.total_budget as u64;
+    let context_total_estimated_tokens = context_report.total_estimated_tokens as u64;
+    let context_compaction_trigger_tokens = context_report.compaction_trigger_tokens as u64;
+    let context_over_budget = context_report.over_budget;
+    let context_over_compaction_threshold = context_report.over_compaction_threshold;
+    let context_compaction_required = context_report.compaction_required;
+    let loaded_tier_count = context_report.tiers.len() as u64;
+
     DoctorMemoryHierarchySummary {
-        l0: "current turn context window (active transcript + system/task/project context)"
-            .to_string(),
+        l0: format!(
+            "current turn context window (active transcript + system/task/project context, warn_at={} tokens, compress_after={} tokens)",
+            config.runtime.compaction.warn_at_tokens,
+            config.runtime.compaction.compress_after
+        ),
         l1: format!(
             "prompt cache via provider prefixes ({} metric row(s), {:.1}% cached input tokens)",
             prompt_cache_rows.len(),
@@ -6375,7 +6541,8 @@ async fn doctor_memory_hierarchy(
             l2_hot_memories,
             l2_total_memories
         ),
-        l3: "durable session logs in transcript/session storage".to_string(),
+        l3: "durable session logs in transcript/session storage (ready for compaction handoff)"
+            .to_string(),
         promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions"
             .to_string(),
         demotion: format!(
@@ -6383,17 +6550,36 @@ async fn doctor_memory_hierarchy(
             config.runtime.compaction.compress_after
         ),
         metrics: format!(
-            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}",
+            "prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}, l2_recall_hits={}, l2_hot_memories={}, l2_total_memories={}, loaded_tiers={}, context_total_budget={}, context_estimated_tokens={}, context_compaction_trigger_tokens={}, context_over_budget={}, context_over_compaction_threshold={}, context_compaction_required={}",
             prompt_cache_rows.len(),
             cached_tokens,
             total_input_tokens,
+            cache_ratio,
             l2_recall_hits,
             l2_hot_memories,
-            l2_total_memories
+            l2_total_memories,
+            loaded_tier_count,
+            context_total_budget,
+            context_total_estimated_tokens,
+            context_compaction_trigger_tokens,
+            context_over_budget,
+            context_over_compaction_threshold,
+            context_compaction_required
         ),
+        prompt_cache_rows: prompt_cache_rows.len() as u64,
+        cached_tokens,
+        total_input_tokens,
+        cache_hit_ratio_percent: cache_ratio,
         l2_recall_hits,
         l2_hot_memories,
         l2_total_memories,
+        context_total_budget,
+        context_total_estimated_tokens,
+        context_compaction_trigger_tokens,
+        context_over_budget,
+        context_over_compaction_threshold,
+        context_compaction_required,
+        loaded_tier_count,
     }
 }
 
