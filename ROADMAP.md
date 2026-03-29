@@ -83,7 +83,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Admin UI | ✅ 2026-03-28 | Admin shell now includes shipped chat, usage, debug, config, logs, agents, and skills pages; broader UX polish and deeper parity still remain |
 | Agent Modes | ❌ Missing | No Orchestrator/Architect/Coder/Debugger modes — beyond OpenClaw |
 | Git Worktree Isolation | ❌ Missing | No isolated agent execution environments — beyond OpenClaw |
-| Context Compression | ❌ Missing | No intelligent context windowing or priority-based assembly — beyond OpenClaw |
+| Context Compression | ⚠️ 2026-03-29 | Context tier budgeting, compaction diagnostics, checkpoint metadata, and delegated context handoff for subagents are shipped; transcript summarization/checkpoint persistence still need follow-up |
 | Memory Bank | ❌ Missing | No architectural decision records or project knowledge base — beyond OpenClaw |
 | Extended Channels | ❌ Missing | No LINE/Mattermost/Matrix/Feishu/iMessage — OpenClaw breadth |
 | Calendar/Email | ✅ 2026-03-26 | Microsoft 365 calendar, mail, files, users, Planner, and To-Do routes/services landed in gateway with auth and integration coverage |
@@ -675,6 +675,8 @@ Smarter context assembly than OpenClaw's static file-loading. Priority-based con
 **Modify**
 - `crates/rune-runtime/src/executor.rs` — Replace static context assembly with `ContextManager`
 - `crates/rune-store/src/repos.rs` — Persist compressed context checkpoints
+
+**Implementation note (2026-03-29):** Core context-management groundwork is now partially shipped on current `main`: context tier budgeting/diagnostics, compaction-required metadata persistence, and delegated context handoff for sub-agents via `create_subagent_session_with_context` plus prompt injection of `delegation_context` and `shared_scratchpad`. The remaining gap in this roadmap item is true transcript/tool-output summarization with persisted checkpoints and broader cross-session relevance selection.
 
 ---
 
