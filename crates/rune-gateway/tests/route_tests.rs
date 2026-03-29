@@ -8424,7 +8424,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         session_engine,
         turn_executor,
         session_repo: session_repo as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
         turn_repo: turn_repo as Arc<dyn TurnRepo>,
         model_provider,
         scheduler,
@@ -8459,6 +8459,22 @@ async fn get_session_status_surfaces_subagent_metadata() {
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
     };
+
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id,
+            turn_id: None,
+            seq: 1,
+            kind: "subagent_result".into(),
+            payload: json!({
+                "session_id": "99999999-9999-9999-9999-999999999999",
+                "summary": "Tests tightened and lifecycle audit trail captured"
+            }),
+            created_at: now + chrono::TimeDelta::milliseconds(1),
+        })
+        .await
+        .unwrap();
 
     let app = build_router(state, None);
     let response = app
@@ -8499,10 +8515,17 @@ async fn get_session_status_surfaces_subagent_metadata() {
         json["subagent_last_note"],
         "Steering message queued for subagent/session: tighten the tests"
     );
-    assert_eq!(json["audit"]["transcript_items"], 0);
+    assert_eq!(json["audit"]["transcript_items"], 1);
     assert_eq!(json["audit"]["status_notes"], 0);
-    assert_eq!(json["audit"]["last_transcript_at"], Value::Null);
+    assert_eq!(json["audit"]["last_transcript_at"].as_str().is_some(), true);
     assert_eq!(json["audit"]["last_operator_note"], Value::Null);
+    assert_eq!(
+        json["latest_subagent_result"],
+        json!({
+            "session_id": "99999999-9999-9999-9999-999999999999",
+            "summary": "Tests tightened and lifecycle audit trail captured"
+        })
+    );
     let unresolved = json["unresolved"].as_array().unwrap();
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("cost posture is estimate-only; provider pricing is not wired yet")));
