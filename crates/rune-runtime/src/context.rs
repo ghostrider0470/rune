@@ -124,6 +124,7 @@ pub struct ContextTierUsage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ContextAssemblyReport {
     pub total_estimated_tokens: usize,
+    pub total_budget: usize,
     pub over_budget: bool,
     pub tiers: Vec<ContextTierUsage>,
 }
@@ -202,6 +203,12 @@ impl ContextAssembler {
     }
 
     #[must_use]
+    pub fn with_tier_specs(mut self, tier_specs: Vec<ContextTierSpec>) -> Self {
+        self.tier_specs = tier_specs;
+        self
+    }
+
+    #[must_use]
     pub fn tier_specs(&self) -> &[ContextTierSpec] {
         &self.tier_specs
     }
@@ -275,6 +282,7 @@ impl ContextAssembler {
             .sum::<usize>();
         ContextAssemblyReport {
             total_estimated_tokens,
+            total_budget,
             over_budget: total_budget > 0 && total_estimated_tokens > total_budget,
             tiers,
         }
@@ -845,6 +853,7 @@ mod context_tier_tests {
         );
 
         assert!(report.total_estimated_tokens > 0);
+        assert_eq!(report.total_budget, 36_000);
         assert!(!report.over_budget);
         assert!(report.identity_tokens() > 0);
         assert!(report.project_tokens() > 0);
