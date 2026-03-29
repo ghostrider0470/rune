@@ -4278,9 +4278,13 @@ async fn instance_health_reports_peer_metadata_from_health_payload() {
     let json = body_json(response).await;
     let peer = json["peers"].as_array().unwrap().first().unwrap();
     assert_eq!(peer["status"], "healthy");
+    assert_eq!(peer["name"], "peer-a");
     assert_eq!(peer["load"]["session_count"], 3);
     assert_eq!(peer["advertised_addr"], "http://peer-a:8787");
     assert_eq!(peer["roles"], serde_json::json!(["gateway", "coder"]));
+    assert_eq!(peer["capability_hash"], "cap-peer-a");
+    assert_eq!(peer["capabilities_version"], 1);
+    assert_eq!(peer["comms_transport"], "filesystem");
     assert_eq!(peer["configured_models"], serde_json::json!(["gpt-4.1"]));
     assert_eq!(peer["active_projects"], serde_json::json!(["rune"]));
 }
@@ -4379,6 +4383,7 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["strategy"], "least_busy");
     assert_eq!(json["selected_peer"]["id"], "peer-b");
     assert_eq!(json["receiver"]["instance_id"], "peer-b");
+    assert_eq!(json["receiver"]["instance_name"], "peer-b");
     assert_eq!(json["receiver"]["transport"], "http");
     assert_eq!(
         json["receiver"]["submit_url"],
@@ -4549,6 +4554,87 @@ async fn delegation_plan_named_strategy_exposes_sender_health_url_when_advertise
         "http://127.0.0.1:8787/api/v1/instance/delegations/{task_id}"
     );
     assert_eq!(json["routing"]["mode"], "named");
+}
+
+#[tokio::test]
+async fn delegation_plan_named_strategy_uses_peer_identity_name_for_receiver() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 12,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "peer-a",
+                    "name": "Peer Alpha",
+                    "advertised_addr": "http://peer-a:8787",
+                    "roles": ["gateway", "coder"],
+                    "capabilities_version": 7,
+                    "capability_hash": "cap-peer-alpha"
+                },
+                "instance_id": "peer-a",
+                "instance_name": "Peer Alpha",
+                "peer_count": 0,
+                "configured_models": ["gpt-4.1"],
+                "active_projects": ["rune", "phoenix"],
+                "comms_transport": "http"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{addr}/api/v1/instance/health"),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["receiver"]["instance_id"], "peer-a");
+    assert_eq!(json["receiver"]["instance_name"], "Peer Alpha");
+    assert_eq!(json["selected_peer"]["name"], "Peer Alpha");
+    assert_eq!(json["selected_peer"]["capability_hash"], "cap-peer-alpha");
+    assert_eq!(json["selected_peer"]["capabilities_version"], 7);
+    assert_eq!(json["selected_peer"]["comms_transport"], "http");
 }
 
 #[tokio::test]
@@ -4940,6 +5026,7 @@ async fn context_assembly_report_flags_compaction_when_budget_is_exceeded() {
             "Additional task context to force both tier and compaction thresholds.".into(),
         ],
         8,
+        false,
     );
 
     assert!(report.over_budget);
