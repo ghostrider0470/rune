@@ -88,6 +88,13 @@ pub enum ContextStalenessPolicy {
     RetrievalOnly,
 }
 
+impl ContextStalenessPolicy {
+    #[must_use]
+    pub fn requires_refresh(&self) -> bool {
+        matches!(self, Self::AlwaysFresh | Self::PerTurn)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextTierSpec {
     pub kind: ContextTierKind,
@@ -118,6 +125,7 @@ pub struct ContextTierUsage {
     pub priority: u8,
     pub staleness_policy: ContextStalenessPolicy,
     pub loaded: bool,
+    pub refresh_required: bool,
     pub source: &'static str,
 }
 
@@ -140,6 +148,7 @@ pub struct ContextTierSnapshot {
     pub priority: u8,
     pub staleness_policy: ContextStalenessPolicy,
     pub loaded: bool,
+    pub refresh_required: bool,
     pub estimated_tokens: usize,
     pub source: String,
 }
@@ -152,6 +161,7 @@ impl From<&ContextTierUsage> for ContextTierSnapshot {
             priority: value.priority,
             staleness_policy: value.staleness_policy.clone(),
             loaded: value.loaded,
+            refresh_required: value.refresh_required,
             estimated_tokens: value.estimated_tokens,
             source: value.source.to_string(),
         }
@@ -416,6 +426,7 @@ impl ContextAssembler {
                     priority: spec.priority,
                     staleness_policy: spec.staleness_policy.clone(),
                     loaded,
+                    refresh_required: loaded && spec.staleness_policy.requires_refresh(),
                     source,
                 }
             })
@@ -1036,6 +1047,68 @@ mod context_tier_tests {
             specs[4],
             ContextTierSpec::new(ContextTierKind::Historical, 8_000)
         );
+    }
+
+    #[test]
+    fn context_usage_marks_per_turn_tiers_for_refresh() {
+        let assembler = ContextAssembler::new("You are Rune.");
+        let report = assembler.analyze_context_usage(
+            None,
+            None,
+            &["## Active task
+
+Ship this slice.".into()],
+            0,
+            false,
+        );
+
+        let identity = report
+            .tiers
+            .iter()
+            .find(|tier| tier.kind == ContextTierKind::Identity)
+            .unwrap();
+        assert!(identity.loaded);
+        assert!(identity.refresh_required);
+
+        let active_task = report
+            .tiers
+            .iter()
+            .find(|tier| tier.kind == ContextTierKind::ActiveTask)
+            .unwrap();
+        assert!(active_task.loaded);
+        assert!(active_task.refresh_required);
+
+        let project = report
+            .tiers
+            .iter()
+            .find(|tier| tier.kind == ContextTierKind::Project)
+            .unwrap();
+        assert!(!project.loaded);
+        assert!(!project.refresh_required);
+
+        let historical = report
+            .tiers
+            .iter()
+            .find(|tier| tier.kind == ContextTierKind::Historical)
+            .unwrap();
+        assert!(!historical.refresh_required);
+    }
+
+    #[test]
+    fn context_snapshots_preserve_refresh_required_flag() {
+        let assembler = ContextAssembler::new("system");
+        let report = assembler.analyze_context_usage(None, None, &[], 0, true);
+        let snapshots = report.snapshots();
+        let identity = snapshots
+            .iter()
+            .find(|tier| tier.kind == ContextTierKind::Identity)
+            .unwrap();
+        assert!(identity.refresh_required);
+        let historical = snapshots
+            .iter()
+            .find(|tier| tier.kind == ContextTierKind::Historical)
+            .unwrap();
+        assert!(!historical.refresh_required);
     }
 
     #[test]

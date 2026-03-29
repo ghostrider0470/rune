@@ -1392,6 +1392,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     priority: 100,
                     staleness_policy: "pinned".to_string(),
                     loaded: true,
+                    refresh_required: true,
                     source: "config".to_string(),
                 },
                 DoctorContextTierCounter {
@@ -1401,6 +1402,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     priority: 90,
                     staleness_policy: "active".to_string(),
                     loaded: true,
+                    refresh_required: true,
                     source: "config".to_string(),
                 },
                 DoctorContextTierCounter {
@@ -1410,6 +1412,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     priority: 80,
                     staleness_policy: "refresh_on_project_switch".to_string(),
                     loaded: true,
+                    refresh_required: false,
                     source: "config".to_string(),
                 },
                 DoctorContextTierCounter {
@@ -1419,6 +1422,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     priority: 70,
                     staleness_policy: "refresh_periodic".to_string(),
                     loaded: true,
+                    refresh_required: false,
                     source: "config".to_string(),
                 },
                 DoctorContextTierCounter {
@@ -1428,6 +1432,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     priority: 60,
                     staleness_policy: "on_demand".to_string(),
                     loaded: true,
+                    refresh_required: false,
                     source: "runtime".to_string(),
                 },
             ],

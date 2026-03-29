@@ -779,6 +779,7 @@ pub struct DoctorContextTierCounter {
     pub priority: u8,
     pub staleness_policy: String,
     pub loaded: bool,
+    pub refresh_required: bool,
     pub source: String,
 }
 
@@ -938,9 +939,10 @@ impl fmt::Display for DoctorReport {
                 for tier in &memory_hierarchy.context_tier_counters {
                     writeln!(
                         f,
-                        "    - {}: loaded={}, budget={}, estimated_tokens={}, priority={}, staleness_policy={}, source={}",
+                        "    - {}: loaded={}, refresh_required={}, budget={}, estimated_tokens={}, priority={}, staleness_policy={}, source={}",
                         tier.kind,
                         tier.loaded,
+                        tier.refresh_required,
                         tier.token_budget,
                         tier.estimated_tokens,
                         tier.priority,
@@ -6153,7 +6155,16 @@ mod tests {
                 context_compaction_required: false,
                 l3_cold_storage_enabled: true,
                 loaded_tier_count: 4,
-                context_tier_counters: vec![],
+                context_tier_counters: vec![DoctorContextTierCounter {
+                    kind: "identity".into(),
+                    token_budget: 1_000,
+                    estimated_tokens: 64,
+                    priority: 0,
+                    staleness_policy: "always_fresh".into(),
+                    loaded: true,
+                    refresh_required: true,
+                    source: "system_instructions".into(),
+                }],
             }),
             run_at: "2026-03-20T09:30:00Z".into(),
         };
@@ -6171,6 +6182,7 @@ mod tests {
         assert!(out.contains("L1: prompt cache via provider prefixes"));
         assert!(out.contains("L1 Counters: prompt_cache_rows=0, cached_tokens=0, total_input_tokens=0, cache_hit_ratio_percent=0.0"));
         assert!(out.contains("Context Tier Counters: loaded_tiers=4, total_budget=36000, estimated_tokens=0, compaction_trigger_tokens=96000, over_budget=false, over_compaction_threshold=false, compaction_required=false, l3_cold_storage_enabled=true"));
+        assert!(out.contains("identity: loaded=true, refresh_required=true, budget=1000, estimated_tokens=64, priority=0, staleness_policy=always_fresh, source=system_instructions"));
         assert!(out.contains("Checks: 1/2 passing"));
         assert!(out.contains("db [fail]: unreachable"));
     }
