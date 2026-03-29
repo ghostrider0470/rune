@@ -36,7 +36,7 @@ use crate::usage::UsageAccumulator;
 use crate::workspace::WorkspaceLoader;
 
 /// Maximum tool-call loop iterations before aborting.
-const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 200;
+const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 500;
 
 /// Executes a single turn: load context → prompt → model → tool loop → persist.
 ///

@@ -1113,6 +1113,13 @@ pub struct RuntimeConfig {
     pub lanes: LaneQueueConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    /// Maximum tool-call iterations per turn before aborting. Default: 200.
+    #[serde(default = "default_max_tool_iterations")]
+    pub max_tool_iterations: u32,
+}
+
+fn default_max_tool_iterations() -> u32 {
+    500
 }
 
 /// Plugin system configuration.
