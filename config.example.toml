@@ -101,6 +101,19 @@ workspace = "/home/hamza/.openclaw/workspace"
 id = "fast"
 model = "oc-01-anthropic/claude-sonnet-4-6"
 
+
+[runtime.lanes]
+# Main interactive sessions (default direct/operator work)
+main_capacity = 4
+# Subagent / spawned coding sessions
+subagent_capacity = 8
+# Scheduled, heartbeat, and passive trigger work
+cron_capacity = 1024
+# Max concurrent tool executions across the whole runtime
+global_tool_capacity = 32
+# Max concurrent tool executions per project lane
+project_tool_capacity = 4
+
 [logging]
 level = "info"
 json = true
