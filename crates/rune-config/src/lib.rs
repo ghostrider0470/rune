@@ -380,6 +380,7 @@ fn probe_dir_writable(dir: &Path) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Capabilities {
     pub mode: RuntimeMode,
+    pub updated_at: String,
     pub storage_backend: String,
     pub pgvector: bool,
     pub memory_mode: String,
@@ -393,6 +394,7 @@ pub struct Capabilities {
     pub security_posture: String,
     pub identity: InstanceIdentity,
     pub peer_count: usize,
+    pub peers: Vec<PeerCapabilityTarget>,
     pub configured_models: Vec<String>,
     pub active_projects: Vec<String>,
     pub comms_transport: String,
@@ -418,7 +420,19 @@ pub struct InstanceConfig {
     #[serde(default = "default_instance_roles")]
     pub roles: Vec<String>,
     #[serde(default)]
-    pub peers: Vec<String>,
+    pub peers: Vec<PeerConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerConfig {
+    pub id: String,
+    pub health_url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerCapabilityTarget {
+    pub id: String,
+    pub health_url: String,
 }
 
 impl Default for InstanceConfig {
@@ -514,6 +528,7 @@ impl Capabilities {
 
         Self {
             mode: resolved_mode,
+            updated_at: chrono::Utc::now().to_rfc3339(),
             storage_backend: backend_name.to_string(),
             pgvector: pgvector_available,
             memory_mode: memory_mode.to_string(),
@@ -533,6 +548,15 @@ impl Capabilities {
                 capabilities_version: 1,
             },
             peer_count: config.instance.peers.len(),
+            peers: config
+                .instance
+                .peers
+                .iter()
+                .map(|peer| PeerCapabilityTarget {
+                    id: peer.id.clone(),
+                    health_url: peer.health_url.clone(),
+                })
+                .collect(),
             configured_models,
             active_projects,
             comms_transport: config.comms.transport.clone(),

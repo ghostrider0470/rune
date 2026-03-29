@@ -68,6 +68,17 @@ pub struct InstanceHealthResponse {
     pub uptime_seconds: u64,
     pub load: InstanceLoadResponse,
     pub capabilities: CapabilitiesResponse,
+    pub peers: Vec<PeerHealthResponse>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PeerHealthResponse {
+    pub id: String,
+    pub health_url: String,
+    pub status: String,
+    pub detail: String,
+    pub checked_at: String,
+    pub latency_ms: Option<u128>,
 }
 
 #[derive(Serialize)]
@@ -122,6 +133,8 @@ pub async fn instance_health(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
+    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+
     Ok(Json(InstanceHealthResponse {
         status: "ok",
         service: "rune-gateway",
@@ -134,6 +147,7 @@ pub async fn instance_health(
         },
         capabilities: CapabilitiesResponse {
             mode: state.capabilities.mode.as_str(),
+            updated_at: state.capabilities.updated_at.clone(),
             storage_backend: state.capabilities.storage_backend.clone(),
             pgvector: state.capabilities.pgvector,
             memory_mode: state.capabilities.memory_mode.clone(),
@@ -158,7 +172,78 @@ pub async fn instance_health(
             active_projects: state.capabilities.active_projects.clone(),
             comms_transport: state.capabilities.comms_transport.clone(),
         },
+        peers,
     }))
+}
+
+async fn collect_peer_health(
+    peers: Vec<rune_config::PeerCapabilityTarget>,
+) -> Vec<PeerHealthResponse> {
+    if peers.is_empty() {
+        return Vec::new();
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            let checked_at = Utc::now().to_rfc3339();
+            return peers
+                .into_iter()
+                .map(|peer| PeerHealthResponse {
+                    id: peer.id,
+                    health_url: peer.health_url,
+                    status: "degraded".to_string(),
+                    detail: format!("client init failed: {error}"),
+                    checked_at: checked_at.clone(),
+                    latency_ms: None,
+                })
+                .collect();
+        }
+    };
+
+    let mut results = Vec::with_capacity(peers.len());
+    for peer in peers {
+        let started = Instant::now();
+        let checked_at = Utc::now().to_rfc3339();
+        let item = match client.get(&peer.health_url).send().await {
+            Ok(response) => {
+                let latency_ms = Some(started.elapsed().as_millis());
+                if response.status().is_success() {
+                    PeerHealthResponse {
+                        id: peer.id,
+                        health_url: peer.health_url,
+                        status: "healthy".to_string(),
+                        detail: response.status().to_string(),
+                        checked_at,
+                        latency_ms,
+                    }
+                } else {
+                    PeerHealthResponse {
+                        id: peer.id,
+                        health_url: peer.health_url,
+                        status: "degraded".to_string(),
+                        detail: response.status().to_string(),
+                        checked_at,
+                        latency_ms,
+                    }
+                }
+            }
+            Err(error) => PeerHealthResponse {
+                id: peer.id,
+                health_url: peer.health_url,
+                status: "unreachable".to_string(),
+                detail: error.to_string(),
+                checked_at,
+                latency_ms: None,
+            },
+        };
+        results.push(item);
+    }
+
+    results
 }
 
 /// Prompt cache token metrics grouped by provider/model.
@@ -241,6 +326,7 @@ pub struct UpdateStatusResponse {
 #[derive(Serialize)]
 pub struct CapabilitiesResponse {
     pub mode: &'static str,
+    pub updated_at: String,
     pub storage_backend: String,
     pub pgvector: bool,
     pub memory_mode: String,
@@ -415,6 +501,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse
         },
         capabilities: CapabilitiesResponse {
             mode: state.capabilities.mode.as_str(),
+            updated_at: state.capabilities.updated_at.clone(),
             storage_backend: state.capabilities.storage_backend.clone(),
             pgvector: state.capabilities.pgvector,
             memory_mode: state.capabilities.memory_mode.clone(),
