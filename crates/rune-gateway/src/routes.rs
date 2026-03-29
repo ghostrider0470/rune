@@ -1770,6 +1770,10 @@ pub struct CreateSessionRequest {
     pub mode: Option<String>,
     /// Optional project identifier for project-scoped context loading.
     pub project_id: Option<String>,
+    /// Optional preloaded delegation context for subagent handoff.
+    pub delegation_context: Option<serde_json::Value>,
+    /// Optional shared scratchpad path used by parent and subagent.
+    pub shared_scratchpad_path: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -1923,18 +1927,33 @@ pub async fn create_session(
 ) -> Result<(StatusCode, Json<SessionResponse>), GatewayError> {
     let kind = parse_session_kind(&body.kind)?;
 
-    let row = state
-        .session_engine
-        .create_session_full(
-            kind,
-            body.workspace_root,
-            body.requester_session_id,
-            body.channel_ref,
-            body.mode,
-            body.project_id,
-        )
-        .await
-        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let row = if kind == SessionKind::Subagent && body.delegation_context.is_some() {
+        state
+            .session_engine
+            .create_subagent_session_with_context(
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                body.delegation_context.unwrap_or(serde_json::json!({})),
+                body.shared_scratchpad_path,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    } else {
+        state
+            .session_engine
+            .create_session_full(
+                kind,
+                body.workspace_root,
+                body.requester_session_id,
+                body.channel_ref,
+                body.mode,
+                body.project_id,
+            )
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+    };
 
     let _ = state.event_tx.send(SessionEvent {
         session_id: row.id.to_string(),

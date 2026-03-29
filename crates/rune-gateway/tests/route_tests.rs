@@ -8849,6 +8849,73 @@ async fn list_sessions_filters_by_channel_and_activity() {
     assert_eq!(items[0]["channel"], "telegram");
 }
 
+#[tokio::test]
+async fn create_subagent_session_accepts_delegation_context_and_scratchpad() {
+    let app = build_test_app(None);
+
+    let response = app.clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let parent_json = body_json(response).await;
+    let parent_id = parent_json["id"].as_str().unwrap().to_string();
+
+    let response = app.clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "subagent",
+                        "requester_session_id": parent_id,
+                        "channel_ref": "orchestrator:acme",
+                        "mode": "isolated",
+                        "delegation_context": {
+                            "task": "Implement retry budget fix",
+                            "budget": { "token_budget": 1536 },
+                            "file_summaries": [
+                                {"path": "src/retry.rs", "summary": "retry budget enforcement"}
+                            ]
+                        },
+                        "shared_scratchpad_path": "agents/acme/scratchpads/retry-fix.md"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let subagent_json = body_json(response).await;
+    let subagent_id = subagent_json["id"].as_str().unwrap().to_string();
+
+    let response = app.clone()
+        .oneshot(
+            Request::get("/sessions?kind=subagent&include_metadata=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sessions = body_json(response).await;
+    let items = sessions.as_array().unwrap();
+    let session = items
+        .iter()
+        .find(|item| item["id"] == subagent_id)
+        .expect("subagent session present");
+    assert_eq!(session["mode"], "isolated");
+    assert_eq!(session["metadata"]["delegation_context"]["task"], "Implement retry budget fix");
+    assert_eq!(session["metadata"]["delegation_context"]["budget"]["token_budget"], 1536);
+    assert_eq!(session["metadata"]["shared_scratchpad"]["path"], "agents/acme/scratchpads/retry-fix.md");
+}
+
 // ── Agents (subagent kind filter) tests ───────────────────────────────────────
 
 #[tokio::test]
