@@ -105,6 +105,8 @@ pub struct DelegationEndpointResponse {
     pub instance_name: String,
     pub transport: String,
     pub health_url: Option<String>,
+    pub submit_url: Option<String>,
+    pub result_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -137,6 +139,9 @@ pub struct DelegationResultContractResponse {
     pub artifact_field: &'static str,
     pub error_field: &'static str,
     pub finished_at_field: &'static str,
+    pub accepted_at_field: &'static str,
+    pub started_at_field: &'static str,
+    pub task_id_field: &'static str,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -293,6 +298,8 @@ pub async fn delegation_plan(
             instance_name: peer.id.clone(),
             transport: "http".to_string(),
             health_url: Some(peer.health_url.clone()),
+            submit_url: Some(format!("{}/api/v1/instance/delegations", peer.health_url.trim_end_matches("/api/v1/instance/health").trim_end_matches('/'))),
+            result_url: Some(format!("{}/api/v1/instance/delegations/{{task_id}}", peer.health_url.trim_end_matches("/api/v1/instance/health").trim_end_matches('/'))),
         });
 
     let routing = DelegationRoutingResponse {
@@ -317,6 +324,12 @@ pub async fn delegation_plan(
             transport: state.capabilities.comms_transport.clone(),
             health_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
                 format!("{}/api/v1/instance/health", addr.trim_end_matches('/'))
+            }),
+            submit_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations", addr.trim_end_matches('/'))
+            }),
+            result_url: state.capabilities.identity.advertised_addr.as_ref().map(|addr| {
+                format!("{}/api/v1/instance/delegations/{{task_id}}", addr.trim_end_matches('/'))
             }),
         },
         receiver,
@@ -345,6 +358,9 @@ pub async fn delegation_plan(
             artifact_field: "artifacts",
             error_field: "error",
             finished_at_field: "finished_at",
+            accepted_at_field: "accepted_at",
+            started_at_field: "started_at",
+            task_id_field: "task_id",
         },
     }))
 }
@@ -378,7 +394,16 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
             "file_locks",
             "artifacts",
         ],
-        result_fields: vec!["status", "output", "artifacts", "error", "finished_at"],
+        result_fields: vec![
+            "task_id",
+            "status",
+            "accepted_at",
+            "started_at",
+            "output",
+            "artifacts",
+            "error",
+            "finished_at",
+        ],
     }
 }
 
