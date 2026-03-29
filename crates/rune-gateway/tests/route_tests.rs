@@ -4850,6 +4850,43 @@ async fn delegation_plan_exposes_full_task_contract_fields() {
 }
 
 #[tokio::test]
+async fn delegation_plan_named_strategy_reports_unavailable_named_peer_in_detail() {
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: "http://127.0.0.1:9/api/v1/instance/health".to_string(),
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegation-plan?strategy=named&peer_id=peer-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    assert_eq!(json["selected_peer"]["id"], "peer-a");
+    assert_eq!(json["selected_peer"]["status"], "unreachable");
+    assert_eq!(json["receiver"]["instance_id"], "peer-a");
+    assert_eq!(
+        json["detail"],
+        "selected named peer 'peer-a'"
+    );
+    assert_eq!(json["routing"]["detail"], json["detail"]);
+    assert_eq!(json["routing"]["mode"], "named");
+    assert_eq!(json["capability_match"]["compatible"], false);
+    assert_eq!(json["capability_match"]["missing_roles"], serde_json::json!(["gateway"]));
+    assert_eq!(
+        json["capability_match"]["detail"],
+        "receiver capability mismatch (missing roles: gateway)"
+    );
+}
+
+#[tokio::test]
 async fn delegation_plan_requires_peer_id_for_named_strategy() {
     let app = build_test_app(None);
     let response = app
