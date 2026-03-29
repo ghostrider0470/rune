@@ -44,6 +44,7 @@ pub struct MemoryHierarchyMetrics {
     pub recall_hits: u64,
     pub warm_memories: u64,
     pub hot_memories: u64,
+    pub cold_memories: u64,
     pub total_memories: u64,
 }
 
@@ -308,6 +309,10 @@ impl Mem0Engine {
             .iter()
             .filter(|memory| memory.access_count >= 3)
             .count() as u64;
+        let cold_memories = memories
+            .iter()
+            .filter(|memory| memory.access_count <= 0)
+            .count() as u64;
         let recall_hits = memories
             .iter()
             .map(|memory| u64::try_from(memory.access_count.max(0)).unwrap_or(0))
@@ -317,6 +322,7 @@ impl Mem0Engine {
             recall_hits,
             warm_memories,
             hot_memories,
+            cold_memories,
             total_memories,
         })
     }

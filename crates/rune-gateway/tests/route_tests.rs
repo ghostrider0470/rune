@@ -5432,6 +5432,7 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(memory_hierarchy["cache_hit_ratio_percent"], 0.0);
     assert_eq!(memory_hierarchy["l2_recall_hits"], 0);
     assert_eq!(memory_hierarchy["l2_hot_memories"], 0);
+    assert_eq!(memory_hierarchy["l2_cold_memories"], 0);
     assert_eq!(memory_hierarchy["l2_total_memories"], 0);
     assert_eq!(memory_hierarchy["context_total_budget"], 36000);
     assert_eq!(memory_hierarchy["context_compaction_trigger_tokens"], 50000);
