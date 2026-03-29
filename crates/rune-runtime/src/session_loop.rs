@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, info, warn};
+use tokio::sync::{watch, Mutex, RwLock};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
@@ -61,6 +61,7 @@ pub struct SessionLoop {
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
     file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
+    shutdown_tx: watch::Sender<bool>,
 }
 
 /// MIME types considered audio for transcription purposes.
@@ -105,6 +106,7 @@ impl SessionLoop {
             stt_engine: None,
             file_downloader: None,
             command_registry: None,
+            shutdown_tx: watch::channel(false).0,
         }
     }
 
@@ -129,6 +131,13 @@ impl SessionLoop {
         self
     }
 
+    /// Request the session loop to stop after the current receive iteration.
+    pub fn request_shutdown(&self) {
+        if self.shutdown_tx.send(true).is_err() {
+            debug!("session loop shutdown requested without active listeners");
+        }
+    }
+
     pub(crate) async fn run_startup_restore(&self) -> Result<(), RuntimeError> {
         let sessions = self.session_repo.list_active_channel_sessions().await?;
         let mut index = self.sessions.lock().await;
@@ -148,7 +157,8 @@ impl SessionLoop {
         Ok(())
     }
 
-    /// Run the session loop forever, processing inbound events.
+    /// Run the session loop forever, processing inbound events until shutdown is requested.
+    #[instrument(skip_all, name = "session_loop.run")]
     pub async fn run(&self) -> Result<(), RuntimeError> {
         // Pre-populate the session index from DB so existing Channel
         // sessions resume after a gateway restart.
@@ -156,17 +166,51 @@ impl SessionLoop {
             warn!(error = %e, "failed to restore channel sessions from DB, starting fresh");
         }
 
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
         info!("session loop started, waiting for inbound events");
 
         loop {
-            let event = {
-                let mut ch = self.channel.lock().await;
-                match ch.receive().await {
-                    Ok(event) => event,
-                    Err(e) => {
-                        error!(error = %e, "channel receive error, retrying in 5s");
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
+            let event = tokio::select! {
+                changed = shutdown_rx.changed() => {
+                    match changed {
+                        Ok(()) if *shutdown_rx.borrow() => {
+                            info!("session loop shutdown requested");
+                            break;
+                        }
+                        Ok(()) => continue,
+                        Err(_) => {
+                            info!("session loop shutdown channel closed");
+                            break;
+                        }
+                    }
+                }
+                event = async {
+                    let mut ch = self.channel.lock().await;
+                    ch.receive().await
+                } => {
+                    match event {
+                        Ok(event) => event,
+                        Err(e) => {
+                            error!(error = %e, "channel receive error, retrying in 5s");
+                            tokio::select! {
+                                changed = shutdown_rx.changed() => {
+                                    match changed {
+                                        Ok(()) if *shutdown_rx.borrow() => {
+                                            info!("session loop shutdown requested during receive backoff");
+                                            break;
+                                        }
+                                        Ok(()) => continue,
+                                        Err(_) => {
+                                            info!("session loop shutdown channel closed during receive backoff");
+                                            break;
+                                        }
+                                    }
+                                }
+                                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                                    continue;
+                                }
+                            }
+                        }
                     }
                 }
             };
@@ -175,6 +219,9 @@ impl SessionLoop {
                 error!(error = %e, "failed to handle inbound event");
             }
         }
+
+        info!("session loop stopped");
+        Ok(())
     }
 
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
