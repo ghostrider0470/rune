@@ -2,7 +2,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use rune_config::{ConfiguredModel, ModelProviderConfig, ModelsConfig};
 use rune_models::{
-    AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
+    AnthropicProvider, AzureFoundryProvider, AzureOpenAiProvider, ChatMessage, CompletionRequest, FinishReason,
     FunctionDefinition, GoogleProvider, ImageUrlPart, MessagePart, ModelError, ModelProvider,
     OpenAiProvider, Role, RoutedModelProvider, StreamEvent, ToolDefinition, provider_from_config,
 };
@@ -2805,4 +2805,58 @@ async fn azure_serializes_multimodal_user_content_parts() {
         content[1]["image_url"]["url"],
         "https://example.test/photo.jpg"
     );
+}
+
+#[tokio::test]
+async fn anthropic_serializes_multimodal_user_content_parts_as_content_blocks() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "content": [{ "type": "text", "text": "I see a diagram" }],
+            "usage": { "input_tokens": 10, "output_tokens": 8 },
+            "stop_reason": "end_turn"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = AnthropicProvider::azure(&server.uri(), "", "2023-06-01", "k");
+    let request = CompletionRequest {
+        messages: vec![ChatMessage {
+            role: Role::User,
+            content: Some("Describe this image".into()),
+            content_parts: Some(vec![
+                MessagePart::Text {
+                    text: "Describe this image".into(),
+                },
+                MessagePart::ImageUrl {
+                    image_url: ImageUrlPart {
+                        url: "data:image/png;base64,QUJDRA==".into(),
+                    },
+                },
+            ]),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }],
+        stable_prefix_messages: None,
+        stable_prefix_tools: None,
+        model: Some("claude-sonnet-4-20250514".into()),
+        temperature: None,
+        max_tokens: None,
+        tools: None,
+    };
+
+    let _ = provider.complete(&request).await.unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let content = body["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[0]["text"], "Describe this image");
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["source"]["type"], "base64");
+    assert_eq!(content[1]["source"]["media_type"], "image/png");
+    assert_eq!(content[1]["source"]["data"], "QUJDRA==");
 }

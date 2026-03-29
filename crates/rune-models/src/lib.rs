@@ -107,8 +107,9 @@ pub fn provider_from_config(
             } else {
                 Ok(Box::new(AnthropicProvider::azure(
                     &cfg.base_url,
-                    &api_key,
+                    cfg.deployment_name.as_deref().unwrap_or(""),
                     api_version,
+                    &api_key,
                 )))
             }
         }
@@ -119,8 +120,9 @@ pub fn provider_from_config(
             validate_azure_api_version(api_version)?;
             Ok(Box::new(AnthropicProvider::azure(
                 &cfg.base_url,
-                &api_key,
+                cfg.deployment_name.as_deref().unwrap_or(""),
                 api_version,
+                &api_key,
             )))
         }
         "azure" | "azure_openai" | "azure-openai" => {
