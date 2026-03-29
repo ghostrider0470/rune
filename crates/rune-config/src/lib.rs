@@ -459,6 +459,36 @@ fn fallback_instance_id() -> String {
         .unwrap_or_else(|| "rune-local".to_string())
 }
 
+fn capability_version_from_config(config: &AppConfig) -> u32 {
+    let mut version = 1u32;
+
+    if config.instance.advertised_addr.is_some() {
+        version += 1;
+    }
+    if !config.instance.roles.is_empty() {
+        version += 1;
+    }
+    if !config.instance.peers.is_empty() {
+        version += 1;
+    }
+    if !config.models.providers.is_empty() {
+        version += 1;
+    }
+    if config
+        .agents
+        .list
+        .iter()
+        .any(|agent| config.agents.effective_workspace(agent).is_some())
+    {
+        version += 1;
+    }
+    if !config.comms.transport.trim().is_empty() {
+        version += 1;
+    }
+
+    version
+}
+
 fn capability_hash_from_config(config: &AppConfig) -> String {
     use sha2::{Digest, Sha256};
 
@@ -612,7 +642,7 @@ impl Capabilities {
                 name: config.instance.name.clone(),
                 advertised_addr: config.instance.advertised_addr.clone(),
                 roles: config.instance.roles.clone(),
-                capabilities_version: 1,
+                capabilities_version: capability_version_from_config(config),
                 capability_hash: capability_hash_from_config(config),
             },
             peer_count: config.instance.peers.len(),

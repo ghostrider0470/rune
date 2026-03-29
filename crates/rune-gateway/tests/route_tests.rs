@@ -4161,6 +4161,33 @@ async fn health_returns_200() {
 }
 
 #[tokio::test]
+async fn capabilities_detect_computes_capability_version_from_advertised_features() {
+    let mut config = AppConfig::default();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+    config.instance.roles = vec!["gateway".to_string(), "scheduler".to_string()];
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: "http://127.0.0.1:8788/api/v1/instance/health".to_string(),
+    }];
+    config.models.providers = vec![rune_config::ModelProviderConfig {
+        name: "openai".to_string(),
+        kind: "openai".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        api_key: None,
+        deployment_name: None,
+        api_version: None,
+        api_key_env: None,
+        model_alias: None,
+        models: vec![ConfiguredModel::Id("gpt-4.1".to_string())],
+    }];
+    config.agents.defaults.workspace = Some("/workspace/rune".to_string());
+    config.comms.transport = "http".to_string();
+
+    let capabilities = Capabilities::detect(&config, RuntimeMode::Standalone, "sqlite", false, false, 0);
+    assert_eq!(capabilities.identity.capabilities_version, 6);
+}
+
+#[tokio::test]
 async fn instance_health_returns_capability_manifest() {
     let mut config = AppConfig::default();
     config.instance.id = "test-instance".to_string();
@@ -4204,7 +4231,7 @@ async fn instance_health_returns_capability_manifest() {
             .as_array()
             .is_some_and(|roles| roles.iter().any(|role| role == "gateway"))
     );
-    assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 1);
+    assert_eq!(json["capabilities"]["identity"]["capabilities_version"], 4);
     assert!(json["capabilities"]["identity"]["capability_hash"].is_string());
     assert_eq!(json["capabilities"]["peer_count"], 0);
     assert!(json["capabilities"]["configured_models"].is_array());
