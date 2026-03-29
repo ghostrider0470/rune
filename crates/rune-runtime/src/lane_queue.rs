@@ -24,6 +24,8 @@ pub enum Lane {
     Subagent,
     /// Scheduled / cron jobs. Effectively uncapped (1024).
     Cron,
+    /// Heartbeat/system checks that should bypass normal scheduled contention.
+    Heartbeat,
 }
 
 impl Lane {
@@ -43,6 +45,7 @@ impl fmt::Display for Lane {
             Lane::Main => write!(f, "main"),
             Lane::Subagent => write!(f, "subagent"),
             Lane::Cron => write!(f, "cron"),
+            Lane::Heartbeat => write!(f, "heartbeat"),
         }
     }
 }
@@ -52,6 +55,7 @@ impl fmt::Display for Lane {
 const MAIN_CAPACITY: usize = 4;
 const SUBAGENT_CAPACITY: usize = 8;
 const CRON_CAPACITY: usize = 1024;
+const HEARTBEAT_CAPACITY: usize = 1024;
 const DEFAULT_GLOBAL_TOOL_CAPACITY: usize = 32;
 const DEFAULT_PROJECT_TOOL_CAPACITY: usize = 4;
 
@@ -138,6 +142,7 @@ pub struct LaneQueue {
     main: LaneSemaphore,
     subagent: LaneSemaphore,
     cron: LaneSemaphore,
+    heartbeat: LaneSemaphore,
     tool_limits: ToolConcurrencyQueue,
 }
 
@@ -148,6 +153,7 @@ impl LaneQueue {
             main: LaneSemaphore::new(MAIN_CAPACITY),
             subagent: LaneSemaphore::new(SUBAGENT_CAPACITY),
             cron: LaneSemaphore::new(CRON_CAPACITY),
+            heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
             tool_limits: ToolConcurrencyQueue::new(
                 DEFAULT_GLOBAL_TOOL_CAPACITY,
                 DEFAULT_PROJECT_TOOL_CAPACITY,
@@ -161,6 +167,7 @@ impl LaneQueue {
             main: LaneSemaphore::new(main),
             subagent: LaneSemaphore::new(subagent),
             cron: LaneSemaphore::new(cron),
+            heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
             tool_limits: ToolConcurrencyQueue::new(
                 DEFAULT_GLOBAL_TOOL_CAPACITY,
                 DEFAULT_PROJECT_TOOL_CAPACITY,
@@ -180,6 +187,7 @@ impl LaneQueue {
             main: LaneSemaphore::new(main),
             subagent: LaneSemaphore::new(subagent),
             cron: LaneSemaphore::new(cron),
+            heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
             tool_limits: ToolConcurrencyQueue::new(global_tool_capacity, project_tool_capacity),
         }
     }
@@ -224,6 +232,8 @@ impl LaneQueue {
             subagent_capacity: self.subagent.capacity,
             cron_active: self.cron.active(),
             cron_capacity: self.cron.capacity,
+            heartbeat_active: self.heartbeat.active(),
+            heartbeat_capacity: self.heartbeat.capacity,
             tool_active: self.tool_limits.active(),
             tool_capacity: self.tool_limits.global_capacity(),
             project_tool_capacity: self.tool_limits.project_capacity(),
@@ -235,6 +245,7 @@ impl LaneQueue {
             Lane::Main => &self.main,
             Lane::Subagent => &self.subagent,
             Lane::Cron => &self.cron,
+            Lane::Heartbeat => &self.heartbeat,
         }
     }
 
@@ -362,6 +373,8 @@ pub struct LaneStats {
     pub subagent_capacity: usize,
     pub cron_active: usize,
     pub cron_capacity: usize,
+    pub heartbeat_active: usize,
+    pub heartbeat_capacity: usize,
     pub tool_active: usize,
     pub tool_capacity: usize,
     pub project_tool_capacity: usize,
@@ -371,13 +384,15 @@ impl fmt::Display for LaneStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "main={}/{} subagent={}/{} cron={}/{} tools={}/{} per_project={}",
+            "main={}/{} subagent={}/{} cron={}/{} heartbeat={}/{} tools={}/{} per_project={}",
             self.main_active,
             self.main_capacity,
             self.subagent_active,
             self.subagent_capacity,
             self.cron_active,
             self.cron_capacity,
+            self.heartbeat_active,
+            self.heartbeat_capacity,
             self.tool_active,
             self.tool_capacity,
             self.project_tool_capacity,
@@ -582,6 +597,8 @@ mod tests {
         assert_eq!(stats.subagent_capacity, 8);
         assert_eq!(stats.cron_active, 0);
         assert_eq!(stats.cron_capacity, 1024);
+        assert_eq!(stats.heartbeat_active, 0);
+        assert_eq!(stats.heartbeat_capacity, 1024);
         assert_eq!(stats.tool_active, 0);
         assert_eq!(stats.tool_capacity, 32);
         assert_eq!(stats.project_tool_capacity, 4);
@@ -592,6 +609,7 @@ mod tests {
         assert_eq!(Lane::Main.to_string(), "main");
         assert_eq!(Lane::Subagent.to_string(), "subagent");
         assert_eq!(Lane::Cron.to_string(), "cron");
+        assert_eq!(Lane::Heartbeat.to_string(), "heartbeat");
     }
 
     #[test]
@@ -603,13 +621,15 @@ mod tests {
             subagent_capacity: 8,
             cron_active: 0,
             cron_capacity: 1024,
+            heartbeat_active: 1,
+            heartbeat_capacity: 1024,
             tool_active: 0,
             tool_capacity: 32,
             project_tool_capacity: 4,
         };
         assert_eq!(
             stats.to_string(),
-            "main=2/4 subagent=1/8 cron=0/1024 tools=0/32 per_project=4"
+            "main=2/4 subagent=1/8 cron=0/1024 heartbeat=1/1024 tools=0/32 per_project=4"
         );
     }
 }

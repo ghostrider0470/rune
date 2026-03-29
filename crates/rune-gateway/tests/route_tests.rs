@@ -1871,6 +1871,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 4);
     assert_eq!(payload["lane_stats"]["subagent_active"], 0);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
+    assert_eq!(payload["lane_stats"]["heartbeat_active"], 0);
+    assert_eq!(payload["lane_stats"]["heartbeat_capacity"], 1024);
     assert_eq!(payload["lane_stats"]["tool_active"], 0);
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
@@ -2055,6 +2057,8 @@ async fn status_reports_configured_lane_capacities() {
         main_capacity: 6,
         subagent_capacity: 9,
         cron_capacity: 128,
+        global_tool_capacity: 32,
+        project_tool_capacity: 4,
     };
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
@@ -2118,6 +2122,7 @@ async fn status_reports_configured_lane_capacities() {
     assert_eq!(payload["lane_stats"]["main_capacity"], 6);
     assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
+    assert_eq!(payload["lane_stats"]["heartbeat_capacity"], 1024);
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
 }
@@ -2212,6 +2217,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
     let subagent_permit = lane_queue.acquire(Lane::Subagent).await;
+    let heartbeat_permit = lane_queue.acquire(Lane::Heartbeat).await;
     let tool_permit = lane_queue.acquire_tool(Some("project-a")).await;
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2227,12 +2233,15 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["heartbeat"]["active"], 1);
+    assert_eq!(payload["lanes"]["heartbeat"]["capacity"], 1024);
     assert_eq!(payload["lanes"]["tools"]["active"], 1);
     assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
     assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
 
     drop(main_permit);
     drop(subagent_permit);
+    drop(heartbeat_permit);
     drop(tool_permit);
 }
 

@@ -340,10 +340,15 @@ impl TurnExecutor {
         // Acquire a lane permit if a lane queue is configured.
         let _lane_permit = if let Some(ref lq) = self.lane_queue {
             let session_kind = parse_session_kind(&session.kind)?;
-            let lane = Lane::from_session_kind(&session_kind);
+            let lane = if matches!(trigger_kind, TriggerKind::Heartbeat) {
+                Lane::Heartbeat
+            } else {
+                Lane::from_session_kind(&session_kind)
+            };
             debug!(
                 turn_id = %turn_id,
                 lane = %lane,
+                trigger_kind = %trigger_kind.as_str(),
                 "waiting for lane permit"
             );
             Some(lq.acquire(lane).await)
