@@ -21,6 +21,8 @@ pub use rune_tts::{TtsAutoMode, TtsConfig};
 pub struct AppConfig {
     #[serde(default)]
     pub mode: RuntimeMode,
+    #[serde(default)]
+    pub instance: InstanceConfig,
     pub gateway: GatewayConfig,
     pub database: DatabaseConfig,
     #[serde(default)]
@@ -388,6 +390,43 @@ pub struct Capabilities {
     pub channels: Vec<String>,
     pub approval_mode: String,
     pub security_posture: String,
+    pub instance_id: String,
+    pub instance_name: String,
+    pub peer_count: usize,
+    pub configured_models: Vec<String>,
+    pub active_projects: Vec<String>,
+    pub comms_transport: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstanceConfig {
+    #[serde(default = "default_instance_id")]
+    pub id: String,
+    #[serde(default = "default_instance_name")]
+    pub name: String,
+    #[serde(default)]
+    pub peers: Vec<String>,
+}
+
+impl Default for InstanceConfig {
+    fn default() -> Self {
+        Self {
+            id: default_instance_id(),
+            name: default_instance_name(),
+            peers: Vec::new(),
+        }
+    }
+}
+
+fn default_instance_id() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "rune-local".to_string())
+}
+
+fn default_instance_name() -> String {
+    default_instance_id()
 }
 
 impl Capabilities {
@@ -414,6 +453,18 @@ impl Capabilities {
             .api_key
             .as_deref()
             .is_some_and(|k| !k.is_empty());
+        let configured_models = config
+            .models
+            .providers
+            .iter()
+            .flat_map(|provider| provider.models.iter().map(|model| model.id().to_string()))
+            .collect();
+        let active_projects = config
+            .agents
+            .list
+            .iter()
+            .filter_map(|agent| config.agents.effective_workspace(agent).map(str::to_string))
+            .collect();
 
         Self {
             mode: resolved_mode,
@@ -428,6 +479,12 @@ impl Capabilities {
             channels,
             approval_mode: config.approval.mode.as_str().to_string(),
             security_posture: config.security.posture().to_string(),
+            instance_id: config.instance.id.clone(),
+            instance_name: config.instance.name.clone(),
+            peer_count: config.instance.peers.len(),
+            configured_models,
+            active_projects,
+            comms_transport: config.comms.transport.clone(),
         }
     }
 }
