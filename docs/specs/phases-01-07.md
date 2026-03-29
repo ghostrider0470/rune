@@ -1131,6 +1131,8 @@ pub struct LaneQueueConfig {
 main_capacity = 4
 subagent_capacity = 8
 cron_capacity = 1024
+global_tool_capacity = 32
+project_tool_capacity = 4
 ```
 
 Environment overrides:
@@ -1138,6 +1140,8 @@ Environment overrides:
 RUNE_RUNTIME__LANES__MAIN_CAPACITY=6
 RUNE_RUNTIME__LANES__SUBAGENT_CAPACITY=12
 RUNE_RUNTIME__LANES__CRON_CAPACITY=2048
+RUNE_RUNTIME__LANES__GLOBAL_TOOL_CAPACITY=48
+RUNE_RUNTIME__LANES__PROJECT_TOOL_CAPACITY=6
 ```
 
 ### 4.4 Wire Protocol (existing — `runtime.lanes` RPC)
