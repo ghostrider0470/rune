@@ -1242,6 +1242,18 @@ pub struct LaneQueueConfig {
     pub main_capacity: usize,
     pub subagent_capacity: usize,
     pub cron_capacity: usize,
+    #[serde(default = "default_global_tool_capacity")]
+    pub global_tool_capacity: usize,
+    #[serde(default = "default_project_tool_capacity")]
+    pub project_tool_capacity: usize,
+}
+
+const fn default_global_tool_capacity() -> usize {
+    32
+}
+
+const fn default_project_tool_capacity() -> usize {
+    4
 }
 
 impl Default for LaneQueueConfig {
@@ -1250,6 +1262,8 @@ impl Default for LaneQueueConfig {
             main_capacity: 4,
             subagent_capacity: 8,
             cron_capacity: 1024,
+            global_tool_capacity: default_global_tool_capacity(),
+            project_tool_capacity: default_project_tool_capacity(),
         }
     }
 }
@@ -2536,6 +2550,7 @@ mod tests {
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
             std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
+            std::env::remove_var("RUNE_RUNTIME__LANES__GLOBAL_TOOL_CAPACITY");
         }
 
         let path = temp_config_path("file-override");
@@ -2554,6 +2569,8 @@ run_migrations = false
 main_capacity = 6
 subagent_capacity = 9
 cron_capacity = 128
+global_tool_capacity = 64
+project_tool_capacity = 6
 
 [memory]
 level = "keyword"
@@ -2569,6 +2586,8 @@ level = "keyword"
         assert_eq!(config.runtime.lanes.main_capacity, 6);
         assert_eq!(config.runtime.lanes.subagent_capacity, 9);
         assert_eq!(config.runtime.lanes.cron_capacity, 128);
+        assert_eq!(config.runtime.lanes.global_tool_capacity, 64);
+        assert_eq!(config.runtime.lanes.project_tool_capacity, 6);
         assert_eq!(config.memory.level, Some(MemoryLevel::Keyword));
         assert_eq!(config.memory.requested_level(), MemoryLevel::Keyword);
 
@@ -2588,6 +2607,7 @@ port = 8787
 
 [runtime.lanes]
 main_capacity = 4
+global_tool_capacity = 24
 "#,
         )
         .unwrap();
@@ -2595,18 +2615,21 @@ main_capacity = 4
         unsafe {
             std::env::set_var("RUNE_GATEWAY__PORT", "9090");
             std::env::set_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY", "12");
+            std::env::set_var("RUNE_RUNTIME__LANES__GLOBAL_TOOL_CAPACITY", "48");
             std::env::set_var("RUNE_BROWSER__ENABLED", "true");
             std::env::set_var("RUNE_MEMORY__LEVEL", "file");
         }
         let config = AppConfig::load(Some(&path)).unwrap();
         assert_eq!(config.gateway.port, 9090);
         assert_eq!(config.runtime.lanes.main_capacity, 12);
+        assert_eq!(config.runtime.lanes.global_tool_capacity, 48);
         assert!(config.browser.enabled);
         assert_eq!(config.memory.level, Some(MemoryLevel::File));
         assert_eq!(config.memory.requested_level(), MemoryLevel::File);
         unsafe {
             std::env::remove_var("RUNE_GATEWAY__PORT");
             std::env::remove_var("RUNE_RUNTIME__LANES__MAIN_CAPACITY");
+            std::env::remove_var("RUNE_RUNTIME__LANES__GLOBAL_TOOL_CAPACITY");
             std::env::remove_var("RUNE_BROWSER__ENABLED");
             std::env::remove_var("RUNE_MEMORY__LEVEL");
         }
