@@ -2085,6 +2085,9 @@ pub struct CreateSessionRequest {
     /// Optional shared scratchpad path used by parent and subagent.
     #[serde(default)]
     pub shared_scratchpad_path: Option<String>,
+    /// Optional upstream delegation plan metadata captured from a parent instance.
+    #[serde(default)]
+    pub delegation_plan: Option<serde_json::Value>,
 }
 
 fn default_kind() -> String {
@@ -2239,8 +2242,21 @@ pub async fn create_session(
     let kind = parse_session_kind(&body.kind)?;
 
     let row = if kind == SessionKind::Subagent
-        && (body.delegation_context.is_some() || body.shared_scratchpad_path.is_some())
+        && (body.delegation_context.is_some()
+            || body.shared_scratchpad_path.is_some()
+            || body.delegation_plan.is_some())
     {
+        let mut delegation_context = body.delegation_context.unwrap_or(serde_json::json!({}));
+        if let Some(plan) = body.delegation_plan {
+            if let Some(context) = delegation_context.as_object_mut() {
+                context.insert("delegation_plan".to_string(), plan);
+            } else {
+                delegation_context = serde_json::json!({
+                    "value": delegation_context,
+                    "delegation_plan": plan,
+                });
+            }
+        }
         state
             .session_engine
             .create_subagent_session_with_context(
@@ -2248,7 +2264,7 @@ pub async fn create_session(
                 body.requester_session_id,
                 body.channel_ref,
                 body.mode,
-                body.delegation_context.unwrap_or(serde_json::json!({})),
+                delegation_context,
                 body.shared_scratchpad_path,
             )
             .await
