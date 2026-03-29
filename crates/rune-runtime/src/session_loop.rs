@@ -639,6 +639,7 @@ impl SessionLoop {
                 None,
                 Some(routing_key.to_string()),
                 None,
+                None,
             )
             .await?;
 
