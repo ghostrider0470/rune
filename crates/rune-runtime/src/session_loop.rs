@@ -66,6 +66,40 @@ pub struct SessionLoop {
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
 }
 
+fn classify_message_priority(content: &str) -> EventPriority {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return PRIORITY_BACKGROUND;
+    }
+
+    if is_comms_directive_message(trimmed) {
+        return PRIORITY_COMMS_DIRECTIVE;
+    }
+
+    if is_cron_message(trimmed) {
+        return PRIORITY_CRON;
+    }
+
+    PRIORITY_USER_MESSAGE
+}
+
+fn is_comms_directive_message(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    let directive_prefixes = [
+        "directive:",
+        "comms directive:",
+        "[directive]",
+        "[comms] directive",
+    ];
+    directive_prefixes.iter().any(|prefix| lower.starts_with(prefix))
+}
+
+fn is_cron_message(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    let cron_prefixes = ["cron:", "scheduled:", "heartbeat:", "reminder:"];
+    cron_prefixes.iter().any(|prefix| lower.starts_with(prefix))
+}
+
 /// MIME types considered audio for transcription purposes.
 const AUDIO_MIME_TYPES: &[&str] = &[
     "audio/ogg",
@@ -182,7 +216,7 @@ impl SessionLoop {
 
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
         match event {
-            InboundEvent::Message(_) => PRIORITY_USER_MESSAGE,
+            InboundEvent::Message(msg) => classify_message_priority(&msg.content),
             InboundEvent::Reaction { .. }
             | InboundEvent::Edit { .. }
             | InboundEvent::Delete { .. }
