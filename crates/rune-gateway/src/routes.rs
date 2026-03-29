@@ -5407,6 +5407,31 @@ pub async fn v1_memory_delete(
     Ok(Json(json!({"deleted": true, "id": id})))
 }
 
+/// `POST /api/v1/memory/vault/sync` — full vault sync: re-export all memories
+/// as `.md` files with `[[wikilinks]]`, pruning orphaned files.
+pub async fn v1_memory_vault_sync(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mem0 = state
+        .turn_executor
+        .mem0()
+        .ok_or_else(|| GatewayError::BadRequest("mem0 not enabled".into()))?;
+
+    let start = std::time::Instant::now();
+    let report = mem0
+        .vault_full_sync()
+        .await
+        .map_err(|e| GatewayError::Internal(format!("vault sync failed: {e}")))?;
+
+    Ok(Json(json!({
+        "created": report.created,
+        "updated": report.updated,
+        "deleted": report.deleted,
+        "errors": report.errors,
+        "duration_ms": start.elapsed().as_millis() as u64,
+    })))
+}
+
 // ── Logs ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

@@ -663,6 +663,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/v1/memory/store", post(routes::v1_memory_store))
         .route("/api/v1/memory/list", get(routes::v1_memory_list))
         .route("/api/v1/memory/{id}", delete(routes::v1_memory_delete))
+        .route("/api/v1/memory/vault/sync", post(routes::v1_memory_vault_sync))
         // Log routes
         .route("/api/logs", get(routes::query_logs))
         // Doctor routes

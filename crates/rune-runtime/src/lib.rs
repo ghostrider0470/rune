@@ -20,6 +20,7 @@ pub mod heartbeat;
 pub mod hooks;
 pub mod lane_queue;
 pub mod mem0;
+pub mod mem0_vault;
 pub mod memory;
 pub mod merge_queue;
 pub mod orchestrator;
