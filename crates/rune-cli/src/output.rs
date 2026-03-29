@@ -52,6 +52,21 @@ impl fmt::Display for StatusResponse {
         if let Some(u) = self.uptime_seconds {
             write!(f, "\nUptime: {u}s")?;
         }
+        if let Some(ref instance_id) = self.instance_id {
+            write!(f, "\nInstance ID: {instance_id}")?;
+        }
+        if let Some(ref instance_name) = self.instance_name {
+            write!(f, "\nInstance name: {instance_name}")?;
+        }
+        if !self.instance_roles.is_empty() {
+            write!(f, "\nRoles: {}", self.instance_roles.join(", "))?;
+        }
+        if let Some(version) = self.capabilities_version {
+            write!(f, "\nCapabilities version: {version}")?;
+        }
+        if let Some(ref advertised_addr) = self.advertised_addr {
+            write!(f, "\nAdvertised address: {advertised_addr}")?;
+        }
         Ok(())
     }
 }
