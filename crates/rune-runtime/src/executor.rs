@@ -30,7 +30,7 @@ use crate::hooks::{HookEvent, HookRegistry};
 use crate::lane_queue::{Lane, LaneQueue};
 use crate::mem0::Mem0Engine;
 use crate::memory::MemoryLoader;
-use crate::session_metadata::selected_model;
+use crate::session_metadata::{selected_model, session_mode_prompt_section};
 use crate::skill::SkillRegistry;
 use crate::usage::UsageAccumulator;
 use crate::workspace::WorkspaceLoader;
@@ -871,6 +871,9 @@ impl TurnExecutor {
                 self.context_assembler
                     .session_metadata_sections(session_kind.clone(), &session.metadata),
             );
+            if let Some(section) = session_mode_prompt_section(&session.metadata) {
+                extra_system_sections.push(section);
+            }
 
             // Inject recalled mem0 memories into the system prompt
             if let Some(ref section) = mem0_prompt_section {
