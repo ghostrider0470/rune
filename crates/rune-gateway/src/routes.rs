@@ -253,6 +253,7 @@ pub struct PeerHealthAlert {
 pub struct PeerHealthAlertsResponse {
     pub status: String,
     pub alerts: Vec<PeerHealthAlert>,
+    pub alert_count: usize,
     pub checked_at: String,
 }
 
@@ -865,6 +866,7 @@ fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAl
     let status = if alerts.is_empty() { "ok" } else { "degraded" };
     PeerHealthAlertsResponse {
         status: status.to_string(),
+        alert_count: alerts.len(),
         alerts,
         checked_at,
     }
