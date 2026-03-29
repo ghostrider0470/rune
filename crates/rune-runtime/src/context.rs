@@ -131,7 +131,37 @@ pub struct ContextAssemblyReport {
     pub tiers: Vec<ContextTierUsage>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextTierSnapshot {
+    pub kind: ContextTierKind,
+    pub token_budget: usize,
+    pub priority: u8,
+    pub staleness_policy: ContextStalenessPolicy,
+    pub loaded: bool,
+    pub estimated_tokens: usize,
+    pub source: String,
+}
+
+impl From<&ContextTierUsage> for ContextTierSnapshot {
+    fn from(value: &ContextTierUsage) -> Self {
+        Self {
+            kind: value.kind.clone(),
+            token_budget: value.token_budget,
+            priority: value.priority,
+            staleness_policy: value.staleness_policy.clone(),
+            loaded: value.loaded,
+            estimated_tokens: value.estimated_tokens,
+            source: value.source.to_string(),
+        }
+    }
+}
+
 impl ContextAssemblyReport {
+    #[must_use]
+    pub fn snapshots(&self) -> Vec<ContextTierSnapshot> {
+        self.tiers.iter().map(ContextTierSnapshot::from).collect()
+    }
+
     #[must_use]
     pub fn identity_tokens(&self) -> usize {
         self.tokens_for(ContextTierKind::Identity)
