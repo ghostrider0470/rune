@@ -16,6 +16,7 @@ use crate::session_metadata::{set_context_tiers, set_session_mode};
 pub struct SessionEngine {
     session_repo: Arc<dyn SessionRepo>,
     transcript_repo: Option<Arc<dyn TranscriptRepo>>,
+    context_assembler: ContextAssembler,
 }
 
 impl SessionEngine {
@@ -23,6 +24,7 @@ impl SessionEngine {
         Self {
             session_repo,
             transcript_repo: None,
+            context_assembler: ContextAssembler::new(""),
         }
     }
 
@@ -33,6 +35,11 @@ impl SessionEngine {
 
     pub fn with_transcript_repo(mut self, transcript_repo: Arc<dyn TranscriptRepo>) -> Self {
         self.transcript_repo = Some(transcript_repo);
+        self
+    }
+
+    pub fn with_context_assembler(mut self, context_assembler: ContextAssembler) -> Self {
+        self.context_assembler = context_assembler;
         self
     }
 
@@ -66,7 +73,7 @@ impl SessionEngine {
             .as_deref()
             .map(|mode| set_session_mode(&serde_json::json!({}), mode))
             .unwrap_or_else(|| serde_json::json!({}));
-        let metadata = seed_context_tier_metadata(metadata);
+        let metadata = seed_context_tier_metadata(metadata, &self.context_assembler);
 
         let new_session = NewSession {
             id: id.into_uuid(),
@@ -289,7 +296,10 @@ fn merge_json(target: &mut serde_json::Value, patch: serde_json::Value) {
     }
 }
 
-fn seed_context_tier_metadata(metadata: serde_json::Value) -> serde_json::Value {
-    let report = ContextAssembler::new("").analyze_context_usage(None, None, &[], 0);
+fn seed_context_tier_metadata(
+    metadata: serde_json::Value,
+    context_assembler: &ContextAssembler,
+) -> serde_json::Value {
+    let report = context_assembler.analyze_context_usage(None, None, &[], 0);
     set_context_tiers(&metadata, &report)
 }
