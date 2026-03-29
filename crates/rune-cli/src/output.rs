@@ -310,12 +310,59 @@ pub struct DelegationTaskContract {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationEndpointSummary {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub transport: String,
+    pub health_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationRoutingSummary {
+    pub mode: String,
+    pub detail: String,
+    pub peer_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationConflictCapabilitySummary {
+    pub required: bool,
+    pub mechanism: String,
+    pub enforced_by: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationTaskStatusSummary {
+    pub states: Vec<String>,
+    pub terminal_states: Vec<String>,
+    pub sender_visibility: String,
+    pub timeout_behavior: String,
+    pub failure_behavior: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationResultContractSummary {
+    pub status_field: String,
+    pub artifact_field: String,
+    pub error_field: String,
+    pub finished_at_field: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationPlanResponse {
     pub strategy: String,
     pub selected_peer: Option<PeerSummary>,
     pub candidates: Vec<PeerSummary>,
     pub detail: String,
     pub task_contract: DelegationTaskContract,
+    pub sender: Option<DelegationEndpointSummary>,
+    pub receiver: Option<DelegationEndpointSummary>,
+    pub routing: Option<DelegationRoutingSummary>,
+    pub branch_reservation: Option<DelegationConflictCapabilitySummary>,
+    pub file_locks: Option<DelegationConflictCapabilitySummary>,
+    pub task_status: Option<DelegationTaskStatusSummary>,
+    pub result: Option<DelegationResultContractSummary>,
 }
 
 impl fmt::Display for DelegationPlanResponse {
@@ -6391,6 +6438,55 @@ mod tests {
                 optional_fields: vec!["target_peer_id".into()],
                 result_fields: vec!["status".into()],
             },
+            sender: Some(DelegationEndpointSummary {
+                instance_id: "sender-a".into(),
+                instance_name: "Sender A".into(),
+                transport: "filesystem".into(),
+                health_url: Some("http://sender-a/api/v1/instance/health".into()),
+            }),
+            receiver: Some(DelegationEndpointSummary {
+                instance_id: "peer-a".into(),
+                instance_name: "Peer A".into(),
+                transport: "http".into(),
+                health_url: Some("http://peer-a/api/v1/instance/health".into()),
+            }),
+            routing: Some(DelegationRoutingSummary {
+                mode: "least_busy".into(),
+                detail: "selected least-busy healthy peer 'peer-a'".into(),
+                peer_count: 1,
+            }),
+            branch_reservation: Some(DelegationConflictCapabilitySummary {
+                required: true,
+                mechanism: "branch_reservation".into(),
+                enforced_by: "orchestrator".into(),
+                detail: "reserve branch names".into(),
+            }),
+            file_locks: Some(DelegationConflictCapabilitySummary {
+                required: true,
+                mechanism: "file_locks".into(),
+                enforced_by: "orchestrator".into(),
+                detail: "acquire file locks".into(),
+            }),
+            task_status: Some(DelegationTaskStatusSummary {
+                states: vec![
+                    "submitted".into(),
+                    "accepted".into(),
+                    "running".into(),
+                    "completed".into(),
+                    "failed".into(),
+                    "timeout".into(),
+                ],
+                terminal_states: vec!["completed".into(), "failed".into(), "timeout".into()],
+                sender_visibility: "tracked".into(),
+                timeout_behavior: "timeout".into(),
+                failure_behavior: "failed".into(),
+            }),
+            result: Some(DelegationResultContractSummary {
+                status_field: "status".into(),
+                artifact_field: "artifacts".into(),
+                error_field: "error".into(),
+                finished_at_field: "finished_at".into(),
+            }),
         };
         let out = render(&response, OutputFormat::Human);
         assert!(out.contains("Delegation strategy: least_busy"));
