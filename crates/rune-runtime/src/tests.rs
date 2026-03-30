@@ -2899,6 +2899,38 @@ async fn create_subagent_session_with_context_persists_delegation_slice_and_scra
 }
 
 #[test]
+fn session_loop_classifies_configurable_sources_in_priority_order() {
+    let heartbeat = crate::session_loop::SessionLoop::source_priority_for_test("heartbeat");
+    let telegram = crate::session_loop::SessionLoop::source_priority_for_test("telegram");
+    let comms = crate::session_loop::SessionLoop::source_priority_for_test("comms");
+    let cron = crate::session_loop::SessionLoop::source_priority_for_test("cron");
+    let background = crate::session_loop::SessionLoop::source_priority_for_test("reaction");
+
+    assert_eq!(heartbeat, 0);
+    assert_eq!(telegram, 1);
+    assert_eq!(comms, 2);
+    assert_eq!(cron, 3);
+    assert_eq!(background, 4);
+    assert!(heartbeat < telegram);
+    assert!(telegram < comms);
+    assert!(comms < cron);
+    assert!(cron < background);
+}
+
+#[test]
+fn session_loop_normalizes_source_priority_aliases() {
+    let heartbeat = crate::session_loop::SessionLoop::source_priority_for_test("health_check");
+    let telegram = crate::session_loop::SessionLoop::source_priority_for_test("telegram_message");
+    let comms = crate::session_loop::SessionLoop::source_priority_for_test("comms_directive");
+    let cron = crate::session_loop::SessionLoop::source_priority_for_test("scheduled");
+
+    assert_eq!(heartbeat, crate::session_loop::PRIORITY_IMMEDIATE);
+    assert_eq!(telegram, crate::session_loop::PRIORITY_USER_MESSAGE);
+    assert_eq!(comms, crate::session_loop::PRIORITY_COMMS_DIRECTIVE);
+    assert_eq!(cron, crate::session_loop::PRIORITY_CRON);
+}
+
+#[test]
 fn session_loop_prioritizes_user_messages_above_background_events() {
     let message = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
         channel_id: rune_core::ChannelId::new(),
@@ -2920,5 +2952,35 @@ fn session_loop_prioritizes_user_messages_above_background_events() {
     let background_priority = crate::session_loop::SessionLoop::event_priority_for_test(&reaction);
 
     assert!(user_priority < background_priority);
-    assert_eq!(user_priority, 0);
+    assert_eq!(user_priority, crate::session_loop::PRIORITY_USER_MESSAGE);
+}
+
+#[test]
+fn session_loop_assigns_comms_directives_between_user_and_cron_priority() {
+    let directive = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "system".to_string(),
+        content: "directive: switch to issue #418".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-3".to_string(),
+    });
+    let cron = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "scheduler".to_string(),
+        content: "cron: hourly sync".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-4".to_string(),
+    });
+
+    let directive_priority = crate::session_loop::SessionLoop::event_priority_for_test(&directive);
+    let cron_priority = crate::session_loop::SessionLoop::event_priority_for_test(&cron);
+
+    assert_eq!(directive_priority, crate::session_loop::PRIORITY_COMMS_DIRECTIVE);
+    assert_eq!(cron_priority, crate::session_loop::PRIORITY_CRON);
+    assert!(directive_priority > crate::session_loop::PRIORITY_USER_MESSAGE);
+    assert!(directive_priority < cron_priority);
 }
