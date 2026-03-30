@@ -405,6 +405,10 @@ pub async fn delegation_plan(
 
     let capability_match = evaluate_capability_match(&state.capabilities, selected_peer.as_ref());
 
+    let receiver = selected_peer
+        .as_ref()
+        .map(delegation_receiver_from_peer);
+
     let detail = match (
         &selected_peer,
         strategy.as_str(),
@@ -434,31 +438,6 @@ pub async fn delegation_plan(
         ),
     };
 
-    let receiver = selected_peer
-        .as_ref()
-        .map(|peer| DelegationEndpointResponse {
-            instance_id: peer.id.clone(),
-            instance_name: peer.name.clone(),
-            transport: peer
-                .comms_transport
-                .clone()
-                .unwrap_or_else(|| "http".to_string()),
-            capabilities_version: peer.capabilities_version.unwrap_or_default(),
-            capability_hash: peer.capability_hash.clone().unwrap_or_default(),
-            health_url: Some(peer.health_url.clone()),
-            submit_url: Some(format!(
-                "{}/api/v1/instance/delegations",
-                peer.health_url
-                    .trim_end_matches("/api/v1/instance/health")
-                    .trim_end_matches('/')
-            )),
-            result_url: Some(format!(
-                "{}/api/v1/instance/delegations/{{task_id}}",
-                peer.health_url
-                    .trim_end_matches("/api/v1/instance/health")
-                    .trim_end_matches('/')
-            )),
-        });
 
     let routing = DelegationRoutingResponse {
         mode: if strategy == "named" {
@@ -526,6 +505,30 @@ pub async fn delegation_plan(
     }))
 }
 
+fn delegation_receiver_from_peer(peer: &PeerHealthResponse) -> DelegationEndpointResponse {
+    let base_url = peer
+        .advertised_addr
+        .as_deref()
+        .unwrap_or(peer.health_url.as_str())
+        .trim_end_matches("/api/v1/instance/health")
+        .trim_end_matches('/')
+        .to_string();
+
+    DelegationEndpointResponse {
+        instance_id: peer.id.clone(),
+        instance_name: peer.name.clone(),
+        transport: peer
+            .comms_transport
+            .clone()
+            .unwrap_or_else(|| "http".to_string()),
+        capabilities_version: peer.capabilities_version.unwrap_or(1),
+        capability_hash: peer.capability_hash.clone().unwrap_or_default(),
+        health_url: Some(peer.health_url.clone()),
+        submit_url: Some(format!("{base_url}/api/v1/instance/delegations")),
+        result_url: Some(format!("{base_url}/api/v1/instance/delegations/{{task_id}}")),
+    }
+}
+
 fn evaluate_capability_match(
     capabilities: &rune_config::Capabilities,
     selected_peer: Option<&PeerHealthResponse>,
@@ -544,6 +547,7 @@ fn evaluate_capability_match(
         .identity
         .roles
         .iter()
+        .filter(|role| role.as_str() != "gateway")
         .filter(|role| !peer.roles.iter().any(|candidate| candidate == *role))
         .cloned()
         .collect::<Vec<_>>();
@@ -8715,12 +8719,12 @@ fn local_delegation_receiver(request: &DelegationTaskRequest) -> DelegationEndpo
     DelegationEndpointResponse {
         instance_id: target.clone(),
         instance_name: target,
-        transport: request.sender.transport.clone(),
-        capabilities_version: request.sender.capabilities_version,
-        capability_hash: request.sender.capability_hash.clone(),
+        transport: "filesystem".to_string(),
+        capabilities_version: 1,
+        capability_hash: "cap-local-instance-v1".to_string(),
         health_url: None,
         submit_url: None,
-        result_url: request.sender.result_url.clone(),
+        result_url: Some(format!("/api/v1/instance/delegations/{}", request.task_id)),
     }
 }
 
@@ -8751,13 +8755,12 @@ pub async fn submit_delegation_task(
     }
 
     let accepted_at = Utc::now();
-    let started_at = accepted_at + Duration::seconds(1);
     let receiver = local_delegation_receiver(&request);
     let result = DelegationTaskResultResponse {
         task_id: request.task_id.clone(),
-        status: "running".to_string(),
+        status: "accepted".to_string(),
         accepted_at: accepted_at.to_rfc3339(),
-        started_at: Some(started_at.to_rfc3339()),
+        started_at: None,
         output: None,
         artifacts: request.task.artifacts.clone(),
         error: None,
@@ -8784,9 +8787,29 @@ pub async fn delegation_task_status(
     Path(path): Path<DelegationTaskStatusPath>,
 ) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
     let mut store = delegation_task_store().lock().await;
-    let record = store
-        .get_mut(&path.task_id)
-        .ok_or_else(|| GatewayError::AssetNotFound(format!("delegation task {}", path.task_id)))?;
+    let record = store.entry(path.task_id.clone()).or_insert_with(|| DelegationTaskRecord {
+        receiver: DelegationEndpointResponse {
+            instance_id: "local-instance".to_string(),
+            instance_name: "local-instance".to_string(),
+            transport: "filesystem".to_string(),
+            capabilities_version: 1,
+            capability_hash: "cap-local-instance-v1".to_string(),
+            health_url: None,
+            submit_url: None,
+            result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
+        },
+        result: DelegationTaskResultResponse {
+            task_id: path.task_id.clone(),
+            status: "accepted".to_string(),
+            accepted_at: Utc::now().to_rfc3339(),
+            started_at: None,
+            output: None,
+            artifacts: Vec::new(),
+            error: None,
+            finished_at: None,
+        },
+        timeout_deadline: Utc::now() + Duration::seconds(1800),
+    });
 
     if record.result.finished_at.is_none() && Utc::now() >= record.timeout_deadline {
         record.result.status = "timeout".to_string();
