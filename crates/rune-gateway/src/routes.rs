@@ -253,6 +253,11 @@ pub struct PeerHealthAlert {
     pub checked_at: String,
     pub last_seen_at: Option<String>,
     pub health_url: String,
+    pub first_observed_at: Option<String>,
+    pub last_observed_at: Option<String>,
+    pub last_notified_at: Option<String>,
+    pub consecutive_failures: u32,
+    pub should_notify: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -855,20 +860,35 @@ pub async fn peer_health_alerts(
     State(state): State<AppState>,
 ) -> Result<Json<PeerHealthAlertsResponse>, GatewayError> {
     let peers = collect_peer_health(state.capabilities.peers.clone()).await;
-    Ok(Json(peer_health_alerts_from_peers(peers)))
+    Ok(Json(peer_health_alerts_from_peers(&state.peer_health_alert_cache, peers).await))
 }
 
-fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAlertsResponse {
-    let checked_at = Utc::now().to_rfc3339();
-    let alerts = peers
-        .into_iter()
-        .filter(|peer| peer.status != "healthy")
-        .map(|peer| PeerHealthAlert {
+async fn peer_health_alerts_from_peers(
+    cache: &crate::state::PeerHealthAlertCache,
+    peers: Vec<PeerHealthResponse>,
+) -> PeerHealthAlertsResponse {
+    let checked_at = Utc::now();
+    let healthy_peer_ids = peers
+        .iter()
+        .filter(|peer| peer.status == "healthy")
+        .map(|peer| peer.id.clone())
+        .collect::<Vec<_>>();
+    cache.clear_healthy(&healthy_peer_ids).await;
+
+    let mut alerts = Vec::new();
+    for peer in peers.into_iter().filter(|peer| peer.status != "healthy") {
+        let state = cache.transition(&peer.id, &peer.status, checked_at).await;
+        let should_notify = matches!(
+            state.last_notified_at,
+            None
+        ) || state.status != "degraded" && state.consecutive_failures == 1;
+
+        alerts.push(PeerHealthAlert {
             severity: match peer.status.as_str() {
                 "unreachable" => "critical".to_string(),
                 _ => "warning".to_string(),
             },
-            peer_id: peer.id,
+            peer_id: peer.id.clone(),
             peer_name: peer.name,
             status: peer.status,
             observed_status: peer.observed_status,
@@ -876,8 +896,14 @@ fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAl
             checked_at: peer.checked_at,
             last_seen_at: peer.last_seen_at,
             health_url: peer.health_url,
-        })
-        .collect::<Vec<_>>();
+            first_observed_at: Some(state.first_observed_at.to_rfc3339()),
+            last_observed_at: Some(state.last_observed_at.to_rfc3339()),
+            last_notified_at: state.last_notified_at.map(|value| value.to_rfc3339()),
+            consecutive_failures: state.consecutive_failures,
+            should_notify,
+        });
+    }
+
     let unreachable_count = alerts
         .iter()
         .filter(|alert| alert.status == "unreachable")
@@ -908,7 +934,7 @@ fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAl
         status: status.to_string(),
         alert_count: alerts.len(),
         alerts,
-        checked_at,
+        checked_at: checked_at.to_rfc3339(),
         failover_ready,
         work_absorption_required,
         target_recovery_sla_seconds,
@@ -1632,7 +1658,11 @@ pub async fn dashboard_summary(
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
     let config = state.config.read().await;
 
-    let peer_health = peer_health_alerts_from_peers(collect_peer_health(state.capabilities.peers.clone()).await);
+    let peer_health = peer_health_alerts_from_peers(
+        &state.peer_health_alert_cache,
+        collect_peer_health(state.capabilities.peers.clone()).await,
+    )
+    .await;
 
     Ok(Json(DashboardSummaryResponse {
         gateway_status: "running",
@@ -6413,7 +6443,9 @@ fn memory_result_is_private(result: &MemorySearchResult) -> bool {
 fn memory_result_scope(result: &MemorySearchResult) -> &'static str {
     if memory_result_is_private(result) {
         "private"
-    } else if result.file_path.starts_with("memory/projects/") || result.file_path.contains("/projects/") {
+    } else if result.file_path.starts_with("memory/projects/")
+        || result.file_path.contains("/projects/")
+    {
         "project"
     } else {
         "shared"
@@ -6550,13 +6582,8 @@ async fn federated_memory_search(
         };
         remote_pending += payload.remote_pending;
 
-        let mut peer_results = annotate_memory_results(
-            payload.results,
-            &peer.id,
-            &peer.id,
-            true,
-            include_private,
-        );
+        let mut peer_results =
+            annotate_memory_results(payload.results, &peer.id, &peer.id, true, include_private);
         merged.append(&mut peer_results);
     }
 
@@ -8399,9 +8426,10 @@ mod tests {
             );
         }
     }
-    #[test]
-    fn peer_health_alerts_empty_when_all_peers_healthy() {
-        let response = peer_health_alerts_from_peers(vec![PeerHealthResponse {
+    #[tokio::test]
+    async fn peer_health_alerts_empty_when_all_peers_healthy() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(&cache, vec![PeerHealthResponse {
             id: "peer-a".to_string(),
             name: "Peer A".to_string(),
             health_url: "http://peer-a/api/v1/instance/health".to_string(),
@@ -8423,17 +8451,21 @@ mod tests {
             comms_transport: Some("http".to_string()),
             configured_models: vec!["gpt-4.1".to_string()],
             active_projects: vec!["/workspace/rune".to_string()],
-        }]);
+        }]).await;
         assert_eq!(response.status, "ok");
         assert!(response.alerts.is_empty());
         assert!(response.failover_ready);
         assert!(!response.work_absorption_required);
-        assert_eq!(response.summary, "all peers healthy; no failover action required");
+        assert_eq!(
+            response.summary,
+            "all peers healthy; no failover action required"
+        );
     }
 
-    #[test]
-    fn peer_health_alerts_expose_observed_status_last_seen_and_health_url() {
-        let response = peer_health_alerts_from_peers(vec![PeerHealthResponse {
+    #[tokio::test]
+    async fn peer_health_alerts_expose_observed_status_last_seen_and_health_url() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(&cache, vec![PeerHealthResponse {
             id: "peer-a".to_string(),
             name: "Peer A".to_string(),
             health_url: "http://peer-a/api/v1/instance/health".to_string(),
@@ -8451,7 +8483,7 @@ mod tests {
             comms_transport: None,
             configured_models: Vec::new(),
             active_projects: Vec::new(),
-        }]);
+        }]).await;
         assert_eq!(response.alert_count, 1);
         assert_eq!(response.alerts[0].status, "degraded");
         assert_eq!(response.alerts[0].observed_status, "invalid-payload");
@@ -8465,9 +8497,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn peer_health_alerts_expose_partition_guard_metadata() {
-        let response = peer_health_alerts_from_peers(vec![
+    #[tokio::test]
+    async fn peer_health_alerts_expose_partition_guard_metadata() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(&cache, vec![
             PeerHealthResponse {
                 id: "peer-a".to_string(),
                 name: "Peer A".to_string(),
@@ -8506,16 +8539,21 @@ mod tests {
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
             },
-        ]);
+        ]).await;
 
         assert!(response.network_partition_suspected);
         assert_eq!(response.target_recovery_sla_seconds, 60);
-        assert!(response.split_brain_guard.contains("degraded peers stay non-failover"));
+        assert!(
+            response
+                .split_brain_guard
+                .contains("degraded peers stay non-failover")
+        );
     }
 
-    #[test]
-    fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
-        let response = peer_health_alerts_from_peers(vec![
+    #[tokio::test]
+    async fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(&cache, vec![
             PeerHealthResponse {
                 id: "peer-a".to_string(),
                 name: "Peer A".to_string(),
@@ -8554,7 +8592,7 @@ mod tests {
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
             },
-        ]);
+        ]).await;
         assert_eq!(response.status, "degraded");
         assert_eq!(response.alerts.len(), 2);
         assert_eq!(response.alerts[0].severity, "critical");
@@ -8723,7 +8761,6 @@ pub async fn delegation_task_status(
         },
     }))
 }
-
 
 #[cfg(test)]
 mod memory_search_federation_tests {

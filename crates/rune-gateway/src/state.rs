@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use rune_config::{AppConfig, Capabilities};
@@ -197,6 +198,76 @@ impl TokenMetricsStore {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct PeerHealthAlertState {
+    pub status: String,
+    pub first_observed_at: DateTime<Utc>,
+    pub last_observed_at: DateTime<Utc>,
+    pub last_notified_at: Option<DateTime<Utc>>,
+    pub consecutive_failures: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PeerHealthAlertCache {
+    inner: Arc<Mutex<HashMap<String, PeerHealthAlertState>>>,
+}
+
+impl PeerHealthAlertCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn transition(
+        &self,
+        peer_id: &str,
+        status: &str,
+        now: DateTime<Utc>,
+    ) -> PeerHealthAlertState {
+        let mut inner = self.inner.lock().await;
+        let entry = inner
+            .entry(peer_id.to_string())
+            .and_modify(|state| {
+                if state.status == status {
+                    state.last_observed_at = now;
+                    state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+                } else {
+                    state.status = status.to_string();
+                    state.first_observed_at = now;
+                    state.last_observed_at = now;
+                    state.last_notified_at = None;
+                    state.consecutive_failures = 1;
+                }
+            })
+            .or_insert_with(|| PeerHealthAlertState {
+                status: status.to_string(),
+                first_observed_at: now,
+                last_observed_at: now,
+                last_notified_at: None,
+                consecutive_failures: 1,
+            });
+
+        entry.clone()
+    }
+
+    pub async fn mark_notified(
+        &self,
+        peer_id: &str,
+        notified_at: DateTime<Utc>,
+    ) -> Option<PeerHealthAlertState> {
+        let mut inner = self.inner.lock().await;
+        let state = inner.get_mut(peer_id)?;
+        state.last_notified_at = Some(notified_at);
+        Some(state.clone())
+    }
+
+    pub async fn clear_healthy(&self, healthy_peer_ids: &[String]) {
+        let mut inner = self.inner.lock().await;
+        for peer_id in healthy_peer_ids {
+            inner.remove(peer_id);
+        }
+    }
+}
+
 impl WebChatRateLimiter {
     pub fn new(window: Duration, max_requests: u32) -> Self {
         Self {
@@ -315,4 +386,6 @@ pub struct AppState {
     pub comms_client: Option<Arc<CommsClient>>,
     /// Rolling in-memory prompt cache metrics grouped by provider/model.
     pub token_metrics: TokenMetricsStore,
+    // In-memory peer health alert transition cache used for failover/notification semantics.
+    pub peer_health_alert_cache: PeerHealthAlertCache,
 }
