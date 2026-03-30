@@ -2984,3 +2984,34 @@ fn session_loop_assigns_comms_directives_between_user_and_cron_priority() {
     assert!(directive_priority > crate::session_loop::PRIORITY_USER_MESSAGE);
     assert!(directive_priority < cron_priority);
 }
+
+#[test]
+fn session_loop_supports_configurable_channel_source_priorities() {
+    let config = rune_config::SourcePriorityConfig {
+        immediate: vec!["healthz".to_string()],
+        user: vec!["slack".to_string()],
+        comms: vec!["supervisor".to_string()],
+        cron: vec!["nightly".to_string()],
+    };
+
+    assert_eq!(
+        crate::session_loop::SessionLoop::source_priority_with_config_for_test("healthz", &config),
+        crate::session_loop::PRIORITY_IMMEDIATE
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::source_priority_with_config_for_test("slack", &config),
+        crate::session_loop::PRIORITY_USER_MESSAGE
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::source_priority_with_config_for_test("supervisor", &config),
+        crate::session_loop::PRIORITY_COMMS_DIRECTIVE
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::source_priority_with_config_for_test("nightly", &config),
+        crate::session_loop::PRIORITY_CRON
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::source_priority_with_config_for_test("telegram", &config),
+        crate::session_loop::PRIORITY_BACKGROUND
+    );
+}

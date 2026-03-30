@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
-use rune_config::{AgentsConfig, ModelsConfig};
+use rune_config::{AgentsConfig, ModelsConfig, SourcePriorityConfig};
 use rune_core::SessionKind;
 use rune_store::models::SessionRow;
 use rune_store::repos::SessionRepo;
@@ -128,7 +128,7 @@ impl SessionLoop {
         channel: Box<dyn ChannelAdapter>,
         agents: AgentsConfig,
         models: ModelsConfig,
-    ) -> Self {
+        ) -> Self {
         Self {
             engine,
             turn_executor,
@@ -226,17 +226,27 @@ impl SessionLoop {
     }
 
     pub fn classify_source_priority(source: &str) -> EventPriority {
-        match source.trim().to_ascii_lowercase().as_str() {
-            "heartbeat" | "health" | "health-check" | "health_check" => PRIORITY_IMMEDIATE,
-            "telegram" | "telegram-message" | "telegram_message" | "user" => {
-                PRIORITY_USER_MESSAGE
-            }
-            "comms" | "directive" | "comms-directive" | "comms_directive" => {
-                PRIORITY_COMMS_DIRECTIVE
-            }
-            "cron" | "scheduler" | "scheduled" => PRIORITY_CRON,
-            _ => PRIORITY_BACKGROUND,
+        Self::classify_source_priority_with_config(source, &SourcePriorityConfig::default())
+    }
+
+    fn classify_source_priority_with_config(
+        source: &str,
+        config: &SourcePriorityConfig,
+    ) -> EventPriority {
+        let source = source.trim().to_ascii_lowercase();
+        if config.immediate.iter().any(|entry| entry.eq_ignore_ascii_case(&source)) {
+            return PRIORITY_IMMEDIATE;
         }
+        if config.user.iter().any(|entry| entry.eq_ignore_ascii_case(&source)) {
+            return PRIORITY_USER_MESSAGE;
+        }
+        if config.comms.iter().any(|entry| entry.eq_ignore_ascii_case(&source)) {
+            return PRIORITY_COMMS_DIRECTIVE;
+        }
+        if config.cron.iter().any(|entry| entry.eq_ignore_ascii_case(&source)) {
+            return PRIORITY_CRON;
+        }
+        PRIORITY_BACKGROUND
     }
 
     #[must_use]
@@ -246,7 +256,15 @@ impl SessionLoop {
 
     #[must_use]
     pub fn source_priority_for_test(source: &str) -> EventPriority {
-        Self::classify_source_priority(source)
+        Self::classify_source_priority_with_config(source, &SourcePriorityConfig::default())
+    }
+
+    #[must_use]
+    pub fn source_priority_with_config_for_test(
+        source: &str,
+        config: &SourcePriorityConfig,
+    ) -> EventPriority {
+        Self::classify_source_priority_with_config(source, config)
     }
 
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {

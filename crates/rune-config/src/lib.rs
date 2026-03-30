@@ -1113,6 +1113,8 @@ pub struct RuntimeConfig {
     pub lanes: LaneQueueConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    #[serde(default)]
+    pub source_priorities: SourcePriorityConfig,
     /// Maximum tool-call iterations per turn before aborting. Default: 200.
     #[serde(default = "default_max_tool_iterations")]
     pub max_tool_iterations: u32,
@@ -1120,6 +1122,65 @@ pub struct RuntimeConfig {
 
 fn default_max_tool_iterations() -> u32 {
     500
+}
+
+/// Priority routing overrides by inbound source/channel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourcePriorityConfig {
+    #[serde(default = "default_priority_immediate_sources")]
+    pub immediate: Vec<String>,
+    #[serde(default = "default_priority_user_sources")]
+    pub user: Vec<String>,
+    #[serde(default = "default_priority_comms_sources")]
+    pub comms: Vec<String>,
+    #[serde(default = "default_priority_cron_sources")]
+    pub cron: Vec<String>,
+}
+
+impl Default for SourcePriorityConfig {
+    fn default() -> Self {
+        Self {
+            immediate: default_priority_immediate_sources(),
+            user: default_priority_user_sources(),
+            comms: default_priority_comms_sources(),
+            cron: default_priority_cron_sources(),
+        }
+    }
+}
+
+fn default_priority_immediate_sources() -> Vec<String> {
+    vec![
+        "heartbeat".to_string(),
+        "health".to_string(),
+        "health-check".to_string(),
+        "health_check".to_string(),
+    ]
+}
+
+fn default_priority_user_sources() -> Vec<String> {
+    vec![
+        "telegram".to_string(),
+        "telegram-message".to_string(),
+        "telegram_message".to_string(),
+        "user".to_string(),
+    ]
+}
+
+fn default_priority_comms_sources() -> Vec<String> {
+    vec![
+        "comms".to_string(),
+        "directive".to_string(),
+        "comms-directive".to_string(),
+        "comms_directive".to_string(),
+    ]
+}
+
+fn default_priority_cron_sources() -> Vec<String> {
+    vec![
+        "cron".to_string(),
+        "scheduler".to_string(),
+        "scheduled".to_string(),
+    ]
 }
 
 /// Plugin system configuration.
