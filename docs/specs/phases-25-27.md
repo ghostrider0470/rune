@@ -3,6 +3,7 @@
 > Generated 2026-03-15. Authoritative reference for implementing phases 25 through 27.
 > Every type, endpoint, wire example, error case, and acceptance criterion is defined
 > here so that implementation can proceed without guessing.
+> Note: this file is the target implementation spec. For the currently shipped Memory Bank surface, see `docs/reference/memory-bank-current-state.md`.
 
 ---
 
