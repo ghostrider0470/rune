@@ -68,6 +68,15 @@ pub struct TokenMetricsSnapshot {
     pub cache_hit_ratio_percent: f64,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct ProjectTokenMetricsSnapshot {
+    pub project_id: String,
+    pub total_input_tokens: u64,
+    pub cached_tokens: u64,
+    pub uncached_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
+}
+
 #[derive(Clone, Debug, Default)]
 struct TokenMetricsEntry {
     total_input_tokens: u64,
@@ -76,8 +85,16 @@ struct TokenMetricsEntry {
 }
 
 #[derive(Clone, Debug, Default)]
+struct ProjectTokenMetricsEntry {
+    total_input_tokens: u64,
+    cached_tokens: u64,
+    uncached_tokens: u64,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct TokenMetricsStore {
     inner: Arc<Mutex<HashMap<(String, String), TokenMetricsEntry>>>,
+    project_inner: Arc<Mutex<HashMap<String, ProjectTokenMetricsEntry>>>,
 }
 
 impl TokenMetricsStore {
@@ -89,30 +106,43 @@ impl TokenMetricsStore {
         &self,
         provider: impl Into<String>,
         model: impl Into<String>,
+        project_id: Option<&str>,
         total_input_tokens: u32,
-        cached_tokens: Option<u32>,
-        uncached_tokens: Option<u32>,
+        cached_tokens: u32,
     ) {
         let provider = provider.into();
         let model = model.into();
-        let mut inner = self.inner.lock().await;
-        let entry = inner.entry((provider, model)).or_default();
-
         let total_input_tokens = u64::from(total_input_tokens);
-        let cached_tokens = u64::from(cached_tokens.unwrap_or(0));
-        let uncached_tokens = uncached_tokens
-            .map(u64::from)
-            .unwrap_or_else(|| total_input_tokens.saturating_sub(cached_tokens));
+        let cached_tokens = u64::from(cached_tokens);
+        let uncached_tokens = total_input_tokens.saturating_sub(cached_tokens);
 
-        entry.total_input_tokens = entry.total_input_tokens.saturating_add(total_input_tokens);
-        entry.cached_tokens = entry.cached_tokens.saturating_add(cached_tokens);
-        entry.uncached_tokens = entry.uncached_tokens.saturating_add(uncached_tokens);
+        {
+            let mut inner = self.inner.lock().await;
+            let entry = inner.entry((provider, model)).or_default();
+            entry.total_input_tokens = entry.total_input_tokens.saturating_add(total_input_tokens);
+            entry.cached_tokens = entry.cached_tokens.saturating_add(cached_tokens);
+            entry.uncached_tokens = entry.uncached_tokens.saturating_add(uncached_tokens);
+        }
+
+        if let Some(project_id) = project_id.filter(|value| !value.is_empty()) {
+            let mut inner = self.project_inner.lock().await;
+            let entry = inner.entry(project_id.to_string()).or_default();
+            entry.total_input_tokens = entry.total_input_tokens.saturating_add(total_input_tokens);
+            entry.cached_tokens = entry.cached_tokens.saturating_add(cached_tokens);
+            entry.uncached_tokens = entry.uncached_tokens.saturating_add(uncached_tokens);
+        }
     }
 
     pub async fn snapshot(&self) -> Vec<TokenMetricsSnapshot> {
         let inner = self.inner.lock().await;
         Self::rows_from_inner(&inner)
     }
+
+    pub async fn project_snapshot(&self) -> Vec<ProjectTokenMetricsSnapshot> {
+        let inner = self.project_inner.lock().await;
+        Self::project_rows_from_inner(&inner)
+    }
+
     fn rows_from_inner(
         inner: &HashMap<(String, String), TokenMetricsEntry>,
     ) -> Vec<TokenMetricsSnapshot> {
@@ -139,6 +169,30 @@ impl TokenMetricsStore {
                 .cmp(&b.provider)
                 .then_with(|| a.model.cmp(&b.model))
         });
+        rows
+    }
+
+    fn project_rows_from_inner(
+        inner: &HashMap<String, ProjectTokenMetricsEntry>,
+    ) -> Vec<ProjectTokenMetricsSnapshot> {
+        let mut rows = inner
+            .iter()
+            .map(|(project_id, entry)| {
+                let ratio = if entry.total_input_tokens == 0 {
+                    0.0
+                } else {
+                    (entry.cached_tokens as f64 / entry.total_input_tokens as f64) * 100.0
+                };
+                ProjectTokenMetricsSnapshot {
+                    project_id: project_id.clone(),
+                    total_input_tokens: entry.total_input_tokens,
+                    cached_tokens: entry.cached_tokens,
+                    uncached_tokens: entry.uncached_tokens,
+                    cache_hit_ratio_percent: ratio,
+                }
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|a, b| a.project_id.cmp(&b.project_id));
         rows
     }
 }

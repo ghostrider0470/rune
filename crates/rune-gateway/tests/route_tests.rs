@@ -1566,9 +1566,9 @@ fn build_test_app_parts_with_ms365_services(
                         .record(
                             provider,
                             model,
+                            None,
                             usage.prompt_tokens,
-                            usage.cached_prompt_tokens,
-                            usage.uncached_prompt_tokens,
+                            usage.cached_prompt_tokens.unwrap_or(0),
                         )
                         .await;
                 }
@@ -8862,6 +8862,133 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
     assert_eq!(project["prompt_tokens"], 1500);
     assert_eq!(project["completion_tokens"], 700);
     assert_eq!(project["request_count"], 2);
+
+    assert_eq!(json["project_cache"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn dashboard_usage_includes_project_cache_metrics() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+    let token_metrics = TokenMetricsStore::new();
+    token_metrics
+        .record("openai", "gpt-4.1", Some("phoenix"), 1_000, 400)
+        .await;
+    token_metrics
+        .record("anthropic", "claude-sonnet-4", Some("phoenix"), 500, 100)
+        .await;
+    token_metrics
+        .record("openai", "gpt-4.1", Some("festivity"), 600, 300)
+        .await;
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics,
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/usage")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let project_cache = json["project_cache"].as_array().unwrap();
+    assert_eq!(project_cache.len(), 2);
+
+    let festivity = project_cache
+        .iter()
+        .find(|entry| entry["project_id"] == "festivity")
+        .unwrap();
+    assert_eq!(festivity["total_input_tokens"], 600);
+    assert_eq!(festivity["cached_tokens"], 300);
+    assert_eq!(festivity["uncached_tokens"], 300);
+    assert_eq!(festivity["cache_hit_ratio_percent"], 50.0);
+
+    let phoenix = project_cache
+        .iter()
+        .find(|entry| entry["project_id"] == "phoenix")
+        .unwrap();
+    assert_eq!(phoenix["total_input_tokens"], 1500);
+    assert_eq!(phoenix["cached_tokens"], 500);
+    assert_eq!(phoenix["uncached_tokens"], 1000);
+    assert_eq!(phoenix["cache_hit_ratio_percent"], serde_json::json!((500.0 / 1500.0) * 100.0));
 }
 
 #[tokio::test]

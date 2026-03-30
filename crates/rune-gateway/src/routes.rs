@@ -41,7 +41,9 @@ use crate::ms365::{
     UpdateTodoTaskRequest, UserProfile, UserSummary,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
-use crate::state::{AppState, SessionEvent, TokenMetricsSnapshot, TokenMetricsStore};
+use crate::state::{
+    AppState, ProjectTokenMetricsSnapshot, SessionEvent, TokenMetricsSnapshot, TokenMetricsStore,
+};
 use crate::ws::active_ws_connections;
 use crate::{SupervisorDeps, run_job_lifecycle};
 
@@ -5159,9 +5161,31 @@ pub struct UsageProjectSummaryResponse {
 }
 
 #[derive(Serialize)]
+pub struct UsageProjectCacheSummaryResponse {
+    pub project_id: String,
+    pub total_input_tokens: u64,
+    pub cached_tokens: u64,
+    pub uncached_tokens: u64,
+    pub cache_hit_ratio_percent: f64,
+}
+
+impl From<ProjectTokenMetricsSnapshot> for UsageProjectCacheSummaryResponse {
+    fn from(value: ProjectTokenMetricsSnapshot) -> Self {
+        Self {
+            project_id: value.project_id,
+            total_input_tokens: value.total_input_tokens,
+            cached_tokens: value.cached_tokens,
+            uncached_tokens: value.uncached_tokens,
+            cache_hit_ratio_percent: value.cache_hit_ratio_percent,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct UsageSummaryResponse {
     pub entries: Vec<UsageEntryResponse>,
     pub projects: Vec<UsageProjectSummaryResponse>,
+    pub project_cache: Vec<UsageProjectCacheSummaryResponse>,
     pub total_prompt_tokens: u64,
     pub total_completion_tokens: u64,
     pub total_tokens: u64,
@@ -5265,6 +5289,13 @@ pub async fn get_dashboard_usage(
         .list_usage(from, params.to, limit)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let project_cache = state
+        .token_metrics
+        .project_snapshot()
+        .await
+        .into_iter()
+        .map(UsageProjectCacheSummaryResponse::from)
+        .collect::<Vec<_>>();
 
     let sessions = state
         .session_repo
@@ -5389,6 +5420,7 @@ pub async fn get_dashboard_usage(
     Ok(Json(UsageSummaryResponse {
         entries,
         projects,
+        project_cache,
         total_prompt_tokens,
         total_completion_tokens,
         total_tokens: total_prompt_tokens + total_completion_tokens,
