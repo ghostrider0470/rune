@@ -2,7 +2,8 @@
 //!
 //! This is the core pipeline: channel message → find/create session → execute turn → reply.
 
-use std::collections::HashMap;
+use std::collections::{BinaryHeap, HashMap};
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -50,6 +51,36 @@ pub const PRIORITY_HEARTBEAT: EventPriority = 2;
 pub const PRIORITY_CRON: EventPriority = 3;
 pub const PRIORITY_BACKGROUND: EventPriority = 4;
 
+#[derive(Clone, Debug)]
+struct QueuedEvent {
+    priority: EventPriority,
+    sequence: u64,
+    event: InboundEvent,
+}
+
+impl PartialEq for QueuedEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority == other.priority && self.sequence == other.sequence
+    }
+}
+
+impl Eq for QueuedEvent {}
+
+impl PartialOrd for QueuedEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for QueuedEvent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .priority
+            .cmp(&self.priority)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
 /// The main session loop that ties channels to the runtime.
 pub struct SessionLoop {
     engine: Arc<SessionEngine>,
@@ -64,6 +95,8 @@ pub struct SessionLoop {
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
     file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
+    pending_events: Mutex<BinaryHeap<QueuedEvent>>,
+    next_sequence: std::sync::atomic::AtomicU64,
 }
 
 fn classify_message_priority(raw_chat_id: &str) -> EventPriority {
@@ -123,6 +156,8 @@ impl SessionLoop {
             stt_engine: None,
             file_downloader: None,
             command_registry: None,
+            pending_events: Mutex::new(BinaryHeap::new()),
+            next_sequence: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -177,17 +212,7 @@ impl SessionLoop {
         info!("session loop started, waiting for inbound events");
 
         loop {
-            let event = {
-                let mut ch = self.channel.lock().await;
-                match ch.receive().await {
-                    Ok(event) => event,
-                    Err(e) => {
-                        error!(error = %e, "channel receive error, retrying in 5s");
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                }
-            };
+            let event = self.next_event().await;
 
             if let Err(e) = self.handle_event(event).await {
                 error!(error = %e, "failed to handle inbound event");
@@ -214,6 +239,68 @@ impl SessionLoop {
     #[must_use]
     pub fn source_priority_for_test(raw_chat_id: &str) -> EventPriority {
         classify_message_priority(raw_chat_id)
+    }
+
+    async fn enqueue_event(&self, event: InboundEvent) {
+        let priority = Self::classify_event_priority(&event);
+        let sequence = self
+            .next_sequence
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut pending = self.pending_events.lock().await;
+        pending.push(QueuedEvent {
+            priority,
+            sequence,
+            event,
+        });
+    }
+
+    async fn pop_pending_event(&self) -> Option<InboundEvent> {
+        self.pending_events
+            .lock()
+            .await
+            .pop()
+            .map(|queued| queued.event)
+    }
+
+    async fn receive_raw_event(&self) -> Result<InboundEvent, rune_channels::ChannelError> {
+        let mut ch = self.channel.lock().await;
+        ch.receive().await
+    }
+
+    pub(crate) async fn next_event(&self) -> InboundEvent {
+        if let Some(event) = self.pop_pending_event().await {
+            return event;
+        }
+
+        loop {
+            let event = match self.receive_raw_event().await {
+                Ok(event) => event,
+                Err(e) => {
+                    error!(error = %e, "channel receive error, retrying in 5s");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
+
+            self.enqueue_event(event).await;
+
+            while let Ok(next_event) =
+                tokio::time::timeout(std::time::Duration::from_millis(10), self.receive_raw_event())
+                    .await
+            {
+                match next_event {
+                    Ok(event) => self.enqueue_event(event).await,
+                    Err(e) => {
+                        error!(error = %e, "channel receive error while draining priority queue");
+                        break;
+                    }
+                }
+            }
+
+            if let Some(event) = self.pop_pending_event().await {
+                return event;
+            }
+        }
     }
 
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
