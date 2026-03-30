@@ -2063,8 +2063,10 @@ async fn status_reports_configured_lane_capacities() {
     let mut config = AppConfig::default();
     config.runtime.lanes = LaneQueueConfig {
         main_capacity: 6,
+        priority_capacity: 16,
         subagent_capacity: 9,
         cron_capacity: 128,
+        heartbeat_capacity: 1024,
         global_tool_capacity: 32,
         project_tool_capacity: 4,
     };
@@ -14931,31 +14933,75 @@ async fn user_messages_outrank_heartbeat_comms_cron_and_background_work() {
         user: "user-1".to_string(),
     };
 
-    assert_eq!(SessionLoop::event_priority_for_test(&user), PRIORITY_USER_MESSAGE);
-    assert_eq!(SessionLoop::event_priority_for_test(&comms), PRIORITY_COMMS_DIRECTIVE);
-    assert_eq!(SessionLoop::event_priority_for_test(&heartbeat), PRIORITY_HEARTBEAT);
+    assert_eq!(
+        SessionLoop::event_priority_for_test(&user),
+        PRIORITY_USER_MESSAGE
+    );
+    assert_eq!(
+        SessionLoop::event_priority_for_test(&comms),
+        PRIORITY_COMMS_DIRECTIVE
+    );
+    assert_eq!(
+        SessionLoop::event_priority_for_test(&heartbeat),
+        PRIORITY_HEARTBEAT
+    );
     assert_eq!(SessionLoop::event_priority_for_test(&cron), PRIORITY_CRON);
-    assert_eq!(SessionLoop::event_priority_for_test(&reaction), PRIORITY_BACKGROUND);
+    assert_eq!(
+        SessionLoop::event_priority_for_test(&reaction),
+        PRIORITY_BACKGROUND
+    );
 
-    assert!(SessionLoop::event_priority_for_test(&user) < SessionLoop::event_priority_for_test(&comms));
-    assert!(SessionLoop::event_priority_for_test(&comms) < SessionLoop::event_priority_for_test(&heartbeat));
-    assert!(SessionLoop::event_priority_for_test(&heartbeat) < SessionLoop::event_priority_for_test(&cron));
-    assert!(SessionLoop::event_priority_for_test(&cron) < SessionLoop::event_priority_for_test(&reaction));
+    assert!(
+        SessionLoop::event_priority_for_test(&user) < SessionLoop::event_priority_for_test(&comms)
+    );
+    assert!(
+        SessionLoop::event_priority_for_test(&comms)
+            < SessionLoop::event_priority_for_test(&heartbeat)
+    );
+    assert!(
+        SessionLoop::event_priority_for_test(&heartbeat)
+            < SessionLoop::event_priority_for_test(&cron)
+    );
+    assert!(
+        SessionLoop::event_priority_for_test(&cron)
+            < SessionLoop::event_priority_for_test(&reaction)
+    );
 }
 
 #[test]
 fn source_priority_detects_internal_message_classes() {
-    assert_eq!(SessionLoop::source_priority_for_test("telegram:dm:hamza"), PRIORITY_USER_MESSAGE);
-    assert_eq!(SessionLoop::source_priority_for_test("COMMS:queue"), PRIORITY_COMMS_DIRECTIVE);
-    assert_eq!(SessionLoop::source_priority_for_test(" system:heartbeat "), PRIORITY_HEARTBEAT);
-    assert_eq!(SessionLoop::source_priority_for_test("cron:nightly"), PRIORITY_CRON);
-    assert_eq!(SessionLoop::source_priority_for_test("system:scheduled:heartbeat"), PRIORITY_CRON);
+    assert_eq!(
+        SessionLoop::source_priority_for_test("telegram:dm:hamza"),
+        PRIORITY_USER_MESSAGE
+    );
+    assert_eq!(
+        SessionLoop::source_priority_for_test("COMMS:queue"),
+        PRIORITY_COMMS_DIRECTIVE
+    );
+    assert_eq!(
+        SessionLoop::source_priority_for_test(" system:heartbeat "),
+        PRIORITY_HEARTBEAT
+    );
+    assert_eq!(
+        SessionLoop::source_priority_for_test("cron:nightly"),
+        PRIORITY_CRON
+    );
+    assert_eq!(
+        SessionLoop::source_priority_for_test("system:scheduled:heartbeat"),
+        PRIORITY_CRON
+    );
 }
 
 #[test]
 fn source_priority_treats_subagent_and_agent_sources_as_background_work() {
-    assert_eq!(SessionLoop::source_priority_for_test("subagent:worker-1"), PRIORITY_BACKGROUND);
-    assert_eq!(SessionLoop::source_priority_for_test(" agent:planner "), PRIORITY_BACKGROUND);
+    assert_eq!(
+        SessionLoop::source_priority_for_test("subagent:worker-1"),
+        PRIORITY_BACKGROUND
+    );
+    assert_eq!(
+        SessionLoop::source_priority_for_test(" agent:planner "),
+        PRIORITY_BACKGROUND
+    );
 }
 
 #[test]
@@ -14970,5 +15016,8 @@ fn event_priority_treats_subagent_messages_as_background_work() {
         provider_message_id: "provider-1".to_string(),
     });
 
-    assert_eq!(SessionLoop::event_priority_for_test(&subagent), PRIORITY_BACKGROUND);
+    assert_eq!(
+        SessionLoop::event_priority_for_test(&subagent),
+        PRIORITY_BACKGROUND
+    );
 }

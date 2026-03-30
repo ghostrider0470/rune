@@ -169,12 +169,23 @@ impl LaneQueue {
 
     /// Create a `LaneQueue` with custom per-lane capacities.
     pub fn with_capacities(main: usize, subagent: usize, cron: usize) -> Self {
+        Self::with_all_capacities(main, PRIORITY_CAPACITY, subagent, cron, HEARTBEAT_CAPACITY)
+    }
+
+    /// Create a queue with custom capacities for every execution lane.
+    pub fn with_all_capacities(
+        main: usize,
+        priority: usize,
+        subagent: usize,
+        cron: usize,
+        heartbeat: usize,
+    ) -> Self {
         Self {
             main: LaneSemaphore::new(main),
-            priority: LaneSemaphore::new(PRIORITY_CAPACITY),
+            priority: LaneSemaphore::new(priority),
             subagent: LaneSemaphore::new(subagent),
             cron: LaneSemaphore::new(cron),
-            heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
+            heartbeat: LaneSemaphore::new(heartbeat),
             tool_limits: ToolConcurrencyQueue::new(
                 DEFAULT_GLOBAL_TOOL_CAPACITY,
                 DEFAULT_PROJECT_TOOL_CAPACITY,
@@ -190,12 +201,33 @@ impl LaneQueue {
         global_tool_capacity: usize,
         project_tool_capacity: usize,
     ) -> Self {
+        Self::with_all_limits(
+            main,
+            PRIORITY_CAPACITY,
+            subagent,
+            cron,
+            HEARTBEAT_CAPACITY,
+            global_tool_capacity,
+            project_tool_capacity,
+        )
+    }
+
+    /// Create a queue with custom capacities for every lane and tool concurrency limits.
+    pub fn with_all_limits(
+        main: usize,
+        priority: usize,
+        subagent: usize,
+        cron: usize,
+        heartbeat: usize,
+        global_tool_capacity: usize,
+        project_tool_capacity: usize,
+    ) -> Self {
         Self {
             main: LaneSemaphore::new(main),
-            priority: LaneSemaphore::new(PRIORITY_CAPACITY),
+            priority: LaneSemaphore::new(priority),
             subagent: LaneSemaphore::new(subagent),
             cron: LaneSemaphore::new(cron),
-            heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
+            heartbeat: LaneSemaphore::new(heartbeat),
             tool_limits: ToolConcurrencyQueue::new(global_tool_capacity, project_tool_capacity),
         }
     }
@@ -493,8 +525,12 @@ mod tests {
         let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
         let _cron = queue.acquire(Lane::Cron).await;
 
-        let priority = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Priority)).await;
-        assert!(priority.is_ok(), "priority lane should not be blocked by cron saturation");
+        let priority =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Priority)).await;
+        assert!(
+            priority.is_ok(),
+            "priority lane should not be blocked by cron saturation"
+        );
     }
 
     #[tokio::test]
@@ -502,8 +538,12 @@ mod tests {
         let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
         let _priority = queue.acquire(Lane::Priority).await;
 
-        let heartbeat = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Heartbeat)).await;
-        assert!(heartbeat.is_ok(), "heartbeat lane should remain immediate under priority load");
+        let heartbeat =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Heartbeat)).await;
+        assert!(
+            heartbeat.is_ok(),
+            "heartbeat lane should remain immediate under priority load"
+        );
     }
 
     #[tokio::test]
@@ -516,7 +556,7 @@ mod tests {
         assert_eq!(stats.priority_capacity, 16);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn lanes_are_independent() {
         let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
         let _main = queue.acquire(Lane::Main).await;
