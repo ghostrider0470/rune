@@ -15228,3 +15228,191 @@ async fn session_status_route_surfaces_subagent_audit_summary() {
         "Operator asked for a tighter review pass"
     );
 }
+
+#[tokio::test]
+async fn submit_delegation_task_returns_running_state_and_persists_status() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("test-token".to_string()));
+    let request = json!({
+        "task_id": format!("delegation-test-{}", Uuid::now_v7()),
+        "protocol_version": 1,
+        "submitted_at": chrono::Utc::now().to_rfc3339(),
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "capabilities_version": 1,
+            "capability_hash": "cap-sender-a",
+            "health_url": "http://sender-a/api/v1/instance/health",
+            "submit_url": "http://sender-a/api/v1/instance/delegations",
+            "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
+        },
+        "task": {
+            "task": "Implement delegated work",
+            "constraints": ["run cargo check"],
+            "expected_output": "summary",
+            "timeout_secs": 60,
+            "target_peer_id": "peer-b",
+            "branch_reservation": "agent/rune/delegation-test",
+            "file_locks": ["crates/rune-gateway/src/routes.rs"],
+            "artifacts": []
+        }
+    });
+    let accepted_at_before = chrono::Utc::now();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/instance/delegations")
+                .header(header::AUTHORIZATION, "Bearer test-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let envelope = body_json(response).await;
+    assert_eq!(envelope["result"]["status"], "running");
+    assert_eq!(envelope["receiver"]["instance_id"], "peer-b");
+    assert!(envelope["result"]["started_at"].is_string());
+    assert!(envelope["result"]["finished_at"].is_null());
+    let task_id = envelope["result"]["task_id"].as_str().unwrap().to_string();
+
+    let status_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/instance/delegations/{task_id}"))
+                .header(header::AUTHORIZATION, "Bearer test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_envelope = body_json(status_response).await;
+    assert_eq!(status_envelope["result"]["status"], "running");
+    let accepted_at = chrono::DateTime::parse_from_rfc3339(
+        status_envelope["result"]["accepted_at"].as_str().unwrap(),
+    )
+    .unwrap()
+    .with_timezone(&chrono::Utc);
+    assert!(accepted_at >= accepted_at_before);
+}
+
+#[tokio::test]
+async fn delegation_task_status_transitions_to_timeout_after_deadline() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("test-token".to_string()));
+    let task_id = format!("delegation-timeout-{}", Uuid::now_v7());
+    let request = json!({
+        "task_id": task_id,
+        "protocol_version": 1,
+        "submitted_at": chrono::Utc::now().to_rfc3339(),
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "capabilities_version": 1,
+            "capability_hash": "cap-sender-a",
+            "health_url": null,
+            "submit_url": null,
+            "result_url": null
+        },
+        "task": {
+            "task": "Implement delegated work",
+            "constraints": [],
+            "expected_output": "summary",
+            "timeout_secs": 1,
+            "target_peer_id": "peer-b",
+            "branch_reservation": null,
+            "file_locks": [],
+            "artifacts": []
+        }
+    });
+
+    let submit_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/instance/delegations")
+                .header(header::AUTHORIZATION, "Bearer test-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(submit_response.status(), StatusCode::CREATED);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let status_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/instance/delegations/{task_id}"))
+                .header(header::AUTHORIZATION, "Bearer test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_envelope = body_json(status_response).await;
+    assert_eq!(status_envelope["result"]["status"], "timeout");
+    assert_eq!(status_envelope["result"]["error"]["code"], "deadline_exceeded");
+    assert!(status_envelope["result"]["finished_at"].is_string());
+}
+
+#[tokio::test]
+async fn submit_delegation_task_rejects_zero_timeout() {
+    let (app, _) = build_test_app_parts(AppConfig::default(), Some("test-token".to_string()));
+    let request = json!({
+        "task_id": format!("delegation-zero-timeout-{}", Uuid::now_v7()),
+        "protocol_version": 1,
+        "submitted_at": chrono::Utc::now().to_rfc3339(),
+        "sender": {
+            "instance_id": "sender-a",
+            "instance_name": "Sender A",
+            "transport": "http",
+            "capabilities_version": 1,
+            "capability_hash": "cap-sender-a",
+            "health_url": null,
+            "submit_url": null,
+            "result_url": null
+        },
+        "task": {
+            "task": "Implement delegated work",
+            "constraints": [],
+            "expected_output": "summary",
+            "timeout_secs": 0,
+            "target_peer_id": null,
+            "branch_reservation": null,
+            "file_locks": [],
+            "artifacts": []
+        }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/instance/delegations")
+                .header(header::AUTHORIZATION, "Bearer test-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(request.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    let message = body["message"].as_str().or_else(|| body["error"]["message"].as_str()).unwrap();
+    assert!(message.contains("timeout_secs must be greater than zero"));
+}

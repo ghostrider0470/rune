@@ -7,7 +7,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
@@ -108,13 +108,13 @@ pub struct DelegationTaskRequest {
     pub task: DelegationTaskPayload,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationErrorResponse {
     pub code: String,
     pub message: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskResultResponse {
     pub task_id: String,
     pub status: String,
@@ -128,7 +128,7 @@ pub struct DelegationTaskResultResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskStatusEnvelope {
     pub receiver: DelegationEndpointResponse,
     pub result: DelegationTaskResultResponse,
@@ -174,7 +174,7 @@ pub struct DelegationCapabilityMatchResponse {
     pub detail: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationEndpointResponse {
     pub instance_id: String,
     pub instance_name: String,
@@ -8693,40 +8693,86 @@ pub struct DelegationTaskStatusPath {
     pub task_id: String,
 }
 
-pub async fn submit_delegation_task(
-    State(_state): State<AppState>,
-    Json(request): Json<DelegationTaskRequest>,
-) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
-    let now = Utc::now().to_rfc3339();
-    let result = DelegationTaskResultResponse {
-        task_id: request.task_id.clone(),
-        status: "accepted".to_string(),
-        accepted_at: now,
-        started_at: None,
-        output: None,
-        artifacts: request.task.artifacts.clone(),
-        error: None,
-        finished_at: None,
-    };
+#[derive(Clone, Debug)]
+struct DelegationTaskRecord {
+    receiver: DelegationEndpointResponse,
+    result: DelegationTaskResultResponse,
+    timeout_deadline: DateTime<Utc>,
+}
 
-    let receiver = DelegationEndpointResponse {
-        instance_id: request
-            .task
-            .target_peer_id
-            .clone()
-            .unwrap_or_else(|| "local-instance".to_string()),
-        instance_name: request
-            .task
-            .target_peer_id
-            .clone()
-            .unwrap_or_else(|| "Local Instance".to_string()),
+fn delegation_task_store() -> &'static tokio::sync::Mutex<HashMap<String, DelegationTaskRecord>> {
+    static STORE: once_cell::sync::Lazy<tokio::sync::Mutex<HashMap<String, DelegationTaskRecord>>> =
+        once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
+    &STORE
+}
+
+fn local_delegation_receiver(request: &DelegationTaskRequest) -> DelegationEndpointResponse {
+    let target = request
+        .task
+        .target_peer_id
+        .clone()
+        .unwrap_or_else(|| "local-instance".to_string());
+    DelegationEndpointResponse {
+        instance_id: target.clone(),
+        instance_name: target,
         transport: request.sender.transport.clone(),
         capabilities_version: request.sender.capabilities_version,
         capability_hash: request.sender.capability_hash.clone(),
         health_url: None,
         submit_url: None,
         result_url: request.sender.result_url.clone(),
+    }
+}
+
+pub async fn submit_delegation_task(
+    State(_state): State<AppState>,
+    Json(request): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
+    if request.protocol_version != 1 {
+        return Err(GatewayError::BadRequest(format!(
+            "unsupported delegation protocol_version '{}' (expected 1)",
+            request.protocol_version
+        )));
+    }
+    if request.task.task.trim().is_empty() {
+        return Err(GatewayError::BadRequest(
+            "delegation task field cannot be empty".to_string(),
+        ));
+    }
+    if request.task.expected_output.trim().is_empty() {
+        return Err(GatewayError::BadRequest(
+            "delegation expected_output field cannot be empty".to_string(),
+        ));
+    }
+    if request.task.timeout_secs == 0 {
+        return Err(GatewayError::BadRequest(
+            "delegation timeout_secs must be greater than zero".to_string(),
+        ));
+    }
+
+    let accepted_at = Utc::now();
+    let started_at = accepted_at + Duration::seconds(1);
+    let receiver = local_delegation_receiver(&request);
+    let result = DelegationTaskResultResponse {
+        task_id: request.task_id.clone(),
+        status: "running".to_string(),
+        accepted_at: accepted_at.to_rfc3339(),
+        started_at: Some(started_at.to_rfc3339()),
+        output: None,
+        artifacts: request.task.artifacts.clone(),
+        error: None,
+        finished_at: None,
     };
+    let deadline = accepted_at + Duration::seconds(request.task.timeout_secs as i64);
+
+    delegation_task_store().lock().await.insert(
+        request.task_id.clone(),
+        DelegationTaskRecord {
+            receiver: receiver.clone(),
+            result: result.clone(),
+            timeout_deadline: deadline,
+        },
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -8737,28 +8783,27 @@ pub async fn submit_delegation_task(
 pub async fn delegation_task_status(
     Path(path): Path<DelegationTaskStatusPath>,
 ) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
-    let now = Utc::now().to_rfc3339();
+    let mut store = delegation_task_store().lock().await;
+    let record = store
+        .get_mut(&path.task_id)
+        .ok_or_else(|| GatewayError::AssetNotFound(format!("delegation task {}", path.task_id)))?;
+
+    if record.result.finished_at.is_none() && Utc::now() >= record.timeout_deadline {
+        record.result.status = "timeout".to_string();
+        record.result.error = Some(DelegationErrorResponse {
+            code: "deadline_exceeded".to_string(),
+            message: format!(
+                "delegation task exceeded timeout at {}",
+                record.timeout_deadline.to_rfc3339()
+            ),
+        });
+        record.result.finished_at = Some(record.timeout_deadline.to_rfc3339());
+        record.result.output = None;
+    }
+
     Ok(Json(DelegationTaskStatusEnvelope {
-        receiver: DelegationEndpointResponse {
-            instance_id: "local-instance".to_string(),
-            instance_name: "Local Instance".to_string(),
-            transport: "http".to_string(),
-            capabilities_version: 1,
-            capability_hash: "local-dev".to_string(),
-            health_url: None,
-            submit_url: None,
-            result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
-        },
-        result: DelegationTaskResultResponse {
-            task_id: path.task_id,
-            status: "accepted".to_string(),
-            accepted_at: now,
-            started_at: None,
-            output: None,
-            artifacts: Vec::new(),
-            error: None,
-            finished_at: None,
-        },
+        receiver: record.receiver.clone(),
+        result: record.result.clone(),
     }))
 }
 
