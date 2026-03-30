@@ -2564,6 +2564,8 @@ pub struct SessionStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_task_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_hint: Option<String>,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2687,6 +2689,7 @@ pub async fn get_session_status(
     let approval_mode =
         metadata_string(metadata, "approval_mode").unwrap_or_else(|| "on-miss".to_string());
     let status_reason = session_status_reason(&row.status, metadata, approval_mode.as_str());
+    let next_task_reason = session_next_task_reason(&row.status, metadata);
     let resume_hint = session_resume_hint(&row.status, metadata);
     let security_mode =
         metadata_string(metadata, "security_mode").unwrap_or_else(|| "allowlist".to_string());
@@ -2779,6 +2782,7 @@ pub async fn get_session_status(
         ),
         status: row.status,
         status_reason,
+        next_task_reason,
         resume_hint,
         kind: row.kind,
         channel_ref: row.channel_ref,
@@ -2814,7 +2818,7 @@ pub async fn get_session_status(
 }
 
 
-fn session_status_reason(status: &str, metadata: &serde_json::Value, approval_mode: &str) -> Option<String> {
+pub(crate) fn session_status_reason(status: &str, metadata: &serde_json::Value, approval_mode: &str) -> Option<String> {
     match status {
         "waiting_for_approval" => Some(format!(
             "blocked on operator approval ({approval_mode}); resume after an approval decision is recorded"
@@ -2832,7 +2836,42 @@ fn session_status_reason(status: &str, metadata: &serde_json::Value, approval_mo
     }
 }
 
-fn session_resume_hint(status: &str, metadata: &serde_json::Value) -> Option<String> {
+pub(crate) fn session_next_task_reason(status: &str, metadata: &serde_json::Value) -> Option<String> {
+    let lifecycle = metadata_string(metadata, "subagent_lifecycle");
+    let operator_note = metadata_string(metadata, "subagent_last_note");
+
+    if status == "waiting_for_approval" {
+        return Some(
+            operator_note.unwrap_or_else(|| {
+                "next action is approval handling because execution is explicitly blocked until an operator decision is recorded".to_string()
+            }),
+        );
+    }
+
+    if status == "waiting_for_subagent" {
+        return Some(match (lifecycle.as_deref(), operator_note) {
+            (_, Some(note)) => note,
+            (Some(lifecycle), None) => format!(
+                "next action follows delegated session lifecycle: {lifecycle}"
+            ),
+            (None, None) => {
+                "next action is delegated-session follow-up because the parent is waiting on child progress".to_string()
+            }
+        });
+    }
+
+    if lifecycle.as_deref() == Some("preempted") {
+        return Some(
+            operator_note.unwrap_or_else(|| {
+                "next action is to finish the higher-priority takeover before resuming this parked work".to_string()
+            }),
+        );
+    }
+
+    metadata_string(metadata, "next_task_reason")
+}
+
+pub(crate) fn session_resume_hint(status: &str, metadata: &serde_json::Value) -> Option<String> {
     match status {
         "waiting_for_approval" => Some(
             "decide the pending approval, then call the approval resume path or send the next operator instruction"
