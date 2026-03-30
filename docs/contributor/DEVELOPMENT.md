@@ -30,6 +30,7 @@ cp config.example.toml config.toml
 ```
 
 Then fill in the required provider, auth, and channel settings. For multi-instance work, also configure `[instance]` (name, advertised address, peers) so `/api/v1/instance/health` exposes a complete capability manifest. The CLI mirrors that surface with `rune gateway instance-health`, and `rune gateway delegation-plan --strategy least_busy` / `--strategy named --peer-id <peer>` lets you validate peer selection, lifecycle contract, timeout semantics, and conflict-prevention requirements before wiring actual task handoff.
+For federation rollouts, treat `capability_hash` changes as an explicit compatibility checkpoint, keep instance IDs stable across restarts so peers recognize rejoining nodes, and verify `/api/v1/instance/peer-health-alerts` before enabling failover-sensitive automation. Rune only marks work absorption as required for unreachable peers; degraded peers stay non-failover to reduce split-brain risk during partitions.
 
 ## Run locally
 
