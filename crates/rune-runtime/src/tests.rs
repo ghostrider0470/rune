@@ -3018,3 +3018,19 @@ fn session_loop_supports_configurable_channel_source_priorities() {
         crate::session_loop::PRIORITY_BACKGROUND
     );
 }
+
+#[test]
+fn session_loop_classifies_stop_as_user_priority() {
+    let stop = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-stop".to_string(),
+        sender: "telegram".to_string(),
+        content: "/stop".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-stop".to_string(),
+    });
+
+    let priority = crate::session_loop::SessionLoop::event_priority_for_test(&stop);
+    assert_eq!(priority, crate::session_loop::PRIORITY_USER_MESSAGE);
+}

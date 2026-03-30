@@ -297,6 +297,10 @@ impl SessionLoop {
             self.priority_wake.notify_waiters();
         }
 
+        if matches!(&event, InboundEvent::Message(msg) if msg.content.trim().eq_ignore_ascii_case("/stop")) {
+            self.priority_wake.notify_waiters();
+        }
+
         match event {
             InboundEvent::Message(msg) => {
                 if self.handle_command(&msg).await? {
@@ -516,6 +520,14 @@ impl SessionLoop {
                 self.send_command_reply(
                     msg,
                     "Rune is online. Send a message to start a session, or use /help for commands.",
+                )
+                .await;
+                Ok(true)
+            }
+            "/stop" => {
+                self.send_command_reply(
+                    msg,
+                    "Stop acknowledged. Current direct-user work can preempt queued cron/background work; active tool cancellation is not wired yet.",
                 )
                 .await;
                 Ok(true)
