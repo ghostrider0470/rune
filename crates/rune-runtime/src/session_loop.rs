@@ -7,6 +7,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{Duration, Utc};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -21,7 +22,14 @@ use rune_stt::SttEngine;
 use crate::engine::SessionEngine;
 use crate::error::RuntimeError;
 use crate::executor::TurnExecutor;
-use crate::session_metadata::{selected_model, set_channel_source_priority, set_selected_model};
+use crate::session_metadata::{
+    RetryBudgetState, anti_thrash_state, clear_anti_thrash_state, selected_model,
+    set_anti_thrash_state, set_channel_source_priority, set_selected_model,
+};
+
+const MAX_FAILURE_RETRIES_PER_FINGERPRINT: u32 = 3;
+const BASE_FAILURE_BACKOFF_SECS: i64 = 5;
+const MAX_FAILURE_BACKOFF_SECS: i64 = 300;
 
 /// Trait for downloading files from Telegram (or any provider using `telegram-file:` URLs).
 ///
@@ -255,6 +263,116 @@ impl SessionLoop {
         }
     }
 
+    fn failure_fingerprint_for_message(error: &str, content: &str) -> String {
+        let normalized_error = error.trim().to_ascii_lowercase();
+        let normalized_content = content.trim().to_ascii_lowercase();
+        let content_marker = if normalized_content.len() > 96 {
+            &normalized_content[..96]
+        } else {
+            normalized_content.as_str()
+        };
+        format!("message:{}:{}", normalized_error, content_marker)
+    }
+
+    fn compute_backoff_secs(retry_count: u32) -> i64 {
+        let exponent = retry_count.saturating_sub(1).min(10);
+        let factor = 1_i64.checked_shl(exponent).unwrap_or(i64::MAX);
+        (BASE_FAILURE_BACKOFF_SECS.saturating_mul(factor)).min(MAX_FAILURE_BACKOFF_SECS)
+    }
+
+    async fn anti_thrash_guard(
+        &self,
+        session: &SessionRow,
+        content: &str,
+    ) -> Result<bool, RuntimeError> {
+        let Some(state) = anti_thrash_state(session) else {
+            return Ok(false);
+        };
+
+        let fingerprint = Self::failure_fingerprint_for_message(
+            state.last_error.as_deref().unwrap_or_default(),
+            content,
+        );
+        if fingerprint != state.failure_fingerprint {
+            return Ok(false);
+        }
+
+        if state.budget_exhausted {
+            return Ok(true);
+        }
+
+        if let Some(next_retry_at) = state.next_retry_at.as_deref() {
+            if let Ok(next_retry_at) = chrono::DateTime::parse_from_rfc3339(next_retry_at) {
+                if next_retry_at.with_timezone(&Utc) > Utc::now() {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn record_turn_failure(
+        &self,
+        session: &SessionRow,
+        content: &str,
+        error: &str,
+    ) -> Result<(), RuntimeError> {
+        let fingerprint = Self::failure_fingerprint_for_message(error, content);
+        let prior = anti_thrash_state(session);
+        let retry_count = match prior.as_ref() {
+            Some(state) if state.failure_fingerprint == fingerprint => {
+                state.retry_count.saturating_add(1)
+            }
+            _ => 1,
+        };
+        let budget_exhausted = retry_count >= MAX_FAILURE_RETRIES_PER_FINGERPRINT;
+        let next_retry_at = if budget_exhausted {
+            None
+        } else {
+            Some(
+                (Utc::now() + Duration::seconds(Self::compute_backoff_secs(retry_count)))
+                    .to_rfc3339(),
+            )
+        };
+        let suppression_reason = if budget_exhausted {
+            Some("retry_budget_exhausted".to_string())
+        } else {
+            Some("backoff_active".to_string())
+        };
+        let metadata = set_anti_thrash_state(
+            &session.metadata,
+            &RetryBudgetState {
+                failure_fingerprint: fingerprint,
+                retry_count,
+                budget_exhausted,
+                suppression_reason,
+                next_retry_at,
+                last_error: Some(error.to_string()),
+            },
+        );
+        self.session_repo
+            .update_metadata(session.id, metadata, Utc::now())
+            .await
+            .map(|_| ())
+            .map_err(RuntimeError::Store)
+    }
+
+    async fn clear_turn_failure_state(&self, session: &SessionRow) -> Result<(), RuntimeError> {
+        if anti_thrash_state(session).is_none() {
+            return Ok(());
+        }
+        self.session_repo
+            .update_metadata(
+                session.id,
+                clear_anti_thrash_state(&session.metadata),
+                Utc::now(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(RuntimeError::Store)
+    }
+
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
         match event {
             InboundEvent::Message(msg) => {
@@ -428,6 +546,11 @@ impl SessionLoop {
                     enriched_content.clone()
                 };
 
+                if self.anti_thrash_guard(&session, &final_text).await? {
+                    info!(session_id = %session.id, "suppressing repeated failing turn while anti-thrash backoff is active");
+                    return Ok(());
+                }
+
                 info!(session_id = %session.id, len = final_text.len(), "executing turn");
 
                 // Send a "Thinking…" placeholder reply so the user gets immediate feedback.
@@ -501,6 +624,7 @@ impl SessionLoop {
 
                 match result {
                     Ok((turn, usage)) => {
+                        self.clear_turn_failure_state(&session).await?;
                         debug!(
                             turn_id = %turn.id,
                             prompt_tokens = usage.prompt_tokens,
@@ -546,6 +670,8 @@ impl SessionLoop {
                         }
                     }
                     Err(e) => {
+                        self.record_turn_failure(&session, &final_text, &e.to_string())
+                            .await?;
                         error!(session_id = %session.id, error = %e, "turn failed");
                         let brief = {
                             let full = e.to_string();
