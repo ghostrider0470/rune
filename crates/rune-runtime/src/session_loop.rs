@@ -43,9 +43,12 @@ Rune commands:
 /// Maps channel routing key → session_id.
 type SessionIndex = HashMap<String, Uuid>;
 
-type EventPriority = u8;
-const PRIORITY_USER_MESSAGE: EventPriority = 0;
-const PRIORITY_BACKGROUND: EventPriority = 4;
+pub type EventPriority = u8;
+pub const PRIORITY_USER_MESSAGE: EventPriority = 0;
+pub const PRIORITY_COMMS_DIRECTIVE: EventPriority = 1;
+pub const PRIORITY_HEARTBEAT: EventPriority = 2;
+pub const PRIORITY_CRON: EventPriority = 3;
+pub const PRIORITY_BACKGROUND: EventPriority = 4;
 
 /// The main session loop that ties channels to the runtime.
 pub struct SessionLoop {
@@ -61,6 +64,21 @@ pub struct SessionLoop {
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
     file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
+}
+
+fn classify_message_priority(raw_chat_id: &str) -> EventPriority {
+    let normalized = raw_chat_id.trim().to_ascii_lowercase();
+    if normalized == "system:heartbeat" {
+        PRIORITY_HEARTBEAT
+    } else if normalized.starts_with("comms:") || normalized == "system:comms" {
+        PRIORITY_COMMS_DIRECTIVE
+    } else if normalized.starts_with("cron:") || normalized.starts_with("system:scheduled") {
+        PRIORITY_CRON
+    } else if normalized.starts_with("subagent:") || normalized.starts_with("agent:") {
+        PRIORITY_BACKGROUND
+    } else {
+        PRIORITY_USER_MESSAGE
+    }
 }
 
 /// MIME types considered audio for transcription purposes.
@@ -179,7 +197,7 @@ impl SessionLoop {
 
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
         match event {
-            InboundEvent::Message(_) => PRIORITY_USER_MESSAGE,
+            InboundEvent::Message(msg) => classify_message_priority(&msg.raw_chat_id),
             InboundEvent::Reaction { .. }
             | InboundEvent::Edit { .. }
             | InboundEvent::Delete { .. }
@@ -191,6 +209,11 @@ impl SessionLoop {
     #[must_use]
     pub fn event_priority_for_test(event: &InboundEvent) -> EventPriority {
         Self::classify_event_priority(event)
+    }
+
+    #[must_use]
+    pub fn source_priority_for_test(raw_chat_id: &str) -> EventPriority {
+        classify_message_priority(raw_chat_id)
     }
 
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
