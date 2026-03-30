@@ -263,6 +263,9 @@ pub struct PeerHealthAlertsResponse {
     pub checked_at: String,
     pub failover_ready: bool,
     pub work_absorption_required: bool,
+    pub target_recovery_sla_seconds: u64,
+    pub network_partition_suspected: bool,
+    pub split_brain_guard: String,
     pub summary: String,
 }
 
@@ -885,6 +888,8 @@ fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAl
         .count();
     let work_absorption_required = unreachable_count > 0;
     let failover_ready = degraded_count == 0;
+    let network_partition_suspected = unreachable_count > 0 && degraded_count > 0;
+    let target_recovery_sla_seconds = 60;
     let status = if alerts.is_empty() { "ok" } else { "degraded" };
     let summary = if alerts.is_empty() {
         "all peers healthy; no failover action required".to_string()
@@ -906,6 +911,9 @@ fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAl
         checked_at,
         failover_ready,
         work_absorption_required,
+        target_recovery_sla_seconds,
+        network_partition_suspected,
+        split_brain_guard: "failover absorption only activates for peers reported unreachable by health probes; degraded peers stay non-failover to avoid split-brain during partitions".to_string(),
         summary,
     }
 }
@@ -1397,6 +1405,7 @@ pub struct DashboardSummaryResponse {
     pub auth_enabled: bool,
     pub ws_subscribers: usize,
     pub channels: Vec<String>,
+    pub peer_health: PeerHealthAlertsResponse,
 }
 
 #[derive(Serialize)]
@@ -1623,6 +1632,8 @@ pub async fn dashboard_summary(
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
     let config = state.config.read().await;
 
+    let peer_health = peer_health_alerts_from_peers(collect_peer_health(state.capabilities.peers.clone()).await);
+
     Ok(Json(DashboardSummaryResponse {
         gateway_status: "running",
         bind: format!("{}:{}", config.gateway.host, config.gateway.port),
@@ -1634,6 +1645,7 @@ pub async fn dashboard_summary(
         auth_enabled: config.gateway.auth_token.is_some(),
         ws_subscribers: state.event_tx.receiver_count(),
         channels: configured_channels(&config),
+        peer_health,
     }))
 }
 
@@ -8451,6 +8463,54 @@ mod tests {
             response.alerts[0].health_url,
             "http://peer-a/api/v1/instance/health"
         );
+    }
+
+    #[test]
+    fn peer_health_alerts_expose_partition_guard_metadata() {
+        let response = peer_health_alerts_from_peers(vec![
+            PeerHealthResponse {
+                id: "peer-a".to_string(),
+                name: "Peer A".to_string(),
+                health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                status: "unreachable".to_string(),
+                detail: "timeout".to_string(),
+                checked_at: "2025-01-01T00:00:00Z".to_string(),
+                latency_ms: None,
+                last_seen_at: Some("2025-01-01T00:00:10Z".to_string()),
+                observed_status: "unknown".to_string(),
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
+            },
+            PeerHealthResponse {
+                id: "peer-b".to_string(),
+                name: "Peer B".to_string(),
+                health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                status: "degraded".to_string(),
+                detail: "high latency".to_string(),
+                checked_at: "2025-01-01T00:00:05Z".to_string(),
+                latency_ms: Some(900),
+                last_seen_at: Some("2025-01-01T00:00:12Z".to_string()),
+                observed_status: "degraded".to_string(),
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
+            },
+        ]);
+
+        assert!(response.network_partition_suspected);
+        assert_eq!(response.target_recovery_sla_seconds, 60);
+        assert!(response.split_brain_guard.contains("degraded peers stay non-failover"));
     }
 
     #[test]
