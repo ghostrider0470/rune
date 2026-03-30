@@ -311,6 +311,8 @@ mod tests {
             lint_command: None,
             repo_path: std::path::PathBuf::from("/tmp/repo"),
             active_agents: vec![],
+            goal_leases: vec![],
+            goal_conflicts: vec![],
             file_locks: std::collections::HashMap::new(),
             merge_queue: vec![
                 crate::orchestrator::MergeQueueEntry {

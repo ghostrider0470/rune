@@ -80,3 +80,14 @@ Rune now carries a first anti-thrash foundation in the runtime session layer:
 - retry budgets eventually exhaust, marking the objective/session state as suppressed instead of pretending the runtime is still productively shipping
 
 This is intentionally session-scoped foundation work for M10 issue #754 / feature #756. It establishes durable failure fingerprints, retry counters, suppression reasons, and next-retry timestamps that later scheduler/control-plane surfaces can consume.
+
+## Orchestrator goal leases and duplicate suppression
+
+Multi-agent orchestration state now persists goal ownership explicitly alongside file locks and merge-queue state. `OrchestratorState` carries durable `goal_leases` and `goal_conflicts` records so agents can suppress duplicate execution of the same goal, recover stale ownership when a lease expires, and leave an operator-visible audit trail for both suppression and reassignment decisions.
+
+Shipped behavior:
+- active leases suppress duplicate claims from other agents and append a `duplicate_suppressed` conflict record
+- expired leases can be reclaimed by a new agent without hidden concurrent ownership; the recovered lease records `recovered_at` and `recovered_from_agent_id`
+- agent entries can carry the currently owned `goal_key` so state snapshots explain which agent owns which delegated objective
+
+This is the orchestration-state slice for issue #779 under feature #766. It does not replace higher-level runtime routing yet; it establishes the durable ownership/audit primitive that later gateway and scheduler surfaces can expose directly.
