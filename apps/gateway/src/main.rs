@@ -598,10 +598,12 @@ async fn build_services(
     let process_audit_store: Arc<dyn ProcessAuditStore> =
         Arc::new(DbProcessAuditStore::new(tool_execution_repo));
     let process_manager = ProcessManager::new().with_audit_store(process_audit_store.clone());
-    let lane_queue = Arc::new(LaneQueue::with_limits(
+    let lane_queue = Arc::new(LaneQueue::with_all_limits(
         config.runtime.lanes.main_capacity,
+        config.runtime.lanes.priority_capacity,
         config.runtime.lanes.subagent_capacity,
         config.runtime.lanes.cron_capacity,
+        config.runtime.lanes.heartbeat_capacity,
         config.runtime.lanes.global_tool_capacity,
         config.runtime.lanes.project_tool_capacity,
     ));
@@ -754,7 +756,10 @@ async fn build_services(
         config.runtime.max_tool_iterations
     };
     turn_executor = turn_executor.with_max_tool_iterations(max_iters);
-    info!(max_tool_iterations = max_iters, "tool iteration limit configured");
+    info!(
+        max_tool_iterations = max_iters,
+        "tool iteration limit configured"
+    );
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
 
     // Mem0 auto-capture/recall memory engine
