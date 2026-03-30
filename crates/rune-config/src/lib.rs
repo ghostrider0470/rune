@@ -1247,12 +1247,24 @@ pub enum McpTransportKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaneQueueConfig {
     pub main_capacity: usize,
+    #[serde(default = "default_priority_capacity")]
+    pub priority_capacity: usize,
     pub subagent_capacity: usize,
     pub cron_capacity: usize,
+    #[serde(default = "default_heartbeat_capacity")]
+    pub heartbeat_capacity: usize,
     #[serde(default = "default_global_tool_capacity")]
     pub global_tool_capacity: usize,
     #[serde(default = "default_project_tool_capacity")]
     pub project_tool_capacity: usize,
+}
+
+const fn default_priority_capacity() -> usize {
+    16
+}
+
+const fn default_heartbeat_capacity() -> usize {
+    1024
 }
 
 const fn default_global_tool_capacity() -> usize {
@@ -1267,8 +1279,10 @@ impl Default for LaneQueueConfig {
     fn default() -> Self {
         Self {
             main_capacity: 4,
+            priority_capacity: default_priority_capacity(),
             subagent_capacity: 8,
             cron_capacity: 1024,
+            heartbeat_capacity: default_heartbeat_capacity(),
             global_tool_capacity: default_global_tool_capacity(),
             project_tool_capacity: default_project_tool_capacity(),
         }

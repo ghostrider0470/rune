@@ -342,10 +342,12 @@ impl TurnExecutor {
             let session_kind = parse_session_kind(&session.kind)?;
             let lane = match trigger_kind {
                 TriggerKind::Heartbeat => Lane::Heartbeat,
-                TriggerKind::UserMessage | TriggerKind::SystemWake | TriggerKind::SubagentRequest => {
-                    Lane::Priority
+                TriggerKind::UserMessage
+                | TriggerKind::SystemWake
+                | TriggerKind::SubagentRequest => Lane::Priority,
+                TriggerKind::CronJob | TriggerKind::Reminder => {
+                    Lane::from_session_kind(&session_kind)
                 }
-                TriggerKind::CronJob | TriggerKind::Reminder => Lane::from_session_kind(&session_kind),
             };
             debug!(
                 turn_id = %turn_id,
