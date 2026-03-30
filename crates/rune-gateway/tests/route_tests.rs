@@ -2057,8 +2057,10 @@ async fn status_reports_configured_lane_capacities() {
     let mut config = AppConfig::default();
     config.runtime.lanes = LaneQueueConfig {
         main_capacity: 6,
+        priority_capacity: 16,
         subagent_capacity: 9,
         cron_capacity: 128,
+        heartbeat_capacity: 1024,
         global_tool_capacity: 32,
         project_tool_capacity: 4,
     };
