@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use once_cell::sync::Lazy;
 
 use chrono::Utc;
 use tracing::{debug, error, info, warn};
@@ -38,6 +41,26 @@ use crate::workspace::WorkspaceLoader;
 /// Maximum tool-call loop iterations before aborting.
 const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 500;
 
+static SESSION_ABORTS: Lazy<tokio::sync::Mutex<HashMap<Uuid, String>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+/// Record an operator/system abort request for a session.
+pub async fn request_session_abort(session_id: Uuid, reason: impl Into<String>) {
+    SESSION_ABORTS
+        .lock()
+        .await
+        .insert(session_id, reason.into());
+}
+
+/// Clear any pending abort request for a session.
+pub async fn clear_session_abort(session_id: Uuid) {
+    SESSION_ABORTS.lock().await.remove(&session_id);
+}
+
+async fn abort_reason(session_id: Uuid) -> Option<String> {
+    SESSION_ABORTS.lock().await.get(&session_id).cloned()
+}
+
 /// Executes a single turn: load context → prompt → model → tool loop → persist.
 ///
 /// When a `LaneQueue` is attached, each turn acquires a lane permit before
@@ -69,6 +92,14 @@ pub struct TurnExecutor {
 }
 
 impl TurnExecutor {
+    async fn check_for_abort(&self, session_id: Uuid) -> Result<(), RuntimeError> {
+        if let Some(reason) = abort_reason(session_id).await {
+            warn!(session_id = %session_id, reason = %reason, "aborting turn execution due to cancellation request");
+            return Err(RuntimeError::Aborted(reason));
+        }
+        Ok(())
+    }
+
     async fn transition_session_status(
         &self,
         session_id: Uuid,
@@ -393,6 +424,7 @@ impl TurnExecutor {
             .await?;
 
         // 4. Run the model/tool loop
+        self.check_for_abort(session_id).await?;
         let mut usage = UsageAccumulator::new();
         let result = self
             .run_turn_loop(
@@ -422,6 +454,7 @@ impl TurnExecutor {
         let (final_status, ended_at) = match &result {
             Ok(TurnLoopOutcome::Completed) => (TurnStatus::Completed, Some(Utc::now())),
             Ok(TurnLoopOutcome::WaitingForApproval) => (TurnStatus::ToolExecuting, None),
+            Err(RuntimeError::Aborted(_)) => (TurnStatus::Cancelled, Some(Utc::now())),
             Err(_) => (TurnStatus::Failed, Some(Utc::now())),
         };
 
@@ -439,6 +472,7 @@ impl TurnExecutor {
         }
 
         // If the loop failed, propagate the error
+        clear_session_abort(session_id).await;
         result?;
 
         // Mem0 capture: extract and store facts from this turn (background).
@@ -781,6 +815,7 @@ impl TurnExecutor {
             .update_status(turn_uuid, status_str(final_status), ended_at)
             .await?;
 
+        clear_session_abort(session_id).await;
         result?;
         Ok((final_turn, usage))
     }
@@ -853,6 +888,7 @@ impl TurnExecutor {
         let mut iterations: u32 = 0;
 
         loop {
+            self.check_for_abort(session_id).await?;
             if iterations >= self.max_tool_iterations {
                 return Err(RuntimeError::MaxToolIterations(self.max_tool_iterations));
             }

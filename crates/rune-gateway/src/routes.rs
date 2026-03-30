@@ -17,6 +17,7 @@ use uuid::Uuid;
 use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
 use rune_runtime::comms::CommsMessage;
 use rune_runtime::heartbeat::HeartbeatState;
+use rune_runtime::request_session_abort;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
     SessionTarget, compute_initial_next_run,
@@ -3158,6 +3159,8 @@ pub async fn agent_kill(
     let now = chrono::Utc::now();
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
     let note = format!("[kill] session cancelled: {reason}");
+
+    request_session_abort(id, reason.to_string()).await;
 
     // Mark session as cancelled.
     state
