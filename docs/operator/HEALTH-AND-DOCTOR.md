@@ -38,3 +38,20 @@ Deeper follow-up documentation is still useful for:
 - doctor command/navigation
 - common failure-mode triage
 - dependency troubleshooting flow
+
+## Anti-thrash diagnostics
+
+Rune now persists early anti-thrash diagnostics in session metadata:
+- `anti_thrash.failure_fingerprint`
+- `anti_thrash.retry_count`
+- `anti_thrash.budget_exhausted`
+- `anti_thrash.suppression_reason`
+- `anti_thrash.next_retry_at`
+- `anti_thrash.last_error`
+
+Current semantics:
+- when the same inbound message keeps triggering the same failure fingerprint, Rune records retry/backoff metadata instead of blindly re-entering the executor
+- while `next_retry_at` is still in the future, repeated retries for that same fingerprint are suppressed
+- once the retry budget is exhausted, the session remains alive but is explicitly marked as suppressed for that fingerprint
+
+This is the first operator-visible M10 anti-thrash foundation rather than the full final status surface. For now, operators can inspect persisted session metadata to distinguish a degraded-but-alive lane from one that is still actively shipping.

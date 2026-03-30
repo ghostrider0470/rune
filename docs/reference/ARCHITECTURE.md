@@ -70,3 +70,13 @@ Deeper follow-up documentation is still useful for:
 - storage/provider/channel relationship details
 - architecture-level invariants and tradeoffs
 - diagrams or richer deployment/control-plane context if that becomes useful
+
+## Anti-thrash runtime guardrails
+
+Rune now carries a first anti-thrash foundation in the runtime session layer:
+- repeated failures are fingerprinted against the normalized failing message and error shape
+- failure state is persisted in session metadata under `anti_thrash`
+- repeated retries on the same failing fingerprint are backoff-suppressed before they can keep re-entering the executor
+- retry budgets eventually exhaust, marking the objective/session state as suppressed instead of pretending the runtime is still productively shipping
+
+This is intentionally session-scoped foundation work for M10 issue #754 / feature #756. It establishes durable failure fingerprints, retry counters, suppression reasons, and next-retry timestamps that later scheduler/control-plane surfaces can consume.
