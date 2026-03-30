@@ -2,7 +2,8 @@
 //!
 //! This is the core pipeline: channel message → find/create session → execute turn → reply.
 
-use std::collections::HashMap;
+use std::collections::{BinaryHeap, HashMap};
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -20,7 +21,7 @@ use rune_stt::SttEngine;
 use crate::engine::SessionEngine;
 use crate::error::RuntimeError;
 use crate::executor::TurnExecutor;
-use crate::session_metadata::{selected_model, set_selected_model};
+use crate::session_metadata::{selected_model, set_channel_source_priority, set_selected_model};
 
 /// Trait for downloading files from Telegram (or any provider using `telegram-file:` URLs).
 ///
@@ -50,6 +51,36 @@ pub const PRIORITY_COMMS_DIRECTIVE: EventPriority = 2;
 pub const PRIORITY_CRON: EventPriority = 3;
 pub const PRIORITY_BACKGROUND: EventPriority = 4;
 
+#[derive(Clone, Debug)]
+struct QueuedEvent {
+    priority: EventPriority,
+    sequence: u64,
+    event: InboundEvent,
+}
+
+impl PartialEq for QueuedEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority == other.priority && self.sequence == other.sequence
+    }
+}
+
+impl Eq for QueuedEvent {}
+
+impl PartialOrd for QueuedEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for QueuedEvent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .priority
+            .cmp(&self.priority)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
 /// The main session loop that ties channels to the runtime.
 pub struct SessionLoop {
     engine: Arc<SessionEngine>,
@@ -64,12 +95,19 @@ pub struct SessionLoop {
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
     file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
+    pending_events: Mutex<BinaryHeap<QueuedEvent>>,
+    next_sequence: std::sync::atomic::AtomicU64,
 }
 
-fn classify_message_priority(content: &str) -> EventPriority {
+fn classify_message_priority(raw_chat_id: &str, sender: &str, content: &str) -> EventPriority {
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return PRIORITY_BACKGROUND;
+    }
+
+    let source = classify_message_source(raw_chat_id, sender);
+    if source != PRIORITY_BACKGROUND {
+        return source;
     }
 
     if is_comms_directive_message(trimmed) {
@@ -81,6 +119,15 @@ fn classify_message_priority(content: &str) -> EventPriority {
     }
 
     PRIORITY_USER_MESSAGE
+}
+
+fn classify_message_source(raw_chat_id: &str, sender: &str) -> EventPriority {
+    let source = raw_chat_id
+        .split([':', '/'])
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or(sender);
+    SessionLoop::classify_source_priority(source)
 }
 
 fn is_comms_directive_message(content: &str) -> bool {
@@ -142,6 +189,8 @@ impl SessionLoop {
             stt_engine: None,
             file_downloader: None,
             command_registry: None,
+            pending_events: Mutex::new(BinaryHeap::new()),
+            next_sequence: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -196,17 +245,7 @@ impl SessionLoop {
         info!("session loop started, waiting for inbound events");
 
         loop {
-            let event = {
-                let mut ch = self.channel.lock().await;
-                match ch.receive().await {
-                    Ok(event) => event,
-                    Err(e) => {
-                        error!(error = %e, "channel receive error, retrying in 5s");
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                }
-            };
+            let event = self.next_event().await;
 
             if let Err(e) = self.handle_event(event).await {
                 error!(error = %e, "failed to handle inbound event");
@@ -216,7 +255,7 @@ impl SessionLoop {
 
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
         match event {
-            InboundEvent::Message(msg) => classify_message_priority(&msg.content),
+            InboundEvent::Message(msg) => classify_message_priority(&msg.raw_chat_id, &msg.sender, &msg.content),
             InboundEvent::Reaction { .. }
             | InboundEvent::Edit { .. }
             | InboundEvent::Delete { .. }
@@ -249,7 +288,69 @@ impl SessionLoop {
         Self::classify_source_priority(source)
     }
 
-    async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
+    async fn enqueue_event(&self, event: InboundEvent) {
+        let priority = Self::classify_event_priority(&event);
+        let sequence = self
+            .next_sequence
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut pending = self.pending_events.lock().await;
+        pending.push(QueuedEvent {
+            priority,
+            sequence,
+            event,
+        });
+    }
+
+    async fn pop_pending_event(&self) -> Option<InboundEvent> {
+        self.pending_events
+            .lock()
+            .await
+            .pop()
+            .map(|queued| queued.event)
+    }
+
+    async fn receive_raw_event(&self) -> Result<InboundEvent, rune_channels::ChannelError> {
+        let mut ch = self.channel.lock().await;
+        ch.receive().await
+    }
+
+    pub(crate) async fn next_event(&self) -> InboundEvent {
+        if let Some(event) = self.pop_pending_event().await {
+            return event;
+        }
+
+        loop {
+            let event = match self.receive_raw_event().await {
+                Ok(event) => event,
+                Err(e) => {
+                    error!(error = %e, "channel receive error, retrying in 5s");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
+
+            self.enqueue_event(event).await;
+
+            while let Ok(next_event) =
+                tokio::time::timeout(std::time::Duration::from_millis(10), self.receive_raw_event())
+                    .await
+            {
+                match next_event {
+                    Ok(event) => self.enqueue_event(event).await,
+                    Err(e) => {
+                        error!(error = %e, "channel receive error while draining priority queue");
+                        break;
+                    }
+                }
+            }
+
+            if let Some(event) = self.pop_pending_event().await {
+                return event;
+            }
+        }
+    }
+
+    pub(crate) async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
         match event {
             InboundEvent::Message(msg) => {
                 if self.handle_command(&msg).await? {
@@ -257,9 +358,23 @@ impl SessionLoop {
                 }
 
                 let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
-                debug!(routing_key = %routing_key, "received inbound message");
+                let source = msg
+                    .raw_chat_id
+                    .split([':', '/'])
+                    .next()
+                    .filter(|segment| !segment.is_empty())
+                    .unwrap_or(msg.sender.as_str())
+                    .to_ascii_lowercase();
+                let source_priority = Self::classify_source_priority(&source);
+                debug!(routing_key = %routing_key, source = %source, priority = source_priority, "received inbound message");
 
                 let session = self.find_or_create_session(&routing_key).await?;
+                let metadata = set_channel_source_priority(&session.metadata, &source, source_priority);
+                if metadata != session.metadata {
+                    self.session_repo
+                        .update_metadata(session.id, metadata, chrono::Utc::now())
+                        .await?;
+                }
                 self.maybe_send_resumed_session_notice(&msg, &routing_key, &session)
                     .await;
 
@@ -444,7 +559,7 @@ impl SessionLoop {
         Ok(())
     }
 
-    async fn handle_command(
+    pub(crate) async fn handle_command(
         &self,
         msg: &rune_channels::ChannelMessage,
     ) -> Result<bool, RuntimeError> {
@@ -482,6 +597,10 @@ impl SessionLoop {
             }
             "/reset" => {
                 self.handle_reset_command(msg).await?;
+                Ok(true)
+            }
+            "/stop" => {
+                self.handle_stop_command(msg, args).await?;
                 Ok(true)
             }
             "/commands" => {
@@ -569,6 +688,39 @@ impl SessionLoop {
             )
             .await;
         }
+        Ok(())
+    }
+
+    async fn handle_stop_command(
+        &self,
+        msg: &rune_channels::ChannelMessage,
+        args: &str,
+    ) -> Result<(), RuntimeError> {
+        let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+        let session = match self.find_or_create_session(&routing_key).await {
+            Ok(session) => session,
+            Err(error) => {
+                self.send_command_reply(
+                    msg,
+                    &format!("No active session to stop: {error}"),
+                )
+                .await;
+                return Ok(());
+            }
+        };
+
+        let reason = if args.trim().is_empty() {
+            format!("stop requested from channel {}", msg.raw_chat_id)
+        } else {
+            format!("stop requested from channel {}: {}", msg.raw_chat_id, args.trim())
+        };
+        crate::request_session_abort(session.id, reason.clone()).await;
+
+        self.send_command_reply(
+            msg,
+            &format!("Stopping active work for session {}. Reason: {}", session.id, reason),
+        )
+        .await;
         Ok(())
     }
 
@@ -679,7 +831,7 @@ impl SessionLoop {
         ))
     }
 
-    async fn find_or_create_session(&self, routing_key: &str) -> Result<SessionRow, RuntimeError> {
+    pub(crate) async fn find_or_create_session(&self, routing_key: &str) -> Result<SessionRow, RuntimeError> {
         // 1. Check in-memory cache
         {
             let index = self.sessions.lock().await;

@@ -2984,3 +2984,170 @@ fn session_loop_assigns_comms_directives_between_user_and_cron_priority() {
     assert!(directive_priority > crate::session_loop::PRIORITY_USER_MESSAGE);
     assert!(directive_priority < cron_priority);
 }
+
+#[derive(Debug)]
+struct SequenceChannelAdapter {
+    events: Arc<Mutex<Vec<rune_channels::InboundEvent>>>,
+}
+
+#[async_trait]
+impl rune_channels::ChannelAdapter for SequenceChannelAdapter {
+    async fn receive(
+        &mut self,
+    ) -> Result<rune_channels::InboundEvent, rune_channels::ChannelError> {
+        let mut events = self.events.lock().await;
+        if events.is_empty() {
+            Err(rune_channels::ChannelError::ConnectionLost {
+                reason: "no more events".to_string(),
+            })
+        } else {
+            Ok(events.remove(0))
+        }
+    }
+
+    async fn send(
+        &self,
+        _action: rune_channels::OutboundAction,
+    ) -> Result<rune_channels::DeliveryReceipt, rune_channels::ChannelError> {
+        Ok(rune_channels::DeliveryReceipt {
+            provider_message_id: Uuid::now_v7().to_string(),
+            delivered_at: chrono::Utc::now(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn next_event_prefers_higher_priority_items_already_waiting() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let events = Arc::new(Mutex::new(vec![
+        rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+            channel_id: rune_core::ChannelId::new(),
+            raw_chat_id: "cron:daily".to_string(),
+            sender: "scheduler".to_string(),
+            content: "run cron".to_string(),
+            attachments: vec![],
+            timestamp: chrono::Utc::now(),
+            provider_message_id: "cron-1".to_string(),
+        }),
+        rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+            channel_id: rune_core::ChannelId::new(),
+            raw_chat_id: "telegram:dm:hamza".to_string(),
+            sender: "hamza".to_string(),
+            content: "urgent".to_string(),
+            attachments: vec![],
+            timestamp: chrono::Utc::now(),
+            provider_message_id: "user-1".to_string(),
+        }),
+    ]));
+    let adapter = SequenceChannelAdapter { events };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let first = session_loop.next_event().await;
+    let second = session_loop.next_event().await;
+
+    match first {
+        rune_channels::InboundEvent::Message(msg) => {
+            assert_eq!(msg.raw_chat_id, "telegram:dm:hamza");
+        }
+        other => panic!("expected message, got {other:?}"),
+    }
+    match second {
+        rune_channels::InboundEvent::Message(msg) => {
+            assert_eq!(msg.raw_chat_id, "cron:daily");
+        }
+        other => panic!("expected message, got {other:?}"),
+    }
+}
+
+
+#[tokio::test]
+async fn stop_command_registers_abort_for_active_channel_session() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let routing_key = "telegram:dm:hamza:hamza";
+    let session = session_loop.find_or_create_session(routing_key).await.unwrap();
+    let stop = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "/stop switch to issue #418".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "stop-1".to_string(),
+    };
+
+    assert!(session_loop.handle_command(&stop).await.unwrap());
+
+    let abort = crate::executor::execute_for_abort_test(session.id).await;
+    assert_eq!(abort.as_deref(), Some("stop requested from channel telegram:dm:hamza: switch to issue #418"));
+    crate::clear_session_abort(session.id).await;
+}
+
+#[tokio::test]
+async fn message_handling_persists_channel_source_priority_metadata() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("done")])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "hello".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-meta-1".to_string(),
+    });
+
+    session_loop.handle_event(event).await.unwrap();
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(session.metadata["channel_source_priority"]["telegram"], serde_json::json!(crate::session_loop::PRIORITY_USER_MESSAGE));
+}

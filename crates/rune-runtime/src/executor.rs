@@ -61,6 +61,11 @@ async fn abort_reason(session_id: Uuid) -> Option<String> {
     SESSION_ABORTS.lock().await.get(&session_id).cloned()
 }
 
+#[cfg(test)]
+pub(crate) async fn execute_for_abort_test(session_id: Uuid) -> Option<String> {
+    abort_reason(session_id).await
+}
+
 /// Executes a single turn: load context → prompt → model → tool loop → persist.
 ///
 /// When a `LaneQueue` is attached, each turn acquires a lane permit before
