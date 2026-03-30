@@ -2,8 +2,8 @@
 //!
 //! This is the core pipeline: channel message → find/create session → execute turn → reply.
 
-use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -138,7 +138,9 @@ fn is_comms_directive_message(content: &str) -> bool {
         "[directive]",
         "[comms] directive",
     ];
-    directive_prefixes.iter().any(|prefix| lower.starts_with(prefix))
+    directive_prefixes
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
 }
 
 fn is_cron_message(content: &str) -> bool {
@@ -286,9 +288,7 @@ impl SessionLoop {
     pub fn classify_source_priority(source: &str) -> EventPriority {
         match source.trim().to_ascii_lowercase().as_str() {
             "heartbeat" | "health" | "health-check" | "health_check" => PRIORITY_IMMEDIATE,
-            "telegram" | "telegram-message" | "telegram_message" | "user" => {
-                PRIORITY_USER_MESSAGE
-            }
+            "telegram" | "telegram-message" | "telegram_message" | "user" => PRIORITY_USER_MESSAGE,
             "comms" | "directive" | "comms-directive" | "comms_directive" => {
                 PRIORITY_COMMS_DIRECTIVE
             }
@@ -355,9 +355,11 @@ impl SessionLoop {
 
             self.enqueue_event(event).await;
 
-            while let Ok(next_event) =
-                tokio::time::timeout(std::time::Duration::from_millis(10), self.receive_raw_event())
-                    .await
+            while let Ok(next_event) = tokio::time::timeout(
+                std::time::Duration::from_millis(10),
+                self.receive_raw_event(),
+            )
+            .await
             {
                 match next_event {
                     Ok(event) => self.enqueue_event(event).await,
@@ -393,7 +395,8 @@ impl SessionLoop {
                 debug!(routing_key = %routing_key, source = %source, priority = source_priority, "received inbound message");
 
                 let session = self.find_or_create_session(&routing_key).await?;
-                let metadata = set_channel_source_priority(&session.metadata, &source, source_priority);
+                let metadata =
+                    set_channel_source_priority(&session.metadata, &source, source_priority);
                 if metadata != session.metadata {
                     self.session_repo
                         .update_metadata(session.id, metadata, chrono::Utc::now())
@@ -475,7 +478,8 @@ impl SessionLoop {
                     Some(tokio::spawn(drain_chunks(chunk_rx)))
                 };
 
-                let trigger_kind = Self::trigger_kind_for_event(&InboundEvent::Message(msg.clone()));
+                let trigger_kind =
+                    Self::trigger_kind_for_event(&InboundEvent::Message(msg.clone()));
                 let result = self
                     .turn_executor
                     .execute_triggered(
@@ -726,11 +730,8 @@ impl SessionLoop {
         let session = match self.find_or_create_session(&routing_key).await {
             Ok(session) => session,
             Err(error) => {
-                self.send_command_reply(
-                    msg,
-                    &format!("No active session to stop: {error}"),
-                )
-                .await;
+                self.send_command_reply(msg, &format!("No active session to stop: {error}"))
+                    .await;
                 return Ok(());
             }
         };
@@ -738,13 +739,20 @@ impl SessionLoop {
         let reason = if args.trim().is_empty() {
             format!("stop requested from channel {}", msg.raw_chat_id)
         } else {
-            format!("stop requested from channel {}: {}", msg.raw_chat_id, args.trim())
+            format!(
+                "stop requested from channel {}: {}",
+                msg.raw_chat_id,
+                args.trim()
+            )
         };
         crate::request_session_abort(session.id, reason.clone()).await;
 
         self.send_command_reply(
             msg,
-            &format!("Stopping active work for session {}. Reason: {}", session.id, reason),
+            &format!(
+                "Stopping active work for session {}. Reason: {}",
+                session.id, reason
+            ),
         )
         .await;
         Ok(())
@@ -857,7 +865,10 @@ impl SessionLoop {
         ))
     }
 
-    pub(crate) async fn find_or_create_session(&self, routing_key: &str) -> Result<SessionRow, RuntimeError> {
+    pub(crate) async fn find_or_create_session(
+        &self,
+        routing_key: &str,
+    ) -> Result<SessionRow, RuntimeError> {
         // 1. Check in-memory cache
         {
             let index = self.sessions.lock().await;

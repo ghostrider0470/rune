@@ -56,7 +56,6 @@ pub(crate) fn set_context_tiers(metadata: &Value, report: &ContextAssemblyReport
     Value::Object(next)
 }
 
-
 pub(crate) fn set_channel_source_priority(metadata: &Value, source: &str, priority: u8) -> Value {
     let mut next = metadata.as_object().cloned().unwrap_or_default();
     let mut map = next

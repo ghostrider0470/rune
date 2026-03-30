@@ -3023,7 +3023,10 @@ fn session_loop_assigns_comms_directives_between_user_and_cron_priority() {
     let directive_priority = crate::session_loop::SessionLoop::event_priority_for_test(&directive);
     let cron_priority = crate::session_loop::SessionLoop::event_priority_for_test(&cron);
 
-    assert_eq!(directive_priority, crate::session_loop::PRIORITY_COMMS_DIRECTIVE);
+    assert_eq!(
+        directive_priority,
+        crate::session_loop::PRIORITY_COMMS_DIRECTIVE
+    );
     assert_eq!(cron_priority, crate::session_loop::PRIORITY_CRON);
     assert!(directive_priority > crate::session_loop::PRIORITY_USER_MESSAGE);
     assert!(directive_priority < cron_priority);
@@ -3115,7 +3118,6 @@ async fn next_event_prefers_higher_priority_items_already_waiting() {
     }
 }
 
-
 #[tokio::test]
 async fn stop_command_registers_abort_for_active_channel_session() {
     let h = TestHarness::new();
@@ -3137,7 +3139,10 @@ async fn stop_command_registers_abort_for_active_channel_session() {
     );
 
     let routing_key = "telegram:dm:hamza:hamza";
-    let session = session_loop.find_or_create_session(routing_key).await.unwrap();
+    let session = session_loop
+        .find_or_create_session(routing_key)
+        .await
+        .unwrap();
     let stop = rune_channels::ChannelMessage {
         channel_id: rune_core::ChannelId::new(),
         raw_chat_id: "telegram:dm:hamza".to_string(),
@@ -3151,7 +3156,10 @@ async fn stop_command_registers_abort_for_active_channel_session() {
     assert!(session_loop.handle_command(&stop).await.unwrap());
 
     let abort = crate::executor::execute_for_abort_test(session.id).await;
-    assert_eq!(abort.as_deref(), Some("stop requested from channel telegram:dm:hamza: switch to issue #418"));
+    assert_eq!(
+        abort.as_deref(),
+        Some("stop requested from channel telegram:dm:hamza: switch to issue #418")
+    );
     crate::clear_session_abort(session.id).await;
 }
 
@@ -3165,7 +3173,9 @@ async fn message_handling_persists_channel_source_priority_metadata() {
     let session_loop = crate::session_loop::SessionLoop::new(
         engine,
         Arc::new(h.turn_executor(
-            Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("done")])),
+            Arc::new(FakeModelProvider::new(vec![
+                FakeModelProvider::text_response("done"),
+            ])),
             Arc::new(FakeToolExecutor::new(vec![])),
             ToolRegistry::new(),
         )),
@@ -3193,5 +3203,8 @@ async fn message_handling_persists_channel_source_priority_metadata() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(session.metadata["channel_source_priority"]["telegram"], serde_json::json!(crate::session_loop::PRIORITY_USER_MESSAGE));
+    assert_eq!(
+        session.metadata["channel_source_priority"]["telegram"],
+        serde_json::json!(crate::session_loop::PRIORITY_USER_MESSAGE)
+    );
 }
