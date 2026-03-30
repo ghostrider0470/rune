@@ -94,7 +94,7 @@ fn register_builtin_stubs_populates_expected_tools() {
     let mut reg = ToolRegistry::new();
     register_builtin_stubs(&mut reg);
 
-    assert_eq!(reg.len(), 16);
+    assert_eq!(reg.len(), 19);
 
     let expected = [
         "read_file",
@@ -112,6 +112,10 @@ fn register_builtin_stubs_populates_expected_tools() {
         "context_budget",
         "context_checkpoint",
         "context_gc",
+        "comms_send",
+        "comms_read",
+        "memory_bank_list",
+        "memory_bank_get",
     ];
     for name in expected {
         assert!(reg.lookup(name).is_ok(), "missing builtin: {name}");
@@ -245,4 +249,13 @@ fn context_budget_tool_definitions_are_registered() {
     assert!(reg.lookup("context_budget").is_ok());
     assert!(reg.lookup("context_checkpoint").is_ok());
     assert!(reg.lookup("context_gc").is_ok());
+}
+
+#[test]
+fn memory_bank_tool_definitions_are_registered() {
+    let mut reg = ToolRegistry::new();
+    register_builtin_stubs(&mut reg);
+
+    assert!(reg.lookup("memory_bank_list").is_ok());
+    assert!(reg.lookup("memory_bank_get").is_ok());
 }
