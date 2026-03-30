@@ -15365,7 +15365,10 @@ async fn delegation_task_status_transitions_to_timeout_after_deadline() {
     assert_eq!(status_response.status(), StatusCode::OK);
     let status_envelope = body_json(status_response).await;
     assert_eq!(status_envelope["result"]["status"], "timeout");
-    assert_eq!(status_envelope["result"]["error"]["code"], "deadline_exceeded");
+    assert_eq!(
+        status_envelope["result"]["error"]["code"],
+        "deadline_exceeded"
+    );
     assert!(status_envelope["result"]["finished_at"].is_string());
 }
 
@@ -15413,6 +15416,9 @@ async fn submit_delegation_task_rejects_zero_timeout() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = body_json(response).await;
-    let message = body["message"].as_str().or_else(|| body["error"]["message"].as_str()).unwrap();
+    let message = body["message"]
+        .as_str()
+        .or_else(|| body["error"]["message"].as_str())
+        .unwrap();
     assert!(message.contains("timeout_secs must be greater than zero"));
 }

@@ -860,7 +860,9 @@ pub async fn peer_health_alerts(
     State(state): State<AppState>,
 ) -> Result<Json<PeerHealthAlertsResponse>, GatewayError> {
     let peers = collect_peer_health(state.capabilities.peers.clone()).await;
-    Ok(Json(peer_health_alerts_from_peers(&state.peer_health_alert_cache, peers).await))
+    Ok(Json(
+        peer_health_alerts_from_peers(&state.peer_health_alert_cache, peers).await,
+    ))
 }
 
 async fn peer_health_alerts_from_peers(
@@ -878,10 +880,8 @@ async fn peer_health_alerts_from_peers(
     let mut alerts = Vec::new();
     for peer in peers.into_iter().filter(|peer| peer.status != "healthy") {
         let state = cache.transition(&peer.id, &peer.status, checked_at).await;
-        let should_notify = matches!(
-            state.last_notified_at,
-            None
-        ) || state.status != "degraded" && state.consecutive_failures == 1;
+        let should_notify = matches!(state.last_notified_at, None)
+            || state.status != "degraded" && state.consecutive_failures == 1;
 
         alerts.push(PeerHealthAlert {
             severity: match peer.status.as_str() {
@@ -8429,29 +8429,33 @@ mod tests {
     #[tokio::test]
     async fn peer_health_alerts_empty_when_all_peers_healthy() {
         let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(&cache, vec![PeerHealthResponse {
-            id: "peer-a".to_string(),
-            name: "Peer A".to_string(),
-            health_url: "http://peer-a/api/v1/instance/health".to_string(),
-            status: "healthy".to_string(),
-            detail: "200 OK".to_string(),
-            checked_at: "2026-03-29T00:00:00Z".to_string(),
-            latency_ms: Some(12),
-            last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
-            observed_status: "healthy".to_string(),
-            load: Some(InstanceLoadResponse {
-                session_count: 1,
-                ws_subscribers: 0,
-                ws_connections: 0,
-            }),
-            advertised_addr: Some("http://peer-a".to_string()),
-            roles: vec!["gateway".to_string()],
-            capability_hash: Some("abc".to_string()),
-            capabilities_version: Some(1),
-            comms_transport: Some("http".to_string()),
-            configured_models: vec!["gpt-4.1".to_string()],
-            active_projects: vec!["/workspace/rune".to_string()],
-        }]).await;
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![PeerHealthResponse {
+                id: "peer-a".to_string(),
+                name: "Peer A".to_string(),
+                health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                status: "healthy".to_string(),
+                detail: "200 OK".to_string(),
+                checked_at: "2026-03-29T00:00:00Z".to_string(),
+                latency_ms: Some(12),
+                last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
+                observed_status: "healthy".to_string(),
+                load: Some(InstanceLoadResponse {
+                    session_count: 1,
+                    ws_subscribers: 0,
+                    ws_connections: 0,
+                }),
+                advertised_addr: Some("http://peer-a".to_string()),
+                roles: vec!["gateway".to_string()],
+                capability_hash: Some("abc".to_string()),
+                capabilities_version: Some(1),
+                comms_transport: Some("http".to_string()),
+                configured_models: vec!["gpt-4.1".to_string()],
+                active_projects: vec!["/workspace/rune".to_string()],
+            }],
+        )
+        .await;
         assert_eq!(response.status, "ok");
         assert!(response.alerts.is_empty());
         assert!(response.failover_ready);
@@ -8465,25 +8469,29 @@ mod tests {
     #[tokio::test]
     async fn peer_health_alerts_expose_observed_status_last_seen_and_health_url() {
         let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(&cache, vec![PeerHealthResponse {
-            id: "peer-a".to_string(),
-            name: "Peer A".to_string(),
-            health_url: "http://peer-a/api/v1/instance/health".to_string(),
-            status: "degraded".to_string(),
-            detail: "invalid health payload".to_string(),
-            checked_at: "2026-03-29T00:00:00Z".to_string(),
-            latency_ms: Some(12),
-            last_seen_at: Some("2026-03-28T23:59:58Z".to_string()),
-            observed_status: "invalid-payload".to_string(),
-            load: None,
-            advertised_addr: None,
-            roles: Vec::new(),
-            capability_hash: None,
-            capabilities_version: None,
-            comms_transport: None,
-            configured_models: Vec::new(),
-            active_projects: Vec::new(),
-        }]).await;
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![PeerHealthResponse {
+                id: "peer-a".to_string(),
+                name: "Peer A".to_string(),
+                health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                status: "degraded".to_string(),
+                detail: "invalid health payload".to_string(),
+                checked_at: "2026-03-29T00:00:00Z".to_string(),
+                latency_ms: Some(12),
+                last_seen_at: Some("2026-03-28T23:59:58Z".to_string()),
+                observed_status: "invalid-payload".to_string(),
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
+            }],
+        )
+        .await;
         assert_eq!(response.alert_count, 1);
         assert_eq!(response.alerts[0].status, "degraded");
         assert_eq!(response.alerts[0].observed_status, "invalid-payload");
@@ -8500,46 +8508,50 @@ mod tests {
     #[tokio::test]
     async fn peer_health_alerts_expose_partition_guard_metadata() {
         let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(&cache, vec![
-            PeerHealthResponse {
-                id: "peer-a".to_string(),
-                name: "Peer A".to_string(),
-                health_url: "http://peer-a/api/v1/instance/health".to_string(),
-                status: "unreachable".to_string(),
-                detail: "timeout".to_string(),
-                checked_at: "2025-01-01T00:00:00Z".to_string(),
-                latency_ms: None,
-                last_seen_at: Some("2025-01-01T00:00:10Z".to_string()),
-                observed_status: "unknown".to_string(),
-                load: None,
-                advertised_addr: None,
-                roles: Vec::new(),
-                capability_hash: None,
-                capabilities_version: None,
-                comms_transport: None,
-                configured_models: Vec::new(),
-                active_projects: Vec::new(),
-            },
-            PeerHealthResponse {
-                id: "peer-b".to_string(),
-                name: "Peer B".to_string(),
-                health_url: "http://peer-b/api/v1/instance/health".to_string(),
-                status: "degraded".to_string(),
-                detail: "high latency".to_string(),
-                checked_at: "2025-01-01T00:00:05Z".to_string(),
-                latency_ms: Some(900),
-                last_seen_at: Some("2025-01-01T00:00:12Z".to_string()),
-                observed_status: "degraded".to_string(),
-                load: None,
-                advertised_addr: None,
-                roles: Vec::new(),
-                capability_hash: None,
-                capabilities_version: None,
-                comms_transport: None,
-                configured_models: Vec::new(),
-                active_projects: Vec::new(),
-            },
-        ]).await;
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![
+                PeerHealthResponse {
+                    id: "peer-a".to_string(),
+                    name: "Peer A".to_string(),
+                    health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                    status: "unreachable".to_string(),
+                    detail: "timeout".to_string(),
+                    checked_at: "2025-01-01T00:00:00Z".to_string(),
+                    latency_ms: None,
+                    last_seen_at: Some("2025-01-01T00:00:10Z".to_string()),
+                    observed_status: "unknown".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+                PeerHealthResponse {
+                    id: "peer-b".to_string(),
+                    name: "Peer B".to_string(),
+                    health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                    status: "degraded".to_string(),
+                    detail: "high latency".to_string(),
+                    checked_at: "2025-01-01T00:00:05Z".to_string(),
+                    latency_ms: Some(900),
+                    last_seen_at: Some("2025-01-01T00:00:12Z".to_string()),
+                    observed_status: "degraded".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+            ],
+        )
+        .await;
 
         assert!(response.network_partition_suspected);
         assert_eq!(response.target_recovery_sla_seconds, 60);
@@ -8553,46 +8565,50 @@ mod tests {
     #[tokio::test]
     async fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
         let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(&cache, vec![
-            PeerHealthResponse {
-                id: "peer-a".to_string(),
-                name: "Peer A".to_string(),
-                health_url: "http://peer-a/api/v1/instance/health".to_string(),
-                status: "unreachable".to_string(),
-                detail: "connection refused".to_string(),
-                checked_at: "2026-03-29T00:00:00Z".to_string(),
-                latency_ms: None,
-                last_seen_at: None,
-                observed_status: "unreachable".to_string(),
-                load: None,
-                advertised_addr: None,
-                roles: Vec::new(),
-                capability_hash: None,
-                capabilities_version: None,
-                comms_transport: None,
-                configured_models: Vec::new(),
-                active_projects: Vec::new(),
-            },
-            PeerHealthResponse {
-                id: "peer-b".to_string(),
-                name: "Peer B".to_string(),
-                health_url: "http://peer-b/api/v1/instance/health".to_string(),
-                status: "degraded".to_string(),
-                detail: "500 Internal Server Error".to_string(),
-                checked_at: "2026-03-29T00:00:03Z".to_string(),
-                latency_ms: Some(55),
-                last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
-                observed_status: "degraded".to_string(),
-                load: None,
-                advertised_addr: None,
-                roles: Vec::new(),
-                capability_hash: None,
-                capabilities_version: None,
-                comms_transport: None,
-                configured_models: Vec::new(),
-                active_projects: Vec::new(),
-            },
-        ]).await;
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![
+                PeerHealthResponse {
+                    id: "peer-a".to_string(),
+                    name: "Peer A".to_string(),
+                    health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                    status: "unreachable".to_string(),
+                    detail: "connection refused".to_string(),
+                    checked_at: "2026-03-29T00:00:00Z".to_string(),
+                    latency_ms: None,
+                    last_seen_at: None,
+                    observed_status: "unreachable".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+                PeerHealthResponse {
+                    id: "peer-b".to_string(),
+                    name: "Peer B".to_string(),
+                    health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                    status: "degraded".to_string(),
+                    detail: "500 Internal Server Error".to_string(),
+                    checked_at: "2026-03-29T00:00:03Z".to_string(),
+                    latency_ms: Some(55),
+                    last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
+                    observed_status: "degraded".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+            ],
+        )
+        .await;
         assert_eq!(response.status, "degraded");
         assert_eq!(response.alerts.len(), 2);
         assert_eq!(response.alerts[0].severity, "critical");
