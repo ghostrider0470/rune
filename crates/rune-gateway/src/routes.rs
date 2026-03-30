@@ -258,6 +258,9 @@ pub struct PeerHealthAlertsResponse {
     pub alerts: Vec<PeerHealthAlert>,
     pub alert_count: usize,
     pub checked_at: String,
+    pub failover_ready: bool,
+    pub work_absorption_required: bool,
+    pub summary: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -866,12 +869,38 @@ fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAl
             checked_at: peer.checked_at,
         })
         .collect::<Vec<_>>();
+    let unreachable_count = alerts
+        .iter()
+        .filter(|alert| alert.status == "unreachable")
+        .count();
+    let degraded_count = alerts
+        .iter()
+        .filter(|alert| alert.status == "degraded")
+        .count();
+    let work_absorption_required = unreachable_count > 0;
+    let failover_ready = degraded_count == 0;
     let status = if alerts.is_empty() { "ok" } else { "degraded" };
+    let summary = if alerts.is_empty() {
+        "all peers healthy; no failover action required".to_string()
+    } else if work_absorption_required {
+        format!(
+            "{} unreachable peer(s) require work absorption; {} degraded peer(s) observed",
+            unreachable_count, degraded_count
+        )
+    } else {
+        format!(
+            "{} degraded peer(s) observed; failover absorption not required yet",
+            degraded_count
+        )
+    };
     PeerHealthAlertsResponse {
         status: status.to_string(),
         alert_count: alerts.len(),
         alerts,
         checked_at,
+        failover_ready,
+        work_absorption_required,
+        summary,
     }
 }
 
@@ -8379,6 +8408,9 @@ mod tests {
         }]);
         assert_eq!(response.status, "ok");
         assert!(response.alerts.is_empty());
+        assert!(response.failover_ready);
+        assert!(!response.work_absorption_required);
+        assert_eq!(response.summary, "all peers healthy; no failover action required");
     }
 
     #[test]
@@ -8429,6 +8461,12 @@ mod tests {
         assert_eq!(response.alerts[0].peer_id, "peer-a");
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
+        assert!(!response.failover_ready);
+        assert!(response.work_absorption_required);
+        assert_eq!(
+            response.summary,
+            "1 unreachable peer(s) require work absorption; 1 degraded peer(s) observed"
+        );
     }
 
     #[test]
