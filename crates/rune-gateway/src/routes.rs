@@ -996,6 +996,8 @@ pub struct StatusPaths {
 pub struct LaneStatsResponse {
     pub main_active: usize,
     pub main_capacity: usize,
+    pub priority_active: usize,
+    pub priority_capacity: usize,
     pub subagent_active: usize,
     pub subagent_capacity: usize,
     pub cron_active: usize,
@@ -3511,6 +3513,8 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
     LaneStatsResponse {
         main_active: stats.main_active,
         main_capacity: stats.main_capacity,
+        priority_active: stats.priority_active,
+        priority_capacity: stats.priority_capacity,
         subagent_active: stats.subagent_active,
         subagent_capacity: stats.subagent_capacity,
         cron_active: stats.cron_active,

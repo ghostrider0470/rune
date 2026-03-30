@@ -963,6 +963,10 @@ impl RpcDispatcher {
                     "active": stats.main_active,
                     "capacity": stats.main_capacity,
                 },
+                "priority": {
+                    "active": stats.priority_active,
+                    "capacity": stats.priority_capacity,
+                },
                 "subagent": {
                     "active": stats.subagent_active,
                     "capacity": stats.subagent_capacity,
@@ -1632,6 +1636,8 @@ impl RpcDispatcher {
             json!({
                 "main_active": stats.main_active,
                 "main_capacity": stats.main_capacity,
+                "priority_active": stats.priority_active,
+                "priority_capacity": stats.priority_capacity,
                 "subagent_active": stats.subagent_active,
                 "subagent_capacity": stats.subagent_capacity,
                 "cron_active": stats.cron_active,
