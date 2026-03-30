@@ -50,7 +50,9 @@ use rune_gateway::ms365::{
 use rune_gateway::parse_memory_search_output;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
-use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
+use rune_gateway::{
+    AppState, PeerHealthAlertCache, WebChatRateLimiter, build_router, pairing::DeviceRegistry,
+};
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
@@ -1636,6 +1638,7 @@ fn build_test_app_parts_with_ms365_services(
         ms365_users_service,
         comms_client: None,
         token_metrics,
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     (build_router(state, auth_token), device_repo)
@@ -1852,6 +1855,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1977,6 +1981,7 @@ enabled: true
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2108,6 +2113,7 @@ async fn status_reports_configured_lane_capacities() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -2218,6 +2224,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -2337,6 +2344,7 @@ async fn ws_rpc_runtime_context_budget_reports_partition_usage_and_checkpoint() 
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2481,6 +2489,7 @@ async fn ws_rpc_runtime_context_budget_gc_compacts_and_returns_before_after_repo
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2601,6 +2610,7 @@ async fn ws_rpc_runtime_context_budget_gc_persists_checkpoint_when_store_path_is
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2728,6 +2738,7 @@ async fn ws_rpc_runtime_context_budget_rejects_invalid_items() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2872,6 +2883,7 @@ async fn ws_rpc_health_reports_session_count() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2991,6 +3003,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3132,6 +3145,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3290,6 +3304,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3392,6 +3407,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3490,6 +3506,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let session_id = Uuid::new_v4();
@@ -3681,6 +3698,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3798,6 +3816,7 @@ async fn approvals_list_route_includes_durable_resume_refs() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let approval_id = Uuid::now_v7();
@@ -3923,6 +3942,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -4082,6 +4102,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -4237,6 +4258,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -4357,6 +4379,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -7895,6 +7918,7 @@ async fn send_message_and_transcript_with_shared_state() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8291,6 +8315,7 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8467,6 +8492,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     transcript_repo
@@ -8669,6 +8695,7 @@ async fn get_session_status_surfaces_orchestration_metadata() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8773,6 +8800,7 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8955,6 +8983,7 @@ async fn dashboard_usage_includes_project_cache_metrics() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics,
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10009,6 +10038,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10501,6 +10531,7 @@ async fn reminders_list_includes_outcome_fields() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10613,6 +10644,7 @@ async fn reminders_cancel_returns_success() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10742,6 +10774,7 @@ async fn agent_steer_success() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10930,6 +10963,7 @@ async fn agent_kill_success() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -11092,6 +11126,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -12090,6 +12125,7 @@ async fn transcript_route_filters_entries_after_cursor() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -12544,6 +12580,7 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_browser_tokens_across_se
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -12680,6 +12717,7 @@ async fn ws_rpc_session_send_rate_limits_shared_webchat_browser_token_across_ses
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -12801,6 +12839,7 @@ async fn ws_rpc_processes_log_surfaces_output() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -12910,6 +12949,7 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13033,6 +13073,7 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13434,6 +13475,7 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13598,6 +13640,7 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13719,6 +13762,7 @@ async fn ws_rpc_session_resolve_merges_metadata_for_existing_channel_session() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13829,6 +13873,7 @@ async fn api_tool_execution_route_returns_persisted_execution() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -14047,6 +14092,7 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let session_id = Uuid::now_v7();
@@ -14352,6 +14398,7 @@ async fn native_comms_send_inbox_and_ack_flow() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: Some(client.clone()),
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
     let app = build_router(app_state, None);
 
@@ -14901,6 +14948,7 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -15154,6 +15202,7 @@ async fn session_status_route_surfaces_subagent_audit_summary() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
+        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);

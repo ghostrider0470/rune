@@ -319,6 +319,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         ms365_mail_service: services.ms365_mail_service,
         ms365_files_service: services.ms365_files_service,
         ms365_users_service: services.ms365_users_service,
+        peer_health_alert_cache: crate::state::PeerHealthAlertCache::new(),
         comms_client,
         token_metrics: TokenMetricsStore::new(),
     };
