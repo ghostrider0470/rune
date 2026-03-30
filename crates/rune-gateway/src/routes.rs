@@ -6290,6 +6290,10 @@ pub struct MemorySearchQuery {
     pub q: Option<String>,
     #[serde(rename = "limit")]
     pub _limit: Option<usize>,
+    #[serde(default)]
+    pub include_remote: Option<bool>,
+    #[serde(default)]
+    pub include_private: Option<bool>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -6349,10 +6353,17 @@ struct RemoteMemorySearchResponse {
     pub message: String,
 }
 
+fn memory_result_is_private(result: &MemorySearchResult) -> bool {
+    let path = result.file_path.to_ascii_lowercase();
+    path.starts_with("memory/private/") || path.contains("/private/")
+}
+
 async fn federated_memory_search(
     state: &AppState,
     query: &str,
     limit: usize,
+    include_remote: bool,
+    include_private: bool,
     local_results: Vec<MemorySearchResult>,
 ) -> (Vec<MemorySearchResult>, usize) {
     let peers = {
@@ -6360,8 +6371,16 @@ async fn federated_memory_search(
         config.instance.peers.clone()
     };
 
-    if peers.is_empty() {
-        return (local_results, 0);
+    if !include_remote || peers.is_empty() {
+        let filtered = if include_private {
+            local_results
+        } else {
+            local_results
+                .into_iter()
+                .filter(|result| !memory_result_is_private(result))
+                .collect()
+        };
+        return (filtered, 0);
     }
 
     let client = match reqwest::Client::builder()
@@ -6381,8 +6400,9 @@ async fn federated_memory_search(
             .trim_end_matches("/api/v1/instance/health")
             .trim_end_matches('/');
         let endpoint = format!(
-            "{base}/api/memory/search?q={}&limit={limit}",
+            "{base}/api/memory/search?q={}&limit={limit}&include_remote=false&include_private={}",
             urlencoding::encode(query),
+            include_private,
         );
 
         let response = match client.get(&endpoint).send().await {
@@ -6423,8 +6443,15 @@ async fn federated_memory_search(
         merged.append(&mut peer_results);
     }
 
-    let local_count = local_results.len();
-    let mut combined = local_results;
+    let mut combined = if include_private {
+        local_results
+    } else {
+        local_results
+            .into_iter()
+            .filter(|result| !memory_result_is_private(result))
+            .collect()
+    };
+    let local_count = combined.len();
     combined.extend(merged);
     combined.truncate(limit.max(local_count));
     (combined, remote_pending)
@@ -6465,6 +6492,8 @@ pub async fn memory_search(
     }
 
     let limit = query._limit.unwrap_or(10).clamp(1, 50);
+    let include_remote = query.include_remote.unwrap_or(true);
+    let include_private = query.include_private.unwrap_or(false);
     let workspace_root = {
         let config = state.config.read().await;
         config
@@ -6490,8 +6519,16 @@ pub async fn memory_search(
         .await
         .map_err(|error| GatewayError::Internal(error.to_string()))?;
     let local_results = parse_memory_search_output(&result.output);
-    let local_count = local_results.len();
-    let (results, remote_pending) = federated_memory_search(&state, &q, limit, local_results).await;
+    let (results, remote_pending) = federated_memory_search(
+        &state,
+        &q,
+        limit,
+        include_remote,
+        include_private,
+        local_results,
+    )
+    .await;
+    let local_count = results.iter().filter(|result| !result.remote).count();
     let remote_results = results.iter().filter(|result| result.remote).count();
     let message = if results.is_empty() {
         format!("No results found for query: {q}")
