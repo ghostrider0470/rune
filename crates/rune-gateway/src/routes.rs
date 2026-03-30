@@ -2538,6 +2538,10 @@ pub struct SessionStatusResponse {
     pub session_id: String,
     pub runtime: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_hint: Option<String>,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_ref: Option<String>,
@@ -2659,6 +2663,8 @@ pub async fn get_session_status(
         .or_else(|| model_override.clone());
     let approval_mode =
         metadata_string(metadata, "approval_mode").unwrap_or_else(|| "on-miss".to_string());
+    let status_reason = session_status_reason(&row.status, metadata, approval_mode.as_str());
+    let resume_hint = session_resume_hint(&row.status, metadata);
     let security_mode =
         metadata_string(metadata, "security_mode").unwrap_or_else(|| "allowlist".to_string());
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
@@ -2749,6 +2755,8 @@ pub async fn get_session_status(
             row.status
         ),
         status: row.status,
+        status_reason,
+        resume_hint,
         kind: row.kind,
         channel_ref: row.channel_ref,
         parent_session_id,
@@ -2780,6 +2788,43 @@ pub async fn get_session_status(
         latest_subagent_result,
         unresolved,
     }))
+}
+
+
+fn session_status_reason(status: &str, metadata: &serde_json::Value, approval_mode: &str) -> Option<String> {
+    match status {
+        "waiting_for_approval" => Some(format!(
+            "blocked on operator approval ({approval_mode}); resume after an approval decision is recorded"
+        )),
+        "waiting_for_subagent" => Some(
+            metadata_string(metadata, "subagent_lifecycle")
+                .map(|lifecycle| format!("waiting for delegated work to progress ({lifecycle})"))
+                .unwrap_or_else(|| "waiting for delegated work to progress".to_string()),
+        ),
+        "waiting_for_tool" => Some("paused until the active tool call finishes".to_string()),
+        "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => {
+            Some("running after a higher-priority preemption; inspect latest operator note for takeover context".to_string())
+        }
+        _ => None,
+    }
+}
+
+fn session_resume_hint(status: &str, metadata: &serde_json::Value) -> Option<String> {
+    match status {
+        "waiting_for_approval" => Some(
+            "decide the pending approval, then call the approval resume path or send the next operator instruction"
+                .to_string(),
+        ),
+        "waiting_for_subagent" => Some(
+            metadata_string(metadata, "subagent_lifecycle")
+                .map(|lifecycle| format!("check child session status; current delegated lifecycle is {lifecycle}"))
+                .unwrap_or_else(|| "check child session status or steer/cancel the delegated session".to_string()),
+        ),
+        "waiting_for_tool" => Some(
+            "wait for tool completion or cancel the in-flight tool execution before resuming".to_string(),
+        ),
+        _ => None,
+    }
 }
 
 /// A single node in a session delegation tree.
