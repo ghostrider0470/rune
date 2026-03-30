@@ -13,7 +13,15 @@ use tokio::sync::{Mutex, RwLock};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use chrono::Timelike;
+use chrono::{Timelike, Utc};
+
+use std::str::FromStr;
+
+use rune_channels::{ChannelMessage, InboundEvent};
+use rune_runtime::session_loop::{
+    PRIORITY_BACKGROUND, PRIORITY_COMMS_DIRECTIVE, PRIORITY_CRON, PRIORITY_HEARTBEAT,
+    PRIORITY_USER_MESSAGE, SessionLoop,
+};
 
 use rune_config::{
     AppConfig, Capabilities, ConfiguredModel, InstanceIdentity, LaneQueueConfig,
@@ -14897,4 +14905,70 @@ async fn session_status_route_surfaces_subagent_audit_summary() {
         json["audit"]["last_operator_note"],
         "Operator asked for a tighter review pass"
     );
+}
+fn test_inbound_message(raw_chat_id: &str) -> ChannelMessage {
+    ChannelMessage {
+        channel_id: rune_core::ChannelId::from_str("11111111-1111-1111-1111-111111111111").unwrap(),
+        raw_chat_id: raw_chat_id.to_string(),
+        sender: "tester".to_string(),
+        content: "payload".to_string(),
+        attachments: vec![],
+        timestamp: Utc::now(),
+        provider_message_id: format!("provider-{raw_chat_id}"),
+    }
+}
+
+#[tokio::test]
+async fn user_messages_outrank_heartbeat_comms_cron_and_background_work() {
+    let user = InboundEvent::Message(test_inbound_message("telegram:dm:hamza"));
+    let heartbeat = InboundEvent::Message(test_inbound_message("system:heartbeat"));
+    let comms = InboundEvent::Message(test_inbound_message("comms:directive"));
+    let cron = InboundEvent::Message(test_inbound_message("cron:daily"));
+    let reaction = InboundEvent::Reaction {
+        channel_id: rune_core::ChannelId::from_str("22222222-2222-2222-2222-222222222222").unwrap(),
+        message_id: "msg-1".to_string(),
+        emoji: "✅".to_string(),
+        user: "user-1".to_string(),
+    };
+
+    assert_eq!(SessionLoop::event_priority_for_test(&user), PRIORITY_USER_MESSAGE);
+    assert_eq!(SessionLoop::event_priority_for_test(&comms), PRIORITY_COMMS_DIRECTIVE);
+    assert_eq!(SessionLoop::event_priority_for_test(&heartbeat), PRIORITY_HEARTBEAT);
+    assert_eq!(SessionLoop::event_priority_for_test(&cron), PRIORITY_CRON);
+    assert_eq!(SessionLoop::event_priority_for_test(&reaction), PRIORITY_BACKGROUND);
+
+    assert!(SessionLoop::event_priority_for_test(&user) < SessionLoop::event_priority_for_test(&comms));
+    assert!(SessionLoop::event_priority_for_test(&comms) < SessionLoop::event_priority_for_test(&heartbeat));
+    assert!(SessionLoop::event_priority_for_test(&heartbeat) < SessionLoop::event_priority_for_test(&cron));
+    assert!(SessionLoop::event_priority_for_test(&cron) < SessionLoop::event_priority_for_test(&reaction));
+}
+
+#[test]
+fn source_priority_detects_internal_message_classes() {
+    assert_eq!(SessionLoop::source_priority_for_test("telegram:dm:hamza"), PRIORITY_USER_MESSAGE);
+    assert_eq!(SessionLoop::source_priority_for_test("COMMS:queue"), PRIORITY_COMMS_DIRECTIVE);
+    assert_eq!(SessionLoop::source_priority_for_test(" system:heartbeat "), PRIORITY_HEARTBEAT);
+    assert_eq!(SessionLoop::source_priority_for_test("cron:nightly"), PRIORITY_CRON);
+    assert_eq!(SessionLoop::source_priority_for_test("system:scheduled:heartbeat"), PRIORITY_CRON);
+}
+
+#[test]
+fn source_priority_treats_subagent_and_agent_sources_as_background_work() {
+    assert_eq!(SessionLoop::source_priority_for_test("subagent:worker-1"), PRIORITY_BACKGROUND);
+    assert_eq!(SessionLoop::source_priority_for_test(" agent:planner "), PRIORITY_BACKGROUND);
+}
+
+#[test]
+fn event_priority_treats_subagent_messages_as_background_work() {
+    let subagent = InboundEvent::Message(ChannelMessage {
+        channel_id: rune_core::ChannelId::from_str("33333333-3333-3333-3333-333333333333").unwrap(),
+        raw_chat_id: "subagent:worker-1".to_string(),
+        sender: "delegate".to_string(),
+        content: "subagent status update".to_string(),
+        attachments: vec![],
+        timestamp: Utc::now(),
+        provider_message_id: "provider-1".to_string(),
+    });
+
+    assert_eq!(SessionLoop::event_priority_for_test(&subagent), PRIORITY_BACKGROUND);
 }

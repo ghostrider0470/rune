@@ -43,10 +43,10 @@ Rune commands:
 /// Maps channel routing key → session_id.
 type SessionIndex = HashMap<String, Uuid>;
 
-type EventPriority = u8;
-pub const PRIORITY_IMMEDIATE: EventPriority = 0;
-pub const PRIORITY_USER_MESSAGE: EventPriority = 1;
-pub const PRIORITY_COMMS_DIRECTIVE: EventPriority = 2;
+pub type EventPriority = u8;
+pub const PRIORITY_USER_MESSAGE: EventPriority = 0;
+pub const PRIORITY_COMMS_DIRECTIVE: EventPriority = 1;
+pub const PRIORITY_HEARTBEAT: EventPriority = 2;
 pub const PRIORITY_CRON: EventPriority = 3;
 pub const PRIORITY_BACKGROUND: EventPriority = 4;
 
@@ -66,38 +66,19 @@ pub struct SessionLoop {
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
 }
 
-fn classify_message_priority(content: &str) -> EventPriority {
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        return PRIORITY_BACKGROUND;
+fn classify_message_priority(raw_chat_id: &str) -> EventPriority {
+    let normalized = raw_chat_id.trim().to_ascii_lowercase();
+    if normalized == "system:heartbeat" {
+        PRIORITY_HEARTBEAT
+    } else if normalized.starts_with("comms:") || normalized == "system:comms" {
+        PRIORITY_COMMS_DIRECTIVE
+    } else if normalized.starts_with("cron:") || normalized.starts_with("system:scheduled") {
+        PRIORITY_CRON
+    } else if normalized.starts_with("subagent:") || normalized.starts_with("agent:") {
+        PRIORITY_BACKGROUND
+    } else {
+        PRIORITY_USER_MESSAGE
     }
-
-    if is_comms_directive_message(trimmed) {
-        return PRIORITY_COMMS_DIRECTIVE;
-    }
-
-    if is_cron_message(trimmed) {
-        return PRIORITY_CRON;
-    }
-
-    PRIORITY_USER_MESSAGE
-}
-
-fn is_comms_directive_message(content: &str) -> bool {
-    let lower = content.to_ascii_lowercase();
-    let directive_prefixes = [
-        "directive:",
-        "comms directive:",
-        "[directive]",
-        "[comms] directive",
-    ];
-    directive_prefixes.iter().any(|prefix| lower.starts_with(prefix))
-}
-
-fn is_cron_message(content: &str) -> bool {
-    let lower = content.to_ascii_lowercase();
-    let cron_prefixes = ["cron:", "scheduled:", "heartbeat:", "reminder:"];
-    cron_prefixes.iter().any(|prefix| lower.starts_with(prefix))
 }
 
 /// MIME types considered audio for transcription purposes.
@@ -216,26 +197,12 @@ impl SessionLoop {
 
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
         match event {
-            InboundEvent::Message(msg) => classify_message_priority(&msg.content),
+            InboundEvent::Message(msg) => classify_message_priority(&msg.raw_chat_id),
             InboundEvent::Reaction { .. }
             | InboundEvent::Edit { .. }
             | InboundEvent::Delete { .. }
             | InboundEvent::MemberJoin { .. }
             | InboundEvent::MemberLeave { .. } => PRIORITY_BACKGROUND,
-        }
-    }
-
-    pub fn classify_source_priority(source: &str) -> EventPriority {
-        match source.trim().to_ascii_lowercase().as_str() {
-            "heartbeat" | "health" | "health-check" | "health_check" => PRIORITY_IMMEDIATE,
-            "telegram" | "telegram-message" | "telegram_message" | "user" => {
-                PRIORITY_USER_MESSAGE
-            }
-            "comms" | "directive" | "comms-directive" | "comms_directive" => {
-                PRIORITY_COMMS_DIRECTIVE
-            }
-            "cron" | "scheduler" | "scheduled" => PRIORITY_CRON,
-            _ => PRIORITY_BACKGROUND,
         }
     }
 
@@ -245,8 +212,8 @@ impl SessionLoop {
     }
 
     #[must_use]
-    pub fn source_priority_for_test(source: &str) -> EventPriority {
-        Self::classify_source_priority(source)
+    pub fn source_priority_for_test(raw_chat_id: &str) -> EventPriority {
+        classify_message_priority(raw_chat_id)
     }
 
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
