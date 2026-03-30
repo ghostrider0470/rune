@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
+use serde_json::json;
+
 use async_trait::async_trait;
 use tracing::instrument;
 
@@ -20,6 +22,7 @@ const MAX_OUTPUT_BYTES: usize = 50 * 1024;
 
 /// Default timeout for git operations (60 seconds).
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_PROTECTED_BRANCHES: &[&str] = &["main", "master"];
 
 /// Executor for the `git` tool.
 ///
@@ -86,6 +89,10 @@ impl GitToolExecutor {
             .workspace_root
             .canonicalize()
             .map_err(|e| ToolError::ExecutionFailed(format!("workspace root invalid: {e}")))?;
+
+        if let Some(result) = self.preflight(operation, &args, call, &workspace_root).await? {
+            return Ok(result);
+        }
 
         // Build the command: git <operation> [args...]
         let mut cmd = tokio::process::Command::new("git");
@@ -158,6 +165,267 @@ impl GitToolExecutor {
     }
 }
 
+impl GitToolExecutor {
+    async fn preflight(
+        &self,
+        operation: &str,
+        args: &[String],
+        call: &ToolCall,
+        workspace_root: &std::path::Path,
+    ) -> Result<Option<ToolResult>, ToolError> {
+        let safety = call.arguments.get("safety").and_then(|v| v.as_object());
+
+        let allow_dirty = safety
+            .and_then(|obj| obj.get("allow_dirty"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let require_clean = safety
+            .and_then(|obj| obj.get("require_clean"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let require_base_in_sync = safety
+            .and_then(|obj| obj.get("require_base_in_sync"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let protected_branches = safety
+            .and_then(|obj| obj.get("protected_branches"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|arr| !arr.is_empty())
+            .unwrap_or_else(|| {
+                DEFAULT_PROTECTED_BRANCHES
+                    .iter()
+                    .map(|branch| (*branch).to_owned())
+                    .collect()
+            });
+
+        let check_dirty = require_clean || !allow_dirty;
+        let dirty = if check_dirty {
+            let output = self.run_git_capture(workspace_root, ["status", "--porcelain"]).await?;
+            if !output.status.success() {
+                return Err(ToolError::ExecutionFailed(format!(
+                    "git status --porcelain failed during safety preflight: {}",
+                    format_output("status", &output)
+                )));
+            }
+            !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        } else {
+            false
+        };
+
+        if dirty && !allow_dirty {
+            return Ok(Some(self.blocked_result(
+                call,
+                operation,
+                json!({
+                    "kind": "dirty_tree",
+                    "message": "git working tree is dirty; pass safety.allow_dirty=true to override",
+                }),
+            )));
+        }
+
+        let current_branch = self.current_branch(workspace_root).await?;
+        let on_protected_branch = current_branch
+            .as_deref()
+            .map(|branch| protected_branches.iter().any(|candidate| candidate == branch))
+            .unwrap_or(false);
+
+        if on_protected_branch && is_mutating_operation(operation) {
+            return Ok(Some(self.blocked_result(
+                call,
+                operation,
+                json!({
+                    "kind": "protected_branch",
+                    "message": format!(
+                        "refusing to run mutating git operation on protected branch {}",
+                        current_branch.as_deref().unwrap_or("<detached>")
+                    ),
+                    "branch": current_branch,
+                    "protected_branches": protected_branches,
+                }),
+            )));
+        }
+
+        if require_base_in_sync {
+            let base_branch = safety
+                .and_then(|obj| obj.get("base_branch"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("main");
+            let remote_name = safety
+                .and_then(|obj| obj.get("remote"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("origin");
+            let fetch_output = self
+                .run_git_capture(workspace_root, ["fetch", remote_name, base_branch])
+                .await?;
+            if !fetch_output.status.success() {
+                return Ok(Some(self.blocked_result(
+                    call,
+                    operation,
+                    json!({
+                        "kind": "base_sync_fetch_failed",
+                        "message": format!("failed to fetch {remote_name}/{base_branch} during safety preflight"),
+                        "details": format_output("fetch", &fetch_output),
+                    }),
+                )));
+            }
+
+            let merge_base = self
+                .run_git_capture(workspace_root, ["merge-base", "HEAD", &format!("{remote_name}/{base_branch}")])
+                .await?;
+            let head_rev = self.run_git_capture(workspace_root, ["rev-parse", "HEAD"]).await?;
+            let base_rev = self
+                .run_git_capture(workspace_root, ["rev-parse", &format!("{remote_name}/{base_branch}")])
+                .await?;
+
+            if !(merge_base.status.success() && head_rev.status.success() && base_rev.status.success()) {
+                return Ok(Some(self.blocked_result(
+                    call,
+                    operation,
+                    json!({
+                        "kind": "base_sync_probe_failed",
+                        "message": format!("failed to compare HEAD against {remote_name}/{base_branch}"),
+                        "details": {
+                            "merge_base": format_output("merge-base", &merge_base),
+                            "head": format_output("rev-parse HEAD", &head_rev),
+                            "base": format_output(&format!("rev-parse {remote_name}/{base_branch}"), &base_rev),
+                        },
+                    }),
+                )));
+            }
+
+            let merge_base_sha = String::from_utf8_lossy(&merge_base.stdout).trim().to_owned();
+            let head_sha = String::from_utf8_lossy(&head_rev.stdout).trim().to_owned();
+            let base_sha = String::from_utf8_lossy(&base_rev.stdout).trim().to_owned();
+            if merge_base_sha != base_sha {
+                return Ok(Some(self.blocked_result(
+                    call,
+                    operation,
+                    json!({
+                        "kind": "base_out_of_sync",
+                        "message": format!("HEAD is not based on the latest {remote_name}/{base_branch}"),
+                        "branch": current_branch,
+                        "head": head_sha,
+                        "base": base_sha,
+                    }),
+                )));
+            }
+            if require_clean && dirty {
+                return Ok(Some(self.blocked_result(
+                    call,
+                    operation,
+                    json!({
+                        "kind": "dirty_tree",
+                        "message": "git working tree is dirty and safety.require_clean=true",
+                    }),
+                )));
+            }
+        }
+
+        if require_clean && dirty {
+            return Ok(Some(self.blocked_result(
+                call,
+                operation,
+                json!({
+                    "kind": "dirty_tree",
+                    "message": "git working tree is dirty and safety.require_clean=true",
+                }),
+            )));
+        }
+
+        let _ = args;
+        Ok(None)
+    }
+
+    async fn current_branch(
+        &self,
+        workspace_root: &std::path::Path,
+    ) -> Result<Option<String>, ToolError> {
+        let output = self
+            .run_git_capture(workspace_root, ["rev-parse", "--abbrev-ref", "HEAD"])
+            .await?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if branch.is_empty() || branch == "HEAD" {
+            Ok(None)
+        } else {
+            Ok(Some(branch))
+        }
+    }
+
+    async fn run_git_capture<I, S>(
+        &self,
+        workspace_root: &std::path::Path,
+        args: I,
+    ) -> Result<std::process::Output, ToolError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        let mut cmd = tokio::process::Command::new("git");
+        cmd.args(args);
+        cmd.current_dir(workspace_root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to spawn git: {e}")))?;
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            child.wait_with_output(),
+        )
+        .await
+        .map_err(|_| {
+            ToolError::ExecutionFailed(format!(
+                "git helper timed out after {DEFAULT_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| ToolError::ExecutionFailed(format!("git process error: {e}")))
+    }
+
+    fn blocked_result(
+        &self,
+        call: &ToolCall,
+        operation: &str,
+        payload: serde_json::Value,
+    ) -> ToolResult {
+        ToolResult {
+            tool_call_id: call.tool_call_id.clone(),
+            output: json!({
+                "ok": false,
+                "operation": operation,
+                "blocked": payload,
+            })
+            .to_string(),
+            is_error: true,
+            tool_execution_id: None,
+        }
+    }
+}
+
+fn is_mutating_operation(operation: &str) -> bool {
+    matches!(operation, "add" | "commit" | "push" | "pull" | "checkout" | "merge")
+}
+
+fn format_output(label: &str, output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => format!("git {label} exited with {}", output.status.code().unwrap_or(-1)),
+        (false, true) => stdout,
+        (true, false) => stderr,
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
+}
+
 /// Truncate a string to at most `max_bytes` without splitting a UTF-8 codepoint.
 fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -199,6 +467,21 @@ pub fn git_tool_definition() -> ToolDefinition {
                         { "type": "array", "items": { "type": "string" } },
                         { "type": "string" }
                     ]
+                },
+                "safety": {
+                    "type": "object",
+                    "description": "Optional safety rails for dirty-tree, base-sync, and protected-branch checks before executing mutating git operations.",
+                    "properties": {
+                        "allow_dirty": { "type": "boolean" },
+                        "require_clean": { "type": "boolean" },
+                        "require_base_in_sync": { "type": "boolean" },
+                        "base_branch": { "type": "string" },
+                        "remote": { "type": "string" },
+                        "protected_branches": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    }
                 }
             },
             "required": ["operation"]
@@ -350,4 +633,99 @@ mod tests {
         // We just check it doesn't fail with our own error
         assert!(!result.output.contains("Unsupported git operation"));
     }
+
+    #[tokio::test]
+    async fn blocks_mutating_operation_on_dirty_tree_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::fs::write(dir.path().join("dirty.txt"), "dirty").unwrap();
+
+        let exec = GitToolExecutor::new(dir.path());
+        let call = make_call(serde_json::json!({"operation": "add", "args": ["dirty.txt"]}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.is_error);
+        assert!(result.output.contains("dirty_tree"));
+    }
+
+    #[tokio::test]
+    async fn blocks_mutating_operation_on_protected_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .output();
+        std::fs::write(dir.path().join("test.txt"), "hello").unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["commit", "-m", "initial commit"])
+            .current_dir(dir.path())
+            .output();
+
+        let exec = GitToolExecutor::new(dir.path());
+        let call = make_call(serde_json::json!({"operation": "commit", "args": ["--allow-empty", "-m", "x"], "safety": {"allow_dirty": true}}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.is_error);
+        assert!(result.output.contains("protected_branch"));
+    }
+
+    #[tokio::test]
+    async fn blocks_when_base_branch_is_out_of_sync() {
+        let root = tempfile::tempdir().unwrap();
+        let remote = root.path().join("remote.git");
+        let repo = root.path().join("repo");
+        let other = root.path().join("other");
+
+        let _ = std::process::Command::new("git").args(["init", "--bare", remote.to_str().unwrap()]).output().unwrap();
+        let _ = std::process::Command::new("git").args(["clone", remote.to_str().unwrap(), repo.to_str().unwrap()]).output().unwrap();
+        let _ = std::process::Command::new("git").args(["clone", remote.to_str().unwrap(), other.to_str().unwrap()]).output().unwrap();
+
+        for path in [&repo, &other] {
+            let _ = std::process::Command::new("git").args(["config", "user.email", "test@test.com"]).current_dir(path).output();
+            let _ = std::process::Command::new("git").args(["config", "user.name", "Test"]).current_dir(path).output();
+        }
+
+        std::fs::write(repo.join("base.txt"), "one").unwrap();
+        let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&repo).output();
+        let _ = std::process::Command::new("git").args(["commit", "-m", "base"]).current_dir(&repo).output();
+        let _ = std::process::Command::new("git").args(["push", "origin", "HEAD:main"]).current_dir(&repo).output();
+
+        let _ = std::process::Command::new("git").args(["checkout", "-b", "feature"]).current_dir(&repo).output();
+
+        let _ = std::process::Command::new("git").args(["pull", "origin", "main"]).current_dir(&other).output();
+        std::fs::write(other.join("base.txt"), "two").unwrap();
+        let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&other).output();
+        let _ = std::process::Command::new("git").args(["commit", "-m", "remote update"]).current_dir(&other).output();
+        let _ = std::process::Command::new("git").args(["push", "origin", "HEAD:main"]).current_dir(&other).output();
+
+        let exec = GitToolExecutor::new(&repo);
+        let call = make_call(serde_json::json!({
+            "operation": "status",
+            "safety": {
+                "allow_dirty": true,
+                "require_base_in_sync": true,
+                "base_branch": "main",
+                "remote": "origin",
+                "protected_branches": ["main"]
+            }
+        }));
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.is_error);
+        assert!(result.output.contains("base_out_of_sync"));
+    }
+
 }
