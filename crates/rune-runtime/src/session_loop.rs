@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -61,6 +61,8 @@ pub struct SessionLoop {
     restored_session_routes: Mutex<HashMap<String, String>>,
     agents: AgentsConfig,
     models: ModelsConfig,
+    source_priorities: SourcePriorityConfig,
+    priority_wake: Arc<Notify>,
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
     file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
@@ -128,7 +130,8 @@ impl SessionLoop {
         channel: Box<dyn ChannelAdapter>,
         agents: AgentsConfig,
         models: ModelsConfig,
-        ) -> Self {
+        source_priorities: SourcePriorityConfig,
+    ) -> Self {
         Self {
             engine,
             turn_executor,
@@ -139,6 +142,8 @@ impl SessionLoop {
             restored_session_routes: Mutex::new(HashMap::new()),
             agents,
             models,
+            source_priorities,
+            priority_wake: Arc::new(Notify::new()),
             stt_engine: None,
             file_downloader: None,
             command_registry: None,
@@ -214,9 +219,16 @@ impl SessionLoop {
         }
     }
 
-    fn classify_event_priority(event: &InboundEvent) -> EventPriority {
+    fn classify_event_priority_with_config(
+        event: &InboundEvent,
+        config: &SourcePriorityConfig,
+    ) -> EventPriority {
         match event {
-            InboundEvent::Message(msg) => classify_message_priority(&msg.content),
+            InboundEvent::Message(msg) => {
+                let source_priority = Self::classify_source_priority_with_config(&msg.sender, config);
+                let content_priority = classify_message_priority(&msg.content);
+                source_priority.min(content_priority)
+            }
             InboundEvent::Reaction { .. }
             | InboundEvent::Edit { .. }
             | InboundEvent::Delete { .. }
@@ -250,8 +262,20 @@ impl SessionLoop {
     }
 
     #[must_use]
+    fn classify_event_priority(event: &InboundEvent) -> EventPriority {
+        Self::classify_event_priority_with_config(event, &SourcePriorityConfig::default())
+    }
+
     pub fn event_priority_for_test(event: &InboundEvent) -> EventPriority {
         Self::classify_event_priority(event)
+    }
+
+    #[must_use]
+    pub fn event_priority_with_config_for_test(
+        event: &InboundEvent,
+        config: &SourcePriorityConfig,
+    ) -> EventPriority {
+        Self::classify_event_priority_with_config(event, config)
     }
 
     #[must_use]
@@ -268,6 +292,11 @@ impl SessionLoop {
     }
 
     async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
+        let priority = Self::classify_event_priority_with_config(&event, &self.source_priorities);
+        if priority <= PRIORITY_COMMS_DIRECTIVE {
+            self.priority_wake.notify_waiters();
+        }
+
         match event {
             InboundEvent::Message(msg) => {
                 if self.handle_command(&msg).await? {
@@ -354,16 +383,23 @@ impl SessionLoop {
                     Some(tokio::spawn(drain_chunks(chunk_rx)))
                 };
 
-                let result = self
-                    .turn_executor
-                    .execute_streaming_with_attachments(
-                        session.id,
-                        &final_text,
-                        msg.attachments.clone(),
-                        None,
-                        chunk_tx,
-                    )
-                    .await;
+                let result = tokio::select! {
+                    biased;
+                    _ = self.priority_wake.notified(), if priority >= PRIORITY_CRON => {
+                        Err(RuntimeError::Aborted(
+                            "higher-priority inbound event preempted queued background work".to_string(),
+                        ))
+                    }
+                    result = self
+                        .turn_executor
+                        .execute_streaming_with_attachments(
+                            session.id,
+                            &final_text,
+                            msg.attachments.clone(),
+                            None,
+                            chunk_tx,
+                        ) => result,
+                };
 
                 // Wait for the progressive edit task to finish (it exits when
                 // the chunk_tx sender is dropped, i.e. when execute_streaming
@@ -421,7 +457,7 @@ impl SessionLoop {
                     Err(e) => {
                         error!(session_id = %session.id, error = %e, "turn failed");
                         let brief = {
-                            let full = e.to_string();
+                            let full: String = e.to_string();
                             if full.len() > 200 {
                                 format!("{}…", &full[..200])
                             } else {

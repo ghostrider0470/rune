@@ -2493,6 +2493,7 @@ async fn resumed_session_notice_skips_non_restored_sessions() {
         Box::new(adapter),
         rune_config::AgentsConfig::default(),
         rune_config::ModelsConfig::default(),
+        rune_config::SourcePriorityConfig::default(),
     );
 
     let msg = rune_channels::ChannelMessage {
@@ -2545,6 +2546,7 @@ async fn resumed_session_notice_only_for_restored_channel_sessions() {
         Box::new(adapter),
         rune_config::AgentsConfig::default(),
         rune_config::ModelsConfig::default(),
+        rune_config::SourcePriorityConfig::default(),
     );
 
     let msg = rune_channels::ChannelMessage {
@@ -2589,6 +2591,7 @@ async fn enrich_media_content_ignores_image_placeholders_for_multimodal_attachme
         Box::new(adapter),
         rune_config::AgentsConfig::default(),
         rune_config::ModelsConfig::default(),
+        rune_config::SourcePriorityConfig::default(),
     );
 
     let msg = rune_channels::ChannelMessage {

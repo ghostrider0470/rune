@@ -838,6 +838,7 @@ async fn build_services(
                 Box::new(TelegramAdapter::new(tg)),
                 config.agents.clone(),
                 config.models.clone(),
+                config.runtime.source_priorities.clone(),
             )
             .with_file_downloader(downloader)
             .with_command_registry(shared_command_registry.clone());
