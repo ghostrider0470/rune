@@ -2270,6 +2270,9 @@ pub struct CreateSessionRequest {
     /// Optional upstream delegation plan metadata captured from a parent instance.
     #[serde(default)]
     pub delegation_plan: Option<serde_json::Value>,
+    /// Optional raw metadata merged into the created session record.
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
 }
 
 fn default_kind() -> String {
@@ -2475,6 +2478,26 @@ pub async fn create_session(
             )
             .await
             .map_err(|e| GatewayError::Internal(e.to_string()))?
+    };
+
+    let row = if let Some(metadata) = body.metadata {
+        if let Some(metadata_obj) = metadata.as_object() {
+            let mut merged = row.metadata.clone();
+            if let Some(existing) = merged.as_object_mut() {
+                for (key, value) in metadata_obj {
+                    existing.insert(key.clone(), value.clone());
+                }
+            }
+            state
+                .session_repo
+                .update_metadata(row.id, merged, Utc::now())
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))?
+        } else {
+            row
+        }
+    } else {
+        row
     };
 
     let _ = state.event_tx.send(SessionEvent {
@@ -2822,6 +2845,14 @@ fn session_resume_hint(status: &str, metadata: &serde_json::Value) -> Option<Str
         ),
         "waiting_for_tool" => Some(
             "wait for tool completion or cancel the in-flight tool execution before resuming".to_string(),
+        ),
+        "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
+            "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
+                .to_string(),
+        ),
+        "suspended" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
+            "preempted work is parked safely; send a resume/steer instruction after the higher-priority task finishes"
+                .to_string(),
         ),
         _ => None,
     }
@@ -3283,6 +3314,14 @@ pub async fn agent_kill(
     let now = chrono::Utc::now();
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
     let note = format!("[kill] session cancelled: {reason}");
+
+    let current_status = session
+        .status
+        .parse::<rune_core::SessionStatus>()
+        .map_err(|_| GatewayError::Internal(format!("invalid persisted session status: {}", session.status)))?;
+    current_status
+        .transition(rune_core::SessionStatus::Cancelled)
+        .map_err(|e| GatewayError::BadRequest(e.to_string()))?;
 
     request_session_abort(id, reason.to_string()).await;
 
