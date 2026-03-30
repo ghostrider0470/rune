@@ -248,8 +248,11 @@ pub struct PeerHealthAlert {
     pub peer_id: String,
     pub peer_name: String,
     pub status: String,
+    pub observed_status: String,
     pub detail: String,
     pub checked_at: String,
+    pub last_seen_at: Option<String>,
+    pub health_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -865,8 +868,11 @@ fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAl
             peer_id: peer.id,
             peer_name: peer.name,
             status: peer.status,
+            observed_status: peer.observed_status,
             detail: peer.detail,
             checked_at: peer.checked_at,
+            last_seen_at: peer.last_seen_at,
+            health_url: peer.health_url,
         })
         .collect::<Vec<_>>();
     let unreachable_count = alerts
@@ -8411,6 +8417,40 @@ mod tests {
         assert!(response.failover_ready);
         assert!(!response.work_absorption_required);
         assert_eq!(response.summary, "all peers healthy; no failover action required");
+    }
+
+    #[test]
+    fn peer_health_alerts_expose_observed_status_last_seen_and_health_url() {
+        let response = peer_health_alerts_from_peers(vec![PeerHealthResponse {
+            id: "peer-a".to_string(),
+            name: "Peer A".to_string(),
+            health_url: "http://peer-a/api/v1/instance/health".to_string(),
+            status: "degraded".to_string(),
+            detail: "invalid health payload".to_string(),
+            checked_at: "2026-03-29T00:00:00Z".to_string(),
+            latency_ms: Some(12),
+            last_seen_at: Some("2026-03-28T23:59:58Z".to_string()),
+            observed_status: "invalid-payload".to_string(),
+            load: None,
+            advertised_addr: None,
+            roles: Vec::new(),
+            capability_hash: None,
+            capabilities_version: None,
+            comms_transport: None,
+            configured_models: Vec::new(),
+            active_projects: Vec::new(),
+        }]);
+        assert_eq!(response.alert_count, 1);
+        assert_eq!(response.alerts[0].status, "degraded");
+        assert_eq!(response.alerts[0].observed_status, "invalid-payload");
+        assert_eq!(
+            response.alerts[0].last_seen_at.as_deref(),
+            Some("2026-03-28T23:59:58Z")
+        );
+        assert_eq!(
+            response.alerts[0].health_url,
+            "http://peer-a/api/v1/instance/health"
+        );
     }
 
     #[test]
