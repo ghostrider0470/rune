@@ -6307,6 +6307,8 @@ pub struct MemorySearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_name: Option<String>,
     pub remote: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -6339,6 +6341,7 @@ pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
                 instance_id: None,
                 instance_name: None,
                 remote: false,
+                scope: None,
             })
         })
         .collect()
@@ -6360,6 +6363,72 @@ fn memory_result_is_private(result: &MemorySearchResult) -> bool {
     path.starts_with("memory/private/") || path.contains("/private/")
 }
 
+fn memory_result_scope(result: &MemorySearchResult) -> &'static str {
+    if memory_result_is_private(result) {
+        "private"
+    } else if result.file_path.starts_with("memory/projects/") || result.file_path.contains("/projects/") {
+        "project"
+    } else {
+        "shared"
+    }
+}
+
+fn annotate_memory_results(
+    results: Vec<MemorySearchResult>,
+    instance_id: &str,
+    instance_name: &str,
+    remote: bool,
+    include_private: bool,
+) -> Vec<MemorySearchResult> {
+    results
+        .into_iter()
+        .filter(|result| include_private || !memory_result_is_private(result))
+        .map(|mut result| {
+            result.remote = remote;
+            if result.instance_id.is_none() {
+                result.instance_id = Some(instance_id.to_string());
+            }
+            if result.instance_name.is_none() {
+                result.instance_name = Some(instance_name.to_string());
+            }
+            result.scope = Some(memory_result_scope(&result).to_string());
+            result
+        })
+        .collect()
+}
+
+fn merge_memory_search_results(
+    mut local_results: Vec<MemorySearchResult>,
+    mut remote_results: Vec<MemorySearchResult>,
+    limit: usize,
+) -> Vec<MemorySearchResult> {
+    local_results.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
+    remote_results.sort_by(|a, b| {
+        a.instance_id
+            .as_deref()
+            .unwrap_or("")
+            .cmp(b.instance_id.as_deref().unwrap_or(""))
+            .then(a.file_path.cmp(&b.file_path))
+            .then(a.line.cmp(&b.line))
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    let mut combined = Vec::with_capacity(local_results.len() + remote_results.len());
+    for result in local_results.into_iter().chain(remote_results.into_iter()) {
+        let key = (
+            result.instance_id.clone().unwrap_or_default(),
+            result.file_path.clone(),
+            result.line,
+            result.snippet.clone(),
+        );
+        if seen.insert(key) {
+            combined.push(result);
+        }
+    }
+    combined.truncate(limit);
+    combined
+}
+
 async fn federated_memory_search(
     state: &AppState,
     query: &str,
@@ -6374,26 +6443,16 @@ async fn federated_memory_search(
         config.instance.peers.clone()
     };
 
-    let mut combined = if include_private {
-        local_results
-    } else {
-        local_results
-            .into_iter()
-            .filter(|result| !memory_result_is_private(result))
-            .collect::<Vec<_>>()
-    };
-    for result in &mut combined {
-        result.remote = false;
-        if result.instance_id.is_none() {
-            result.instance_id = Some(identity.id.clone());
-        }
-        if result.instance_name.is_none() {
-            result.instance_name = Some(identity.name.clone());
-        }
-    }
+    let local_results = annotate_memory_results(
+        local_results,
+        &identity.id,
+        &identity.name,
+        false,
+        include_private,
+    );
 
     if !include_remote || peers.is_empty() {
-        combined.truncate(limit);
+        let combined = merge_memory_search_results(local_results, Vec::new(), limit);
         return (combined, 0);
     }
 
@@ -6403,9 +6462,8 @@ async fn federated_memory_search(
     {
         Ok(client) => client,
         Err(_) => {
-            let pending = peers.len();
-            combined.truncate(limit);
-            return (combined, pending);
+            let combined = merge_memory_search_results(local_results, Vec::new(), limit);
+            return (combined, peers.len());
         }
     };
 
@@ -6445,26 +6503,17 @@ async fn federated_memory_search(
         };
         remote_pending += payload.remote_pending;
 
-        let mut peer_results = payload
-            .results
-            .into_iter()
-            .filter(|result| include_private || !memory_result_is_private(result))
-            .map(|mut result| {
-                result.remote = true;
-                if result.instance_id.is_none() {
-                    result.instance_id = Some(peer.id.clone());
-                }
-                if result.instance_name.is_none() {
-                    result.instance_name = Some(peer.id.clone());
-                }
-                result
-            })
-            .collect::<Vec<_>>();
+        let mut peer_results = annotate_memory_results(
+            payload.results,
+            &peer.id,
+            &peer.id,
+            true,
+            include_private,
+        );
         merged.append(&mut peer_results);
     }
 
-    combined.extend(merged);
-    combined.truncate(limit);
+    let combined = merge_memory_search_results(local_results, merged, limit);
     (combined, remote_pending)
 }
 
@@ -8392,6 +8441,7 @@ mod tests {
             instance_id: None,
             instance_name: None,
             remote: false,
+            scope: None,
         }];
 
         let identity = rune_config::InstanceIdentity {
@@ -8434,6 +8484,7 @@ mod tests {
                 instance_id: None,
                 instance_name: None,
                 remote: false,
+                scope: None,
             }],
             message: "ok".to_string(),
             remote_pending: 2,
@@ -8533,4 +8584,78 @@ pub async fn delegation_task_status(
             finished_at: None,
         },
     }))
+}
+
+
+#[cfg(test)]
+mod memory_search_federation_tests {
+    use super::*;
+
+    #[test]
+    fn annotate_memory_results_sets_scope_and_source_attribution() {
+        let results = annotate_memory_results(
+            vec![MemorySearchResult {
+                source: "memory/projects/phoenix/notes.md#7".to_string(),
+                file_path: "memory/projects/phoenix/notes.md".to_string(),
+                line: 7,
+                snippet: "borrow checker patterns".to_string(),
+                instance_id: None,
+                instance_name: None,
+                remote: false,
+                scope: None,
+            }],
+            "desktop-a",
+            "Desktop A",
+            true,
+            true,
+        );
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert_eq!(result.instance_id.as_deref(), Some("desktop-a"));
+        assert_eq!(result.instance_name.as_deref(), Some("Desktop A"));
+        assert!(result.remote);
+        assert_eq!(result.scope.as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn merge_memory_search_results_prefers_local_and_deduplicates_remote_matches() {
+        let local = vec![MemorySearchResult {
+            source: "MEMORY.md#3".to_string(),
+            file_path: "MEMORY.md".to_string(),
+            line: 3,
+            snippet: "borrow checker patterns".to_string(),
+            instance_id: Some("local".to_string()),
+            instance_name: Some("Local".to_string()),
+            remote: false,
+            scope: Some("shared".to_string()),
+        }];
+        let remote = vec![
+            MemorySearchResult {
+                source: "memory/2026-03-27.md#4".to_string(),
+                file_path: "memory/2026-03-27.md".to_string(),
+                line: 4,
+                snippet: "borrow checker patterns".to_string(),
+                instance_id: Some("peer-a".to_string()),
+                instance_name: Some("Peer A".to_string()),
+                remote: true,
+                scope: Some("shared".to_string()),
+            },
+            MemorySearchResult {
+                source: "memory/2026-03-27.md#4".to_string(),
+                file_path: "memory/2026-03-27.md".to_string(),
+                line: 4,
+                snippet: "borrow checker patterns".to_string(),
+                instance_id: Some("peer-a".to_string()),
+                instance_name: Some("Peer A".to_string()),
+                remote: true,
+                scope: Some("shared".to_string()),
+            },
+        ];
+
+        let merged = merge_memory_search_results(local, remote, 10);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].instance_id.as_deref(), Some("local"));
+        assert_eq!(merged[1].instance_id.as_deref(), Some("peer-a"));
+    }
 }
