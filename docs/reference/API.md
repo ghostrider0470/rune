@@ -166,6 +166,93 @@ Typical `delegation_context` contents:
 - `delegation_plan` can be supplied alongside `delegation_context`; Rune embeds it under `delegation_context.delegation_plan` so delegated sessions retain the upstream sender/receiver/routing contract.
 - Shared scratchpad support is path-level metadata today; higher-level bidirectional scratchpad workflows can build on top of it.
 
+## Multi-instance delegation and failover contracts
+
+Rune already exposes the core multi-instance operator surfaces needed to reason about federation health and delegation safety.
+
+### Key HTTP endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET /api/v1/instance/health` | | Local instance identity, capability manifest, peer reachability snapshot |
+| `GET /api/v1/instance/delegation-plan` | | Compute sender/receiver/task-contract metadata before handing work to a peer |
+| `POST /api/v1/instance/delegations` | | Submit a delegated task envelope |
+| `GET /api/v1/instance/delegations/{task_id}` | | Poll delegated task lifecycle state/result envelope |
+| `GET /api/v1/instance/peer-health-alerts` | | Summarize peer health alerts, failover readiness, and split-brain guard state |
+
+### Instance config baseline
+
+Configure `[instance]` in `config.toml` for every node participating in federation:
+
+```toml
+[instance]
+# id defaults to a persisted UUID under ~/.rune/instance-id
+name = "rune-local"
+# advertised_addr = "http://10.0.0.15:18790"
+# roles = ["gateway"]
+# peers = [
+#   { id = "rune-laptop", health_url = "http://10.0.0.16:18790/api/v1/instance/health" },
+# ]
+```
+
+Operational expectations:
+- `id` is stable across restarts because Rune persists it locally if you do not set one explicitly.
+- `name` is the operator-facing identity shown in health/delegation surfaces.
+- `advertised_addr` should resolve from peer instances; otherwise delegation plans will fall back to the peer health URL origin when possible.
+- `peers[*].health_url` is the explicit discovery list today. Federation is config-driven, not gossip-based.
+
+### Delegation-plan safety checks
+
+`GET /api/v1/instance/delegation-plan` returns a preflight contract instead of forcing operators to guess whether a peer is safe to target.
+
+The response includes:
+- sender identity and `capability_hash`
+- selected peer identity/addressing
+- capability compatibility evaluation (`compatible`, model overlap, missing roles, missing projects, detail)
+- task submission/result polling URLs
+- branch-reservation and file-lock expectations for delegated coding work
+- timeout/lifecycle metadata for the delegated task contract
+
+Use it before enabling real handoff so operators can verify:
+- the chosen peer is healthy
+- the chosen peer is capability-compatible
+- the routing URLs are reachable from the sender
+- the conflict-prevention requirements are understood by the orchestrator
+
+### Failover and split-brain boundary
+
+`GET /api/v1/instance/peer-health-alerts` is the current operator surface for failover posture.
+
+Important semantics already enforced by Rune:
+- unhealthy peers are classified separately from degraded peers
+- `work_absorption_required = true` only when at least one peer is unreachable
+- `failover_ready = true` only when no degraded peers are present
+- `network_partition_suspected = true` when unreachable and degraded peers coexist
+- `split_brain_guard` explicitly documents that failover absorption does **not** activate for merely degraded peers
+
+That means Rune intentionally prefers under-failing over duplicate execution during suspected partitions.
+
+### Rejoin and compatibility guidance
+
+Current guidance for peer restarts/rejoin events:
+- keep instance IDs stable across restarts so peers observe the same logical node coming back
+- re-check `/api/v1/instance/health` after restart to confirm identity, capability hash, and peer visibility
+- re-run `rune gateway delegation-plan` before resuming delegated work if model/project/role capability changed during rollout
+- treat `capability_hash` drift as a rollout signal: compatible peers can still be selected, but operators should verify the reported compatibility details before resuming automation
+
+### CLI verification flow
+
+The CLI mirrors the same contracts for local operator checks:
+- `rune gateway instance-health`
+- `rune gateway delegation-plan --strategy least_busy`
+- `rune gateway delegation-plan --strategy named --peer-id <peer>`
+
+Recommended rollout sequence:
+1. bring up each node with `[instance]` configured
+2. verify every node reports the expected identity and peers via `instance-health`
+3. inspect a delegation plan from the sender node
+4. only then enable real delegated work between instances
+
 ## Further detail still missing
 
 Deeper follow-up documentation is still useful for:
