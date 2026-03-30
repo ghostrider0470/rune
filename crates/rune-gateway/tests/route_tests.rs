@@ -8988,7 +8988,10 @@ async fn dashboard_usage_includes_project_cache_metrics() {
     assert_eq!(phoenix["total_input_tokens"], 1500);
     assert_eq!(phoenix["cached_tokens"], 500);
     assert_eq!(phoenix["uncached_tokens"], 1000);
-    assert_eq!(phoenix["cache_hit_ratio_percent"], serde_json::json!((500.0 / 1500.0) * 100.0));
+    assert_eq!(
+        phoenix["cache_hit_ratio_percent"],
+        serde_json::json!((500.0 / 1500.0) * 100.0)
+    );
 }
 
 #[tokio::test]
@@ -11652,6 +11655,148 @@ Met Hamza at Horizon Tech
     assert_eq!(body["remote_pending"], 1);
     assert_eq!(body["results"].as_array().unwrap().len(), 1);
     assert_eq!(body["results"][0]["remote"], false);
+}
+
+#[tokio::test]
+async fn memory_search_route_excludes_private_results_by_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("MEMORY.md"),
+        "# Memory
+Met Hamza at Horizon Tech
+",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("memory/private")).unwrap();
+    std::fs::write(
+        tmp.path().join("memory/private/secret.md"),
+        "# Private
+borrow checker patterns from private notes
+",
+    )
+    .unwrap();
+
+    let mut config = AppConfig::default();
+    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/memory/search?q=borrow&limit=5")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let results = body["results"].as_array().unwrap();
+    assert!(results.is_empty());
+}
+
+#[tokio::test]
+async fn memory_search_route_can_include_private_results_explicitly() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("MEMORY.md"),
+        "# Memory
+Met Hamza at Horizon Tech
+",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("memory/private")).unwrap();
+    std::fs::write(
+        tmp.path().join("memory/private/secret.md"),
+        "# Private
+borrow checker patterns from private notes
+",
+    )
+    .unwrap();
+
+    let mut config = AppConfig::default();
+    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/memory/search?q=borrow&limit=5&include_private=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["file_path"], "memory/private/secret.md");
+}
+
+#[tokio::test]
+async fn memory_search_route_disables_remote_fanout_when_requested() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("MEMORY.md"),
+        "# Memory
+Met Hamza at Horizon Tech
+",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("memory")).unwrap();
+
+    let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peer_addr = peer_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "query": "Hamza",
+            "results": [
+                {
+                    "source": "memory/2026-03-27.md#4",
+                    "file_path": "memory/2026-03-27.md",
+                    "line": 4,
+                    "snippet": "Learned shared borrow checker pattern from remote peer",
+                    "instance_id": "peer-a",
+                    "instance_name": "Peer A",
+                    "remote": true
+                }
+            ],
+            "message": "Found 1 memory result(s)"
+        });
+        let app = axum::Router::new().route(
+            "/api/memory/search",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(peer_listener, app).await.unwrap();
+    });
+
+    let mut config = AppConfig::default();
+    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "peer-a".to_string(),
+        health_url: format!("http://{peer_addr}/api/v1/instance/health"),
+    }];
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/memory/search?q=Hamza&limit=5&include_remote=false")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["local_results"], 1);
+    assert_eq!(body["remote_results"], 0);
+    assert_eq!(body["remote_pending"], 0);
+    assert_eq!(body["results"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]

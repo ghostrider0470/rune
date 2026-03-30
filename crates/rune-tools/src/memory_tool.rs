@@ -238,11 +238,16 @@ impl MemoryToolExecutor {
 
         let memory_dir = self.workspace_root.join("memory");
         if memory_dir.is_dir() {
-            if let Ok(mut entries) = tokio::fs::read_dir(&memory_dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "md") {
-                        files.push(path);
+            let mut stack = vec![memory_dir];
+            while let Some(dir) = stack.pop() {
+                if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            stack.push(path);
+                        } else if path.extension().is_some_and(|e| e == "md") {
+                            files.push(path);
+                        }
                     }
                 }
             }
