@@ -1166,6 +1166,43 @@ Minimum protocol requirements:
 
 For early phases, out-of-process isolation is the safer default.
 
+### Native `PLUGIN.md` manifest v1
+
+Rune-native plugins use a YAML frontmatter contract at the top of `PLUGIN.md`.
+The runtime currently supports schema version `1`.
+
+Required operator-visible behavior:
+
+- `schema_version` defaults to `1` when omitted, but any other value is rejected with a field-specific diagnostic
+- `name` defaults to the plugin directory name when omitted and must not be empty
+- `version` defaults to `0.0.0` when omitted and must not be empty when provided
+- `description` defaults to `Plugin: <name>` when omitted and must not be empty when provided
+- `binary` defaults to `./plugin` when omitted and must not be empty when provided
+- `capabilities` is a comma-separated declaration list; duplicate entries are rejected
+- `hooks` is a comma-separated list of runtime hook event names; unknown events are rejected explicitly
+
+Example:
+
+```md
+---
+schema_version: 1
+name: example-plugin
+version: 1.2.3
+description: Example native plugin
+binary: ./bin/example
+capabilities: hooks, commands
+hooks: pre_tool_call, post_tool_call
+---
+```
+
+Validation failures must be readable without source inspection. Runtime diagnostics render as:
+
+- manifest path
+- exact field name
+- human-readable reason for rejection
+
+This keeps plugin author feedback actionable in logs, doctor output, and future plugin management surfaces.
+
 ---
 
 ## 15. Config, doctor, and observability protocol
