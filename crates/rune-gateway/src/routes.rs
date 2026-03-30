@@ -6351,6 +6351,8 @@ struct RemoteMemorySearchResponse {
     pub results: Vec<MemorySearchResult>,
     #[serde(default)]
     pub message: String,
+    #[serde(default)]
+    pub remote_pending: usize,
 }
 
 fn memory_result_is_private(result: &MemorySearchResult) -> bool {
@@ -6366,21 +6368,33 @@ async fn federated_memory_search(
     include_private: bool,
     local_results: Vec<MemorySearchResult>,
 ) -> (Vec<MemorySearchResult>, usize) {
+    let identity = state.capabilities.identity.clone();
     let peers = {
         let config = state.config.read().await;
         config.instance.peers.clone()
     };
 
+    let mut combined = if include_private {
+        local_results
+    } else {
+        local_results
+            .into_iter()
+            .filter(|result| !memory_result_is_private(result))
+            .collect::<Vec<_>>()
+    };
+    for result in &mut combined {
+        result.remote = false;
+        if result.instance_id.is_none() {
+            result.instance_id = Some(identity.id.clone());
+        }
+        if result.instance_name.is_none() {
+            result.instance_name = Some(identity.name.clone());
+        }
+    }
+
     if !include_remote || peers.is_empty() {
-        let filtered = if include_private {
-            local_results
-        } else {
-            local_results
-                .into_iter()
-                .filter(|result| !memory_result_is_private(result))
-                .collect()
-        };
-        return (filtered, 0);
+        combined.truncate(limit);
+        return (combined, 0);
     }
 
     let client = match reqwest::Client::builder()
@@ -6388,7 +6402,11 @@ async fn federated_memory_search(
         .build()
     {
         Ok(client) => client,
-        Err(_) => return (local_results, peers.len()),
+        Err(_) => {
+            let pending = peers.len();
+            combined.truncate(limit);
+            return (combined, pending);
+        }
     };
 
     let mut merged = Vec::new();
@@ -6425,10 +6443,12 @@ async fn federated_memory_search(
                 continue;
             }
         };
+        remote_pending += payload.remote_pending;
 
         let mut peer_results = payload
             .results
             .into_iter()
+            .filter(|result| include_private || !memory_result_is_private(result))
             .map(|mut result| {
                 result.remote = true;
                 if result.instance_id.is_none() {
@@ -6443,17 +6463,8 @@ async fn federated_memory_search(
         merged.append(&mut peer_results);
     }
 
-    let mut combined = if include_private {
-        local_results
-    } else {
-        local_results
-            .into_iter()
-            .filter(|result| !memory_result_is_private(result))
-            .collect()
-    };
-    let local_count = combined.len();
     combined.extend(merged);
-    combined.truncate(limit.max(local_count));
+    combined.truncate(limit);
     (combined, remote_pending)
 }
 
@@ -8369,6 +8380,80 @@ mod tests {
         assert_eq!(response.alerts[0].peer_id, "peer-a");
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
+    }
+
+    #[test]
+    fn local_memory_results_are_attributed_to_current_instance() {
+        let mut results = vec![MemorySearchResult {
+            source: "memory/2026-03-30.md#12".to_string(),
+            file_path: "memory/2026-03-30.md".to_string(),
+            line: 12,
+            snippet: "borrow checker pattern".to_string(),
+            instance_id: None,
+            instance_name: None,
+            remote: false,
+        }];
+
+        let identity = rune_config::InstanceIdentity {
+            id: "local-instance".to_string(),
+            name: "Local Instance".to_string(),
+            advertised_addr: None,
+            roles: Vec::new(),
+            capabilities_version: 1,
+            capability_hash: "local-capability-hash".to_string(),
+        };
+
+        for result in &mut results {
+            result.remote = false;
+            if result.instance_id.is_none() {
+                result.instance_id = Some(identity.id.clone());
+            }
+            if result.instance_name.is_none() {
+                result.instance_name = Some(identity.name.clone());
+            }
+        }
+
+        assert_eq!(results[0].instance_id.as_deref(), Some("local-instance"));
+        assert_eq!(results[0].instance_name.as_deref(), Some("Local Instance"));
+        assert!(!results[0].remote);
+    }
+
+    #[test]
+    fn remote_memory_results_capture_nested_pending_and_peer_attribution() {
+        let peer = rune_config::PeerConfig {
+            id: "peer-1".to_string(),
+            health_url: "http://peer-1/api/v1/instance/health".to_string(),
+        };
+        let payload = RemoteMemorySearchResponse {
+            query: "borrow checker".to_string(),
+            results: vec![MemorySearchResult {
+                source: "memory/shared.md#4".to_string(),
+                file_path: "memory/shared.md".to_string(),
+                line: 4,
+                snippet: "shared fact".to_string(),
+                instance_id: None,
+                instance_name: None,
+                remote: false,
+            }],
+            message: "ok".to_string(),
+            remote_pending: 2,
+        };
+
+        let mut remote_pending = 0usize;
+        remote_pending += payload.remote_pending;
+        let mut result = payload.results.into_iter().next().unwrap();
+        result.remote = true;
+        if result.instance_id.is_none() {
+            result.instance_id = Some(peer.id.clone());
+        }
+        if result.instance_name.is_none() {
+            result.instance_name = Some(peer.id.clone());
+        }
+
+        assert_eq!(remote_pending, 2);
+        assert_eq!(result.instance_id.as_deref(), Some("peer-1"));
+        assert_eq!(result.instance_name.as_deref(), Some("peer-1"));
+        assert!(result.remote);
     }
 }
 
