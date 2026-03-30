@@ -2956,6 +2956,50 @@ fn session_loop_prioritizes_user_messages_above_background_events() {
 }
 
 #[test]
+fn session_loop_maps_event_priority_to_trigger_kind() {
+    let heartbeat = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "heartbeat:agent".to_string(),
+        sender: "health".to_string(),
+        content: "ok".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-heartbeat".to_string(),
+    });
+    let cron = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "cron:daily".to_string(),
+        sender: "scheduler".to_string(),
+        content: "cron: run".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-cron".to_string(),
+    });
+    let user = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "urgent".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-user".to_string(),
+    });
+
+    assert_eq!(
+        crate::session_loop::SessionLoop::trigger_kind_for_test(&heartbeat),
+        rune_core::TriggerKind::Heartbeat
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::trigger_kind_for_test(&cron),
+        rune_core::TriggerKind::CronJob
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::trigger_kind_for_test(&user),
+        rune_core::TriggerKind::UserMessage
+    );
+}
+
+#[test]
 fn session_loop_assigns_comms_directives_between_user_and_cron_priority() {
     let directive = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
         channel_id: rune_core::ChannelId::new(),

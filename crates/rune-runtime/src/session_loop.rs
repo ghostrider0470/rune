@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
 use rune_config::{AgentsConfig, ModelsConfig};
-use rune_core::SessionKind;
+use rune_core::{SessionKind, TriggerKind};
 use rune_store::models::SessionRow;
 use rune_store::repos::SessionRepo;
 use rune_stt::SttEngine;
@@ -255,12 +255,31 @@ impl SessionLoop {
 
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
         match event {
-            InboundEvent::Message(msg) => classify_message_priority(&msg.raw_chat_id, &msg.sender, &msg.content),
+            InboundEvent::Message(msg) => {
+                classify_message_priority(&msg.raw_chat_id, &msg.sender, &msg.content)
+            }
             InboundEvent::Reaction { .. }
             | InboundEvent::Edit { .. }
             | InboundEvent::Delete { .. }
             | InboundEvent::MemberJoin { .. }
             | InboundEvent::MemberLeave { .. } => PRIORITY_BACKGROUND,
+        }
+    }
+
+    fn trigger_kind_for_event(event: &InboundEvent) -> TriggerKind {
+        match event {
+            InboundEvent::Message(msg) => {
+                match Self::classify_event_priority(&InboundEvent::Message(msg.clone())) {
+                    PRIORITY_IMMEDIATE => TriggerKind::Heartbeat,
+                    PRIORITY_CRON => TriggerKind::CronJob,
+                    _ => TriggerKind::UserMessage,
+                }
+            }
+            InboundEvent::Reaction { .. }
+            | InboundEvent::Edit { .. }
+            | InboundEvent::Delete { .. }
+            | InboundEvent::MemberJoin { .. }
+            | InboundEvent::MemberLeave { .. } => TriggerKind::SystemWake,
         }
     }
 
@@ -286,6 +305,11 @@ impl SessionLoop {
     #[must_use]
     pub fn source_priority_for_test(source: &str) -> EventPriority {
         Self::classify_source_priority(source)
+    }
+
+    #[must_use]
+    pub fn trigger_kind_for_test(event: &InboundEvent) -> TriggerKind {
+        Self::trigger_kind_for_event(event)
     }
 
     async fn enqueue_event(&self, event: InboundEvent) {
@@ -451,14 +475,16 @@ impl SessionLoop {
                     Some(tokio::spawn(drain_chunks(chunk_rx)))
                 };
 
+                let trigger_kind = Self::trigger_kind_for_event(&InboundEvent::Message(msg.clone()));
                 let result = self
                     .turn_executor
-                    .execute_streaming_with_attachments(
+                    .execute_triggered(
                         session.id,
                         &final_text,
                         msg.attachments.clone(),
                         None,
-                        chunk_tx,
+                        trigger_kind,
+                        Some(chunk_tx),
                     )
                     .await;
 
