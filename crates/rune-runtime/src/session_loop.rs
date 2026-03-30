@@ -21,7 +21,7 @@ use rune_stt::SttEngine;
 use crate::engine::SessionEngine;
 use crate::error::RuntimeError;
 use crate::executor::TurnExecutor;
-use crate::session_metadata::{selected_model, set_selected_model};
+use crate::session_metadata::{selected_model, set_channel_source_priority, set_selected_model};
 
 /// Trait for downloading files from Telegram (or any provider using `telegram-file:` URLs).
 ///
@@ -350,7 +350,7 @@ impl SessionLoop {
         }
     }
 
-    async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
+    pub(crate) async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
         match event {
             InboundEvent::Message(msg) => {
                 if self.handle_command(&msg).await? {
@@ -358,9 +358,23 @@ impl SessionLoop {
                 }
 
                 let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
-                debug!(routing_key = %routing_key, "received inbound message");
+                let source = msg
+                    .raw_chat_id
+                    .split([':', '/'])
+                    .next()
+                    .filter(|segment| !segment.is_empty())
+                    .unwrap_or(msg.sender.as_str())
+                    .to_ascii_lowercase();
+                let source_priority = Self::classify_source_priority(&source);
+                debug!(routing_key = %routing_key, source = %source, priority = source_priority, "received inbound message");
 
                 let session = self.find_or_create_session(&routing_key).await?;
+                let metadata = set_channel_source_priority(&session.metadata, &source, source_priority);
+                if metadata != session.metadata {
+                    self.session_repo
+                        .update_metadata(session.id, metadata, chrono::Utc::now())
+                        .await?;
+                }
                 self.maybe_send_resumed_session_notice(&msg, &routing_key, &session)
                     .await;
 
@@ -545,7 +559,7 @@ impl SessionLoop {
         Ok(())
     }
 
-    async fn handle_command(
+    pub(crate) async fn handle_command(
         &self,
         msg: &rune_channels::ChannelMessage,
     ) -> Result<bool, RuntimeError> {
@@ -583,6 +597,10 @@ impl SessionLoop {
             }
             "/reset" => {
                 self.handle_reset_command(msg).await?;
+                Ok(true)
+            }
+            "/stop" => {
+                self.handle_stop_command(msg, args).await?;
                 Ok(true)
             }
             "/commands" => {
@@ -670,6 +688,39 @@ impl SessionLoop {
             )
             .await;
         }
+        Ok(())
+    }
+
+    async fn handle_stop_command(
+        &self,
+        msg: &rune_channels::ChannelMessage,
+        args: &str,
+    ) -> Result<(), RuntimeError> {
+        let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+        let session = match self.find_or_create_session(&routing_key).await {
+            Ok(session) => session,
+            Err(error) => {
+                self.send_command_reply(
+                    msg,
+                    &format!("No active session to stop: {error}"),
+                )
+                .await;
+                return Ok(());
+            }
+        };
+
+        let reason = if args.trim().is_empty() {
+            format!("stop requested from channel {}", msg.raw_chat_id)
+        } else {
+            format!("stop requested from channel {}: {}", msg.raw_chat_id, args.trim())
+        };
+        crate::request_session_abort(session.id, reason.clone()).await;
+
+        self.send_command_reply(
+            msg,
+            &format!("Stopping active work for session {}. Reason: {}", session.id, reason),
+        )
+        .await;
         Ok(())
     }
 
@@ -780,7 +831,7 @@ impl SessionLoop {
         ))
     }
 
-    async fn find_or_create_session(&self, routing_key: &str) -> Result<SessionRow, RuntimeError> {
+    pub(crate) async fn find_or_create_session(&self, routing_key: &str) -> Result<SessionRow, RuntimeError> {
         // 1. Check in-memory cache
         {
             let index = self.sessions.lock().await;

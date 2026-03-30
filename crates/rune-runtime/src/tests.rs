@@ -3070,3 +3070,84 @@ async fn next_event_prefers_higher_priority_items_already_waiting() {
         other => panic!("expected message, got {other:?}"),
     }
 }
+
+
+#[tokio::test]
+async fn stop_command_registers_abort_for_active_channel_session() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let routing_key = "telegram:dm:hamza:hamza";
+    let session = session_loop.find_or_create_session(routing_key).await.unwrap();
+    let stop = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "/stop switch to issue #418".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "stop-1".to_string(),
+    };
+
+    assert!(session_loop.handle_command(&stop).await.unwrap());
+
+    let abort = crate::executor::execute_for_abort_test(session.id).await;
+    assert_eq!(abort.as_deref(), Some("stop requested from channel telegram:dm:hamza: switch to issue #418"));
+    crate::clear_session_abort(session.id).await;
+}
+
+#[tokio::test]
+async fn message_handling_persists_channel_source_priority_metadata() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("done")])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "hello".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-meta-1".to_string(),
+    });
+
+    session_loop.handle_event(event).await.unwrap();
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(session.metadata["channel_source_priority"]["telegram"], serde_json::json!(crate::session_loop::PRIORITY_USER_MESSAGE));
+}

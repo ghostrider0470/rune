@@ -8,6 +8,7 @@ pub(crate) const SESSION_MODE_KEY: &str = "mode";
 pub(crate) const PROJECT_ID_KEY: &str = "project_id";
 pub(crate) const CONTEXT_TIERS_KEY: &str = "context_tiers";
 pub(crate) const CONTEXT_TOKEN_USAGE_KEY: &str = "context_token_usage";
+pub(crate) const CHANNEL_SOURCE_PRIORITY_KEY: &str = "channel_source_priority";
 
 pub(crate) fn selected_model(session: &SessionRow) -> Option<&str> {
     session
@@ -52,5 +53,17 @@ pub(crate) fn set_context_tiers(metadata: &Value, report: &ContextAssemblyReport
             "compaction_required": report.compaction_required,
         }),
     );
+    Value::Object(next)
+}
+
+
+pub(crate) fn set_channel_source_priority(metadata: &Value, source: &str, priority: u8) -> Value {
+    let mut next = metadata.as_object().cloned().unwrap_or_default();
+    let mut map = next
+        .remove(CHANNEL_SOURCE_PRIORITY_KEY)
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    map.insert(source.to_string(), json!(priority));
+    next.insert(CHANNEL_SOURCE_PRIORITY_KEY.to_string(), Value::Object(map));
     Value::Object(next)
 }
