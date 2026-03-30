@@ -99,10 +99,15 @@ pub struct SessionLoop {
     next_sequence: std::sync::atomic::AtomicU64,
 }
 
-fn classify_message_priority(content: &str) -> EventPriority {
+fn classify_message_priority(raw_chat_id: &str, sender: &str, content: &str) -> EventPriority {
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return PRIORITY_BACKGROUND;
+    }
+
+    let source = classify_message_source(raw_chat_id, sender);
+    if source != PRIORITY_BACKGROUND {
+        return source;
     }
 
     if is_comms_directive_message(trimmed) {
@@ -114,6 +119,15 @@ fn classify_message_priority(content: &str) -> EventPriority {
     }
 
     PRIORITY_USER_MESSAGE
+}
+
+fn classify_message_source(raw_chat_id: &str, sender: &str) -> EventPriority {
+    let source = raw_chat_id
+        .split([':', '/'])
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or(sender);
+    SessionLoop::classify_source_priority(source)
 }
 
 fn is_comms_directive_message(content: &str) -> bool {
@@ -241,7 +255,7 @@ impl SessionLoop {
 
     fn classify_event_priority(event: &InboundEvent) -> EventPriority {
         match event {
-            InboundEvent::Message(msg) => classify_message_priority(&msg.content),
+            InboundEvent::Message(msg) => classify_message_priority(&msg.raw_chat_id, &msg.sender, &msg.content),
             InboundEvent::Reaction { .. }
             | InboundEvent::Edit { .. }
             | InboundEvent::Delete { .. }
