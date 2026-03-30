@@ -1869,6 +1869,8 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert!(payload["config_paths"].is_object());
     assert_eq!(payload["lane_stats"]["main_active"], 1);
     assert_eq!(payload["lane_stats"]["main_capacity"], 4);
+    assert_eq!(payload["lane_stats"]["priority_active"], 0);
+    assert_eq!(payload["lane_stats"]["priority_capacity"], 16);
     assert_eq!(payload["lane_stats"]["subagent_active"], 0);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
     assert_eq!(payload["lane_stats"]["heartbeat_active"], 0);
@@ -2120,6 +2122,7 @@ async fn status_reports_configured_lane_capacities() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload["lane_stats"]["main_capacity"], 6);
+    assert_eq!(payload["lane_stats"]["priority_capacity"], 16);
     assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
     assert_eq!(payload["lane_stats"]["heartbeat_capacity"], 1024);
@@ -2216,6 +2219,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
+    let priority_permit = lane_queue.acquire(Lane::Priority).await;
     let subagent_permit = lane_queue.acquire(Lane::Subagent).await;
     let heartbeat_permit = lane_queue.acquire(Lane::Heartbeat).await;
     let tool_permit = lane_queue.acquire_tool(Some("project-a")).await;
@@ -2229,6 +2233,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["enabled"], true);
     assert_eq!(payload["lanes"]["main"]["active"], 1);
     assert_eq!(payload["lanes"]["main"]["capacity"], 2);
+    assert_eq!(payload["lanes"]["priority"]["active"], 1);
+    assert_eq!(payload["lanes"]["priority"]["capacity"], 16);
     assert_eq!(payload["lanes"]["subagent"]["active"], 1);
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
@@ -2240,6 +2246,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
 
     drop(main_permit);
+    drop(priority_permit);
     drop(subagent_permit);
     drop(heartbeat_permit);
     drop(tool_permit);
