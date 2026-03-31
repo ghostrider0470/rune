@@ -51,6 +51,10 @@ Responsible for:
 - reply/reaction/media semantics
 - adapter-specific integration behavior
 
+## Agent-team orchestration
+
+Rune's multi-agent model is lead/worker based: a parent session acts as the lead, delegated child sessions act as workers, and durable session/subagent metadata is the control-plane backbone for inspection, steering, cancellation, and result collection. See [`AGENT-TEAMS.md`](AGENT-TEAMS.md) for the concrete model and current implementation reality.
+
 ## Current reference use
 
 Use this doc as the architecture entrypoint for:

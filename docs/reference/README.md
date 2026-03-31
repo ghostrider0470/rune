@@ -11,3 +11,5 @@ Start here:
 - use [`../parity/PROTOCOLS.md`](../parity/PROTOCOLS.md) if you need deeper runtime behavior semantics
 - use [`../parity/PARITY-INVENTORY.md#77-native-spell-inventory`](../parity/PARITY-INVENTORY.md#77-native-spell-inventory) for the current native spell inventory (`rust-patterns`, `security-audit`, `code-review`, `evolver`)
 - use [`../INDEX.md`](../INDEX.md) if you need the wider docs front door
+
+- [`AGENT-TEAMS.md`](AGENT-TEAMS.md) — Rune-native lead/worker delegation and agent-team model
