@@ -7,7 +7,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
@@ -108,13 +108,13 @@ pub struct DelegationTaskRequest {
     pub task: DelegationTaskPayload,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationErrorResponse {
     pub code: String,
     pub message: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskResultResponse {
     pub task_id: String,
     pub status: String,
@@ -128,7 +128,7 @@ pub struct DelegationTaskResultResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationTaskStatusEnvelope {
     pub receiver: DelegationEndpointResponse,
     pub result: DelegationTaskResultResponse,
@@ -174,7 +174,7 @@ pub struct DelegationCapabilityMatchResponse {
     pub detail: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegationEndpointResponse {
     pub instance_id: String,
     pub instance_name: String,
@@ -248,8 +248,16 @@ pub struct PeerHealthAlert {
     pub peer_id: String,
     pub peer_name: String,
     pub status: String,
+    pub observed_status: String,
     pub detail: String,
     pub checked_at: String,
+    pub last_seen_at: Option<String>,
+    pub health_url: String,
+    pub first_observed_at: Option<String>,
+    pub last_observed_at: Option<String>,
+    pub last_notified_at: Option<String>,
+    pub consecutive_failures: u32,
+    pub should_notify: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -258,6 +266,12 @@ pub struct PeerHealthAlertsResponse {
     pub alerts: Vec<PeerHealthAlert>,
     pub alert_count: usize,
     pub checked_at: String,
+    pub failover_ready: bool,
+    pub work_absorption_required: bool,
+    pub target_recovery_sla_seconds: u64,
+    pub network_partition_suspected: bool,
+    pub split_brain_guard: String,
+    pub summary: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -846,32 +860,89 @@ pub async fn peer_health_alerts(
     State(state): State<AppState>,
 ) -> Result<Json<PeerHealthAlertsResponse>, GatewayError> {
     let peers = collect_peer_health(state.capabilities.peers.clone()).await;
-    Ok(Json(peer_health_alerts_from_peers(peers)))
+    Ok(Json(
+        peer_health_alerts_from_peers(&state.peer_health_alert_cache, peers).await,
+    ))
 }
 
-fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAlertsResponse {
-    let checked_at = Utc::now().to_rfc3339();
-    let alerts = peers
-        .into_iter()
-        .filter(|peer| peer.status != "healthy")
-        .map(|peer| PeerHealthAlert {
+async fn peer_health_alerts_from_peers(
+    cache: &crate::state::PeerHealthAlertCache,
+    peers: Vec<PeerHealthResponse>,
+) -> PeerHealthAlertsResponse {
+    let checked_at = Utc::now();
+    let healthy_peer_ids = peers
+        .iter()
+        .filter(|peer| peer.status == "healthy")
+        .map(|peer| peer.id.clone())
+        .collect::<Vec<_>>();
+    cache.clear_healthy(&healthy_peer_ids).await;
+
+    let mut alerts = Vec::new();
+    for peer in peers.into_iter().filter(|peer| peer.status != "healthy") {
+        let state = cache.transition(&peer.id, &peer.status, checked_at).await;
+        let should_notify = matches!(state.last_notified_at, None)
+            || state.status != "degraded" && state.consecutive_failures == 1;
+
+        alerts.push(PeerHealthAlert {
             severity: match peer.status.as_str() {
                 "unreachable" => "critical".to_string(),
                 _ => "warning".to_string(),
             },
-            peer_id: peer.id,
+            peer_id: peer.id.clone(),
             peer_name: peer.name,
             status: peer.status,
+            observed_status: peer.observed_status,
             detail: peer.detail,
             checked_at: peer.checked_at,
-        })
-        .collect::<Vec<_>>();
+            last_seen_at: peer.last_seen_at,
+            health_url: peer.health_url,
+            first_observed_at: Some(state.first_observed_at.to_rfc3339()),
+            last_observed_at: Some(state.last_observed_at.to_rfc3339()),
+            last_notified_at: state
+                .last_notified_at
+                .map(|value: chrono::DateTime<chrono::Utc>| value.to_rfc3339()),
+            consecutive_failures: state.consecutive_failures,
+            should_notify,
+        });
+    }
+
+    let unreachable_count = alerts
+        .iter()
+        .filter(|alert| alert.status == "unreachable")
+        .count();
+    let degraded_count = alerts
+        .iter()
+        .filter(|alert| alert.status == "degraded")
+        .count();
+    let work_absorption_required = unreachable_count > 0;
+    let failover_ready = degraded_count == 0;
+    let network_partition_suspected = unreachable_count > 0 && degraded_count > 0;
+    let target_recovery_sla_seconds = 60;
     let status = if alerts.is_empty() { "ok" } else { "degraded" };
+    let summary = if alerts.is_empty() {
+        "all peers healthy; no failover action required".to_string()
+    } else if work_absorption_required {
+        format!(
+            "{} unreachable peer(s) require work absorption; {} degraded peer(s) observed",
+            unreachable_count, degraded_count
+        )
+    } else {
+        format!(
+            "{} degraded peer(s) observed; failover absorption not required yet",
+            degraded_count
+        )
+    };
     PeerHealthAlertsResponse {
         status: status.to_string(),
         alert_count: alerts.len(),
         alerts,
-        checked_at,
+        checked_at: checked_at.to_rfc3339(),
+        failover_ready,
+        work_absorption_required,
+        target_recovery_sla_seconds,
+        network_partition_suspected,
+        split_brain_guard: "failover absorption only activates for peers reported unreachable by health probes; degraded peers stay non-failover to avoid split-brain during partitions".to_string(),
+        summary,
     }
 }
 
@@ -1362,6 +1433,7 @@ pub struct DashboardSummaryResponse {
     pub auth_enabled: bool,
     pub ws_subscribers: usize,
     pub channels: Vec<String>,
+    pub peer_health: PeerHealthAlertsResponse,
 }
 
 #[derive(Serialize)]
@@ -1588,6 +1660,12 @@ pub async fn dashboard_summary(
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
     let config = state.config.read().await;
 
+    let peer_health = peer_health_alerts_from_peers(
+        &state.peer_health_alert_cache,
+        collect_peer_health(state.capabilities.peers.clone()).await,
+    )
+    .await;
+
     Ok(Json(DashboardSummaryResponse {
         gateway_status: "running",
         bind: format!("{}:{}", config.gateway.host, config.gateway.port),
@@ -1599,6 +1677,7 @@ pub async fn dashboard_summary(
         auth_enabled: config.gateway.auth_token.is_some(),
         ws_subscribers: state.event_tx.receiver_count(),
         channels: configured_channels(&config),
+        peer_health,
     }))
 }
 
@@ -2193,6 +2272,9 @@ pub struct CreateSessionRequest {
     /// Optional upstream delegation plan metadata captured from a parent instance.
     #[serde(default)]
     pub delegation_plan: Option<serde_json::Value>,
+    /// Optional raw metadata merged into the created session record.
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
 }
 
 fn default_kind() -> String {
@@ -2400,6 +2482,26 @@ pub async fn create_session(
             .map_err(|e| GatewayError::Internal(e.to_string()))?
     };
 
+    let row = if let Some(metadata) = body.metadata {
+        if let Some(metadata_obj) = metadata.as_object() {
+            let mut merged = row.metadata.clone();
+            if let Some(existing) = merged.as_object_mut() {
+                for (key, value) in metadata_obj {
+                    existing.insert(key.clone(), value.clone());
+                }
+            }
+            state
+                .session_repo
+                .update_metadata(row.id, merged, Utc::now())
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))?
+        } else {
+            row
+        }
+    } else {
+        row
+    };
+
     let _ = state.event_tx.send(SessionEvent {
         session_id: row.id.to_string(),
         kind: "session_created".to_string(),
@@ -2461,6 +2563,12 @@ pub struct SessionStatusResponse {
     pub session_id: String,
     pub runtime: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_task_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_hint: Option<String>,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_ref: Option<String>,
@@ -2582,6 +2690,9 @@ pub async fn get_session_status(
         .or_else(|| model_override.clone());
     let approval_mode =
         metadata_string(metadata, "approval_mode").unwrap_or_else(|| "on-miss".to_string());
+    let status_reason = session_status_reason(&row.status, metadata, approval_mode.as_str());
+    let next_task_reason = session_next_task_reason(&row.status, metadata);
+    let resume_hint = session_resume_hint(&row.status, metadata);
     let security_mode =
         metadata_string(metadata, "security_mode").unwrap_or_else(|| "allowlist".to_string());
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
@@ -2672,6 +2783,9 @@ pub async fn get_session_status(
             row.status
         ),
         status: row.status,
+        status_reason,
+        next_task_reason,
+        resume_hint,
         kind: row.kind,
         channel_ref: row.channel_ref,
         parent_session_id,
@@ -2703,6 +2817,92 @@ pub async fn get_session_status(
         latest_subagent_result,
         unresolved,
     }))
+}
+
+pub(crate) fn session_status_reason(
+    status: &str,
+    metadata: &serde_json::Value,
+    approval_mode: &str,
+) -> Option<String> {
+    match status {
+        "waiting_for_approval" => Some(format!(
+            "blocked on operator approval ({approval_mode}); resume after an approval decision is recorded"
+        )),
+        "waiting_for_subagent" => Some(
+            metadata_string(metadata, "subagent_lifecycle")
+                .map(|lifecycle| format!("waiting for delegated work to progress ({lifecycle})"))
+                .unwrap_or_else(|| "waiting for delegated work to progress".to_string()),
+        ),
+        "waiting_for_tool" => Some("paused until the active tool call finishes".to_string()),
+        "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => {
+            Some("running after a higher-priority preemption; inspect latest operator note for takeover context".to_string())
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn session_next_task_reason(
+    status: &str,
+    metadata: &serde_json::Value,
+) -> Option<String> {
+    let lifecycle = metadata_string(metadata, "subagent_lifecycle");
+    let operator_note = metadata_string(metadata, "subagent_last_note");
+
+    if status == "waiting_for_approval" {
+        return Some(
+            operator_note.unwrap_or_else(|| {
+                "next action is approval handling because execution is explicitly blocked until an operator decision is recorded".to_string()
+            }),
+        );
+    }
+
+    if status == "waiting_for_subagent" {
+        return Some(match (lifecycle.as_deref(), operator_note) {
+            (_, Some(note)) => note,
+            (Some(lifecycle), None) => format!(
+                "next action follows delegated session lifecycle: {lifecycle}"
+            ),
+            (None, None) => {
+                "next action is delegated-session follow-up because the parent is waiting on child progress".to_string()
+            }
+        });
+    }
+
+    if lifecycle.as_deref() == Some("preempted") {
+        return Some(
+            operator_note.unwrap_or_else(|| {
+                "next action is to finish the higher-priority takeover before resuming this parked work".to_string()
+            }),
+        );
+    }
+
+    metadata_string(metadata, "next_task_reason")
+}
+
+pub(crate) fn session_resume_hint(status: &str, metadata: &serde_json::Value) -> Option<String> {
+    match status {
+        "waiting_for_approval" => Some(
+            "decide the pending approval, then call the approval resume path or send the next operator instruction"
+                .to_string(),
+        ),
+        "waiting_for_subagent" => Some(
+            metadata_string(metadata, "subagent_lifecycle")
+                .map(|lifecycle| format!("check child session status; current delegated lifecycle is {lifecycle}"))
+                .unwrap_or_else(|| "check child session status or steer/cancel the delegated session".to_string()),
+        ),
+        "waiting_for_tool" => Some(
+            "wait for tool completion or cancel the in-flight tool execution before resuming".to_string(),
+        ),
+        "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
+            "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
+                .to_string(),
+        ),
+        "suspended" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
+            "preempted work is parked safely; send a resume/steer instruction after the higher-priority task finishes"
+                .to_string(),
+        ),
+        _ => None,
+    }
 }
 
 /// A single node in a session delegation tree.
@@ -3161,6 +3361,19 @@ pub async fn agent_kill(
     let now = chrono::Utc::now();
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
     let note = format!("[kill] session cancelled: {reason}");
+
+    let current_status = session
+        .status
+        .parse::<rune_core::SessionStatus>()
+        .map_err(|_| {
+            GatewayError::Internal(format!(
+                "invalid persisted session status: {}",
+                session.status
+            ))
+        })?;
+    current_status
+        .transition(rune_core::SessionStatus::Cancelled)
+        .map_err(|e| GatewayError::BadRequest(e.to_string()))?;
 
     request_session_abort(id, reason.to_string()).await;
 
@@ -6307,6 +6520,8 @@ pub struct MemorySearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_name: Option<String>,
     pub remote: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -6339,6 +6554,7 @@ pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
                 instance_id: None,
                 instance_name: None,
                 remote: false,
+                scope: None,
             })
         })
         .collect()
@@ -6360,6 +6576,74 @@ fn memory_result_is_private(result: &MemorySearchResult) -> bool {
     path.starts_with("memory/private/") || path.contains("/private/")
 }
 
+fn memory_result_scope(result: &MemorySearchResult) -> &'static str {
+    if memory_result_is_private(result) {
+        "private"
+    } else if result.file_path.starts_with("memory/projects/")
+        || result.file_path.contains("/projects/")
+    {
+        "project"
+    } else {
+        "shared"
+    }
+}
+
+fn annotate_memory_results(
+    results: Vec<MemorySearchResult>,
+    instance_id: &str,
+    instance_name: &str,
+    remote: bool,
+    include_private: bool,
+) -> Vec<MemorySearchResult> {
+    results
+        .into_iter()
+        .filter(|result| include_private || !memory_result_is_private(result))
+        .map(|mut result| {
+            result.remote = remote;
+            if result.instance_id.is_none() {
+                result.instance_id = Some(instance_id.to_string());
+            }
+            if result.instance_name.is_none() {
+                result.instance_name = Some(instance_name.to_string());
+            }
+            result.scope = Some(memory_result_scope(&result).to_string());
+            result
+        })
+        .collect()
+}
+
+fn merge_memory_search_results(
+    mut local_results: Vec<MemorySearchResult>,
+    mut remote_results: Vec<MemorySearchResult>,
+    limit: usize,
+) -> Vec<MemorySearchResult> {
+    local_results.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
+    remote_results.sort_by(|a, b| {
+        a.instance_id
+            .as_deref()
+            .unwrap_or("")
+            .cmp(b.instance_id.as_deref().unwrap_or(""))
+            .then(a.file_path.cmp(&b.file_path))
+            .then(a.line.cmp(&b.line))
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    let mut combined = Vec::with_capacity(local_results.len() + remote_results.len());
+    for result in local_results.into_iter().chain(remote_results.into_iter()) {
+        let key = (
+            result.instance_id.clone().unwrap_or_default(),
+            result.file_path.clone(),
+            result.line,
+            result.snippet.clone(),
+        );
+        if seen.insert(key) {
+            combined.push(result);
+        }
+    }
+    combined.truncate(limit);
+    combined
+}
+
 async fn federated_memory_search(
     state: &AppState,
     query: &str,
@@ -6374,26 +6658,16 @@ async fn federated_memory_search(
         config.instance.peers.clone()
     };
 
-    let mut combined = if include_private {
-        local_results
-    } else {
-        local_results
-            .into_iter()
-            .filter(|result| !memory_result_is_private(result))
-            .collect::<Vec<_>>()
-    };
-    for result in &mut combined {
-        result.remote = false;
-        if result.instance_id.is_none() {
-            result.instance_id = Some(identity.id.clone());
-        }
-        if result.instance_name.is_none() {
-            result.instance_name = Some(identity.name.clone());
-        }
-    }
+    let local_results = annotate_memory_results(
+        local_results,
+        &identity.id,
+        &identity.name,
+        false,
+        include_private,
+    );
 
     if !include_remote || peers.is_empty() {
-        combined.truncate(limit);
+        let combined = merge_memory_search_results(local_results, Vec::new(), limit);
         return (combined, 0);
     }
 
@@ -6403,9 +6677,8 @@ async fn federated_memory_search(
     {
         Ok(client) => client,
         Err(_) => {
-            let pending = peers.len();
-            combined.truncate(limit);
-            return (combined, pending);
+            let combined = merge_memory_search_results(local_results, Vec::new(), limit);
+            return (combined, peers.len());
         }
     };
 
@@ -6445,26 +6718,12 @@ async fn federated_memory_search(
         };
         remote_pending += payload.remote_pending;
 
-        let mut peer_results = payload
-            .results
-            .into_iter()
-            .filter(|result| include_private || !memory_result_is_private(result))
-            .map(|mut result| {
-                result.remote = true;
-                if result.instance_id.is_none() {
-                    result.instance_id = Some(peer.id.clone());
-                }
-                if result.instance_name.is_none() {
-                    result.instance_name = Some(peer.id.clone());
-                }
-                result
-            })
-            .collect::<Vec<_>>();
+        let mut peer_results =
+            annotate_memory_results(payload.results, &peer.id, &peer.id, true, include_private);
         merged.append(&mut peer_results);
     }
 
-    combined.extend(merged);
-    combined.truncate(limit);
+    let combined = merge_memory_search_results(local_results, merged, limit);
     (combined, remote_pending)
 }
 
@@ -8303,67 +8562,61 @@ mod tests {
             );
         }
     }
-    #[test]
-    fn peer_health_alerts_empty_when_all_peers_healthy() {
-        let response = peer_health_alerts_from_peers(vec![PeerHealthResponse {
-            id: "peer-a".to_string(),
-            name: "Peer A".to_string(),
-            health_url: "http://peer-a/api/v1/instance/health".to_string(),
-            status: "healthy".to_string(),
-            detail: "200 OK".to_string(),
-            checked_at: "2026-03-29T00:00:00Z".to_string(),
-            latency_ms: Some(12),
-            last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
-            observed_status: "healthy".to_string(),
-            load: Some(InstanceLoadResponse {
-                session_count: 1,
-                ws_subscribers: 0,
-                ws_connections: 0,
-            }),
-            advertised_addr: Some("http://peer-a".to_string()),
-            roles: vec!["gateway".to_string()],
-            capability_hash: Some("abc".to_string()),
-            capabilities_version: Some(1),
-            comms_transport: Some("http".to_string()),
-            configured_models: vec!["gpt-4.1".to_string()],
-            active_projects: vec!["/workspace/rune".to_string()],
-        }]);
-        assert_eq!(response.status, "ok");
-        assert!(response.alerts.is_empty());
-    }
-
-    #[test]
-    fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
-        let response = peer_health_alerts_from_peers(vec![
-            PeerHealthResponse {
+    #[tokio::test]
+    async fn peer_health_alerts_empty_when_all_peers_healthy() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![PeerHealthResponse {
                 id: "peer-a".to_string(),
                 name: "Peer A".to_string(),
                 health_url: "http://peer-a/api/v1/instance/health".to_string(),
-                status: "unreachable".to_string(),
-                detail: "connection refused".to_string(),
+                status: "healthy".to_string(),
+                detail: "200 OK".to_string(),
                 checked_at: "2026-03-29T00:00:00Z".to_string(),
-                latency_ms: None,
-                last_seen_at: None,
-                observed_status: "unreachable".to_string(),
-                load: None,
-                advertised_addr: None,
-                roles: Vec::new(),
-                capability_hash: None,
-                capabilities_version: None,
-                comms_transport: None,
-                configured_models: Vec::new(),
-                active_projects: Vec::new(),
-            },
-            PeerHealthResponse {
-                id: "peer-b".to_string(),
-                name: "Peer B".to_string(),
-                health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                latency_ms: Some(12),
+                last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
+                observed_status: "healthy".to_string(),
+                load: Some(InstanceLoadResponse {
+                    session_count: 1,
+                    ws_subscribers: 0,
+                    ws_connections: 0,
+                }),
+                advertised_addr: Some("http://peer-a".to_string()),
+                roles: vec!["gateway".to_string()],
+                capability_hash: Some("abc".to_string()),
+                capabilities_version: Some(1),
+                comms_transport: Some("http".to_string()),
+                configured_models: vec!["gpt-4.1".to_string()],
+                active_projects: vec!["/workspace/rune".to_string()],
+            }],
+        )
+        .await;
+        assert_eq!(response.status, "ok");
+        assert!(response.alerts.is_empty());
+        assert!(response.failover_ready);
+        assert!(!response.work_absorption_required);
+        assert_eq!(
+            response.summary,
+            "all peers healthy; no failover action required"
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_health_alerts_expose_observed_status_last_seen_and_health_url() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![PeerHealthResponse {
+                id: "peer-a".to_string(),
+                name: "Peer A".to_string(),
+                health_url: "http://peer-a/api/v1/instance/health".to_string(),
                 status: "degraded".to_string(),
-                detail: "500 Internal Server Error".to_string(),
-                checked_at: "2026-03-29T00:00:03Z".to_string(),
-                latency_ms: Some(55),
-                last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
-                observed_status: "degraded".to_string(),
+                detail: "invalid health payload".to_string(),
+                checked_at: "2026-03-29T00:00:00Z".to_string(),
+                latency_ms: Some(12),
+                last_seen_at: Some("2026-03-28T23:59:58Z".to_string()),
+                observed_status: "invalid-payload".to_string(),
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
@@ -8372,14 +8625,138 @@ mod tests {
                 comms_transport: None,
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
-            },
-        ]);
+            }],
+        )
+        .await;
+        assert_eq!(response.alert_count, 1);
+        assert_eq!(response.alerts[0].status, "degraded");
+        assert_eq!(response.alerts[0].observed_status, "invalid-payload");
+        assert_eq!(
+            response.alerts[0].last_seen_at.as_deref(),
+            Some("2026-03-28T23:59:58Z")
+        );
+        assert_eq!(
+            response.alerts[0].health_url,
+            "http://peer-a/api/v1/instance/health"
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_health_alerts_expose_partition_guard_metadata() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![
+                PeerHealthResponse {
+                    id: "peer-a".to_string(),
+                    name: "Peer A".to_string(),
+                    health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                    status: "unreachable".to_string(),
+                    detail: "timeout".to_string(),
+                    checked_at: "2025-01-01T00:00:00Z".to_string(),
+                    latency_ms: None,
+                    last_seen_at: Some("2025-01-01T00:00:10Z".to_string()),
+                    observed_status: "unknown".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+                PeerHealthResponse {
+                    id: "peer-b".to_string(),
+                    name: "Peer B".to_string(),
+                    health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                    status: "degraded".to_string(),
+                    detail: "high latency".to_string(),
+                    checked_at: "2025-01-01T00:00:05Z".to_string(),
+                    latency_ms: Some(900),
+                    last_seen_at: Some("2025-01-01T00:00:12Z".to_string()),
+                    observed_status: "degraded".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+            ],
+        )
+        .await;
+
+        assert!(response.network_partition_suspected);
+        assert_eq!(response.target_recovery_sla_seconds, 60);
+        assert!(
+            response
+                .split_brain_guard
+                .contains("degraded peers stay non-failover")
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
+        let cache = crate::state::PeerHealthAlertCache::new();
+        let response = peer_health_alerts_from_peers(
+            &cache,
+            vec![
+                PeerHealthResponse {
+                    id: "peer-a".to_string(),
+                    name: "Peer A".to_string(),
+                    health_url: "http://peer-a/api/v1/instance/health".to_string(),
+                    status: "unreachable".to_string(),
+                    detail: "connection refused".to_string(),
+                    checked_at: "2026-03-29T00:00:00Z".to_string(),
+                    latency_ms: None,
+                    last_seen_at: None,
+                    observed_status: "unreachable".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+                PeerHealthResponse {
+                    id: "peer-b".to_string(),
+                    name: "Peer B".to_string(),
+                    health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                    status: "degraded".to_string(),
+                    detail: "500 Internal Server Error".to_string(),
+                    checked_at: "2026-03-29T00:00:03Z".to_string(),
+                    latency_ms: Some(55),
+                    last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
+                    observed_status: "degraded".to_string(),
+                    load: None,
+                    advertised_addr: None,
+                    roles: Vec::new(),
+                    capability_hash: None,
+                    capabilities_version: None,
+                    comms_transport: None,
+                    configured_models: Vec::new(),
+                    active_projects: Vec::new(),
+                },
+            ],
+        )
+        .await;
         assert_eq!(response.status, "degraded");
         assert_eq!(response.alerts.len(), 2);
         assert_eq!(response.alerts[0].severity, "critical");
         assert_eq!(response.alerts[0].peer_id, "peer-a");
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
+        assert!(!response.failover_ready);
+        assert!(response.work_absorption_required);
+        assert_eq!(
+            response.summary,
+            "1 unreachable peer(s) require work absorption; 1 degraded peer(s) observed"
+        );
     }
 
     #[test]
@@ -8392,6 +8769,7 @@ mod tests {
             instance_id: None,
             instance_name: None,
             remote: false,
+            scope: None,
         }];
 
         let identity = rune_config::InstanceIdentity {
@@ -8434,6 +8812,7 @@ mod tests {
                 instance_id: None,
                 instance_name: None,
                 remote: false,
+                scope: None,
             }],
             message: "ok".to_string(),
             remote_pending: 2,
@@ -8466,40 +8845,86 @@ pub struct DelegationTaskStatusPath {
     pub task_id: String,
 }
 
-pub async fn submit_delegation_task(
-    State(_state): State<AppState>,
-    Json(request): Json<DelegationTaskRequest>,
-) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
-    let now = Utc::now().to_rfc3339();
-    let result = DelegationTaskResultResponse {
-        task_id: request.task_id.clone(),
-        status: "accepted".to_string(),
-        accepted_at: now,
-        started_at: None,
-        output: None,
-        artifacts: request.task.artifacts.clone(),
-        error: None,
-        finished_at: None,
-    };
+#[derive(Clone, Debug)]
+struct DelegationTaskRecord {
+    receiver: DelegationEndpointResponse,
+    result: DelegationTaskResultResponse,
+    timeout_deadline: DateTime<Utc>,
+}
 
-    let receiver = DelegationEndpointResponse {
-        instance_id: request
-            .task
-            .target_peer_id
-            .clone()
-            .unwrap_or_else(|| "local-instance".to_string()),
-        instance_name: request
-            .task
-            .target_peer_id
-            .clone()
-            .unwrap_or_else(|| "Local Instance".to_string()),
+fn delegation_task_store() -> &'static tokio::sync::Mutex<HashMap<String, DelegationTaskRecord>> {
+    static STORE: once_cell::sync::Lazy<tokio::sync::Mutex<HashMap<String, DelegationTaskRecord>>> =
+        once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
+    &STORE
+}
+
+fn local_delegation_receiver(request: &DelegationTaskRequest) -> DelegationEndpointResponse {
+    let target = request
+        .task
+        .target_peer_id
+        .clone()
+        .unwrap_or_else(|| "local-instance".to_string());
+    DelegationEndpointResponse {
+        instance_id: target.clone(),
+        instance_name: target,
         transport: request.sender.transport.clone(),
         capabilities_version: request.sender.capabilities_version,
         capability_hash: request.sender.capability_hash.clone(),
         health_url: None,
         submit_url: None,
         result_url: request.sender.result_url.clone(),
+    }
+}
+
+pub async fn submit_delegation_task(
+    State(_state): State<AppState>,
+    Json(request): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
+    if request.protocol_version != 1 {
+        return Err(GatewayError::BadRequest(format!(
+            "unsupported delegation protocol_version '{}' (expected 1)",
+            request.protocol_version
+        )));
+    }
+    if request.task.task.trim().is_empty() {
+        return Err(GatewayError::BadRequest(
+            "delegation task field cannot be empty".to_string(),
+        ));
+    }
+    if request.task.expected_output.trim().is_empty() {
+        return Err(GatewayError::BadRequest(
+            "delegation expected_output field cannot be empty".to_string(),
+        ));
+    }
+    if request.task.timeout_secs == 0 {
+        return Err(GatewayError::BadRequest(
+            "delegation timeout_secs must be greater than zero".to_string(),
+        ));
+    }
+
+    let accepted_at = Utc::now();
+    let started_at = accepted_at + Duration::seconds(1);
+    let receiver = local_delegation_receiver(&request);
+    let result = DelegationTaskResultResponse {
+        task_id: request.task_id.clone(),
+        status: "running".to_string(),
+        accepted_at: accepted_at.to_rfc3339(),
+        started_at: Some(started_at.to_rfc3339()),
+        output: None,
+        artifacts: request.task.artifacts.clone(),
+        error: None,
+        finished_at: None,
     };
+    let deadline = accepted_at + Duration::seconds(request.task.timeout_secs as i64);
+
+    delegation_task_store().lock().await.insert(
+        request.task_id.clone(),
+        DelegationTaskRecord {
+            receiver: receiver.clone(),
+            result: result.clone(),
+            timeout_deadline: deadline,
+        },
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -8510,27 +8935,99 @@ pub async fn submit_delegation_task(
 pub async fn delegation_task_status(
     Path(path): Path<DelegationTaskStatusPath>,
 ) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
-    let now = Utc::now().to_rfc3339();
+    let mut store = delegation_task_store().lock().await;
+    let record = store
+        .get_mut(&path.task_id)
+        .ok_or_else(|| GatewayError::AssetNotFound(format!("delegation task {}", path.task_id)))?;
+
+    if record.result.finished_at.is_none() && Utc::now() >= record.timeout_deadline {
+        record.result.status = "timeout".to_string();
+        record.result.error = Some(DelegationErrorResponse {
+            code: "deadline_exceeded".to_string(),
+            message: format!(
+                "delegation task exceeded timeout at {}",
+                record.timeout_deadline.to_rfc3339()
+            ),
+        });
+        record.result.finished_at = Some(record.timeout_deadline.to_rfc3339());
+        record.result.output = None;
+    }
+
     Ok(Json(DelegationTaskStatusEnvelope {
-        receiver: DelegationEndpointResponse {
-            instance_id: "local-instance".to_string(),
-            instance_name: "Local Instance".to_string(),
-            transport: "http".to_string(),
-            capabilities_version: 1,
-            capability_hash: "local-dev".to_string(),
-            health_url: None,
-            submit_url: None,
-            result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
-        },
-        result: DelegationTaskResultResponse {
-            task_id: path.task_id,
-            status: "accepted".to_string(),
-            accepted_at: now,
-            started_at: None,
-            output: None,
-            artifacts: Vec::new(),
-            error: None,
-            finished_at: None,
-        },
+        receiver: record.receiver.clone(),
+        result: record.result.clone(),
     }))
+}
+
+#[cfg(test)]
+mod memory_search_federation_tests {
+    use super::*;
+
+    #[test]
+    fn annotate_memory_results_sets_scope_and_source_attribution() {
+        let results = annotate_memory_results(
+            vec![MemorySearchResult {
+                source: "memory/projects/phoenix/notes.md#7".to_string(),
+                file_path: "memory/projects/phoenix/notes.md".to_string(),
+                line: 7,
+                snippet: "borrow checker patterns".to_string(),
+                instance_id: None,
+                instance_name: None,
+                remote: false,
+                scope: None,
+            }],
+            "desktop-a",
+            "Desktop A",
+            true,
+            true,
+        );
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert_eq!(result.instance_id.as_deref(), Some("desktop-a"));
+        assert_eq!(result.instance_name.as_deref(), Some("Desktop A"));
+        assert!(result.remote);
+        assert_eq!(result.scope.as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn merge_memory_search_results_prefers_local_and_deduplicates_remote_matches() {
+        let local = vec![MemorySearchResult {
+            source: "MEMORY.md#3".to_string(),
+            file_path: "MEMORY.md".to_string(),
+            line: 3,
+            snippet: "borrow checker patterns".to_string(),
+            instance_id: Some("local".to_string()),
+            instance_name: Some("Local".to_string()),
+            remote: false,
+            scope: Some("shared".to_string()),
+        }];
+        let remote = vec![
+            MemorySearchResult {
+                source: "memory/2026-03-27.md#4".to_string(),
+                file_path: "memory/2026-03-27.md".to_string(),
+                line: 4,
+                snippet: "borrow checker patterns".to_string(),
+                instance_id: Some("peer-a".to_string()),
+                instance_name: Some("Peer A".to_string()),
+                remote: true,
+                scope: Some("shared".to_string()),
+            },
+            MemorySearchResult {
+                source: "memory/2026-03-27.md#4".to_string(),
+                file_path: "memory/2026-03-27.md".to_string(),
+                line: 4,
+                snippet: "borrow checker patterns".to_string(),
+                instance_id: Some("peer-a".to_string()),
+                instance_name: Some("Peer A".to_string()),
+                remote: true,
+                scope: Some("shared".to_string()),
+            },
+        ];
+
+        let merged = merge_memory_search_results(local, remote, 10);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].instance_id.as_deref(), Some("local"));
+        assert_eq!(merged[1].instance_id.as_deref(), Some("peer-a"));
+    }
 }

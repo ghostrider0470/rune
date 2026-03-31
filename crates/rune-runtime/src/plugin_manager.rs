@@ -9,7 +9,9 @@ use tracing::info;
 use crate::agent_registry::AgentRegistry;
 use crate::command_registry::CommandRegistry;
 use crate::hooks::HookRegistry;
-use crate::plugin_scanner::{PluginScanner, UnifiedScanSummary};
+use crate::plugin_scanner::{
+    PluginDecisionKind, PluginDiscoveryDecision, PluginScanner, UnifiedScanSummary,
+};
 use crate::skill::SkillRegistry;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -17,11 +19,14 @@ pub struct PluginStatus {
     pub name: String,
     pub enabled: bool,
     pub source: String,
+    pub kind: String,
     pub skills: usize,
     pub agents: usize,
     pub hooks: usize,
     pub commands: usize,
     pub mcp_servers: usize,
+    pub last_decision: String,
+    pub last_detail: String,
 }
 
 #[derive(Clone)]
@@ -38,12 +43,15 @@ pub struct PluginManager {
 struct PluginMeta {
     name: String,
     source_dir: String,
+    kind: String,
     enabled: bool,
     skills: usize,
     agents: usize,
     hooks: usize,
     commands: usize,
     mcp_servers: usize,
+    last_decision: String,
+    last_detail: String,
 }
 
 impl PluginManager {
@@ -81,11 +89,14 @@ impl PluginManager {
                 name: m.name.clone(),
                 enabled: m.enabled,
                 source: m.source_dir.clone(),
+                kind: m.kind.clone(),
                 skills: m.skills,
                 agents: m.agents,
                 hooks: m.hooks,
                 commands: m.commands,
                 mcp_servers: m.mcp_servers,
+                last_decision: m.last_decision.clone(),
+                last_detail: m.last_detail.clone(),
             })
             .collect()
     }
@@ -96,11 +107,14 @@ impl PluginManager {
             name: m.name.clone(),
             enabled: m.enabled,
             source: m.source_dir.clone(),
+            kind: m.kind.clone(),
             skills: m.skills,
             agents: m.agents,
             hooks: m.hooks,
             commands: m.commands,
             mcp_servers: m.mcp_servers,
+            last_decision: m.last_decision.clone(),
+            last_detail: m.last_detail.clone(),
         })
     }
 
@@ -158,6 +172,7 @@ impl PluginManager {
         let agents = self.agent_registry.list().await;
         let commands = self.command_registry.list().await;
         let mcp_servers = self.scanner.discovered_mcp_servers().await;
+        let discovery_decisions = self.scanner.discovery_decisions().await;
 
         let mut counts: HashMap<String, PluginMeta> = HashMap::new();
 
@@ -172,12 +187,15 @@ impl PluginManager {
                 .or_insert_with(|| PluginMeta {
                     name: plugin_name.to_string(),
                     source_dir: skill.source_dir.display().to_string(),
+                    kind: "claude".to_string(),
                     enabled: true,
                     skills: 0,
                     agents: 0,
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
+                    last_detail: "registered plugin components are active".to_string(),
                 });
             entry.skills += 1;
         }
@@ -193,12 +211,15 @@ impl PluginManager {
                 .or_insert_with(|| PluginMeta {
                     name: plugin_name.to_string(),
                     source_dir: String::new(),
+                    kind: "claude".to_string(),
                     enabled: true,
                     skills: 0,
                     agents: 0,
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
+                    last_detail: "registered plugin components are active".to_string(),
                 });
             entry.agents += 1;
         }
@@ -209,12 +230,15 @@ impl PluginManager {
                 .or_insert_with(|| PluginMeta {
                     name: cmd.plugin_name.clone(),
                     source_dir: String::new(),
+                    kind: "claude".to_string(),
                     enabled: true,
                     skills: 0,
                     agents: 0,
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
+                    last_detail: "registered plugin components are active".to_string(),
                 });
             entry.commands += 1;
         }
@@ -225,17 +249,49 @@ impl PluginManager {
                 .or_insert_with(|| PluginMeta {
                     name: server.plugin_name.clone(),
                     source_dir: String::new(),
+                    kind: "claude".to_string(),
                     enabled: true,
                     skills: 0,
                     agents: 0,
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
+                    last_detail: "registered plugin components are active".to_string(),
                 });
             entry.mcp_servers += 1;
         }
 
-        *meta = counts;
+        for decision in discovery_decisions {
+            let entry = counts
+                .entry(decision.plugin_name.clone())
+                .or_insert_with(|| plugin_meta_from_decision(&decision));
+            entry.source_dir = decision.source.clone();
+            entry.kind = decision.kind.as_str().to_string();
+            entry.last_decision = decision.decision.as_str().to_string();
+            entry.last_detail = decision.detail.clone();
+            entry.enabled = matches!(decision.decision, PluginDecisionKind::Loaded);
+        }
+
+        let mut ordered: Vec<_> = counts.into_iter().collect();
+        ordered.sort_by(|a, b| a.0.cmp(&b.0));
+        *meta = ordered.into_iter().collect();
+    }
+}
+
+fn plugin_meta_from_decision(decision: &PluginDiscoveryDecision) -> PluginMeta {
+    PluginMeta {
+        name: decision.plugin_name.clone(),
+        source_dir: decision.source.clone(),
+        kind: decision.kind.as_str().to_string(),
+        enabled: matches!(decision.decision, PluginDecisionKind::Loaded),
+        skills: 0,
+        agents: 0,
+        hooks: 0,
+        commands: 0,
+        mcp_servers: 0,
+        last_decision: decision.decision.as_str().to_string(),
+        last_detail: decision.detail.clone(),
     }
 }
 

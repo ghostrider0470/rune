@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
 use crate::agent_registry::{AgentRegistry, AgentTemplate};
@@ -44,6 +45,51 @@ pub struct UnifiedScanSummary {
     pub commands_registered: usize,
     /// Total MCP server entries discovered (informational; not yet launched).
     pub mcp_servers_found: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PluginDiscoveryKind {
+    Native,
+    Claude,
+}
+
+impl PluginDiscoveryKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Claude => "claude",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PluginDecisionKind {
+    Loaded,
+    SkippedDuplicate,
+    DisabledByOverride,
+    RejectedIncompatible,
+    ParseFailed,
+}
+
+impl PluginDecisionKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Loaded => "loaded",
+            Self::SkippedDuplicate => "skipped_duplicate",
+            Self::DisabledByOverride => "disabled_by_override",
+            Self::RejectedIncompatible => "rejected_incompatible",
+            Self::ParseFailed => "parse_failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginDiscoveryDecision {
+    pub plugin_name: String,
+    pub source: String,
+    pub kind: PluginDiscoveryKind,
+    pub decision: PluginDecisionKind,
+    pub detail: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +191,8 @@ pub struct PluginScanner {
     hook_registry: Arc<HookRegistry>,
     /// MCP servers discovered during the last scan.
     discovered_mcp_servers: Arc<tokio::sync::RwLock<Vec<claude_plugin::ClaudeMcpServer>>>,
+    /// Discovery decisions from the last scan for auditability and UI reporting.
+    discovery_decisions: Arc<tokio::sync::RwLock<Vec<PluginDiscoveryDecision>>>,
 }
 
 impl PluginScanner {
@@ -166,12 +214,18 @@ impl PluginScanner {
             command_registry,
             hook_registry,
             discovered_mcp_servers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            discovery_decisions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
 
     /// Return MCP servers discovered during the last scan.
     pub async fn discovered_mcp_servers(&self) -> Vec<claude_plugin::ClaudeMcpServer> {
         self.discovered_mcp_servers.read().await.clone()
+    }
+
+    /// Return plugin discovery decisions captured during the last scan.
+    pub async fn discovery_decisions(&self) -> Vec<PluginDiscoveryDecision> {
+        self.discovery_decisions.read().await.clone()
     }
 
     /// Scan all configured directories and register discovered plugins.
@@ -182,6 +236,7 @@ impl PluginScanner {
         let mut summary = UnifiedScanSummary::default();
         let mut seen_names: HashSet<String> = HashSet::new();
         let mut mcp_servers: Vec<claude_plugin::ClaudeMcpServer> = Vec::new();
+        let mut decisions: Vec<PluginDiscoveryDecision> = Vec::new();
 
         for dir in &self.scan_dirs {
             let expanded = expand_tilde(dir);
@@ -218,6 +273,7 @@ impl PluginScanner {
                                 &mut seen_names,
                                 &mut summary,
                                 &mut mcp_servers,
+                                &mut decisions,
                             )
                             .await;
                         } else if path.join("PLUGIN.md").exists() {
@@ -226,8 +282,23 @@ impl PluginScanner {
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("")
                                 .to_string();
-                            if seen_names.insert(dir_name) {
+                            if seen_names.insert(dir_name.clone()) {
                                 summary.native_plugins += 1;
+                                decisions.push(PluginDiscoveryDecision {
+                                    plugin_name: dir_name,
+                                    source: path.display().to_string(),
+                                    kind: PluginDiscoveryKind::Native,
+                                    decision: PluginDecisionKind::Loaded,
+                                    detail: "loaded native PLUGIN.md plugin".to_string(),
+                                });
+                            } else {
+                                decisions.push(PluginDiscoveryDecision {
+                                    plugin_name: dir_name,
+                                    source: path.display().to_string(),
+                                    kind: PluginDiscoveryKind::Native,
+                                    decision: PluginDecisionKind::SkippedDuplicate,
+                                    detail: "plugin name already discovered from a higher-precedence directory".to_string(),
+                                });
                             }
                         } else {
                             // Not a plugin dir — recurse deeper (marketplace/version dirs)
@@ -242,7 +313,15 @@ impl PluginScanner {
             }
         }
 
+        decisions.sort_by(|a, b| {
+            a.plugin_name
+                .cmp(&b.plugin_name)
+                .then(a.source.cmp(&b.source))
+                .then(a.kind.as_str().cmp(b.kind.as_str()))
+        });
+
         *self.discovered_mcp_servers.write().await = mcp_servers;
+        *self.discovery_decisions.write().await = decisions;
 
         info!(
             native = summary.native_plugins,
@@ -265,10 +344,23 @@ impl PluginScanner {
         seen_names: &mut HashSet<String>,
         summary: &mut UnifiedScanSummary,
         mcp_servers: &mut Vec<claude_plugin::ClaudeMcpServer>,
+        decisions: &mut Vec<PluginDiscoveryDecision>,
     ) {
         let parsed = match claude_plugin::parse_claude_plugin(path).await {
             Ok(p) => p,
             Err(e) => {
+                let plugin_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                decisions.push(PluginDiscoveryDecision {
+                    plugin_name,
+                    source: path.display().to_string(),
+                    kind: PluginDiscoveryKind::Claude,
+                    decision: PluginDecisionKind::ParseFailed,
+                    detail: e.clone(),
+                });
                 warn!(dir = %path.display(), error = %e, "failed to parse Claude plugin");
                 return;
             }
@@ -278,6 +370,14 @@ impl PluginScanner {
 
         // First-directory-wins.
         if !seen_names.insert(plugin_name.clone()) {
+            decisions.push(PluginDiscoveryDecision {
+                plugin_name: plugin_name.clone(),
+                source: path.display().to_string(),
+                kind: PluginDiscoveryKind::Claude,
+                decision: PluginDecisionKind::SkippedDuplicate,
+                detail: "plugin name already discovered from a higher-precedence directory"
+                    .to_string(),
+            });
             debug!(plugin = %plugin_name, "plugin already registered from an earlier directory, skipping");
             return;
         }
@@ -288,11 +388,37 @@ impl PluginScanner {
             .cloned()
             .unwrap_or_default();
         if !plugin_override.enabled {
+            decisions.push(PluginDiscoveryDecision {
+                plugin_name: plugin_name.clone(),
+                source: path.display().to_string(),
+                kind: PluginDiscoveryKind::Claude,
+                decision: PluginDecisionKind::DisabledByOverride,
+                detail: "plugin disabled by config override".to_string(),
+            });
             debug!(plugin = %plugin_name, "plugin disabled by config override, skipping");
             return;
         }
 
+        if parsed.version.trim().is_empty() {
+            decisions.push(PluginDiscoveryDecision {
+                plugin_name: plugin_name.clone(),
+                source: path.display().to_string(),
+                kind: PluginDiscoveryKind::Claude,
+                decision: PluginDecisionKind::RejectedIncompatible,
+                detail: "plugin manifest version must not be empty".to_string(),
+            });
+            warn!(plugin = %plugin_name, dir = %path.display(), "rejecting Claude plugin with empty manifest version");
+            return;
+        }
+
         summary.claude_plugins += 1;
+        decisions.push(PluginDiscoveryDecision {
+            plugin_name: plugin_name.clone(),
+            source: path.display().to_string(),
+            kind: PluginDiscoveryKind::Claude,
+            decision: PluginDecisionKind::Loaded,
+            detail: format!("loaded Claude plugin manifest version {}", parsed.version),
+        });
 
         // --- Register skills ---
         for cs in &parsed.skills {
