@@ -14,7 +14,19 @@ use crate::executor::ToolExecutor;
 
 /// Allowed git subcommands. Anything outside this list is rejected.
 const ALLOWED_OPERATIONS: &[&str] = &[
-    "status", "diff", "add", "commit", "push", "pull", "log", "branch", "checkout", "merge",
+    "status",
+    "diff",
+    "add",
+    "commit",
+    "push",
+    "pull",
+    "log",
+    "branch",
+    "checkout",
+    "merge",
+    "pr_status",
+    "staged",
+    "suggest_branch",
 ];
 
 /// Maximum output bytes returned from a git command (50 KB).
@@ -84,13 +96,29 @@ impl GitToolExecutor {
             })
             .unwrap_or_default();
 
+        let mode = call
+            .arguments
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+
         // Validate workspace root exists
         let workspace_root = self
             .workspace_root
             .canonicalize()
             .map_err(|e| ToolError::ExecutionFailed(format!("workspace root invalid: {e}")))?;
 
-        if let Some(result) = self.preflight(operation, &args, call, &workspace_root).await? {
+        if let Some(result) = self
+            .preflight(operation, &args, call, &workspace_root)
+            .await?
+        {
+            return Ok(result);
+        }
+
+        if let Some(result) = self
+            .synthetic_operation(operation, &args, mode.as_deref(), call, &workspace_root)
+            .await?
+        {
             return Ok(result);
         }
 
@@ -173,6 +201,10 @@ impl GitToolExecutor {
         call: &ToolCall,
         workspace_root: &std::path::Path,
     ) -> Result<Option<ToolResult>, ToolError> {
+        if matches!(operation, "pr_status" | "staged" | "suggest_branch") {
+            return Ok(None);
+        }
+
         let safety = call.arguments.get("safety").and_then(|v| v.as_object());
 
         let allow_dirty = safety
@@ -205,7 +237,9 @@ impl GitToolExecutor {
 
         let check_dirty = require_clean || !allow_dirty;
         let dirty = if check_dirty {
-            let output = self.run_git_capture(workspace_root, ["status", "--porcelain"]).await?;
+            let output = self
+                .run_git_capture(workspace_root, ["status", "--porcelain"])
+                .await?;
             if !output.status.success() {
                 return Err(ToolError::ExecutionFailed(format!(
                     "git status --porcelain failed during safety preflight: {}",
@@ -231,7 +265,11 @@ impl GitToolExecutor {
         let current_branch = self.current_branch(workspace_root).await?;
         let on_protected_branch = current_branch
             .as_deref()
-            .map(|branch| protected_branches.iter().any(|candidate| candidate == branch))
+            .map(|branch| {
+                protected_branches
+                    .iter()
+                    .any(|candidate| candidate == branch)
+            })
             .unwrap_or(false);
 
         if on_protected_branch && is_mutating_operation(operation) {
@@ -275,14 +313,29 @@ impl GitToolExecutor {
             }
 
             let merge_base = self
-                .run_git_capture(workspace_root, ["merge-base", "HEAD", &format!("{remote_name}/{base_branch}")])
+                .run_git_capture(
+                    workspace_root,
+                    [
+                        "merge-base",
+                        "HEAD",
+                        &format!("{remote_name}/{base_branch}"),
+                    ],
+                )
                 .await?;
-            let head_rev = self.run_git_capture(workspace_root, ["rev-parse", "HEAD"]).await?;
+            let head_rev = self
+                .run_git_capture(workspace_root, ["rev-parse", "HEAD"])
+                .await?;
             let base_rev = self
-                .run_git_capture(workspace_root, ["rev-parse", &format!("{remote_name}/{base_branch}")])
+                .run_git_capture(
+                    workspace_root,
+                    ["rev-parse", &format!("{remote_name}/{base_branch}")],
+                )
                 .await?;
 
-            if !(merge_base.status.success() && head_rev.status.success() && base_rev.status.success()) {
+            if !(merge_base.status.success()
+                && head_rev.status.success()
+                && base_rev.status.success())
+            {
                 return Ok(Some(self.blocked_result(
                     call,
                     operation,
@@ -298,7 +351,9 @@ impl GitToolExecutor {
                 )));
             }
 
-            let merge_base_sha = String::from_utf8_lossy(&merge_base.stdout).trim().to_owned();
+            let merge_base_sha = String::from_utf8_lossy(&merge_base.stdout)
+                .trim()
+                .to_owned();
             let head_sha = String::from_utf8_lossy(&head_rev.stdout).trim().to_owned();
             let base_sha = String::from_utf8_lossy(&base_rev.stdout).trim().to_owned();
             if merge_base_sha != base_sha {
@@ -391,6 +446,247 @@ impl GitToolExecutor {
         .map_err(|e| ToolError::ExecutionFailed(format!("git process error: {e}")))
     }
 
+    async fn synthetic_operation(
+        &self,
+        operation: &str,
+        args: &[String],
+        mode: Option<&str>,
+        call: &ToolCall,
+        workspace_root: &std::path::Path,
+    ) -> Result<Option<ToolResult>, ToolError> {
+        match operation {
+            "pr_status" => Ok(Some(self.pr_status(call, workspace_root).await?)),
+            "staged" => Ok(Some(self.staged_status(call, mode, workspace_root).await?)),
+            "suggest_branch" => Ok(Some(
+                self.suggest_branch_name(call, args, workspace_root).await?,
+            )),
+            _ => Ok(None),
+        }
+    }
+
+    async fn pr_status(
+        &self,
+        call: &ToolCall,
+        workspace_root: &std::path::Path,
+    ) -> Result<ToolResult, ToolError> {
+        let current_branch = self.current_branch(workspace_root).await?;
+        let branch = call
+            .arguments
+            .get("branch")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .or(current_branch.clone());
+
+        let Some(branch) = branch else {
+            return Ok(self.structured_result(
+                call,
+                false,
+                json!({
+                    "kind": "no_branch",
+                    "message": "cannot inspect PR status from detached HEAD without an explicit branch"
+                }),
+            ));
+        };
+
+        let mut cmd = tokio::process::Command::new("gh");
+        cmd.args([
+            "pr",
+            "view",
+            &branch,
+            "--json",
+            "number,title,url,state,isDraft,mergeStateStatus,headRefName,baseRefName,statusCheckRollup",
+        ]);
+        cmd.current_dir(workspace_root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        let child = cmd
+            .spawn()
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to spawn gh: {e}")))?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            child.wait_with_output(),
+        )
+        .await
+        .map_err(|_| {
+            ToolError::ExecutionFailed(format!(
+                "gh pr view timed out after {DEFAULT_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| ToolError::ExecutionFailed(format!("gh process error: {e}")))?;
+
+        if !output.status.success() {
+            let details = format_output("gh pr view", &output);
+            let missing = details.contains("no pull requests found")
+                || details.contains("Could not resolve to a PullRequest");
+            return Ok(self.structured_result(
+                call,
+                missing,
+                json!({
+                    "branch": branch,
+                    "current_branch": current_branch,
+                    "has_pr": false,
+                    "message": if missing { "no pull request found for branch" } else { "failed to inspect pull request status" },
+                    "details": details,
+                }),
+            ));
+        }
+
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| {
+            ToolError::ExecutionFailed(format!("failed to parse gh pr view JSON: {e}"))
+        })?;
+        let checks = value
+            .get("statusCheckRollup")
+            .and_then(|v| v.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| {
+                        json!({
+                            "name": item.get("name").and_then(|v| v.as_str()),
+                            "status": item.get("status").and_then(|v| v.as_str()),
+                            "conclusion": item.get("conclusion").and_then(|v| v.as_str()),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok(self.structured_result(
+            call,
+            true,
+            json!({
+                "branch": branch,
+                "current_branch": current_branch,
+                "has_pr": true,
+                "number": value.get("number").cloned(),
+                "title": value.get("title").cloned(),
+                "url": value.get("url").cloned(),
+                "state": value.get("state").cloned(),
+                "is_draft": value.get("isDraft").cloned(),
+                "merge_state_status": value.get("mergeStateStatus").cloned(),
+                "head_ref": value.get("headRefName").cloned(),
+                "base_ref": value.get("baseRefName").cloned(),
+                "checks": checks,
+            }),
+        ))
+    }
+
+    async fn staged_status(
+        &self,
+        call: &ToolCall,
+        mode: Option<&str>,
+        workspace_root: &std::path::Path,
+    ) -> Result<ToolResult, ToolError> {
+        let output = self
+            .run_git_capture(workspace_root, ["diff", "--cached", "--name-status"])
+            .await?;
+        if !output.status.success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "git diff --cached --name-status failed: {}",
+                format_output("diff --cached --name-status", &output)
+            )));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let files = stdout
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut parts = line.split_whitespace();
+                let status = parts.next().unwrap_or_default().to_owned();
+                let path = parts.next().unwrap_or_default().to_owned();
+                json!({"status": status, "path": path})
+            })
+            .collect::<Vec<_>>();
+
+        let mut ok = true;
+        let mut message = if files.is_empty() {
+            "no files staged".to_owned()
+        } else {
+            format!("{} staged file(s)", files.len())
+        };
+
+        if mode == Some("single_commit") && files.is_empty() {
+            ok = false;
+            message = "single_commit validation failed: no files staged".to_owned();
+        }
+
+        Ok(self.structured_result(
+            call,
+            ok,
+            json!({
+                "mode": mode,
+                "message": message,
+                "count": files.len(),
+                "files": files,
+            }),
+        ))
+    }
+
+    async fn suggest_branch_name(
+        &self,
+        call: &ToolCall,
+        args: &[String],
+        workspace_root: &std::path::Path,
+    ) -> Result<ToolResult, ToolError> {
+        let prefix = call
+            .arguments
+            .get("prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("agent/rune");
+        let slug_source = if args.is_empty() {
+            call.arguments
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("work-item")
+                .to_owned()
+        } else {
+            args.join("-")
+        };
+        let issue = call.arguments.get("issue").and_then(|v| v.as_i64());
+        let slug = slugify(&slug_source);
+        let candidate = if let Some(issue) = issue {
+            format!("{prefix}/issue-{issue}-{slug}")
+        } else {
+            format!("{prefix}/{slug}")
+        };
+        let branch_exists = self
+            .run_git_capture(
+                workspace_root,
+                [
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    &format!("refs/heads/{candidate}"),
+                ],
+            )
+            .await?
+            .status
+            .success();
+
+        Ok(self.structured_result(
+            call,
+            true,
+            json!({
+                "suggested": candidate,
+                "available_locally": !branch_exists,
+            }),
+        ))
+    }
+
+    fn structured_result(
+        &self,
+        call: &ToolCall,
+        ok: bool,
+        payload: serde_json::Value,
+    ) -> ToolResult {
+        ToolResult {
+            tool_call_id: call.tool_call_id.clone(),
+            output: json!({"ok": ok, "result": payload}).to_string(),
+            is_error: !ok,
+            tool_execution_id: None,
+        }
+    }
+
     fn blocked_result(
         &self,
         call: &ToolCall,
@@ -412,14 +708,35 @@ impl GitToolExecutor {
 }
 
 fn is_mutating_operation(operation: &str) -> bool {
-    matches!(operation, "add" | "commit" | "push" | "pull" | "checkout" | "merge")
+    matches!(
+        operation,
+        "add" | "commit" | "push" | "pull" | "checkout" | "merge"
+    )
+}
+
+fn slugify(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
 }
 
 fn format_output(label: &str, output: &std::process::Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     match (stdout.is_empty(), stderr.is_empty()) {
-        (true, true) => format!("git {label} exited with {}", output.status.code().unwrap_or(-1)),
+        (true, true) => format!(
+            "git {label} exited with {}",
+            output.status.code().unwrap_or(-1)
+        ),
         (false, true) => stdout,
         (true, false) => stderr,
         (false, false) => format!("{stdout}\n{stderr}"),
@@ -452,14 +769,14 @@ impl ToolExecutor for GitToolExecutor {
 pub fn git_tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "git".into(),
-        description: "Execute git operations in the workspace. Supports: status, diff, add, commit, push, pull, log, branch, checkout, merge.".into(),
+        description: "Execute git operations in the workspace. Supports: status, diff, add, commit, push, pull, log, branch, checkout, merge, pr_status, staged, suggest_branch.".into(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "operation": {
                     "type": "string",
                     "description": "Git subcommand to execute",
-                    "enum": ["status", "diff", "add", "commit", "push", "pull", "log", "branch", "checkout", "merge"]
+                    "enum": ["status", "diff", "add", "commit", "push", "pull", "log", "branch", "checkout", "merge", "pr_status", "staged", "suggest_branch"]
                 },
                 "args": {
                     "description": "Additional arguments for the git command. Can be a JSON array of strings or a single string (split on whitespace).",
@@ -467,6 +784,26 @@ pub fn git_tool_definition() -> ToolDefinition {
                         { "type": "array", "items": { "type": "string" } },
                         { "type": "string" }
                     ]
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Optional validation mode for synthetic operations such as staged-file checks."
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Optional branch name for pr_status lookups."
+                },
+                "issue": {
+                    "type": "integer",
+                    "description": "Optional issue number used when suggesting branch names."
+                },
+                "prefix": {
+                    "type": "string",
+                    "description": "Optional branch prefix used by suggest_branch."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional slug source used by suggest_branch when args are omitted."
                 },
                 "safety": {
                     "type": "object",
@@ -677,7 +1014,9 @@ mod tests {
             .output();
 
         let exec = GitToolExecutor::new(dir.path());
-        let call = make_call(serde_json::json!({"operation": "commit", "args": ["--allow-empty", "-m", "x"], "safety": {"allow_dirty": true}}));
+        let call = make_call(
+            serde_json::json!({"operation": "commit", "args": ["--allow-empty", "-m", "x"], "safety": {"allow_dirty": true}}),
+        );
         let result = exec.execute(call).await.unwrap();
         assert!(result.is_error);
         assert!(result.output.contains("protected_branch"));
@@ -690,27 +1029,66 @@ mod tests {
         let repo = root.path().join("repo");
         let other = root.path().join("other");
 
-        let _ = std::process::Command::new("git").args(["init", "--bare", remote.to_str().unwrap()]).output().unwrap();
-        let _ = std::process::Command::new("git").args(["clone", remote.to_str().unwrap(), repo.to_str().unwrap()]).output().unwrap();
-        let _ = std::process::Command::new("git").args(["clone", remote.to_str().unwrap(), other.to_str().unwrap()]).output().unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init", "--bare", remote.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["clone", remote.to_str().unwrap(), repo.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["clone", remote.to_str().unwrap(), other.to_str().unwrap()])
+            .output()
+            .unwrap();
 
         for path in [&repo, &other] {
-            let _ = std::process::Command::new("git").args(["config", "user.email", "test@test.com"]).current_dir(path).output();
-            let _ = std::process::Command::new("git").args(["config", "user.name", "Test"]).current_dir(path).output();
+            let _ = std::process::Command::new("git")
+                .args(["config", "user.email", "test@test.com"])
+                .current_dir(path)
+                .output();
+            let _ = std::process::Command::new("git")
+                .args(["config", "user.name", "Test"])
+                .current_dir(path)
+                .output();
         }
 
         std::fs::write(repo.join("base.txt"), "one").unwrap();
-        let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&repo).output();
-        let _ = std::process::Command::new("git").args(["commit", "-m", "base"]).current_dir(&repo).output();
-        let _ = std::process::Command::new("git").args(["push", "origin", "HEAD:main"]).current_dir(&repo).output();
+        let _ = std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(&repo)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["commit", "-m", "base"])
+            .current_dir(&repo)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["push", "origin", "HEAD:main"])
+            .current_dir(&repo)
+            .output();
 
-        let _ = std::process::Command::new("git").args(["checkout", "-b", "feature"]).current_dir(&repo).output();
+        let _ = std::process::Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(&repo)
+            .output();
 
-        let _ = std::process::Command::new("git").args(["pull", "origin", "main"]).current_dir(&other).output();
+        let _ = std::process::Command::new("git")
+            .args(["pull", "origin", "main"])
+            .current_dir(&other)
+            .output();
         std::fs::write(other.join("base.txt"), "two").unwrap();
-        let _ = std::process::Command::new("git").args(["add", "."]).current_dir(&other).output();
-        let _ = std::process::Command::new("git").args(["commit", "-m", "remote update"]).current_dir(&other).output();
-        let _ = std::process::Command::new("git").args(["push", "origin", "HEAD:main"]).current_dir(&other).output();
+        let _ = std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(&other)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["commit", "-m", "remote update"])
+            .current_dir(&other)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["push", "origin", "HEAD:main"])
+            .current_dir(&other)
+            .output();
 
         let exec = GitToolExecutor::new(&repo);
         let call = make_call(serde_json::json!({
@@ -727,5 +1105,83 @@ mod tests {
         assert!(result.is_error);
         assert!(result.output.contains("base_out_of_sync"));
     }
+}
 
+#[cfg(test)]
+mod synthetic_git_tool_tests {
+    use super::*;
+    use rune_core::ToolCallId;
+
+    fn make_call(args: serde_json::Value) -> ToolCall {
+        ToolCall {
+            tool_call_id: ToolCallId::new(),
+            tool_name: "git".into(),
+            arguments: args,
+        }
+    }
+
+    #[tokio::test]
+    async fn suggest_branch_includes_issue_slug() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = GitToolExecutor::new(dir.path());
+        let call = make_call(serde_json::json!({
+            "operation": "suggest_branch",
+            "safety": {"allow_dirty": true},
+            "issue": 773,
+            "name": "PR status + staged validation"
+        }));
+        let result = exec.execute(call).await.unwrap();
+        assert!(
+            !result.is_error,
+            "suggest_branch should succeed: {}",
+            result.output
+        );
+        assert!(
+            result
+                .output
+                .contains("issue-773-pr-status-staged-validation")
+        );
+    }
+
+    #[tokio::test]
+    async fn staged_mode_single_commit_requires_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let exec = GitToolExecutor::new(dir.path());
+        let call = make_call(serde_json::json!({
+            "operation": "staged",
+            "mode": "single_commit"
+        }));
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.is_error);
+        assert!(result.output.contains("single_commit validation failed"));
+    }
+
+    #[tokio::test]
+    async fn staged_lists_indexed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::fs::write(dir.path().join("staged.txt"), "hello").unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["add", "staged.txt"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let exec = GitToolExecutor::new(dir.path());
+        let call =
+            make_call(serde_json::json!({"operation": "staged", "safety": {"allow_dirty": true}}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error, "staged should succeed: {}", result.output);
+        assert!(result.output.contains("staged.txt"));
+    }
 }
