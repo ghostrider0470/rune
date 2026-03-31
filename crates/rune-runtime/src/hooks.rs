@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Events
@@ -117,6 +118,16 @@ pub trait HookHandler: Send + Sync {
     fn session_kinds_filter(&self) -> Option<&[String]> {
         None
     }
+
+    /// Whether failures should block execution. Default is fail-open with warning.
+    fn fail_closed(&self) -> bool {
+        false
+    }
+
+    /// Whether this handler should be suppressed for the provided context, with a reason.
+    fn suppression_reason(&self, _context: &serde_json::Value) -> Option<String> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +136,37 @@ pub trait HookHandler: Send + Sync {
 
 /// Handler map: event → ordered list of handlers.
 type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookPolicyOutcome {
+    Applied,
+    Warned,
+    Blocked,
+    Suppressed,
+    Skipped,
+}
+
+impl HookPolicyOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::Warned => "warned",
+            Self::Blocked => "blocked",
+            Self::Suppressed => "suppressed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HookExecutionRecord {
+    pub plugin: String,
+    pub event: String,
+    pub outcome: HookPolicyOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
 
 /// Maps hook events to registered handlers. Thread-safe.
 #[derive(Clone)]
@@ -157,10 +199,10 @@ impl HookRegistry {
     /// (e.g., PreToolCall handlers can adjust tool arguments).
     ///
     /// Handler errors are logged but do not stop subsequent handlers from running.
-    pub async fn emit(&self, event: &HookEvent, context: &mut serde_json::Value) {
+    pub async fn emit(&self, event: &HookEvent, context: &mut serde_json::Value) -> Vec<HookExecutionRecord> {
         let handlers = self.handlers.read().await;
         let Some(event_handlers) = handlers.get(event) else {
-            return;
+            return Vec::new();
         };
 
         let session_kind = context
@@ -175,6 +217,8 @@ impl HookRegistry {
             "emitting hook event"
         );
 
+        let mut records = Vec::with_capacity(event_handlers.len());
+
         for handler in event_handlers {
             if let Some(allowed) = handler.session_kinds_filter() {
                 if !session_kind.is_empty()
@@ -188,19 +232,70 @@ impl HookRegistry {
                         session_kind = %session_kind,
                         "skipping hook handler (session kind filtered)"
                     );
+                    records.push(HookExecutionRecord {
+                        plugin: handler.plugin_name().to_string(),
+                        event: event.as_str().to_string(),
+                        outcome: HookPolicyOutcome::Skipped,
+                        reason: Some(format!("session kind `{session_kind}` not allowed")),
+                    });
                     continue;
                 }
             }
 
+            if let Some(reason) = handler.suppression_reason(context) {
+                debug!(
+                    event = %event.as_str(),
+                    plugin = %handler.plugin_name(),
+                    reason = %reason,
+                    "suppressing hook handler"
+                );
+                records.push(HookExecutionRecord {
+                    plugin: handler.plugin_name().to_string(),
+                    event: event.as_str().to_string(),
+                    outcome: HookPolicyOutcome::Suppressed,
+                    reason: Some(reason),
+                });
+                continue;
+            }
+
             if let Err(e) = handler.handle(event, context).await {
+                let outcome = if handler.fail_closed() {
+                    HookPolicyOutcome::Blocked
+                } else {
+                    HookPolicyOutcome::Warned
+                };
                 warn!(
                     event = %event.as_str(),
                     plugin = %handler.plugin_name(),
                     error = %e,
-                    "hook handler failed, continuing"
+                    fail_closed = handler.fail_closed(),
+                    "hook handler failed"
                 );
+                records.push(HookExecutionRecord {
+                    plugin: handler.plugin_name().to_string(),
+                    event: event.as_str().to_string(),
+                    outcome,
+                    reason: Some(e.clone()),
+                });
+                if handler.fail_closed() {
+                    context["hook_blocked"] = serde_json::Value::Bool(true);
+                    context["hook_block_reason"] = serde_json::Value::String(format!(
+                        "hook `{}` failed: {e}",
+                        handler.plugin_name()
+                    ));
+                    break;
+                }
+            } else {
+                records.push(HookExecutionRecord {
+                    plugin: handler.plugin_name().to_string(),
+                    event: event.as_str().to_string(),
+                    outcome: HookPolicyOutcome::Applied,
+                    reason: None,
+                });
             }
         }
+
+        records
     }
 
     /// Number of handlers registered for a specific event.
@@ -279,6 +374,50 @@ mod tests {
         }
     }
 
+
+
+    struct FailClosedHandler;
+
+    #[async_trait::async_trait]
+    impl HookHandler for FailClosedHandler {
+        async fn handle(
+            &self,
+            _event: &HookEvent,
+            _context: &mut serde_json::Value,
+        ) -> Result<(), String> {
+            Err("must block".to_string())
+        }
+
+        fn plugin_name(&self) -> &str {
+            "fail-closed-plugin"
+        }
+
+        fn fail_closed(&self) -> bool {
+            true
+        }
+    }
+
+    struct SuppressedHandler;
+
+    #[async_trait::async_trait]
+    impl HookHandler for SuppressedHandler {
+        async fn handle(
+            &self,
+            _event: &HookEvent,
+            _context: &mut serde_json::Value,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn plugin_name(&self) -> &str {
+            "suppressed-plugin"
+        }
+
+        fn suppression_reason(&self, _context: &serde_json::Value) -> Option<String> {
+            Some("policy disabled this hook".to_string())
+        }
+    }
+
     #[test]
     fn hook_event_roundtrip() {
         for event in HookEvent::all() {
@@ -320,9 +459,10 @@ mod tests {
             .await;
 
         let mut ctx = serde_json::json!({"tool_name": "bash"});
-        registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
+        let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
 
         assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(records.len(), 2);
         assert_eq!(ctx["handled_by_plugin-a"], true);
         assert_eq!(ctx["handled_by_plugin-b"], true);
     }
@@ -331,8 +471,9 @@ mod tests {
     async fn emit_no_handlers_is_noop() {
         let registry = HookRegistry::new();
         let mut ctx = serde_json::json!({"key": "value"});
-        registry.emit(&HookEvent::PostToolCall, &mut ctx).await;
+        let records = registry.emit(&HookEvent::PostToolCall, &mut ctx).await;
         assert_eq!(ctx, serde_json::json!({"key": "value"}));
+        assert!(records.is_empty());
     }
 
     #[tokio::test]
@@ -357,10 +498,11 @@ mod tests {
             .await;
 
         let mut ctx = serde_json::json!({});
-        registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
+        let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
 
         // The surviving handler should still have been called
         assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(records.len(), 2);
         assert_eq!(ctx["handled_by_survivor"], true);
     }
 
@@ -435,11 +577,56 @@ mod tests {
             "arguments": {"command": "ls"}
         });
 
-        registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
+        let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
 
         // Handler should have added its marker
         assert_eq!(ctx["handled_by_modifier"], true);
+        assert_eq!(records[0].outcome.as_str(), "applied");
         // Original data should be preserved
         assert_eq!(ctx["tool_name"], "bash");
     }
+
+
+    #[tokio::test]
+    async fn emit_fail_closed_marks_context_blocked() {
+        let registry = HookRegistry::new();
+        let count = Arc::new(AtomicU32::new(0));
+        registry
+            .register(HookEvent::PreToolCall, Box::new(FailClosedHandler))
+            .await;
+        registry
+            .register(
+                HookEvent::PreToolCall,
+                Box::new(TestHandler {
+                    name: "after-block".into(),
+                    call_count: count,
+                }),
+            )
+            .await;
+
+        let mut ctx = serde_json::json!({});
+        let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].outcome.as_str(), "blocked");
+        assert_eq!(ctx["hook_blocked"], true);
+        assert_eq!(ctx["hook_block_reason"], "hook `fail-closed-plugin` failed: must block");
+        assert!(ctx.get("handled_by_after-block").is_none());
+    }
+
+    #[tokio::test]
+    async fn emit_records_suppressed_handlers() {
+        let registry = HookRegistry::new();
+        registry
+            .register(HookEvent::PreToolCall, Box::new(SuppressedHandler))
+            .await;
+
+        let mut ctx = serde_json::json!({});
+        let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].outcome.as_str(), "suppressed");
+        assert_eq!(records[0].reason.as_deref(), Some("policy disabled this hook"));
+    }
+
 }
