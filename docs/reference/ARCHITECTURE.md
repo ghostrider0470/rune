@@ -89,5 +89,6 @@ Shipped behavior:
 - active leases suppress duplicate claims from other agents and append a `duplicate_suppressed` conflict record
 - expired leases can be reclaimed by a new agent without hidden concurrent ownership; the recovered lease records `recovered_at` and `recovered_from_agent_id`
 - agent entries can carry the currently owned `goal_key` so state snapshots explain which agent owns which delegated objective
+- claim operations now return the durable lease snapshot directly, and state helpers can answer the current owner for a goal or expire stale leases while clearing dangling agent goal assignments
 
 This is the orchestration-state slice for issue #779 under feature #766. It does not replace higher-level runtime routing yet; it establishes the durable ownership/audit primitive that later gateway and scheduler surfaces can expose directly.
