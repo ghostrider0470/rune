@@ -136,6 +136,8 @@ Need shared abstractions for:
 
 ## 3.5 Agent / multi-agent orchestration
 
+Canonical current design reference: [`reference/AGENT-TEAMS.md`](reference/AGENT-TEAMS.md). Use that doc for the Rune-native lead/worker delegation contract and current-vs-planned agent-team behavior.
+
 - main agent session
 - isolated runs
 - sub-agent spawning
