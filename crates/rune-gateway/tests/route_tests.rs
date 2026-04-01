@@ -11169,10 +11169,12 @@ async fn agent_kill_rejects_invalid_terminal_transition() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = body_json(response).await;
     assert_eq!(json["code"], "bad_request");
-    assert!(json["message"]
-        .as_str()
-        .unwrap()
-        .contains("invalid session transition"));
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid session transition")
+    );
 
     let session = session_repo.find_by_id(agent_id).await.unwrap();
     assert_eq!(session.status, "completed");
@@ -15086,6 +15088,30 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
         })
         .await
         .unwrap();
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id: child_id,
+            turn_id: None,
+            seq: 1,
+            kind: "subagent_result".into(),
+            payload: serde_json::json!({
+                "session_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+                "summary": "Delegated review completed with reroute notes",
+                "artifacts": [
+                    {
+                        "name": "handoff.md",
+                        "kind": "markdown",
+                        "uri": "memory://subagents/cccccccc-cccc-cccc-cccc-cccccccccccc/handoff.md",
+                        "content_type": "text/markdown",
+                        "description": "Reroute summary for the parent operator"
+                    }
+                ]
+            }),
+            created_at: now + chrono::TimeDelta::milliseconds(1),
+        })
+        .await
+        .unwrap();
 
     let state = AppState {
         config: Arc::new(RwLock::new(AppConfig::default())),
@@ -15161,8 +15187,20 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
     assert_eq!(child["subagent_runtime_attached"], false);
     assert_eq!(child["subagent_status_updated_at"], "2026-03-29T12:00:00Z");
     assert_eq!(
-        child["subagent_last_note"],
-        "Review result routing before resuming"
+        child["latest_subagent_result"],
+        serde_json::json!({
+            "session_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "summary": "Delegated review completed with reroute notes",
+            "artifacts": [
+                {
+                    "name": "handoff.md",
+                    "kind": "markdown",
+                    "uri": "memory://subagents/cccccccc-cccc-cccc-cccc-cccccccccccc/handoff.md",
+                    "content_type": "text/markdown",
+                    "description": "Reroute summary for the parent operator"
+                }
+            ]
+        })
     );
 }
 
@@ -16019,7 +16057,10 @@ async fn session_status_route_surfaces_next_task_reason_for_preempted_work() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["next_task_reason"], "higher-priority operator request took over");
+    assert_eq!(
+        json["next_task_reason"],
+        "higher-priority operator request took over"
+    );
 }
 
 #[tokio::test]
@@ -16140,7 +16181,16 @@ async fn ws_rpc_session_status_surfaces_next_task_reason_and_resume_fields() {
         .await
         .unwrap();
 
-    assert_eq!(result["status_reason"], "waiting for delegated work to progress (queued)");
-    assert_eq!(result["next_task_reason"], "next action follows delegated session lifecycle: queued");
-    assert_eq!(result["resume_hint"], "check child session status; current delegated lifecycle is queued");
+    assert_eq!(
+        result["status_reason"],
+        "waiting for delegated work to progress (queued)"
+    );
+    assert_eq!(
+        result["next_task_reason"],
+        "next action follows delegated session lifecycle: queued"
+    );
+    assert_eq!(
+        result["resume_hint"],
+        "check child session status; current delegated lifecycle is queued"
+    );
 }
