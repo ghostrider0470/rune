@@ -2853,7 +2853,12 @@ fn effective_session_status<'a>(status: &'a str, metadata: &serde_json::Value) -
 
 fn waiting_for_subagent_status_reason(metadata: &serde_json::Value) -> Option<String> {
     let lifecycle = metadata_string(metadata, "subagent_lifecycle");
-    match (lifecycle, subagent_runtime_reattachment_pending(metadata)) {
+    let subagent_note = metadata_string(metadata, "subagent_last_note");
+    match (lifecycle.as_deref(), subagent_runtime_reattachment_pending(metadata)) {
+        (Some("preempted"), false) => Some(subagent_note.unwrap_or_else(|| {
+            "waiting for delegated work to progress (preempted by higher-priority work)"
+                .to_string()
+        })),
         (Some(lifecycle), true) => Some(format!(
             "waiting for delegated work to progress ({lifecycle}; runtime reattachment pending after restart)"
         )),

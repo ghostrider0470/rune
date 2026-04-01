@@ -16509,7 +16509,7 @@ async fn session_status_route_surfaces_startup_restore_reason_for_waiting_subage
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["status"], "waiting_for_subagent");
+    assert_eq!(json["status"], "ready");
     assert_eq!(json["subagent_lifecycle"], "running");
     assert_eq!(json["subagent_runtime_attached"], false);
     assert_eq!(
@@ -16570,7 +16570,7 @@ async fn session_status_route_marks_running_subagent_as_waiting_when_runtime_det
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["runtime"], "kind=subagent | channel=local | status=waiting_for_subagent");
-    assert_eq!(json["status"], "waiting_for_subagent");
+    assert_eq!(json["status"], "ready");
     assert_eq!(json["subagent_lifecycle"], "running");
     assert_eq!(json["subagent_runtime_attached"], false);
     assert_eq!(
@@ -16683,6 +16683,65 @@ async fn session_status_route_prefers_operator_note_for_approval_pause_next_task
 }
 
 #[tokio::test]
+async fn session_status_route_prefers_preempted_note_when_effective_status_waits_for_subagent() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "subagent",
+                        "status": "running",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "subagent_lifecycle": "preempted",
+                            "subagent_runtime_status": "parked",
+                            "subagent_runtime_attached": false,
+                            "subagent_last_note": "interactive takeover is active; resume after the operator lane finishes"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["status"], "ready");
+    assert_eq!(
+        json["status_reason"],
+        "interactive takeover is active; resume after the operator lane finishes"
+    );
+    assert_eq!(
+        json["next_task_reason"],
+        "interactive takeover is active; resume after the operator lane finishes"
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
+    );
+}
+
+#[tokio::test]
 async fn session_status_route_surfaces_runtime_reattachment_next_task_reason_for_running_subagent() {
     let app = build_test_app(None);
 
@@ -16725,7 +16784,7 @@ async fn session_status_route_surfaces_runtime_reattachment_next_task_reason_for
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["status"], "waiting_for_subagent");
+    assert_eq!(json["status"], "ready");
     assert_eq!(
         json["next_task_reason"],
         "next action is runtime reattachment so delegated work can resume after the restart"
