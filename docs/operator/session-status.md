@@ -18,5 +18,10 @@ Current behavior:
   reasons like `queued`.
 - `subagent_lifecycle=preempted` returns the last operator note as the next-task reason when
   available, making higher-priority takeovers visible without reading the raw transcript.
+- `status=cancelled` with `subagent_lifecycle=cancelled` now explains that delegated work was
+  explicitly cancelled, preserves the operator note as the next-task reason when present, and
+  gives a concrete recovery hint: either spawn a replacement subagent or steer the parent session
+  with a new plan.
 
-This closes an operator-visibility gap for approval pauses, delegated waits, and preempted work.
+This closes an operator-visibility gap for approval pauses, delegated waits, preempted work, and
+explicitly cancelled delegated work.
