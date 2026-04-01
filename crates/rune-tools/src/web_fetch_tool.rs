@@ -1,9 +1,10 @@
 //! HTTP fetch tool for agents to retrieve web content, APIs, and issue trackers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, COOKIE};
 use tracing::instrument;
 
 use crate::definition::{ToolCall, ToolDefinition, ToolResult};
@@ -15,6 +16,7 @@ const MAX_BODY_BYTES: usize = 50 * 1024;
 
 /// Default request timeout.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const REDACTED_HEADER_VALUE: &str = "<redacted>";
 
 /// Executor for the `web_fetch` tool.
 ///
@@ -59,11 +61,22 @@ impl WebFetchToolExecutor {
             .to_uppercase();
 
         // Parse optional headers
-        let headers: HashMap<String, String> = call
+        let raw_headers: HashMap<String, String> = call
             .arguments
             .get("headers")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
+        let (request_headers, display_headers) = match build_request_headers(&raw_headers) {
+            Ok(parts) => parts,
+            Err(error) => {
+                return Ok(ToolResult {
+                    tool_call_id: call.tool_call_id.clone(),
+                    output: error,
+                    is_error: true,
+                    tool_execution_id: None,
+                });
+            }
+        };
 
         let body = call
             .arguments
@@ -86,9 +99,7 @@ impl WebFetchToolExecutor {
         };
 
         // Apply headers
-        for (key, value) in &headers {
-            request = request.header(key.as_str(), value.as_str());
-        }
+        request = request.headers(request_headers);
 
         // Apply body (POST)
         if let Some(body_content) = body {
@@ -162,6 +173,13 @@ impl WebFetchToolExecutor {
             "HTTP {status_code} {}\n",
             status.canonical_reason().unwrap_or("")
         );
+        if !display_headers.is_empty() {
+            output.push_str("Request headers:\n");
+            for header in &display_headers {
+                output.push_str(header);
+                output.push('\n');
+            }
+        }
         if !response_headers.is_empty() {
             for h in &response_headers {
                 output.push_str(h);
@@ -184,6 +202,43 @@ impl WebFetchToolExecutor {
             tool_execution_id: None,
         })
     }
+}
+
+fn build_request_headers(
+    raw_headers: &HashMap<String, String>,
+) -> Result<(HeaderMap, Vec<String>), String> {
+    let mut request_headers = HeaderMap::new();
+    let mut display_headers = Vec::new();
+    let sensitive = sensitive_header_names();
+
+    for (key, value) in raw_headers {
+        let header_name = HeaderName::from_bytes(key.as_bytes())
+            .map_err(|e| format!("Invalid header name '{key}': {e}"))?;
+        let header_value = HeaderValue::from_str(value)
+            .map_err(|e| format!("Invalid header value for '{key}': {e}"))?;
+        let is_sensitive = sensitive.contains(header_name.as_str());
+        request_headers.append(header_name.clone(), header_value);
+        let rendered_value = if is_sensitive {
+            REDACTED_HEADER_VALUE
+        } else {
+            value.as_str()
+        };
+        display_headers.push(format!("{}: {}", header_name.as_str(), rendered_value));
+    }
+
+    display_headers.sort();
+    Ok((request_headers, display_headers))
+}
+
+fn sensitive_header_names() -> HashSet<&'static str> {
+    HashSet::from([
+        AUTHORIZATION.as_str(),
+        COOKIE.as_str(),
+        "proxy-authorization",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+    ])
 }
 
 /// Truncate a string to at most `max_bytes` without splitting a UTF-8 codepoint.
@@ -310,5 +365,31 @@ mod tests {
         };
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::NotFound(_)));
+    }
+
+    #[test]
+    fn build_request_headers_redacts_sensitive_values() {
+        let raw_headers = HashMap::from([
+            ("authorization".to_string(), "Bearer secret".to_string()),
+            ("x-trace-id".to_string(), "trace-123".to_string()),
+        ]);
+
+        let (request_headers, display_headers) = build_request_headers(&raw_headers).unwrap();
+
+        assert_eq!(
+            request_headers.get("authorization").unwrap(),
+            &HeaderValue::from_static("Bearer secret")
+        );
+        assert!(display_headers.contains(&"authorization: <redacted>".to_string()));
+        assert!(display_headers.contains(&"x-trace-id: trace-123".to_string()));
+    }
+
+    #[test]
+    fn build_request_headers_rejects_invalid_header_name() {
+        let raw_headers = HashMap::from([("bad header".to_string(), "value".to_string())]);
+
+        let error = build_request_headers(&raw_headers).unwrap_err();
+
+        assert!(error.contains("Invalid header name"));
     }
 }
