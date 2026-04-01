@@ -5,6 +5,7 @@
 > Canonical product strategy now lives in `rune-plan.md`.
 > Use `docs/IMPLEMENTATION-PHASES.md` for parity-phase sequencing and acceptance criteria.
 > Use GitHub Project 2 for live execution state.
+> Recent roadmap-linked design work: issue #798 shipped in PR #804, documenting the Rune-native agent-team orchestration model in `docs/reference/AGENT-TEAMS.md`.
 
 ## Goal
 
