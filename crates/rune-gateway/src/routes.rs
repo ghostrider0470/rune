@@ -2925,18 +2925,19 @@ pub(crate) fn session_next_task_reason(
     metadata: &serde_json::Value,
 ) -> Option<String> {
     let lifecycle = metadata_string(metadata, "subagent_lifecycle");
-    let operator_note = metadata_string(metadata, "subagent_last_note");
+    let subagent_note = metadata_string(metadata, "subagent_last_note");
+    let operator_note = metadata_string(metadata, "operator_note");
 
     if status == "waiting_for_approval" {
         return Some(
-            operator_note.unwrap_or_else(|| {
+            operator_note.or(subagent_note).unwrap_or_else(|| {
                 "next action is approval handling because execution is explicitly blocked until an operator decision is recorded".to_string()
             }),
         );
     }
 
     if status == "waiting_for_subagent" {
-        if let Some(note) = operator_note {
+        if let Some(note) = subagent_note {
             return Some(note);
         }
         if subagent_runtime_reattachment_pending(metadata) {
@@ -2955,7 +2956,7 @@ pub(crate) fn session_next_task_reason(
 
     if lifecycle.as_deref() == Some("preempted") {
         return Some(
-            operator_note.unwrap_or_else(|| {
+            subagent_note.unwrap_or_else(|| {
                 "next action is to finish the higher-priority takeover before resuming this parked work".to_string()
             }),
         );
@@ -2963,13 +2964,31 @@ pub(crate) fn session_next_task_reason(
 
     if lifecycle.as_deref() == Some("cancelled") {
         return Some(
-            operator_note.unwrap_or_else(|| {
+            subagent_note.unwrap_or_else(|| {
                 "next action is to restart or replace the cancelled delegated work before continuing this lane".to_string()
             }),
         );
     }
 
-    if let Some(operator_note) = metadata_string(metadata, "operator_note") {
+    if matches!(status, "running" | "ready") {
+        if subagent_runtime_reattachment_pending(metadata) {
+            return Some(
+                "next action is runtime reattachment so delegated work can resume after the restart"
+                    .to_string(),
+            );
+        }
+
+        match metadata_string(metadata, "suppression_reason").as_deref() {
+            Some("backoff_active") | Some("retry_budget_exhausted") => {
+                if let Some(note) = operator_note {
+                    return Some(note);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(operator_note) = operator_note {
         return Some(operator_note);
     }
 
