@@ -11002,6 +11002,63 @@ async fn agent_kill_success() {
 }
 
 #[tokio::test]
+async fn session_status_route_surfaces_cancelled_subagent_recovery_guidance() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "subagent",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "subagent_lifecycle": "cancelled",
+                            "subagent_runtime_status": "terminated",
+                            "subagent_runtime_attached": false,
+                            "subagent_last_note": "operator cancelled stale delegated work"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(
+        json["status_reason"],
+        "delegated work was cancelled explicitly; inspect the latest status note for the operator-provided reason"
+    );
+    assert_eq!(
+        json["next_task_reason"],
+        "operator cancelled stale delegated work"
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "delegated work has been cancelled; spawn a replacement subagent or steer the parent session with a new plan"
+    );
+}
+
+#[tokio::test]
 async fn session_status_route_surfaces_preempted_resume_hints() {
     let app = build_test_app(None);
 

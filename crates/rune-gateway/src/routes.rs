@@ -2832,6 +2832,14 @@ pub(crate) fn session_status_reason(
                 .unwrap_or_else(|| "waiting for delegated work to progress".to_string()),
         ),
         "waiting_for_tool" => Some("paused until the active tool call finishes".to_string()),
+        status if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("cancelled")
+            && matches!(status, "cancelled" | "ready" | "running" | "suspended") =>
+        {
+            Some(
+                "delegated work was cancelled explicitly; inspect the latest status note for the operator-provided reason"
+                    .to_string(),
+            )
+        }
         "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => {
             Some("running after a higher-priority preemption; inspect latest operator note for takeover context".to_string())
         }
@@ -2874,6 +2882,14 @@ pub(crate) fn session_next_task_reason(
         );
     }
 
+    if lifecycle.as_deref() == Some("cancelled") {
+        return Some(
+            operator_note.unwrap_or_else(|| {
+                "next action is to restart or replace the cancelled delegated work before continuing this lane".to_string()
+            }),
+        );
+    }
+
     metadata_string(metadata, "next_task_reason")
 }
 
@@ -2899,6 +2915,14 @@ pub(crate) fn session_resume_hint(status: &str, metadata: &serde_json::Value) ->
             "preempted work is parked safely; send a resume/steer instruction after the higher-priority task finishes"
                 .to_string(),
         ),
+        status if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("cancelled")
+            && matches!(status, "cancelled" | "ready" | "running" | "suspended") =>
+        {
+            Some(
+                "delegated work has been cancelled; spawn a replacement subagent or steer the parent session with a new plan"
+                    .to_string(),
+            )
+        }
         _ => None,
     }
 }
