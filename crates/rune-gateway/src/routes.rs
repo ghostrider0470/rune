@@ -2699,9 +2699,10 @@ pub async fn get_session_status(
         .or_else(|| model_override.clone());
     let approval_mode =
         metadata_string(metadata, "approval_mode").unwrap_or_else(|| "on-miss".to_string());
-    let status_reason = session_status_reason(&row.status, metadata, approval_mode.as_str());
-    let next_task_reason = session_next_task_reason(&row.status, metadata);
-    let resume_hint = session_resume_hint(&row.status, metadata);
+    let effective_status = effective_session_status(&row.status, metadata);
+    let status_reason = session_status_reason(effective_status, metadata, approval_mode.as_str());
+    let next_task_reason = session_next_task_reason(effective_status, metadata);
+    let resume_hint = session_resume_hint(effective_status, metadata);
     let security_mode =
         metadata_string(metadata, "security_mode").unwrap_or_else(|| "allowlist".to_string());
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
@@ -2789,9 +2790,9 @@ pub async fn get_session_status(
             "kind={} | channel={} | status={}",
             row.kind,
             row.channel_ref.as_deref().unwrap_or("local"),
-            row.status
+            effective_status
         ),
-        status: row.status,
+        status: effective_status.to_string(),
         status_reason,
         next_task_reason,
         resume_hint,
@@ -2828,6 +2829,41 @@ pub async fn get_session_status(
     }))
 }
 
+fn subagent_runtime_reattachment_pending(metadata: &serde_json::Value) -> bool {
+    metadata_string(metadata, "subagent_lifecycle").is_some()
+        && matches!(
+            metadata.get("subagent_runtime_attached"),
+            Some(serde_json::Value::Bool(false))
+        )
+}
+
+fn effective_session_status<'a>(status: &'a str, metadata: &serde_json::Value) -> &'a str {
+    let lifecycle = metadata_string(metadata, "subagent_lifecycle");
+    let attached = metadata_bool(metadata, "subagent_runtime_attached");
+
+    if matches!(status, "running" | "ready" | "waiting_for_subagent")
+        && matches!(lifecycle.as_deref(), Some("running") | Some("queued"))
+        && attached == Some(false)
+    {
+        return "waiting_for_subagent";
+    }
+
+    status
+}
+
+fn waiting_for_subagent_status_reason(metadata: &serde_json::Value) -> Option<String> {
+    let lifecycle = metadata_string(metadata, "subagent_lifecycle");
+    match (lifecycle, subagent_runtime_reattachment_pending(metadata)) {
+        (Some(lifecycle), true) => Some(format!(
+            "waiting for delegated work to progress ({lifecycle}; runtime reattachment pending after restart)"
+        )),
+        (Some(lifecycle), false) => {
+            Some(format!("waiting for delegated work to progress ({lifecycle})"))
+        }
+        (None, _) => None,
+    }
+}
+
 pub(crate) fn session_status_reason(
     status: &str,
     metadata: &serde_json::Value,
@@ -2838,8 +2874,7 @@ pub(crate) fn session_status_reason(
             "blocked on operator approval ({approval_mode}); resume after an approval decision is recorded"
         )),
         "waiting_for_subagent" => Some(
-            metadata_string(metadata, "subagent_lifecycle")
-                .map(|lifecycle| format!("waiting for delegated work to progress ({lifecycle})"))
+            waiting_for_subagent_status_reason(metadata)
                 .unwrap_or_else(|| "waiting for delegated work to progress".to_string()),
         ),
         "waiting_for_tool" => Some("paused until the active tool call finishes".to_string()),
@@ -2853,6 +2888,26 @@ pub(crate) fn session_status_reason(
         }
         "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => {
             Some("running after a higher-priority preemption; inspect latest operator note for takeover context".to_string())
+        }
+        status if matches!(status, "running" | "ready")
+            && metadata_string(metadata, "suppression_reason").as_deref() == Some("backoff_active") => {
+            Some(
+                metadata_string(metadata, "operator_note").unwrap_or_else(|| {
+                    "execution is intentionally stalled until the retry backoff window expires"
+                        .to_string()
+                }),
+            )
+        }
+        status if matches!(status, "running" | "ready")
+            && metadata_string(metadata, "suppression_reason").as_deref()
+                == Some("retry_budget_exhausted") =>
+        {
+            Some(
+                metadata_string(metadata, "operator_note").unwrap_or_else(|| {
+                    "execution is stalled because the retry budget for the current failure fingerprint is exhausted"
+                        .to_string()
+                }),
+            )
         }
         _ => None,
     }
@@ -2874,12 +2929,18 @@ pub(crate) fn session_next_task_reason(
     }
 
     if status == "waiting_for_subagent" {
-        return Some(match (lifecycle.as_deref(), operator_note) {
-            (_, Some(note)) => note,
-            (Some(lifecycle), None) => format!(
-                "next action follows delegated session lifecycle: {lifecycle}"
-            ),
-            (None, None) => {
+        if let Some(note) = operator_note {
+            return Some(note);
+        }
+        if subagent_runtime_reattachment_pending(metadata) {
+            return Some(
+                "next action is runtime reattachment so delegated work can resume after the restart"
+                    .to_string(),
+            );
+        }
+        return Some(match lifecycle.as_deref() {
+            Some(lifecycle) => format!("next action follows delegated session lifecycle: {lifecycle}"),
+            None => {
                 "next action is delegated-session follow-up because the parent is waiting on child progress".to_string()
             }
         });
@@ -2901,6 +2962,10 @@ pub(crate) fn session_next_task_reason(
         );
     }
 
+    if let Some(operator_note) = metadata_string(metadata, "operator_note") {
+        return Some(operator_note);
+    }
+
     metadata_string(metadata, "next_task_reason")
 }
 
@@ -2911,9 +2976,14 @@ pub(crate) fn session_resume_hint(status: &str, metadata: &serde_json::Value) ->
                 .to_string(),
         ),
         "waiting_for_subagent" => Some(
-            metadata_string(metadata, "subagent_lifecycle")
-                .map(|lifecycle| format!("check child session status; current delegated lifecycle is {lifecycle}"))
-                .unwrap_or_else(|| "check child session status or steer/cancel the delegated session".to_string()),
+            if subagent_runtime_reattachment_pending(metadata) {
+                "wait for runtime startup restore to reattach the delegated session, then recheck child status"
+                    .to_string()
+            } else {
+                metadata_string(metadata, "subagent_lifecycle")
+                    .map(|lifecycle| format!("check child session status; current delegated lifecycle is {lifecycle}"))
+                    .unwrap_or_else(|| "check child session status or steer/cancel the delegated session".to_string())
+            },
         ),
         "waiting_for_tool" => Some(
             "wait for tool completion or cancel the in-flight tool execution before resuming".to_string(),
@@ -2931,6 +3001,22 @@ pub(crate) fn session_resume_hint(status: &str, metadata: &serde_json::Value) ->
         {
             Some(
                 "delegated work has been cancelled; spawn a replacement subagent or steer the parent session with a new plan"
+                    .to_string(),
+            )
+        }
+        status if matches!(status, "running" | "ready")
+            && metadata_string(metadata, "suppression_reason").as_deref() == Some("backoff_active") => {
+            Some(
+                "wait for the retry backoff window to expire before retrying this stalled turn"
+                    .to_string(),
+            )
+        }
+        status if matches!(status, "running" | "ready")
+            && metadata_string(metadata, "suppression_reason").as_deref()
+                == Some("retry_budget_exhausted") =>
+        {
+            Some(
+                "fix the repeated failure fingerprint before resuming this stalled turn"
                     .to_string(),
             )
         }
