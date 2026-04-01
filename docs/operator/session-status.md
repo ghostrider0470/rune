@@ -1,4 +1,3 @@
-
 ## Next-task explainability and approval-aware resume
 
 `GET /sessions/{id}/status` and `session.status` now expose `next_task_reason` alongside
@@ -26,3 +25,23 @@ Current behavior:
 
 This closes an operator-visibility gap for approval pauses, delegated waits, preempted work, and
 explicitly cancelled delegated work.
+
+## Lane queue visibility and priority routing
+
+`GET /status` exposes `lane_stats` so operators can verify that high-priority work is isolated from normal background contention. The payload includes independent utilisation/capacity counters for `main`, `priority`, `subagent`, `cron`, and `heartbeat`, plus global/per-project tool concurrency.
+
+Practical reading guide:
+
+- `priority_*` reflects control/comms traffic that should cut ahead of background work.
+- `heartbeat_*` reflects watchdog/health traffic that should remain immediate even when other lanes are busy.
+- `subagent_*` shows delegated workload saturation separately from operator-facing direct sessions.
+- `tool_active`, `tool_capacity`, and `project_tool_capacity` help explain cross-project throttling during heavy tool use.
+
+Current routing contract:
+
+- background cron load does not block the `priority` lane
+- `heartbeat` traffic bypasses normal priority contention
+- scheduled and subagent sessions use independent lanes
+- lane stats are intended as the operator-facing explainability surface for task picking and preemption pressure
+
+This is the fast diagnostic surface to check before assuming Rune is stalled: if `main` is free but `subagent` is saturated, the bottleneck is delegated work; if `priority` or `heartbeat` are active, control-plane traffic is intentionally bypassing background queues.
