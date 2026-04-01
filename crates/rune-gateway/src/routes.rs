@@ -2886,8 +2886,15 @@ pub(crate) fn session_status_reason(
                     .to_string(),
             )
         }
-        "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => {
-            Some("running after a higher-priority preemption; inspect latest operator note for takeover context".to_string())
+        status if matches!(status, "running" | "ready" | "suspended")
+            && metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") =>
+        {
+            Some(
+                metadata_string(metadata, "subagent_last_note").unwrap_or_else(|| {
+                    "work was preempted by a higher-priority task; inspect the latest operator note for takeover context"
+                        .to_string()
+                }),
+            )
         }
         status if matches!(status, "running" | "ready")
             && metadata_string(metadata, "suppression_reason").as_deref() == Some("backoff_active") => {
@@ -2988,7 +2995,8 @@ pub(crate) fn session_resume_hint(status: &str, metadata: &serde_json::Value) ->
         "waiting_for_tool" => Some(
             "wait for tool completion or cancel the in-flight tool execution before resuming".to_string(),
         ),
-        "running" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
+        status if matches!(status, "running" | "ready")
+            && metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
             "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
                 .to_string(),
         ),
