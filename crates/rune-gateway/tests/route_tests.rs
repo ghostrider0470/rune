@@ -16633,3 +16633,101 @@ async fn session_status_route_surfaces_stall_reason_for_retry_budget_exhaustion(
         "fix the repeated failure fingerprint before resuming this stalled turn"
     );
 }
+
+#[tokio::test]
+async fn session_status_route_prefers_operator_note_for_approval_pause_next_task_reason() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "direct",
+                        "status": "waiting_for_approval",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "operator_note": "security approval is pending before this exec can resume",
+                            "subagent_last_note": "stale delegated note should not win"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(
+        json["next_task_reason"],
+        "security approval is pending before this exec can resume"
+    );
+}
+
+#[tokio::test]
+async fn session_status_route_surfaces_runtime_reattachment_next_task_reason_for_running_subagent() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "subagent",
+                        "status": "running",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "subagent_lifecycle": "running",
+                            "subagent_runtime_attached": false,
+                            "subagent_status_updated_at": "2026-04-01T18:00:00Z"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["status"], "waiting_for_subagent");
+    assert_eq!(
+        json["next_task_reason"],
+        "next action is runtime reattachment so delegated work can resume after the restart"
+    );
+}
