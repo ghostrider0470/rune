@@ -8276,6 +8276,31 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
         .await
         .unwrap();
 
+    transcript_repo
+        .append(NewTranscriptItem {
+            id: Uuid::now_v7(),
+            session_id: child_id,
+            turn_id: None,
+            seq: 1,
+            kind: "subagent_result".into(),
+            payload: json!({
+                "session_id": grandchild_id.to_string(),
+                "summary": "Queued runtime handoff captured",
+                "artifacts": [
+                    {
+                        "name": "handoff.md",
+                        "kind": "markdown",
+                        "uri": format!("memory://subagents/{}/handoff.md", grandchild_id),
+                        "content_type": "text/markdown",
+                        "description": "Queued handoff note for the grandchild subagent"
+                    }
+                ]
+            }),
+            created_at: now + chrono::TimeDelta::milliseconds(4),
+        })
+        .await
+        .unwrap();
+
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
@@ -8358,6 +8383,26 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     assert_eq!(child["subagent_runtime_attached"], true);
     assert_eq!(child["subagent_status_updated_at"], "2026-03-29T10:00:00Z");
     assert_eq!(child["subagent_last_note"], "Child subagent attached");
+    assert_eq!(
+        child["latest_subagent_result"],
+        json!({
+            "session_id": grandchild_id.to_string(),
+            "summary": "Queued runtime handoff captured",
+            "recorded_at": (now + chrono::TimeDelta::milliseconds(4)).to_rfc3339(),
+            "artifacts": [
+                {
+                    "name": "handoff.md",
+                    "kind": "markdown",
+                    "uri": format!(
+                        "memory://subagents/{}/handoff.md",
+                        grandchild_id
+                    ),
+                    "content_type": "text/markdown",
+                    "description": "Queued handoff note for the grandchild subagent"
+                }
+            ]
+        })
+    );
 
     let grandchild = child["children"]
         .as_array()
@@ -8372,6 +8417,7 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     assert_eq!(grandchild["subagent_runtime_status"], "not_attached");
     assert_eq!(grandchild["subagent_runtime_attached"], false);
     assert_eq!(grandchild["subagent_last_note"], "Waiting for runtime");
+    assert_eq!(grandchild["latest_subagent_result"], Value::Null);
     assert_eq!(grandchild["children"].as_array().unwrap().len(), 0);
 
     let sibling = children
