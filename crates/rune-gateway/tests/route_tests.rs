@@ -11109,8 +11109,14 @@ async fn session_status_route_surfaces_preempted_resume_hints() {
     let json = body_json(response).await;
     assert_eq!(json["status"], "ready");
     assert_eq!(json["subagent_lifecycle"], "preempted");
-    assert!(json["status_reason"].is_null());
-    assert!(json["resume_hint"].is_null());
+    assert_eq!(
+        json["status_reason"],
+        "higher-priority operator request took over"
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
+    );
 }
 
 #[tokio::test]
