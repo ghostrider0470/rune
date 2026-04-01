@@ -340,6 +340,27 @@ impl SessionLoop {
         } else {
             Some("backoff_active".to_string())
         };
+        let stall_reason = if budget_exhausted {
+            Some("retry budget exhausted for repeated failure fingerprint".to_string())
+        } else {
+            Some("retry backoff active for repeated failure fingerprint".to_string())
+        };
+        let operator_note = if budget_exhausted {
+            Some(format!(
+                "Previous turn failed repeatedly and the retry budget is exhausted (attempt {}). Fix the underlying failure before retrying this fingerprint.",
+                retry_count
+            ))
+        } else if let Some(next_retry_at_value) = next_retry_at.as_deref() {
+            Some(format!(
+                "Previous turn failed repeatedly. Backing off before retrying again (attempt {}, next retry at {}).",
+                retry_count, next_retry_at_value
+            ))
+        } else {
+            Some(format!(
+                "Previous turn failed repeatedly. Backing off before retrying again (attempt {}).",
+                retry_count
+            ))
+        };
         let metadata = set_anti_thrash_state(
             &session.metadata,
             &RetryBudgetState {
@@ -347,6 +368,8 @@ impl SessionLoop {
                 retry_count,
                 budget_exhausted,
                 suppression_reason,
+                stall_reason,
+                operator_note,
                 next_retry_at,
                 last_error: Some(error.to_string()),
             },

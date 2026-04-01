@@ -16091,7 +16091,7 @@ async fn get_session_status_surfaces_subagent_resume_hint() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["status"], "waiting_for_subagent");
+    assert_eq!(json["status"], "ready");
     assert_eq!(
         json["status_reason"],
         "waiting for delegated work to progress (queued)"
@@ -16402,5 +16402,228 @@ async fn ws_rpc_session_status_surfaces_next_task_reason_and_resume_fields() {
     assert_eq!(
         result["resume_hint"],
         "check child session status; current delegated lifecycle is queued"
+    );
+}
+
+
+#[tokio::test]
+async fn session_status_route_surfaces_stall_reason_for_backoff_active_turn() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "direct",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "suppression_reason": "backoff_active",
+                            "operator_note": "Previous turn failed repeatedly. Backing off before retrying again (attempt 2, next retry at 2026-04-01T18:00:00Z)."
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(
+        json["status_reason"],
+        "Previous turn failed repeatedly. Backing off before retrying again (attempt 2, next retry at 2026-04-01T18:00:00Z)."
+    );
+    assert_eq!(
+        json["next_task_reason"],
+        "Previous turn failed repeatedly. Backing off before retrying again (attempt 2, next retry at 2026-04-01T18:00:00Z)."
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "wait for the retry backoff window to expire before retrying this stalled turn"
+    );
+}
+
+#[tokio::test]
+async fn session_status_route_surfaces_startup_restore_reason_for_waiting_subagent() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "subagent",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "subagent_lifecycle": "running",
+                            "subagent_runtime_attached": false,
+                            "subagent_status_updated_at": "2026-04-01T18:00:00Z"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["status"], "waiting_for_subagent");
+    assert_eq!(json["subagent_lifecycle"], "running");
+    assert_eq!(json["subagent_runtime_attached"], false);
+    assert_eq!(
+        json["status_reason"],
+        "waiting for delegated work to progress (running; runtime reattachment pending after restart)"
+    );
+    assert_eq!(
+        json["next_task_reason"],
+        "next action is runtime reattachment so delegated work can resume after the restart"
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "wait for runtime startup restore to reattach the delegated session, then recheck child status"
+    );
+}
+
+#[tokio::test]
+async fn session_status_route_marks_running_subagent_as_waiting_when_runtime_detached() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "subagent",
+                        "status": "running",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "subagent_lifecycle": "running",
+                            "subagent_runtime_attached": false,
+                            "subagent_status_updated_at": "2026-04-01T18:00:00Z"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["runtime"], "kind=subagent | channel=local | status=waiting_for_subagent");
+    assert_eq!(json["status"], "waiting_for_subagent");
+    assert_eq!(json["subagent_lifecycle"], "running");
+    assert_eq!(json["subagent_runtime_attached"], false);
+    assert_eq!(
+        json["status_reason"],
+        "waiting for delegated work to progress (running; runtime reattachment pending after restart)"
+    );
+}
+
+#[tokio::test]
+async fn session_status_route_surfaces_stall_reason_for_retry_budget_exhaustion() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "direct",
+                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
+                        "metadata": {
+                            "suppression_reason": "retry_budget_exhausted",
+                            "operator_note": "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint."
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(
+        json["status_reason"],
+        "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint."
+    );
+    assert_eq!(
+        json["next_task_reason"],
+        "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint."
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "fix the repeated failure fingerprint before resuming this stalled turn"
     );
 }

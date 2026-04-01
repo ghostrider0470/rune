@@ -17,6 +17,8 @@ pub struct RetryBudgetState {
     pub retry_count: u32,
     pub budget_exhausted: bool,
     pub suppression_reason: Option<String>,
+    pub stall_reason: Option<String>,
+    pub operator_note: Option<String>,
     pub next_retry_at: Option<String>,
     pub last_error: Option<String>,
 }
@@ -95,6 +97,14 @@ pub(crate) fn anti_thrash_state(session: &SessionRow) -> Option<RetryBudgetState
             .get("suppression_reason")
             .and_then(Value::as_str)
             .map(ToString::to_string),
+        stall_reason: anti
+            .get("stall_reason")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        operator_note: anti
+            .get("operator_note")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         next_retry_at: anti
             .get("next_retry_at")
             .and_then(Value::as_str)
@@ -115,6 +125,8 @@ pub(crate) fn set_anti_thrash_state(metadata: &Value, state: &RetryBudgetState) 
             "retry_count": state.retry_count,
             "budget_exhausted": state.budget_exhausted,
             "suppression_reason": state.suppression_reason,
+            "stall_reason": state.stall_reason,
+            "operator_note": state.operator_note,
             "next_retry_at": state.next_retry_at,
             "last_error": state.last_error,
         }),
