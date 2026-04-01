@@ -68,7 +68,7 @@ Workers should be disposable and specialized, not general long-lived authorities
 
 ## 3. Team topology
 
-Rune should support these topologies.
+Rune should support these topologies. The design intentionally favors shallow, inspectable teams over opaque recursion.
 
 ### 3.1 Single-worker delegation
 One lead delegates one bounded task to one child.
@@ -159,6 +159,11 @@ Recommended shape:
 
 The exact serialized format can evolve. The invariant should not.
 
+Recommended API/tooling direction:
+- `sessions_spawn` should grow a first-class `delegation_contract` field instead of relying on loosely-shaped metadata blobs
+- gateway and WS session-create surfaces should mirror that field so lead agents, UI clients, and automation all speak the same delegation language
+- status/tree payloads should echo the normalized contract summary back for inspection without forcing operators to inspect raw transcript text
+
 ---
 
 ## 5. Context handoff
@@ -182,6 +187,14 @@ Rune should prefer **selective handoff** over full transcript cloning.
 
 ### Current Rune fit
 Current Rune already supports preloaded delegation context and shared scratchpad references on subagent creation. The next maturity step is to formalize what the handoff must contain and expose it more cleanly in API/tool surfaces.
+
+Recommended handoff envelope fields:
+- `task_summary` — one-paragraph worker brief
+- `selected_transcript_range` — explicit transcript excerpts or message ids included on purpose
+- `relevant_paths` — repo paths the worker may inspect or mutate
+- `linked_issues` / `linked_docs` — issue numbers and docs references that define done-ness
+- `lock_context` — file locks, branch reservations, or goal leases already granted
+- `return_contract` — summary shape, artifact paths, and required verification evidence
 
 ---
 
@@ -315,6 +328,7 @@ Agent-team expectation:
 - show parent/child tree clearly
 - show lifecycle, attachment state, last note, latest result
 - explain whether the parent is waiting, synthesizing, or stalled
+- surface team-level rollups such as active worker count, blocked worker count, and last team event
 
 ### `acp_dispatch`
 This is a sibling but not identical concept.
@@ -387,10 +401,12 @@ Rune should make these true for every agent team:
 ### Phase 2 — structured worker creation
 - extend `sessions_spawn` and related session creation surfaces to accept a first-class delegation contract
 - normalize delegation metadata fields instead of relying on ad hoc blobs
+- keep backward-compatible support for existing `delegation_context` / `delegation_plan` payloads during migration
 
 ### Phase 3 — team observability
 - add parent-side team summaries to session status/tree surfaces
 - expose worker counts, waiting/synthesizing state, and latest team events
+- make it obvious when fields reflect durable persisted state versus live runtime attachment
 
 ### Phase 4 — safety integration
 - wire delegation flows more tightly to goal leases, file locks, and branch reservation primitives
@@ -439,6 +455,7 @@ What Rune should not copy blindly:
 - any behavior that hides current parity limits
 - any delegation flow that bypasses Rune's durable session/status model
 - any parallelism model that ignores file locks, goal ownership, or branch safety
+- any assumption that all worker backends share identical attachment, streaming, or cancellation semantics
 
 Rune's version should remain:
 - durable
