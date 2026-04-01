@@ -66,6 +66,16 @@ pub enum SessionTarget {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Job {
     pub id: JobId,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+    #[serde(default)]
+    pub retry_count: u32,
+    #[serde(default)]
+    pub suppression_reason: Option<String>,
+    #[serde(default)]
+    pub suppressed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub last_error: Option<String>,
     pub name: Option<String>,
     pub schedule: Schedule,
     pub payload: JobPayload,
@@ -95,6 +105,16 @@ pub struct JobRun {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct StoredJobRecord {
     pub name: Option<String>,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+    #[serde(default)]
+    pub retry_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppression_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppressed_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
     pub payload: JobPayload,
     #[serde(default = "default_scheduler_delivery_mode")]
     pub delivery_mode: SchedulerDeliveryMode,
@@ -268,6 +288,21 @@ impl Scheduler {
                 if let Some(name) = update.name {
                     job.name = Some(name);
                 }
+                if let Some(max_retries) = update.max_retries {
+                    job.max_retries = Some(max_retries);
+                }
+                if let Some(retry_count) = update.retry_count {
+                    job.retry_count = retry_count;
+                }
+                if let Some(suppression_reason) = update.suppression_reason {
+                    job.suppression_reason = Some(suppression_reason);
+                }
+                if let Some(suppressed_at) = update.suppressed_at {
+                    job.suppressed_at = Some(suppressed_at);
+                }
+                if let Some(last_error) = update.last_error {
+                    job.last_error = Some(last_error);
+                }
                 if let Some(enabled) = update.enabled {
                     job.enabled = enabled;
                 }
@@ -294,6 +329,21 @@ impl Scheduler {
 
                 if let Some(name) = update.name {
                     job.name = Some(name);
+                }
+                if let Some(max_retries) = update.max_retries {
+                    job.max_retries = Some(max_retries);
+                }
+                if let Some(retry_count) = update.retry_count {
+                    job.retry_count = retry_count;
+                }
+                if let Some(suppression_reason) = update.suppression_reason {
+                    job.suppression_reason = Some(suppression_reason);
+                }
+                if let Some(suppressed_at) = update.suppressed_at {
+                    job.suppressed_at = Some(suppressed_at);
+                }
+                if let Some(last_error) = update.last_error {
+                    job.last_error = Some(last_error);
                 }
                 if let Some(enabled) = update.enabled {
                     job.enabled = enabled;
@@ -722,6 +772,11 @@ impl Default for Scheduler {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct JobUpdate {
     pub name: Option<String>,
+    pub max_retries: Option<u32>,
+    pub retry_count: Option<u32>,
+    pub suppression_reason: Option<String>,
+    pub suppressed_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
     pub enabled: Option<bool>,
     pub schedule: Option<Schedule>,
     pub payload: Option<JobPayload>,
@@ -1214,6 +1269,11 @@ fn row_to_job(row: JobRow) -> Result<Job, StoreError> {
 
     Ok(Job {
         id: JobId::from(row.id),
+        max_retries: stored.max_retries,
+        retry_count: stored.retry_count,
+        suppression_reason: stored.suppression_reason,
+        suppressed_at: stored.suppressed_at,
+        last_error: stored.last_error,
         name: stored.name,
         schedule,
         payload: stored.payload,
@@ -1290,6 +1350,11 @@ fn recompute_next_run(
 fn stored_job_payload(job: &Job) -> serde_json::Value {
     serde_json::to_value(StoredJobRecord {
         name: job.name.clone(),
+        max_retries: job.max_retries,
+        retry_count: job.retry_count,
+        suppression_reason: job.suppression_reason.clone(),
+        suppressed_at: job.suppressed_at,
+        last_error: job.last_error.clone(),
         payload: job.payload.clone(),
         delivery_mode: job.delivery_mode,
         webhook_url: job.webhook_url.clone(),
@@ -1325,6 +1390,11 @@ mod tests {
     fn make_job(name: &str) -> Job {
         Job {
             id: JobId::new(),
+            max_retries: None,
+            retry_count: 0,
+            suppression_reason: None,
+            suppressed_at: None,
+            last_error: None,
             name: Some(name.into()),
             schedule: Schedule::Every {
                 every_ms: 60_000,
