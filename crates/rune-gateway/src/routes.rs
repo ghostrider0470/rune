@@ -2077,6 +2077,11 @@ pub async fn cron_add(
     let next_run_at = compute_initial_next_run(&schedule);
     let mut job = Job {
         id,
+        max_retries: None,
+        retry_count: 0,
+        suppression_reason: None,
+        suppressed_at: None,
+        last_error: None,
         name: body.name,
         schedule,
         payload,
@@ -2127,6 +2132,11 @@ pub async fn cron_update(
 
     let update = JobUpdate {
         name: body.name,
+        max_retries: None,
+        retry_count: None,
+        suppression_reason: None,
+        suppressed_at: None,
+        last_error: None,
         enabled: body.enabled,
         schedule: new_schedule,
         payload: new_payload,
@@ -2552,6 +2562,7 @@ pub struct SessionAuditSummary {
 pub struct ParentSubagentResultSummary {
     pub session_id: String,
     pub summary: String,
+    pub recorded_at: String,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub artifacts: Vec<DelegationArtifactResponse>,
 }
@@ -3750,6 +3761,7 @@ fn latest_subagent_result(
         Some(ParentSubagentResultSummary {
             session_id,
             summary,
+            recorded_at: item.created_at.to_rfc3339(),
             artifacts,
         })
     })

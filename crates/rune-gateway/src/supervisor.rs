@@ -874,6 +874,11 @@ mod tests {
     fn make_test_job(delivery_mode: SchedulerDeliveryMode, webhook_url: Option<String>) -> Job {
         Job {
             id: JobId::new(),
+            max_retries: None,
+            retry_count: 0,
+            suppression_reason: None,
+            suppressed_at: None,
+            last_error: None,
             name: Some("test-job".into()),
             schedule: Schedule::Every {
                 every_ms: 60_000,
