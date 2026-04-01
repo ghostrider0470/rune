@@ -184,6 +184,6 @@ The `message` family is the most actively developed #74 artifact. Current verb c
 |-----------|--------|
 | Every OpenClaw CLI family has a Rune decision | **Done** — this matrix |
 | Shell completion generation for bash, zsh, fish | **Shipped** — PR #143 |
-| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, substantial `message` surfaces, and `agents` inspect/start flows shipped, plus first gateway-backed `logs`/`doctor` admin surfaces; subagent `steer` / `kill` still lack a client-facing transport and `secrets` is still not started |
+| Operator workflow families have working equivalents | **Partial** — `sessions`, `approvals`, `system`, substantial `message` surfaces, and `agents` inspect/start/steer/kill flows shipped, plus first gateway-backed `logs`/`doctor` admin surfaces; `secrets` is still not started |
 | Lifecycle families have working equivalents | **Not started** — `setup`, `update`, `uninstall`, `reset` all missing |
 | Audit matrix produced | **Done** — this document |
