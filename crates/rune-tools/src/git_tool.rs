@@ -25,6 +25,9 @@ const ALLOWED_OPERATIONS: &[&str] = &[
     "checkout",
     "merge",
     "pr_status",
+    "pr_open",
+    "pr_merge",
+    "repo_state",
     "staged",
     "suggest_branch",
 ];
@@ -201,7 +204,7 @@ impl GitToolExecutor {
         call: &ToolCall,
         workspace_root: &std::path::Path,
     ) -> Result<Option<ToolResult>, ToolError> {
-        if matches!(operation, "pr_status" | "staged" | "suggest_branch") {
+        if matches!(operation, "pr_status" | "pr_open" | "pr_merge" | "repo_state" | "staged" | "suggest_branch") {
             return Ok(None);
         }
 
@@ -456,6 +459,9 @@ impl GitToolExecutor {
     ) -> Result<Option<ToolResult>, ToolError> {
         match operation {
             "pr_status" => Ok(Some(self.pr_status(call, workspace_root).await?)),
+            "pr_open" => Ok(Some(self.pr_open(call, workspace_root).await?)),
+            "pr_merge" => Ok(Some(self.pr_merge(call, workspace_root).await?)),
+            "repo_state" => Ok(Some(self.repo_state(call, workspace_root).await?)),
             "staged" => Ok(Some(self.staged_status(call, mode, workspace_root).await?)),
             "suggest_branch" => Ok(Some(
                 self.suggest_branch_name(call, args, workspace_root).await?,
@@ -567,6 +573,338 @@ impl GitToolExecutor {
                 "head_ref": value.get("headRefName").cloned(),
                 "base_ref": value.get("baseRefName").cloned(),
                 "checks": checks,
+            }),
+        ))
+    }
+
+    async fn repo_state(
+        &self,
+        call: &ToolCall,
+        workspace_root: &std::path::Path,
+    ) -> Result<ToolResult, ToolError> {
+        let current_branch = self.current_branch(workspace_root).await?;
+        let protected_branches = call
+            .arguments
+            .get("protected_branches")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|arr| !arr.is_empty())
+            .unwrap_or_else(|| {
+                DEFAULT_PROTECTED_BRANCHES
+                    .iter()
+                    .map(|branch| (*branch).to_owned())
+                    .collect()
+            });
+        let base_branch = call
+            .arguments
+            .get("base_branch")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main");
+        let remote = call
+            .arguments
+            .get("remote")
+            .and_then(|v| v.as_str())
+            .unwrap_or("origin");
+
+        let status_output = self
+            .run_git_capture(workspace_root, ["status", "--porcelain", "--branch"])
+            .await?;
+        if !status_output.status.success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "git status --porcelain --branch failed: {}",
+                format_output("status --porcelain --branch", &status_output)
+            )));
+        }
+        let status_text = String::from_utf8_lossy(&status_output.stdout);
+        let mut lines = status_text.lines();
+        let branch_line = lines.next().unwrap_or_default().trim().to_owned();
+        let worktree_entries = lines
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| line.to_owned())
+            .collect::<Vec<_>>();
+        let dirty = !worktree_entries.is_empty();
+        let branch_inferred = branch_line
+            .strip_prefix("## ")
+            .and_then(|raw| {
+                let raw = raw
+                    .strip_prefix("No commits yet on ")
+                    .or_else(|| raw.strip_prefix("Initial commit on "))
+                    .unwrap_or(raw);
+                let head = raw
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(raw)
+                    .split("...")
+                    .next()
+                    .unwrap_or(raw);
+                (!head.is_empty() && head != "HEAD").then_some(head.to_owned())
+            })
+            .or(current_branch.clone());
+        let on_protected_branch = branch_inferred
+            .as_deref()
+            .map(|branch| protected_branches.iter().any(|candidate| candidate == branch))
+            .unwrap_or(false);
+
+        let head_rev = self.run_git_capture(workspace_root, ["rev-parse", "HEAD"]).await?;
+        let head_sha = if head_rev.status.success() {
+            Some(String::from_utf8_lossy(&head_rev.stdout).trim().to_owned())
+        } else {
+            None
+        };
+
+        let mut base_sync = serde_json::json!({
+            "ok": false,
+            "checked": false,
+            "base_branch": base_branch,
+            "remote": remote,
+        });
+
+        let fetch_output = self
+            .run_git_capture(workspace_root, ["fetch", remote, base_branch])
+            .await?;
+        if fetch_output.status.success() {
+            let remote_ref = format!("{remote}/{base_branch}");
+            let merge_base = self
+                .run_git_capture(workspace_root, ["merge-base", "HEAD", &remote_ref])
+                .await?;
+            let base_rev = self
+                .run_git_capture(workspace_root, ["rev-parse", &remote_ref])
+                .await?;
+            if merge_base.status.success() && base_rev.status.success() {
+                let merge_base_sha = String::from_utf8_lossy(&merge_base.stdout).trim().to_owned();
+                let base_sha = String::from_utf8_lossy(&base_rev.stdout).trim().to_owned();
+                let in_sync = merge_base_sha == base_sha;
+                base_sync = serde_json::json!({
+                    "ok": in_sync,
+                    "checked": true,
+                    "base_branch": base_branch,
+                    "remote": remote,
+                    "base_sha": base_sha,
+                    "merge_base_sha": merge_base_sha,
+                    "head_sha": head_sha,
+                    "reason": if in_sync { "head includes latest remote base" } else { "head is behind remote base" },
+                });
+            } else {
+                base_sync = serde_json::json!({
+                    "ok": false,
+                    "checked": true,
+                    "base_branch": base_branch,
+                    "remote": remote,
+                    "reason": "failed to compare HEAD against remote base",
+                    "details": {
+                        "merge_base": format_output("merge-base", &merge_base),
+                        "base_rev": format_output("rev-parse base", &base_rev),
+                    }
+                });
+            }
+        } else {
+            base_sync = serde_json::json!({
+                "ok": false,
+                "checked": true,
+                "base_branch": base_branch,
+                "remote": remote,
+                "reason": "failed to fetch remote base",
+                "details": format_output("fetch", &fetch_output),
+            });
+        }
+
+        Ok(self.structured_result(
+            call,
+            true,
+            serde_json::json!({
+                "current_branch": branch_inferred,
+                "branch_status": branch_line,
+                "dirty": dirty,
+                "worktree_entries": worktree_entries,
+                "protected_branches": protected_branches,
+                "on_protected_branch": on_protected_branch,
+                "head_sha": head_sha,
+                "base_sync": base_sync,
+            }),
+        ))
+    }
+
+    async fn pr_open(
+        &self,
+        call: &ToolCall,
+        workspace_root: &std::path::Path,
+    ) -> Result<ToolResult, ToolError> {
+        let title = call
+            .arguments
+            .get("title")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                tool: "git".into(),
+                reason: "pr_open requires title".into(),
+            })?;
+        let body = call
+            .arguments
+            .get("body")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let base = call
+            .arguments
+            .get("base")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main");
+        let head = call
+            .arguments
+            .get("head")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .or(self.current_branch(workspace_root).await?);
+        let Some(head) = head else {
+            return Ok(self.structured_result(
+                call,
+                false,
+                serde_json::json!({"message": "cannot open PR from detached HEAD without explicit head branch"}),
+            ));
+        };
+
+        let mut cmd = tokio::process::Command::new("gh");
+        cmd.args([
+            "pr",
+            "create",
+            "--base",
+            base,
+            "--head",
+            &head,
+            "--title",
+            title,
+            "--body",
+            body,
+        ]);
+        cmd.current_dir(workspace_root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        let child = cmd
+            .spawn()
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to spawn gh: {e}")))?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            child.wait_with_output(),
+        )
+        .await
+        .map_err(|_| {
+            ToolError::ExecutionFailed(format!(
+                "gh pr create timed out after {DEFAULT_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| ToolError::ExecutionFailed(format!("gh process error: {e}")))?;
+
+        if !output.status.success() {
+            return Ok(self.structured_result(
+                call,
+                false,
+                serde_json::json!({
+                    "message": "failed to open pull request",
+                    "head": head,
+                    "base": base,
+                    "details": format_output("gh pr create", &output),
+                }),
+            ));
+        }
+
+        let url = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        Ok(self.structured_result(
+            call,
+            true,
+            serde_json::json!({
+                "message": "pull request opened",
+                "head": head,
+                "base": base,
+                "url": url,
+            }),
+        ))
+    }
+
+    async fn pr_merge(
+        &self,
+        call: &ToolCall,
+        workspace_root: &std::path::Path,
+    ) -> Result<ToolResult, ToolError> {
+        let target = call
+            .arguments
+            .get("target")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .or(self
+                .current_branch(workspace_root)
+                .await?
+                .map(|branch| branch.to_owned()));
+        let Some(target) = target else {
+            return Ok(self.structured_result(
+                call,
+                false,
+                serde_json::json!({"message": "cannot merge PR from detached HEAD without explicit target"}),
+            ));
+        };
+        let strategy = call
+            .arguments
+            .get("strategy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("squash");
+        let delete_branch = call
+            .arguments
+            .get("delete_branch")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let mut args = vec!["pr", "merge", &target];
+        match strategy {
+            "merge" => args.push("--merge"),
+            "rebase" => args.push("--rebase"),
+            _ => args.push("--squash"),
+        }
+        if delete_branch {
+            args.push("--delete-branch");
+        }
+
+        let mut cmd = tokio::process::Command::new("gh");
+        cmd.args(&args);
+        cmd.current_dir(workspace_root);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        let child = cmd
+            .spawn()
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to spawn gh: {e}")))?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            child.wait_with_output(),
+        )
+        .await
+        .map_err(|_| {
+            ToolError::ExecutionFailed(format!(
+                "gh pr merge timed out after {DEFAULT_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| ToolError::ExecutionFailed(format!("gh process error: {e}")))?;
+
+        if !output.status.success() {
+            return Ok(self.structured_result(
+                call,
+                false,
+                serde_json::json!({
+                    "message": "failed to merge pull request",
+                    "target": target,
+                    "strategy": strategy,
+                    "details": format_output("gh pr merge", &output),
+                }),
+            ));
+        }
+
+        Ok(self.structured_result(
+            call,
+            true,
+            serde_json::json!({
+                "message": "pull request merged",
+                "target": target,
+                "strategy": strategy,
+                "delete_branch": delete_branch,
+                "details": format_output("gh pr merge", &output),
             }),
         ))
     }
@@ -769,14 +1107,14 @@ impl ToolExecutor for GitToolExecutor {
 pub fn git_tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "git".into(),
-        description: "Execute git operations in the workspace. Supports: status, diff, add, commit, push, pull, log, branch, checkout, merge, pr_status, staged, suggest_branch.".into(),
+        description: "Execute git operations in the workspace. Supports: status, diff, add, commit, push, pull, log, branch, checkout, merge, pr_status, pr_open, pr_merge, repo_state, staged, suggest_branch.".into(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
                 "operation": {
                     "type": "string",
                     "description": "Git subcommand to execute",
-                    "enum": ["status", "diff", "add", "commit", "push", "pull", "log", "branch", "checkout", "merge", "pr_status", "staged", "suggest_branch"]
+                    "enum": ["status", "diff", "add", "commit", "push", "pull", "log", "branch", "checkout", "merge", "pr_status", "pr_open", "pr_merge", "repo_state", "staged", "suggest_branch"]
                 },
                 "args": {
                     "description": "Additional arguments for the git command. Can be a JSON array of strings or a single string (split on whitespace).",
@@ -1105,6 +1443,35 @@ mod tests {
         assert!(result.is_error);
         assert!(result.output.contains("base_out_of_sync"));
     }
+
+    #[tokio::test]
+    async fn repo_state_reports_dirty_and_protected_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::fs::write(dir.path().join("dirty.txt"), "dirty").unwrap();
+
+        let exec = GitToolExecutor::new(dir.path());
+        let call = make_call(serde_json::json!({"operation": "repo_state"}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(!result.is_error, "repo_state should succeed: {}", result.output);
+        assert!(result.output.contains("\"dirty\":true"));
+        assert!(result.output.contains("\"current_branch\":\"main\""));
+        assert!(result.output.contains("\"on_protected_branch\":true"));
+    }
+
+    #[tokio::test]
+    async fn pr_open_requires_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = GitToolExecutor::new(dir.path());
+        let call = make_call(serde_json::json!({"operation": "pr_open"}));
+        let err = exec.execute(call).await.unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArguments { .. }));
+    }
+
 }
 
 #[cfg(test)]

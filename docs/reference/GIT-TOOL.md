@@ -17,7 +17,10 @@ Rune's `git` tool wraps a constrained subset of git and adds workflow-aware synt
 - `merge`
 
 ### Synthetic workflow operations
+- `repo_state` — inspect branch, dirty-tree, protected-branch, and base-sync status in one structured read
 - `pr_status` — inspect whether the current or named branch already has a PR, plus merge/check status
+- `pr_open` — open a pull request without shelling out to `gh pr create` manually in the agent prompt
+- `pr_merge` — merge a pull request with an explicit strategy and delete-branch option
 - `staged` — inspect staged files and optionally enforce staged-content expectations
 - `suggest_branch` — generate a normalized branch name from issue/task metadata
 
@@ -31,6 +34,27 @@ Mutating operations (`add`, `commit`, `push`, `pull`, `checkout`, `merge`) suppo
 - `base_branch` — remote base branch to compare against, default `main`
 - `remote` — remote name, default `origin`
 - `protected_branches` — branch names where mutating operations are blocked, default `main`, `master`
+
+## `repo_state`
+
+`repo_state` gives orchestrators a single structured snapshot before mutating git state.
+
+### Inputs
+- `base_branch` (optional) — base branch used for remote sync checks, default `main`
+- `remote` (optional) — remote used for sync checks, default `origin`
+- `protected_branches` (optional) — override protected branch list
+
+### Output fields
+- `current_branch`
+- `branch_status` — raw `git status --porcelain --branch` branch header
+- `dirty`
+- `worktree_entries[]`
+- `protected_branches[]`
+- `on_protected_branch`
+- `head_sha`
+- `base_sync` with `ok`, `checked`, `base_branch`, `remote`, and sync diagnostics
+
+Use this when an autonomous flow needs to decide whether it is safe to branch, stage, commit, or push without re-implementing multiple git probes in shell.
 
 ## `pr_status`
 
@@ -52,6 +76,38 @@ Mutating operations (`add`, `commit`, `push`, `pull`, `checkout`, `merge`) suppo
 - `checks[]` with `name`, `status`, `conclusion`
 
 If no PR exists for the branch, Rune returns a structured negative result with `has_pr = false` so orchestrators can decide whether to open one.
+
+## `pr_open`
+
+`pr_open` wraps `gh pr create` as a structured workflow primitive.
+
+### Inputs
+- `title` (required) — PR title
+- `body` (optional) — PR body, default empty string
+- `base` (optional) — target branch, default `main`
+- `head` (optional) — source branch, default current branch
+
+### Output fields
+- `message`
+- `head`
+- `base`
+- `url`
+
+## `pr_merge`
+
+`pr_merge` wraps `gh pr merge` so agents can merge by contract instead of shell composition.
+
+### Inputs
+- `target` (optional) — PR number/url/branch accepted by `gh pr merge`; defaults to current branch
+- `strategy` (optional) — `squash` (default), `merge`, or `rebase`
+- `delete_branch` (optional) — default `true`
+
+### Output fields
+- `message`
+- `target`
+- `strategy`
+- `delete_branch`
+- `details`
 
 ## `staged`
 
@@ -96,6 +152,6 @@ Returns a branch like `agent/rune/issue-773-pr-status-and-branch-workflow-primit
 
 ## Operator notes
 
-- `pr_status`, `staged`, and `suggest_branch` are synthetic operations implemented inside Rune rather than raw git subcommands.
-- `pr_status` depends on GitHub CLI availability/auth in the runtime environment.
+- `repo_state`, `pr_status`, `pr_open`, `pr_merge`, `staged`, and `suggest_branch` are synthetic operations implemented inside Rune rather than raw git subcommands.
+- `pr_status`, `pr_open`, and `pr_merge` depend on GitHub CLI availability/auth in the runtime environment.
 - Structured JSON output is intentional: orchestration code should consume the JSON contract instead of scraping human-oriented text.
