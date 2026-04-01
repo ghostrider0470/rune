@@ -2817,8 +2817,11 @@ pub async fn get_session_status(
     }))
 }
 
-
-pub(crate) fn session_status_reason(status: &str, metadata: &serde_json::Value, approval_mode: &str) -> Option<String> {
+pub(crate) fn session_status_reason(
+    status: &str,
+    metadata: &serde_json::Value,
+    approval_mode: &str,
+) -> Option<String> {
     match status {
         "waiting_for_approval" => Some(format!(
             "blocked on operator approval ({approval_mode}); resume after an approval decision is recorded"
@@ -2836,7 +2839,10 @@ pub(crate) fn session_status_reason(status: &str, metadata: &serde_json::Value, 
     }
 }
 
-pub(crate) fn session_next_task_reason(status: &str, metadata: &serde_json::Value) -> Option<String> {
+pub(crate) fn session_next_task_reason(
+    status: &str,
+    metadata: &serde_json::Value,
+) -> Option<String> {
     let lifecycle = metadata_string(metadata, "subagent_lifecycle");
     let operator_note = metadata_string(metadata, "subagent_last_note");
 
@@ -2925,6 +2931,7 @@ pub struct SessionTreeNode {
     pub subagent_status_updated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_last_note: Option<String>,
+    pub latest_subagent_result: Option<ParentSubagentResultSummary>,
     pub created_at: String,
     pub turn_count: u32,
     pub children: Vec<SessionTreeNode>,
@@ -2988,15 +2995,15 @@ pub async fn get_session_tree(
         row: &rune_store::models::SessionRow,
         children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
         turn_counts: &std::collections::HashMap<Uuid, u32>,
+        latest_results: &std::collections::HashMap<Uuid, ParentSubagentResultSummary>,
     ) -> SessionTreeNode {
-        let children = children_map
-            .get(&row.id)
-            .map(|kids| {
-                kids.iter()
-                    .map(|child| build_node(child, children_map, turn_counts))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut children = Vec::new();
+        if let Some(kids) = children_map.get(&row.id) {
+            for child in kids {
+                children.push(build_node(child, children_map, turn_counts, latest_results));
+            }
+        }
+        let latest_subagent_result = latest_results.get(&row.id).cloned();
         let orchestration_status = metadata_string(&row.metadata, "orchestration_status")
             .or_else(|| metadata_string(&row.metadata, "subagent_lifecycle"));
         let delegation_roles = row
@@ -3042,13 +3049,31 @@ pub async fn get_session_tree(
                 "subagent_status_updated_at",
             ),
             subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
+            latest_subagent_result,
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
             children,
         }
     }
 
-    let tree = build_node(&root, &children_map, &turn_counts);
+    let mut latest_results = std::collections::HashMap::new();
+    for sid in &subtree_ids {
+        if let Some(row) = all_rows
+            .iter()
+            .find(|row| &row.id == sid && row.kind == "subagent")
+        {
+            let transcript_items = state
+                .transcript_repo
+                .list_by_session(row.id)
+                .await
+                .map_err(|e| GatewayError::Internal(e.to_string()))?;
+            if let Some(summary) = latest_subagent_result(&transcript_items) {
+                latest_results.insert(row.id, summary);
+            }
+        }
+    }
+
+    let tree = build_node(&root, &children_map, &turn_counts, &latest_results);
     Ok(Json(tree))
 }
 
@@ -3357,7 +3382,12 @@ pub async fn agent_kill(
     let current_status = session
         .status
         .parse::<rune_core::SessionStatus>()
-        .map_err(|_| GatewayError::Internal(format!("invalid persisted session status: {}", session.status)))?;
+        .map_err(|_| {
+            GatewayError::Internal(format!(
+                "invalid persisted session status: {}",
+                session.status
+            ))
+        })?;
     current_status
         .transition(rune_core::SessionStatus::Cancelled)
         .map_err(|e| GatewayError::BadRequest(e.to_string()))?;
