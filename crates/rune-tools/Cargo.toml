@@ -24,3 +24,4 @@ quick-xml = "0.36"
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 tempfile = "3"
+wiremock.workspace = true
