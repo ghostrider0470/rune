@@ -1143,6 +1143,45 @@ mod synthetic_git_tool_tests {
         );
     }
 
+
+    #[tokio::test]
+    async fn pr_status_reports_missing_pr_for_branch_without_pull_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .output();
+        std::fs::write(dir.path().join("test.txt"), "hello").unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["commit", "-m", "initial commit"])
+            .current_dir(dir.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["checkout", "-b", "feature/no-pr"])
+            .current_dir(dir.path())
+            .output();
+
+        let exec = GitToolExecutor::new(dir.path());
+        let call = make_call(serde_json::json!({"operation": "pr_status"}));
+        let result = exec.execute(call).await.unwrap();
+        assert!(result.is_error);
+        assert!(result.output.contains("\"has_pr\":false"));
+        assert!(result.output.contains("no pull request found for branch") || result.output.contains("failed to inspect pull request status"));
+    }
+
     #[tokio::test]
     async fn staged_mode_single_commit_requires_files() {
         let dir = tempfile::tempdir().unwrap();
