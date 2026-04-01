@@ -47,6 +47,9 @@ Use this when troubleshooting why a plugin did not activate after startup or rel
 Operational notes:
 - duplicate plugin names across scan roots are an override mechanism; only the highest-precedence copy loads
 - Claude plugin manifests must declare a non-empty manifest version
+- native `PLUGIN.md` manifests use schema version `1` today and are rejected if they declare another version
+- native manifests preserve declared `capabilities` and `hooks` order for display, while also producing deterministic canonical sets for runtime comparison and auditing
+- native manifests may optionally declare `author` and `homepage`; if present they must be non-empty
 - `/api/plugins` and `/api/plugins/{name}` return the latest discovery decision alongside component counts
 
 ## Read next

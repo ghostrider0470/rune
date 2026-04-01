@@ -4,7 +4,7 @@
 //! containing a `PLUGIN.md` manifest file with YAML frontmatter. Each plugin
 //! is spawned as a subprocess communicating via stdin/stdout JSON-RPC.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -39,8 +39,16 @@ pub struct PluginManifest {
     pub binary: PathBuf,
     /// Runtime capabilities declared by the plugin author.
     pub capabilities: Vec<String>,
+    /// Canonicalized capabilities for deterministic comparisons.
+    pub capability_set: Vec<String>,
     /// Hook events this plugin subscribes to.
     pub hooks: Vec<String>,
+    /// Canonicalized hook subscriptions for deterministic comparisons.
+    pub hook_set: Vec<String>,
+    /// Optional manifest author identifier.
+    pub author: Option<String>,
+    /// Optional homepage or source URL.
+    pub homepage: Option<String>,
     /// The directory containing the PLUGIN.md file.
     #[serde(skip)]
     pub source_dir: PathBuf,
@@ -56,6 +64,8 @@ pub struct PluginFrontmatter {
     pub binary: Option<String>,
     pub capabilities: Option<String>,
     pub hooks: Option<String>,
+    pub author: Option<String>,
+    pub homepage: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -585,6 +595,17 @@ fn parse_yaml_to_json(yaml: &str) -> Option<serde_json::Value> {
     Some(serde_json::Value::Object(map))
 }
 
+fn canonicalize_csv_items(items: &[String]) -> Vec<String> {
+    let mut deduped = BTreeSet::new();
+    for item in items {
+        deduped.insert(item.trim().to_string());
+    }
+    deduped
+        .into_iter()
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
 fn parse_csv_field(_field: &str, value: Option<String>) -> Result<Vec<String>, PluginManifestDiagnostic> {
     let Some(value) = value else {
         return Ok(Vec::new());
@@ -671,6 +692,7 @@ fn validate_plugin_frontmatter(
             Vec::new()
         }
     };
+    let capability_set = canonicalize_csv_items(&capabilities);
 
     let hooks = match parse_csv_field("hooks", frontmatter.hooks) {
         Ok(items) => items,
@@ -679,6 +701,23 @@ fn validate_plugin_frontmatter(
             Vec::new()
         }
     };
+    let hook_set = canonicalize_csv_items(&hooks);
+
+    let author = frontmatter.author.map(|value| value.trim().to_string());
+    if author.as_deref().is_some_and(|value| value.is_empty()) {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "author",
+            "must be non-empty when provided",
+        ));
+    }
+
+    let homepage = frontmatter.homepage.map(|value| value.trim().to_string());
+    if homepage.as_deref().is_some_and(|value| value.is_empty()) {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "homepage",
+            "must be non-empty when provided",
+        ));
+    }
 
     let mut duplicate_capabilities = BTreeMap::<String, usize>::new();
     for capability in &capabilities {
@@ -716,7 +755,11 @@ fn validate_plugin_frontmatter(
             description,
             binary,
             capabilities,
+            capability_set,
             hooks,
+            hook_set,
+            author: author.filter(|value| !value.is_empty()),
+            homepage: homepage.filter(|value| !value.is_empty()),
             source_dir: source_dir.to_path_buf(),
         })
     } else {
@@ -800,6 +843,8 @@ name: minimal
             binary: Some("./bin/native".into()),
             capabilities: Some("hooks, commands".into()),
             hooks: Some("pre_tool_call, post_tool_call".into()),
+            author: Some("Rune Team".into()),
+            homepage: Some("https://example.com/native-plugin".into()),
         };
 
         let manifest = validate_plugin_frontmatter(Path::new("/tmp/native/PLUGIN.md"), frontmatter)
@@ -807,8 +852,12 @@ name: minimal
 
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.capabilities, vec!["hooks", "commands"]);
+        assert_eq!(manifest.capability_set, vec!["commands", "hooks"]);
         assert_eq!(manifest.hooks, vec!["pre_tool_call", "post_tool_call"]);
+        assert_eq!(manifest.hook_set, vec!["post_tool_call", "pre_tool_call"]);
         assert_eq!(manifest.binary, PathBuf::from("./bin/native"));
+        assert_eq!(manifest.author.as_deref(), Some("Rune Team"));
+        assert_eq!(manifest.homepage.as_deref(), Some("https://example.com/native-plugin"));
     }
 
     #[test]
@@ -821,6 +870,8 @@ name: minimal
             binary: Some(String::new()),
             capabilities: Some("hooks, hooks".into()),
             hooks: Some("pre_tool_call, unknown_event".into()),
+            author: Some(String::new()),
+            homepage: Some(String::new()),
         };
 
         let error = validate_plugin_frontmatter(Path::new("/tmp/bad/PLUGIN.md"), frontmatter)
@@ -834,7 +885,29 @@ name: minimal
         assert!(rendered.contains("binary"));
         assert!(rendered.contains("capabilities"));
         assert!(rendered.contains("hooks"));
+        assert!(rendered.contains("author"));
+        assert!(rendered.contains("homepage"));
         assert!(rendered.contains("unsupported schema version 99"));
+    }
+
+    #[test]
+    fn validate_manifest_defaults_metadata_and_canonicalizes_duplicates() {
+        let frontmatter = PluginFrontmatter {
+            schema_version: None,
+            name: Some("native-plugin".into()),
+            version: None,
+            description: Some("Native plugin".into()),
+            binary: None,
+            capabilities: Some("hooks, commands, hooks".into()),
+            hooks: Some("post_tool_call, pre_tool_call, post_tool_call".into()),
+            author: None,
+            homepage: None,
+        };
+
+        let manifest = validate_plugin_frontmatter(Path::new("/tmp/native/PLUGIN.md"), frontmatter)
+            .expect_err("duplicates should fail validation");
+        let rendered = manifest.to_string();
+        assert!(rendered.contains("capabilities"));
     }
 
     #[tokio::test]
@@ -848,7 +921,11 @@ name: minimal
             description: "Test".into(),
             binary: PathBuf::from("./test"),
             capabilities: vec!["hooks".into()],
+            capability_set: vec!["hooks".into()],
             hooks: vec!["pre_tool_call".into()],
+            hook_set: vec!["pre_tool_call".into()],
+            author: None,
+            homepage: None,
             source_dir: PathBuf::from("/tmp"),
         };
 
@@ -904,7 +981,9 @@ hooks: pre_tool_call, post_tool_call
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.version, "1.0.0");
         assert_eq!(manifest.capabilities, vec!["hooks", "notifications"]);
+        assert_eq!(manifest.capability_set, vec!["hooks", "notifications"]);
         assert_eq!(manifest.hooks, vec!["pre_tool_call", "post_tool_call"]);
+        assert_eq!(manifest.hook_set, vec!["post_tool_call", "pre_tool_call"]);
     }
 
     #[tokio::test]
