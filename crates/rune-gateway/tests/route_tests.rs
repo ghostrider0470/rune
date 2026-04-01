@@ -8383,6 +8383,9 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     assert_eq!(child["subagent_runtime_attached"], true);
     assert_eq!(child["subagent_status_updated_at"], "2026-03-29T10:00:00Z");
     assert_eq!(child["subagent_last_note"], "Child subagent attached");
+    assert_eq!(child["orchestration_status"], "attached");
+    assert_eq!(child["delegation_depth"], 1);
+    assert_eq!(child["delegation_roles"], serde_json::json!([]));
     assert_eq!(
         child["latest_subagent_result"],
         json!({
@@ -8417,6 +8420,9 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     assert_eq!(grandchild["subagent_runtime_status"], "not_attached");
     assert_eq!(grandchild["subagent_runtime_attached"], false);
     assert_eq!(grandchild["subagent_last_note"], "Waiting for runtime");
+    assert_eq!(grandchild["orchestration_status"], "queued");
+    assert_eq!(grandchild["delegation_depth"], 1);
+    assert_eq!(grandchild["delegation_roles"], serde_json::json!([]));
     assert_eq!(grandchild["latest_subagent_result"], Value::Null);
     assert_eq!(grandchild["children"].as_array().unwrap().len(), 0);
 
@@ -8426,6 +8432,9 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
         .unwrap();
     assert_eq!(sibling["kind"], "subagent");
     assert_eq!(sibling["status"], "completed");
+    assert_eq!(sibling["orchestration_status"], Value::Null);
+    assert_eq!(sibling["delegation_depth"], 1);
+    assert_eq!(sibling["delegation_roles"], serde_json::json!([]));
     assert_eq!(sibling["turn_count"], 0);
     assert_eq!(sibling["children"].as_array().unwrap().len(), 0);
 
