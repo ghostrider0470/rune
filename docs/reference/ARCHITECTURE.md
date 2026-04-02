@@ -96,3 +96,5 @@ Shipped behavior:
 - claim operations now return the durable lease snapshot directly, and state helpers can answer the current owner for a goal or expire stale leases while clearing dangling agent goal assignments
 
 This is the orchestration-state slice for issue #779 under feature #766. It does not replace higher-level runtime routing yet; it establishes the durable ownership/audit primitive that later gateway and scheduler surfaces can expose directly.
+
+- Retry budget state now stores both failure fingerprint and objective fingerprint/snapshot so operators can inspect which objective keeps re-failing after restart.

@@ -3364,7 +3364,9 @@ async fn successful_retry_clears_persisted_anti_thrash_metadata() {
                     "stall_reason": "retry backoff active for repeated failure fingerprint",
                     "operator_note": "Previous turn failed repeatedly. Backing off before retrying again.",
                     "next_retry_at": null,
-                    "last_error": "model exploded"
+                    "last_error": "model exploded",
+                    "objective_fingerprint": "sha256:existing",
+                    "objective_snapshot": {"kind": "message", "content": "retry this", "content_preview": "retry this"}
                 }
             }),
             created_at: chrono::Utc::now(),
@@ -3388,6 +3390,60 @@ async fn successful_retry_clears_persisted_anti_thrash_metadata() {
 
     let session = h.session_repo.find_by_id(session.id).await.unwrap();
     assert!(session.metadata.get("anti_thrash").is_none());
+}
+
+#[tokio::test]
+async fn repeated_failure_metadata_survives_repo_reload_for_operator_inspection() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let fake_model = Arc::new(FailingModelProvider);
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            fake_model.clone(),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "retry this".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-fail-persist".to_string(),
+    });
+
+    assert!(session_loop.handle_event(event).await.is_err());
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    let anti = crate::session_metadata::anti_thrash_state(&session).unwrap();
+    assert_eq!(anti.retry_count, 1);
+    assert_eq!(anti.last_error.as_deref(), Some("model exploded"));
+    assert_eq!(anti.objective_snapshot, Some(serde_json::json!({
+        "kind": "message",
+        "content": "retry this",
+        "content_preview": "retry this"
+    })));
+    assert!(anti
+        .objective_fingerprint
+        .as_deref()
+        .unwrap()
+        .starts_with("sha256:"));
 }
 
 #[tokio::test]
@@ -3507,4 +3563,16 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
         )
     );
     assert!(session.metadata["anti_thrash"]["next_retry_at"].is_null());
+    assert_eq!(
+        session.metadata["anti_thrash"]["objective_snapshot"]["kind"],
+        serde_json::json!("message")
+    );
+    assert_eq!(
+        session.metadata["anti_thrash"]["objective_snapshot"]["content"],
+        serde_json::json!("retry this")
+    );
+    assert!(session.metadata["anti_thrash"]["objective_fingerprint"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
 }

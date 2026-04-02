@@ -21,6 +21,8 @@ pub struct RetryBudgetState {
     pub operator_note: Option<String>,
     pub next_retry_at: Option<String>,
     pub last_error: Option<String>,
+    pub objective_fingerprint: Option<String>,
+    pub objective_snapshot: Option<Value>,
 }
 
 pub(crate) fn selected_model(session: &SessionRow) -> Option<&str> {
@@ -113,6 +115,11 @@ pub(crate) fn anti_thrash_state(session: &SessionRow) -> Option<RetryBudgetState
             .get("last_error")
             .and_then(Value::as_str)
             .map(ToString::to_string),
+        objective_fingerprint: anti
+            .get("objective_fingerprint")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        objective_snapshot: anti.get("objective_snapshot").cloned(),
     })
 }
 
@@ -129,6 +136,8 @@ pub(crate) fn set_anti_thrash_state(metadata: &Value, state: &RetryBudgetState) 
             "operator_note": state.operator_note,
             "next_retry_at": state.next_retry_at,
             "last_error": state.last_error,
+            "objective_fingerprint": state.objective_fingerprint,
+            "objective_snapshot": state.objective_snapshot,
         }),
     );
     Value::Object(next)

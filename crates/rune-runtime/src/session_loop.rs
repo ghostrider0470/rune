@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -279,6 +280,23 @@ impl SessionLoop {
         let factor = 1_i64.checked_shl(exponent).unwrap_or(i64::MAX);
         (BASE_FAILURE_BACKOFF_SECS.saturating_mul(factor)).min(MAX_FAILURE_BACKOFF_SECS)
     }
+    fn objective_snapshot_for_message(content: &str) -> serde_json::Value {
+        let normalized_content = content.trim();
+        let content_preview: String = normalized_content.chars().take(160).collect();
+        serde_json::json!({
+            "kind": "message",
+            "content": normalized_content,
+            "content_preview": content_preview,
+        })
+    }
+
+    fn objective_fingerprint_for_message(content: &str) -> String {
+        let snapshot = Self::objective_snapshot_for_message(content);
+        let encoded = serde_json::to_vec(&snapshot).unwrap_or_default();
+        let digest = Sha256::digest(encoded);
+        format!("sha256:{:x}", digest)
+    }
+
 
     async fn anti_thrash_guard(
         &self,
@@ -372,6 +390,8 @@ impl SessionLoop {
                 operator_note,
                 next_retry_at,
                 last_error: Some(error.to_string()),
+                objective_fingerprint: Some(Self::objective_fingerprint_for_message(content)),
+                objective_snapshot: Some(Self::objective_snapshot_for_message(content)),
             },
         );
         self.session_repo

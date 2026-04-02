@@ -58,3 +58,5 @@ Current semantics:
 - terminal suppression now persists both a machine-readable `stall_reason` and a human-facing `operator_note`, so route/status surfaces can explain whether the session is waiting for backoff expiry or needs intervention for an exhausted retry budget
 
 This is the first operator-visible M10 anti-thrash foundation rather than the full final status surface. For now, operators can inspect persisted session metadata to distinguish a degraded-but-alive lane from one that is still actively shipping.
+
+- Anti-thrash metadata now persists objective fingerprints and objective snapshots for repeated-failure diagnosis across reloads/restarts.
