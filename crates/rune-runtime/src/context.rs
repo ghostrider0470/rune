@@ -637,93 +637,95 @@ impl ContextAssembler {
     }
 }
 
-/// Ensures every `tool_call_id` in an Assistant message has a corresponding
-/// `Role::Tool` response, AND every `Role::Tool` message has a preceding
-/// Assistant message with a matching `tool_calls` entry. Injects synthetic
-/// responses for orphaned tool calls, and removes orphaned tool results
-/// (e.g. after compaction drops the assistant message but preserves the result).
+/// Ensures tool call/result sequences obey the provider contract:
+/// an assistant message with `tool_calls` must be followed by a contiguous
+/// block of matching `Role::Tool` messages, and `Role::Tool` messages may not
+/// appear anywhere else. Missing tool responses are synthesized, stray/late
+/// tool results are dropped.
 fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
-    // Pass 1: Remove orphaned Role::Tool messages that have no preceding
-    // Assistant message with a matching tool_call_id. This can happen when
-    // compaction drops older messages including the assistant tool_calls
-    // but preserves the tool result in the tail.
-    let mut known_call_ids: HashSet<String> = HashSet::new();
-    let mut to_remove = Vec::new();
-    for (idx, msg) in messages.iter().enumerate() {
-        if let Some(ref calls) = msg.tool_calls {
-            for tc in calls {
-                known_call_ids.insert(tc.id.clone());
-            }
-        }
-        if msg.role == Role::Tool {
-            if let Some(ref id) = msg.tool_call_id {
-                if !known_call_ids.contains(id) {
-                    to_remove.push(idx);
+    let original = std::mem::take(messages);
+    let mut sanitized = Vec::with_capacity(original.len());
+    let mut stray_results = 0usize;
+    let mut synthesized_results = 0usize;
+    let mut i = 0usize;
+
+    while i < original.len() {
+        let msg = original[i].clone();
+
+        match msg.role {
+            Role::Assistant if msg.tool_calls.as_ref().is_some_and(|calls| !calls.is_empty()) => {
+                let pending_ids: Vec<String> = msg
+                    .tool_calls
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|calls| calls.iter().map(|tc| tc.id.clone()))
+                    .collect();
+                let pending_set: HashSet<String> = pending_ids.iter().cloned().collect();
+                let mut seen = HashSet::new();
+                let mut tool_block = Vec::new();
+                let mut j = i + 1;
+
+                while j < original.len() && original[j].role == Role::Tool {
+                    let tool_msg = original[j].clone();
+                    match tool_msg.tool_call_id.as_ref() {
+                        Some(id) if pending_set.contains(id) && seen.insert(id.clone()) => {
+                            tool_block.push(tool_msg);
+                        }
+                        _ => {
+                            stray_results += 1;
+                        }
+                    }
+                    j += 1;
                 }
-            }
-        }
-    }
-    if !to_remove.is_empty() {
-        warn!(
-            orphaned_results = to_remove.len(),
-            "removing orphaned tool result messages with no preceding tool_calls"
-        );
-        for idx in to_remove.into_iter().rev() {
-            messages.remove(idx);
-        }
-    }
 
-    // Pass 2: Inject synthetic tool responses for assistant tool_calls
-    // that have no corresponding Role::Tool response.
-    let mut i = 0;
-    while i < messages.len() {
-        let pending_ids: Vec<String> = match &messages[i] {
-            ChatMessage {
-                role: Role::Assistant,
-                tool_calls: Some(calls),
-                ..
-            } if !calls.is_empty() => calls.iter().map(|tc| tc.id.clone()).collect(),
-            _ => {
-                i += 1;
-                continue;
-            }
-        };
+                sanitized.push(msg);
 
-        let mut outstanding: HashSet<String> = pending_ids.into_iter().collect();
-        let mut j = i + 1;
-        while j < messages.len() && messages[j].role == Role::Tool {
-            if let Some(ref id) = messages[j].tool_call_id {
-                outstanding.remove(id);
-            }
-            j += 1;
-        }
+                let mut missing: Vec<String> = pending_ids
+                    .into_iter()
+                    .filter(|id| !seen.contains(id))
+                    .collect();
+                missing.sort();
+                synthesized_results += missing.len();
 
-        if !outstanding.is_empty() {
-            warn!(
-                orphaned_count = outstanding.len(),
-                "injecting synthetic tool responses for orphaned tool_call(s)"
-            );
-            let mut orphaned: Vec<String> = outstanding.into_iter().collect();
-            orphaned.sort();
-            let count = orphaned.len();
-            for (offset, id) in orphaned.into_iter().enumerate() {
-                messages.insert(
-                    j + offset,
-                    ChatMessage {
+                sanitized.extend(tool_block);
+                for id in missing {
+                    sanitized.push(ChatMessage {
                         role: Role::Tool,
                         content: Some("[Tool call interrupted — no result available]".to_string()),
                         content_parts: None,
                         name: None,
                         tool_call_id: Some(id),
                         tool_calls: None,
-                    },
-                );
+                    });
+                }
+
+                i = j;
             }
-            i = j + count;
-        } else {
-            i = j;
+            Role::Tool => {
+                stray_results += 1;
+                i += 1;
+            }
+            _ => {
+                sanitized.push(msg);
+                i += 1;
+            }
         }
     }
+
+    if stray_results > 0 {
+        warn!(
+            stray_results,
+            "removing tool result messages outside contiguous assistant tool_call blocks"
+        );
+    }
+    if synthesized_results > 0 {
+        warn!(
+            synthesized_results,
+            "injecting synthetic tool responses for interrupted tool_call blocks"
+        );
+    }
+
+    *messages = sanitized;
 }
 
 fn build_user_message_parts(
@@ -1022,6 +1024,117 @@ mod attachment_prompt_tests {
             matches!(&parts[1], MessagePart::ImageUrl { image_url } if image_url.url == "https://example.test/photo.jpg")
         );
         assert_eq!(parts.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod tool_call_sanitizer_tests {
+    use super::*;
+    use rune_models::{FunctionCall, ToolCallRequest};
+
+    fn assistant_with_tool_calls(ids: &[&str]) -> ChatMessage {
+        ChatMessage {
+            role: Role::Assistant,
+            content: None,
+            content_parts: None,
+            name: None,
+            tool_call_id: None,
+            tool_calls: Some(
+                ids.iter()
+                    .map(|id| ToolCallRequest {
+                        id: (*id).to_string(),
+                        call_type: "function".to_string(),
+                        function: FunctionCall {
+                            name: "read".to_string(),
+                            arguments: "{}".to_string(),
+                        },
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    fn tool_result(id: &str, content: &str) -> ChatMessage {
+        ChatMessage {
+            role: Role::Tool,
+            content: Some(content.to_string()),
+            content_parts: None,
+            name: None,
+            tool_call_id: Some(id.to_string()),
+            tool_calls: None,
+        }
+    }
+
+    fn user_message(content: &str) -> ChatMessage {
+        ChatMessage {
+            role: Role::User,
+            content: Some(content.to_string()),
+            content_parts: None,
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }
+    }
+
+    #[test]
+    fn sanitize_tool_calls_drops_late_tool_results_outside_assistant_block() {
+        let mut messages = vec![
+            assistant_with_tool_calls(&["call-a"]),
+            user_message("intervening user message"),
+            tool_result("call-a", "late tool result"),
+        ];
+
+        sanitize_tool_calls(&mut messages);
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::Assistant);
+        assert_eq!(messages[1].role, Role::Tool);
+        assert_eq!(messages[1].tool_call_id.as_deref(), Some("call-a"));
+        assert_eq!(
+            messages[1].content.as_deref(),
+            Some("[Tool call interrupted — no result available]")
+        );
+        assert_eq!(messages[2].role, Role::User);
+    }
+
+    #[test]
+    fn sanitize_tool_calls_keeps_matching_contiguous_tool_results() {
+        let mut messages = vec![
+            assistant_with_tool_calls(&["call-a", "call-b"]),
+            tool_result("call-a", "result a"),
+            tool_result("call-b", "result b"),
+            user_message("next"),
+        ];
+
+        sanitize_tool_calls(&mut messages);
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, Role::Assistant);
+        assert_eq!(messages[1].tool_call_id.as_deref(), Some("call-a"));
+        assert_eq!(messages[2].tool_call_id.as_deref(), Some("call-b"));
+        assert_eq!(messages[3].role, Role::User);
+    }
+
+    #[test]
+    fn sanitize_tool_calls_replaces_invalid_tool_block_entries_with_synthetic_results() {
+        let mut messages = vec![
+            assistant_with_tool_calls(&["call-a", "call-b"]),
+            tool_result("call-a", "result a"),
+            tool_result("other", "wrong block result"),
+            user_message("next"),
+        ];
+
+        sanitize_tool_calls(&mut messages);
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, Role::Assistant);
+        assert_eq!(messages[1].tool_call_id.as_deref(), Some("call-a"));
+        assert_eq!(messages[2].tool_call_id.as_deref(), Some("call-b"));
+        assert_eq!(
+            messages[2].content.as_deref(),
+            Some("[Tool call interrupted — no result available]")
+        );
+        assert_eq!(messages[3].role, Role::User);
     }
 }
 
