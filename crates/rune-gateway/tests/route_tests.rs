@@ -50,9 +50,7 @@ use rune_gateway::ms365::{
 use rune_gateway::parse_memory_search_output;
 use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
 use rune_gateway::ws_rpc::RpcDispatcher;
-use rune_gateway::{
-    AppState, PeerHealthAlertCache, WebChatRateLimiter, build_router, pairing::DeviceRegistry,
-};
+use rune_gateway::{AppState, WebChatRateLimiter, build_router, pairing::DeviceRegistry};
 
 fn test_capabilities(tool_count: usize) -> Arc<Capabilities> {
     Arc::new(Capabilities {
@@ -1568,9 +1566,9 @@ fn build_test_app_parts_with_ms365_services(
                         .record(
                             provider,
                             model,
-                            None,
                             usage.prompt_tokens,
-                            usage.cached_prompt_tokens.unwrap_or(0),
+                            usage.cached_prompt_tokens,
+                            usage.uncached_prompt_tokens,
                         )
                         .await;
                 }
@@ -1638,7 +1636,6 @@ fn build_test_app_parts_with_ms365_services(
         ms365_users_service,
         comms_client: None,
         token_metrics,
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     (build_router(state, auth_token), device_repo)
@@ -1855,7 +1852,6 @@ async fn ws_rpc_status_matches_http_status_basics() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
@@ -1873,8 +1869,6 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert!(payload["config_paths"].is_object());
     assert_eq!(payload["lane_stats"]["main_active"], 1);
     assert_eq!(payload["lane_stats"]["main_capacity"], 4);
-    assert_eq!(payload["lane_stats"]["priority_active"], 0);
-    assert_eq!(payload["lane_stats"]["priority_capacity"], 16);
     assert_eq!(payload["lane_stats"]["subagent_active"], 0);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
     assert_eq!(payload["lane_stats"]["heartbeat_active"], 0);
@@ -1981,7 +1975,6 @@ enabled: true
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2062,10 +2055,8 @@ async fn status_reports_configured_lane_capacities() {
     let mut config = AppConfig::default();
     config.runtime.lanes = LaneQueueConfig {
         main_capacity: 6,
-        priority_capacity: 16,
         subagent_capacity: 9,
         cron_capacity: 128,
-        heartbeat_capacity: 1024,
         global_tool_capacity: 32,
         project_tool_capacity: 4,
     };
@@ -2113,7 +2104,6 @@ async fn status_reports_configured_lane_capacities() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -2130,7 +2120,6 @@ async fn status_reports_configured_lane_capacities() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload["lane_stats"]["main_capacity"], 6);
-    assert_eq!(payload["lane_stats"]["priority_capacity"], 16);
     assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
     assert_eq!(payload["lane_stats"]["heartbeat_capacity"], 1024);
@@ -2224,11 +2213,9 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let main_permit = lane_queue.acquire(Lane::Main).await;
-    let priority_permit = lane_queue.acquire(Lane::Priority).await;
     let subagent_permit = lane_queue.acquire(Lane::Subagent).await;
     let heartbeat_permit = lane_queue.acquire(Lane::Heartbeat).await;
     let tool_permit = lane_queue.acquire_tool(Some("project-a")).await;
@@ -2242,8 +2229,6 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["enabled"], true);
     assert_eq!(payload["lanes"]["main"]["active"], 1);
     assert_eq!(payload["lanes"]["main"]["capacity"], 2);
-    assert_eq!(payload["lanes"]["priority"]["active"], 1);
-    assert_eq!(payload["lanes"]["priority"]["capacity"], 16);
     assert_eq!(payload["lanes"]["subagent"]["active"], 1);
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
@@ -2255,7 +2240,6 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
 
     drop(main_permit);
-    drop(priority_permit);
     drop(subagent_permit);
     drop(heartbeat_permit);
     drop(tool_permit);
@@ -2344,7 +2328,6 @@ async fn ws_rpc_runtime_context_budget_reports_partition_usage_and_checkpoint() 
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2489,7 +2472,6 @@ async fn ws_rpc_runtime_context_budget_gc_compacts_and_returns_before_after_repo
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2610,7 +2592,6 @@ async fn ws_rpc_runtime_context_budget_gc_persists_checkpoint_when_store_path_is
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2738,7 +2719,6 @@ async fn ws_rpc_runtime_context_budget_rejects_invalid_items() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2883,7 +2863,6 @@ async fn ws_rpc_health_reports_session_count() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -2944,11 +2923,6 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
     let job_id = scheduler
         .add_job(rune_runtime::scheduler::Job {
             id: rune_core::JobId::new(),
-            max_retries: None,
-            retry_count: 0,
-            suppression_reason: None,
-            suppressed_at: None,
-            last_error: None,
             name: Some("daily-check".into()),
             schedule: rune_runtime::scheduler::Schedule::Cron {
                 expr: "0 0 9 * * *".into(),
@@ -3008,7 +2982,6 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3150,7 +3123,6 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3309,7 +3281,6 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3412,7 +3383,6 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3511,7 +3481,6 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let session_id = Uuid::new_v4();
@@ -3703,7 +3672,6 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -3821,7 +3789,6 @@ async fn approvals_list_route_includes_durable_resume_refs() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let approval_id = Uuid::now_v7();
@@ -3947,7 +3914,6 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -4107,7 +4073,6 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -4263,7 +4228,6 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -4384,7 +4348,6 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -7923,7 +7886,6 @@ async fn send_message_and_transcript_with_shared_state() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8276,31 +8238,6 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
         .await
         .unwrap();
 
-    transcript_repo
-        .append(NewTranscriptItem {
-            id: Uuid::now_v7(),
-            session_id: child_id,
-            turn_id: None,
-            seq: 1,
-            kind: "subagent_result".into(),
-            payload: json!({
-                "session_id": grandchild_id.to_string(),
-                "summary": "Queued runtime handoff captured",
-                "artifacts": [
-                    {
-                        "name": "handoff.md",
-                        "kind": "markdown",
-                        "uri": format!("memory://subagents/{}/handoff.md", grandchild_id),
-                        "content_type": "text/markdown",
-                        "description": "Queued handoff note for the grandchild subagent"
-                    }
-                ]
-            }),
-            created_at: now + chrono::TimeDelta::milliseconds(4),
-        })
-        .await
-        .unwrap();
-
     let device_repo = Arc::new(MemDeviceRepo::new());
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
@@ -8345,7 +8282,6 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8383,29 +8319,6 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     assert_eq!(child["subagent_runtime_attached"], true);
     assert_eq!(child["subagent_status_updated_at"], "2026-03-29T10:00:00Z");
     assert_eq!(child["subagent_last_note"], "Child subagent attached");
-    assert_eq!(child["orchestration_status"], "attached");
-    assert_eq!(child["delegation_depth"], 1);
-    assert_eq!(child["delegation_roles"], serde_json::json!([]));
-    assert_eq!(
-        child["latest_subagent_result"],
-        json!({
-            "session_id": grandchild_id.to_string(),
-            "summary": "Queued runtime handoff captured",
-            "recorded_at": (now + chrono::TimeDelta::milliseconds(4)).to_rfc3339(),
-            "artifacts": [
-                {
-                    "name": "handoff.md",
-                    "kind": "markdown",
-                    "uri": format!(
-                        "memory://subagents/{}/handoff.md",
-                        grandchild_id
-                    ),
-                    "content_type": "text/markdown",
-                    "description": "Queued handoff note for the grandchild subagent"
-                }
-            ]
-        })
-    );
 
     let grandchild = child["children"]
         .as_array()
@@ -8420,10 +8333,6 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     assert_eq!(grandchild["subagent_runtime_status"], "not_attached");
     assert_eq!(grandchild["subagent_runtime_attached"], false);
     assert_eq!(grandchild["subagent_last_note"], "Waiting for runtime");
-    assert_eq!(grandchild["orchestration_status"], "queued");
-    assert_eq!(grandchild["delegation_depth"], 1);
-    assert_eq!(grandchild["delegation_roles"], serde_json::json!([]));
-    assert_eq!(grandchild["latest_subagent_result"], Value::Null);
     assert_eq!(grandchild["children"].as_array().unwrap().len(), 0);
 
     let sibling = children
@@ -8432,9 +8341,6 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
         .unwrap();
     assert_eq!(sibling["kind"], "subagent");
     assert_eq!(sibling["status"], "completed");
-    assert_eq!(sibling["orchestration_status"], Value::Null);
-    assert_eq!(sibling["delegation_depth"], 1);
-    assert_eq!(sibling["delegation_roles"], serde_json::json!([]));
     assert_eq!(sibling["turn_count"], 0);
     assert_eq!(sibling["children"].as_array().unwrap().len(), 0);
 
@@ -8518,7 +8424,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         session_engine,
         turn_executor,
         session_repo: session_repo as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
         turn_repo: turn_repo as Arc<dyn TurnRepo>,
         model_provider,
         scheduler,
@@ -8552,33 +8458,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
-
-    transcript_repo
-        .append(NewTranscriptItem {
-            id: Uuid::now_v7(),
-            session_id,
-            turn_id: None,
-            seq: 1,
-            kind: "subagent_result".into(),
-            payload: json!({
-                "session_id": "99999999-9999-9999-9999-999999999999",
-                "summary": "Tests tightened and lifecycle audit trail captured",
-                "artifacts": [
-                    {
-                        "name": "review-notes.md",
-                        "kind": "markdown",
-                        "uri": "memory://subagents/99999999-9999-9999-9999-999999999999/review-notes.md",
-                        "content_type": "text/markdown",
-                        "description": "Follow-up notes from the delegated review pass"
-                    }
-                ]
-            }),
-            created_at: now + chrono::TimeDelta::milliseconds(1),
-        })
-        .await
-        .unwrap();
 
     let app = build_router(state, None);
     let response = app
@@ -8619,27 +8499,10 @@ async fn get_session_status_surfaces_subagent_metadata() {
         json["subagent_last_note"],
         "Steering message queued for subagent/session: tighten the tests"
     );
-    assert_eq!(json["audit"]["transcript_items"], 1);
+    assert_eq!(json["audit"]["transcript_items"], 0);
     assert_eq!(json["audit"]["status_notes"], 0);
-    assert_eq!(json["audit"]["last_transcript_at"].as_str().is_some(), true);
+    assert_eq!(json["audit"]["last_transcript_at"], Value::Null);
     assert_eq!(json["audit"]["last_operator_note"], Value::Null);
-    assert_eq!(
-        json["latest_subagent_result"],
-        json!({
-            "session_id": "99999999-9999-9999-9999-999999999999",
-            "summary": "Tests tightened and lifecycle audit trail captured",
-            "recorded_at": (now + chrono::TimeDelta::milliseconds(1)).to_rfc3339(),
-            "artifacts": [
-                {
-                    "name": "review-notes.md",
-                    "kind": "markdown",
-                    "uri": "memory://subagents/99999999-9999-9999-9999-999999999999/review-notes.md",
-                    "content_type": "text/markdown",
-                    "description": "Follow-up notes from the delegated review pass"
-                }
-            ]
-        })
-    );
     let unresolved = json["unresolved"].as_array().unwrap();
     assert!(unresolved.iter().any(|item| item.as_str()
         == Some("cost posture is estimate-only; provider pricing is not wired yet")));
@@ -8756,7 +8619,6 @@ async fn get_session_status_surfaces_orchestration_metadata() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8861,7 +8723,6 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -8951,137 +8812,6 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
     assert_eq!(project["prompt_tokens"], 1500);
     assert_eq!(project["completion_tokens"], 700);
     assert_eq!(project["request_count"], 2);
-
-    assert_eq!(json["project_cache"].as_array().unwrap().len(), 0);
-}
-
-#[tokio::test]
-async fn dashboard_usage_includes_project_cache_metrics() {
-    let session_repo = Arc::new(MemSessionRepo::new());
-    let turn_repo = Arc::new(MemTurnRepo::new());
-    let transcript_repo = Arc::new(MemTranscriptRepo::new());
-    let approval_repo = Arc::new(MemApprovalRepo::new());
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
-    let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(
-        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
-    );
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
-    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
-    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let turn_executor = Arc::new(
-        TurnExecutor::new(
-            session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo.clone() as Arc<dyn TurnRepo>,
-            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-            approval_repo.clone() as Arc<dyn ApprovalRepo>,
-            model_provider.clone(),
-            tool_executor,
-            tool_registry,
-            context_assembler,
-            compaction,
-        )
-        .with_default_model("fake-model"),
-    );
-    let event_tx = test_event_sender().clone();
-    let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        std::env::temp_dir(),
-        skill_registry.clone(),
-    ));
-    let device_repo = Arc::new(MemDeviceRepo::new());
-    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-    let token_metrics = TokenMetricsStore::new();
-    token_metrics
-        .record("openai", "gpt-4.1", Some("phoenix"), 1_000, 400)
-        .await;
-    token_metrics
-        .record("anthropic", "claude-sonnet-4", Some("phoenix"), 500, 100)
-        .await;
-    token_metrics
-        .record("openai", "gpt-4.1", Some("festivity"), 600, 300)
-        .await;
-
-    let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
-        started_at: Arc::new(Instant::now()),
-        session_engine,
-        turn_executor,
-        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
-        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
-        model_provider,
-        scheduler,
-        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-        reminder_store: Arc::new(ReminderStore::new()),
-        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
-            as Arc<dyn ToolApprovalPolicyRepo>,
-        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
-            as Arc<dyn ToolExecutionRepo>,
-        process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
-        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
-        device_registry,
-        skill_registry,
-        skill_loader,
-        plugin_registry,
-        plugin_loader,
-        hook_registry,
-        plugin_manager: None,
-        event_tx,
-        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
-        tts_engine: None,
-        stt_engine: None,
-        ms365_calendar_service: test_ms365_calendar_service(),
-        ms365_planner_service: test_ms365_planner_service(),
-        ms365_todo_service: test_ms365_todo_service(),
-        ms365_mail_service: test_ms365_mail_service(),
-        ms365_files_service: test_ms365_files_service(),
-        ms365_users_service: test_ms365_users_service(),
-        comms_client: None,
-        token_metrics,
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
-    };
-
-    let app = build_router(state, None);
-    let response = app
-        .oneshot(
-            Request::get("/api/dashboard/usage")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    let project_cache = json["project_cache"].as_array().unwrap();
-    assert_eq!(project_cache.len(), 2);
-
-    let festivity = project_cache
-        .iter()
-        .find(|entry| entry["project_id"] == "festivity")
-        .unwrap();
-    assert_eq!(festivity["total_input_tokens"], 600);
-    assert_eq!(festivity["cached_tokens"], 300);
-    assert_eq!(festivity["uncached_tokens"], 300);
-    assert_eq!(festivity["cache_hit_ratio_percent"], 50.0);
-
-    let phoenix = project_cache
-        .iter()
-        .find(|entry| entry["project_id"] == "phoenix")
-        .unwrap();
-    assert_eq!(phoenix["total_input_tokens"], 1500);
-    assert_eq!(phoenix["cached_tokens"], 500);
-    assert_eq!(phoenix["uncached_tokens"], 1000);
-    assert_eq!(
-        phoenix["cache_hit_ratio_percent"],
-        serde_json::json!((500.0 / 1500.0) * 100.0)
-    );
 }
 
 #[tokio::test]
@@ -10099,7 +9829,6 @@ async fn list_sessions_filters_by_channel_and_activity() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10592,7 +10321,6 @@ async fn reminders_list_includes_outcome_fields() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10705,7 +10433,6 @@ async fn reminders_cancel_returns_success() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -10835,7 +10562,6 @@ async fn agent_steer_success() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -11024,7 +10750,6 @@ async fn agent_kill_success() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -11060,250 +10785,6 @@ async fn agent_kill_success() {
             .unwrap()
             .contains("no longer needed")
     );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_cancelled_subagent_recovery_guidance() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "subagent",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "subagent_lifecycle": "cancelled",
-                            "subagent_runtime_status": "terminated",
-                            "subagent_runtime_attached": false,
-                            "subagent_last_note": "operator cancelled stale delegated work"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(
-        json["status_reason"],
-        "delegated work was cancelled explicitly; inspect the latest status note for the operator-provided reason"
-    );
-    assert_eq!(
-        json["next_task_reason"],
-        "operator cancelled stale delegated work"
-    );
-    assert_eq!(
-        json["resume_hint"],
-        "delegated work has been cancelled; spawn a replacement subagent or steer the parent session with a new plan"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_preempted_resume_hints() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "subagent",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "subagent_lifecycle": "preempted",
-                            "subagent_runtime_status": "parked",
-                            "subagent_runtime_attached": false,
-                            "subagent_last_note": "higher-priority operator request took over"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["status"], "ready");
-    assert_eq!(json["subagent_lifecycle"], "preempted");
-    assert_eq!(
-        json["status_reason"],
-        "higher-priority operator request took over"
-    );
-    assert_eq!(
-        json["resume_hint"],
-        "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
-    );
-}
-
-#[tokio::test]
-async fn agent_kill_rejects_invalid_terminal_transition() {
-    let session_repo = Arc::new(MemSessionRepo::new());
-    let transcript_repo = Arc::new(MemTranscriptRepo::new());
-
-    let now = chrono::Utc::now();
-    let agent_id = Uuid::now_v7();
-    session_repo
-        .create(rune_store::models::NewSession {
-            id: agent_id,
-            kind: "subagent".into(),
-            status: "completed".into(),
-            workspace_root: None,
-            channel_ref: None,
-            requester_session_id: None,
-            latest_turn_id: None,
-            runtime_profile: None,
-            policy_profile: None,
-            metadata: serde_json::json!({}),
-            created_at: now,
-            updated_at: now,
-            last_activity_at: now,
-        })
-        .await
-        .unwrap();
-
-    let turn_repo = Arc::new(MemTurnRepo::new());
-    let approval_repo = Arc::new(MemApprovalRepo::new());
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
-    let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(
-        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
-    );
-    let context_assembler = ContextAssembler::new("test");
-    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
-    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let turn_executor = Arc::new(
-        TurnExecutor::new(
-            session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo.clone() as Arc<dyn TurnRepo>,
-            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-            approval_repo.clone() as Arc<dyn ApprovalRepo>,
-            model_provider.clone(),
-            tool_executor,
-            tool_registry,
-            context_assembler,
-            compaction,
-        )
-        .with_default_model("fake-model"),
-    );
-    let event_tx = test_event_sender().clone();
-    let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        std::env::temp_dir(),
-        skill_registry.clone(),
-    ));
-    let device_repo = Arc::new(MemDeviceRepo::new());
-    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-
-    let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
-        started_at: Arc::new(Instant::now()),
-        session_engine,
-        turn_executor,
-        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-        turn_repo: turn_repo as Arc<dyn TurnRepo>,
-        model_provider,
-        scheduler,
-        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-        reminder_store: Arc::new(ReminderStore::new()),
-        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
-            as Arc<dyn ToolApprovalPolicyRepo>,
-        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
-            as Arc<dyn ToolExecutionRepo>,
-        process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
-        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
-        device_registry,
-        skill_registry,
-        skill_loader,
-        plugin_registry,
-        plugin_loader,
-        hook_registry,
-        plugin_manager: None,
-        event_tx,
-        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
-        tts_engine: None,
-        stt_engine: None,
-        ms365_calendar_service: test_ms365_calendar_service(),
-        ms365_planner_service: test_ms365_planner_service(),
-        ms365_todo_service: test_ms365_todo_service(),
-        ms365_mail_service: test_ms365_mail_service(),
-        ms365_files_service: test_ms365_files_service(),
-        ms365_users_service: test_ms365_users_service(),
-        comms_client: None,
-        token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
-    };
-
-    let app = build_router(state, None);
-
-    let response = app
-        .oneshot(
-            Request::post(format!("/agents/{agent_id}/kill"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"reason":"too late"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let json = body_json(response).await;
-    assert_eq!(json["code"], "bad_request");
-    assert!(
-        json["message"]
-            .as_str()
-            .unwrap()
-            .contains("invalid session transition")
-    );
-
-    let session = session_repo.find_by_id(agent_id).await.unwrap();
-    assert_eq!(session.status, "completed");
-    let items = transcript_repo.list_by_session(agent_id).await.unwrap();
-    assert!(items.is_empty());
 }
 
 #[tokio::test]
@@ -11431,7 +10912,6 @@ async fn ws_rpc_agent_steer_and_kill() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -11998,148 +11478,6 @@ Met Hamza at Horizon Tech
 }
 
 #[tokio::test]
-async fn memory_search_route_excludes_private_results_by_default() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(
-        tmp.path().join("MEMORY.md"),
-        "# Memory
-Met Hamza at Horizon Tech
-",
-    )
-    .unwrap();
-    std::fs::create_dir_all(tmp.path().join("memory/private")).unwrap();
-    std::fs::write(
-        tmp.path().join("memory/private/secret.md"),
-        "# Private
-borrow checker patterns from private notes
-",
-    )
-    .unwrap();
-
-    let mut config = AppConfig::default();
-    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
-
-    let app = build_test_app_with_config(config, None);
-    let response = app
-        .oneshot(
-            Request::get("/api/memory/search?q=borrow&limit=5")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response).await;
-    let results = body["results"].as_array().unwrap();
-    assert!(results.is_empty());
-}
-
-#[tokio::test]
-async fn memory_search_route_can_include_private_results_explicitly() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(
-        tmp.path().join("MEMORY.md"),
-        "# Memory
-Met Hamza at Horizon Tech
-",
-    )
-    .unwrap();
-    std::fs::create_dir_all(tmp.path().join("memory/private")).unwrap();
-    std::fs::write(
-        tmp.path().join("memory/private/secret.md"),
-        "# Private
-borrow checker patterns from private notes
-",
-    )
-    .unwrap();
-
-    let mut config = AppConfig::default();
-    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
-
-    let app = build_test_app_with_config(config, None);
-    let response = app
-        .oneshot(
-            Request::get("/api/memory/search?q=borrow&limit=5&include_private=true")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response).await;
-    let results = body["results"].as_array().unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["file_path"], "memory/private/secret.md");
-}
-
-#[tokio::test]
-async fn memory_search_route_disables_remote_fanout_when_requested() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(
-        tmp.path().join("MEMORY.md"),
-        "# Memory
-Met Hamza at Horizon Tech
-",
-    )
-    .unwrap();
-    std::fs::create_dir_all(tmp.path().join("memory")).unwrap();
-
-    let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let peer_addr = peer_listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let payload = serde_json::json!({
-            "query": "Hamza",
-            "results": [
-                {
-                    "source": "memory/2026-03-27.md#4",
-                    "file_path": "memory/2026-03-27.md",
-                    "line": 4,
-                    "snippet": "Learned shared borrow checker pattern from remote peer",
-                    "instance_id": "peer-a",
-                    "instance_name": "Peer A",
-                    "remote": true
-                }
-            ],
-            "message": "Found 1 memory result(s)"
-        });
-        let app = axum::Router::new().route(
-            "/api/memory/search",
-            axum::routing::get(move || {
-                let payload = payload.clone();
-                async move { axum::Json(payload) }
-            }),
-        );
-        axum::serve(peer_listener, app).await.unwrap();
-    });
-
-    let mut config = AppConfig::default();
-    config.agents.defaults.workspace = Some(tmp.path().display().to_string());
-    config.instance.peers = vec![rune_config::PeerConfig {
-        id: "peer-a".to_string(),
-        health_url: format!("http://{peer_addr}/api/v1/instance/health"),
-    }];
-
-    let app = build_test_app_with_config(config, None);
-    let response = app
-        .oneshot(
-            Request::get("/api/memory/search?q=Hamza&limit=5&include_remote=false")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response).await;
-    assert_eq!(body["local_results"], 1);
-    assert_eq!(body["remote_results"], 0);
-    assert_eq!(body["remote_pending"], 0);
-    assert_eq!(body["results"].as_array().unwrap().len(), 1);
-}
-
-#[tokio::test]
 async fn memory_search_route_requires_query_param() {
     let app = build_test_app(None);
     let response = app
@@ -12430,7 +11768,6 @@ async fn transcript_route_filters_entries_after_cursor() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -12885,7 +12222,6 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_browser_tokens_across_se
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13022,7 +12358,6 @@ async fn ws_rpc_session_send_rate_limits_shared_webchat_browser_token_across_ses
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13144,7 +12479,6 @@ async fn ws_rpc_processes_log_surfaces_output() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13254,7 +12588,6 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13378,7 +12711,6 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13780,7 +13112,6 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -13945,7 +13276,6 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -14067,7 +13397,6 @@ async fn ws_rpc_session_resolve_merges_metadata_for_existing_channel_session() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let dispatcher = RpcDispatcher::new(state);
@@ -14178,7 +13507,6 @@ async fn api_tool_execution_route_returns_persisted_execution() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -14397,7 +13725,6 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let session_id = Uuid::now_v7();
@@ -14703,7 +14030,6 @@ async fn native_comms_send_inbox_and_ack_flow() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: Some(client.clone()),
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
     let app = build_router(app_state, None);
 
@@ -15217,22 +14543,14 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
             id: Uuid::now_v7(),
             session_id: child_id,
             turn_id: None,
-            seq: 1,
+            seq: 0,
             kind: "subagent_result".into(),
             payload: serde_json::json!({
-                "session_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
-                "summary": "Delegated review completed with reroute notes",
-                "artifacts": [
-                    {
-                        "name": "handoff.md",
-                        "kind": "markdown",
-                        "uri": "memory://subagents/cccccccc-cccc-cccc-cccc-cccccccccccc/handoff.md",
-                        "content_type": "text/markdown",
-                        "description": "Reroute summary for the parent operator"
-                    }
-                ]
+                "content": "Delegated architect found the missing result-routing summary and attached an audit-friendly excerpt for the parent tree."
             }),
-            created_at: now + chrono::TimeDelta::milliseconds(1),
+            created_at: chrono::DateTime::parse_from_rfc3339("2026-03-29T12:05:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
         })
         .await
         .unwrap();
@@ -15277,7 +14595,6 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -15311,20 +14628,13 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
     assert_eq!(child["subagent_runtime_attached"], false);
     assert_eq!(child["subagent_status_updated_at"], "2026-03-29T12:00:00Z");
     assert_eq!(
-        child["latest_subagent_result"],
-        serde_json::json!({
-            "session_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
-            "summary": "Delegated review completed with reroute notes",
-            "artifacts": [
-                {
-                    "name": "handoff.md",
-                    "kind": "markdown",
-                    "uri": "memory://subagents/cccccccc-cccc-cccc-cccc-cccccccccccc/handoff.md",
-                    "content_type": "text/markdown",
-                    "description": "Reroute summary for the parent operator"
-                }
-            ]
-        })
+        child["subagent_last_note"],
+        "Review result routing before resuming"
+    );
+    assert_eq!(child["last_subagent_result_at"], "2026-03-29T12:05:00+00:00");
+    assert_eq!(
+        child["last_subagent_result_excerpt"],
+        "Delegated architect found the missing result-routing summary and attached an audit-friendly excerpt for the parent tree."
     );
 }
 
@@ -15502,156 +14812,19 @@ async fn session_status_route_surfaces_subagent_audit_summary() {
         })
         .await
         .unwrap();
-
-    let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
-        started_at: Arc::new(Instant::now()),
-        session_engine,
-        turn_executor,
-        session_repo: session_repo as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
-        turn_repo: turn_repo as Arc<dyn TurnRepo>,
-        model_provider,
-        scheduler,
-        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-        reminder_store: Arc::new(ReminderStore::new()),
-        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
-            as Arc<dyn ToolApprovalPolicyRepo>,
-        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
-            as Arc<dyn ToolExecutionRepo>,
-        process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
-        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
-        device_registry,
-        skill_registry,
-        skill_loader,
-        plugin_registry,
-        plugin_loader,
-        hook_registry,
-        plugin_manager: None,
-        event_tx,
-        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
-        tts_engine: None,
-        stt_engine: None,
-        ms365_calendar_service: test_ms365_calendar_service(),
-        ms365_planner_service: test_ms365_planner_service(),
-        ms365_todo_service: test_ms365_todo_service(),
-        ms365_mail_service: test_ms365_mail_service(),
-        ms365_files_service: test_ms365_files_service(),
-        ms365_users_service: test_ms365_users_service(),
-        comms_client: None,
-        token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
-    };
-
-    let app = build_router(state, None);
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["audit"]["transcript_items"], 2);
-    assert_eq!(json["audit"]["status_notes"], 1);
-    assert_eq!(
-        json["audit"]["last_transcript_at"],
-        "2026-03-29T12:03:00+00:00"
-    );
-    assert_eq!(
-        json["audit"]["last_operator_note"],
-        "Operator asked for a tighter review pass"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_latest_subagent_result_timestamp() {
-    let session_repo = Arc::new(MemSessionRepo::new());
-    let turn_repo = Arc::new(MemTurnRepo::new());
-    let transcript_repo = Arc::new(MemTranscriptRepo::new());
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
-    let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(
-        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
-    );
-    let context_assembler = ContextAssembler::new("test");
-    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
-    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let approval_repo = Arc::new(MemApprovalRepo::new());
-    let turn_executor = Arc::new(
-        TurnExecutor::new(
-            session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo.clone() as Arc<dyn TurnRepo>,
-            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-            approval_repo.clone() as Arc<dyn ApprovalRepo>,
-            model_provider.clone(),
-            tool_executor,
-            tool_registry,
-            context_assembler,
-            compaction,
-        )
-        .with_default_model("fake-model"),
-    );
-    let event_tx = test_event_sender().clone();
-    let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        std::env::temp_dir(),
-        skill_registry.clone(),
-    ));
-    let device_repo = Arc::new(MemDeviceRepo::new());
-    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-
-    let session_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
-    let now = chrono::DateTime::parse_from_rfc3339("2026-03-29T12:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let result_recorded_at = chrono::DateTime::parse_from_rfc3339("2026-03-29T12:04:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    session_repo
-        .create(NewSession {
-            id: session_id,
-            kind: "subagent".into(),
-            status: "running".into(),
-            workspace_root: None,
-            channel_ref: None,
-            requester_session_id: Some(
-                Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
-            ),
-            latest_turn_id: None,
-            runtime_profile: None,
-            policy_profile: None,
-            metadata: serde_json::json!({
-                "subagent_lifecycle": "steered",
-                "subagent_runtime_status": "running",
-                "subagent_runtime_attached": true
-            }),
-            created_at: now,
-            updated_at: now,
-            last_activity_at: now,
-        })
-        .await
-        .unwrap();
     transcript_repo
         .append(NewTranscriptItem {
             id: Uuid::now_v7(),
             session_id,
             turn_id: None,
-            seq: 0,
+            seq: 2,
             kind: "subagent_result".into(),
-            payload: json!({
-                "session_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
-                "summary": "Delegated work completed with a clean verification pass"
+            payload: serde_json::json!({
+                "content": "Identified result routing gap: parent session lacks last delegated outcome summary when descendant completes."
             }),
-            created_at: result_recorded_at,
+            created_at: chrono::DateTime::parse_from_rfc3339("2026-03-29T12:04:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
         })
         .await
         .unwrap();
@@ -15696,7 +14869,6 @@ async fn session_status_route_surfaces_latest_subagent_result_timestamp() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
     };
 
     let app = build_router(state, None);
@@ -15711,1137 +14883,23 @@ async fn session_status_route_surfaces_latest_subagent_result_timestamp() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
+    assert_eq!(json["audit"]["transcript_items"], 3);
+    assert_eq!(json["audit"]["status_notes"], 1);
+    assert_eq!(json["audit"]["subagent_results"], 1);
     assert_eq!(
-        json["latest_subagent_result"]["recorded_at"],
-        result_recorded_at.to_rfc3339()
-    );
-}
-
-#[tokio::test]
-async fn submit_delegation_task_returns_running_state_and_persists_status() {
-    let (app, _) = build_test_app_parts(AppConfig::default(), Some("test-token".to_string()));
-    let request = json!({
-        "task_id": format!("delegation-test-{}", Uuid::now_v7()),
-        "protocol_version": 1,
-        "submitted_at": chrono::Utc::now().to_rfc3339(),
-        "sender": {
-            "instance_id": "sender-a",
-            "instance_name": "Sender A",
-            "transport": "http",
-            "capabilities_version": 1,
-            "capability_hash": "cap-sender-a",
-            "health_url": "http://sender-a/api/v1/instance/health",
-            "submit_url": "http://sender-a/api/v1/instance/delegations",
-            "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
-        },
-        "task": {
-            "task": "Implement delegated work",
-            "constraints": ["run cargo check"],
-            "expected_output": "summary",
-            "timeout_secs": 60,
-            "target_peer_id": "peer-b",
-            "branch_reservation": "agent/rune/delegation-test",
-            "file_locks": ["crates/rune-gateway/src/routes.rs"],
-            "artifacts": []
-        }
-    });
-    let accepted_at_before = chrono::Utc::now();
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/instance/delegations")
-                .header(header::AUTHORIZATION, "Bearer test-token")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(request.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let envelope = body_json(response).await;
-    assert_eq!(envelope["result"]["status"], "running");
-    assert_eq!(envelope["receiver"]["instance_id"], "peer-b");
-    assert!(envelope["result"]["started_at"].is_string());
-    assert!(envelope["result"]["finished_at"].is_null());
-    let task_id = envelope["result"]["task_id"].as_str().unwrap().to_string();
-
-    let status_response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!("/api/v1/instance/delegations/{task_id}"))
-                .header(header::AUTHORIZATION, "Bearer test-token")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(status_response.status(), StatusCode::OK);
-    let status_envelope = body_json(status_response).await;
-    assert_eq!(status_envelope["result"]["status"], "running");
-    let accepted_at = chrono::DateTime::parse_from_rfc3339(
-        status_envelope["result"]["accepted_at"].as_str().unwrap(),
-    )
-    .unwrap()
-    .with_timezone(&chrono::Utc);
-    assert!(accepted_at >= accepted_at_before);
-}
-
-#[tokio::test]
-async fn delegation_task_status_transitions_to_timeout_after_deadline() {
-    let (app, _) = build_test_app_parts(AppConfig::default(), Some("test-token".to_string()));
-    let task_id = format!("delegation-timeout-{}", Uuid::now_v7());
-    let request = json!({
-        "task_id": task_id,
-        "protocol_version": 1,
-        "submitted_at": chrono::Utc::now().to_rfc3339(),
-        "sender": {
-            "instance_id": "sender-a",
-            "instance_name": "Sender A",
-            "transport": "http",
-            "capabilities_version": 1,
-            "capability_hash": "cap-sender-a",
-            "health_url": null,
-            "submit_url": null,
-            "result_url": null
-        },
-        "task": {
-            "task": "Implement delegated work",
-            "constraints": [],
-            "expected_output": "summary",
-            "timeout_secs": 1,
-            "target_peer_id": "peer-b",
-            "branch_reservation": null,
-            "file_locks": [],
-            "artifacts": []
-        }
-    });
-
-    let submit_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/instance/delegations")
-                .header(header::AUTHORIZATION, "Bearer test-token")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(request.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(submit_response.status(), StatusCode::CREATED);
-
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    let status_response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!("/api/v1/instance/delegations/{task_id}"))
-                .header(header::AUTHORIZATION, "Bearer test-token")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(status_response.status(), StatusCode::OK);
-    let status_envelope = body_json(status_response).await;
-    assert_eq!(status_envelope["result"]["status"], "timeout");
-    assert_eq!(
-        status_envelope["result"]["error"]["code"],
-        "deadline_exceeded"
-    );
-    assert!(status_envelope["result"]["finished_at"].is_string());
-}
-
-#[tokio::test]
-async fn submit_delegation_task_rejects_zero_timeout() {
-    let (app, _) = build_test_app_parts(AppConfig::default(), Some("test-token".to_string()));
-    let request = json!({
-        "task_id": format!("delegation-zero-timeout-{}", Uuid::now_v7()),
-        "protocol_version": 1,
-        "submitted_at": chrono::Utc::now().to_rfc3339(),
-        "sender": {
-            "instance_id": "sender-a",
-            "instance_name": "Sender A",
-            "transport": "http",
-            "capabilities_version": 1,
-            "capability_hash": "cap-sender-a",
-            "health_url": null,
-            "submit_url": null,
-            "result_url": null
-        },
-        "task": {
-            "task": "Implement delegated work",
-            "constraints": [],
-            "expected_output": "summary",
-            "timeout_secs": 0,
-            "target_peer_id": null,
-            "branch_reservation": null,
-            "file_locks": [],
-            "artifacts": []
-        }
-    });
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/instance/delegations")
-                .header(header::AUTHORIZATION, "Bearer test-token")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(request.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = body_json(response).await;
-    let message = body["message"]
-        .as_str()
-        .or_else(|| body["error"]["message"].as_str())
-        .unwrap();
-    assert!(message.contains("timeout_secs must be greater than zero"));
-}
-
-#[tokio::test]
-async fn get_session_status_surfaces_approval_block_reason_and_resume_hint() {
-    let session_repo = Arc::new(MemSessionRepo::new());
-    let turn_repo = Arc::new(MemTurnRepo::new());
-    let transcript_repo = Arc::new(MemTranscriptRepo::new());
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
-    let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(
-        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
-    );
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
-    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
-    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let approval_repo = Arc::new(MemApprovalRepo::new());
-    let turn_executor = Arc::new(
-        TurnExecutor::new(
-            session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo.clone() as Arc<dyn TurnRepo>,
-            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-            approval_repo.clone() as Arc<dyn ApprovalRepo>,
-            model_provider.clone(),
-            tool_executor,
-            tool_registry,
-            context_assembler,
-            compaction,
-        )
-        .with_default_model("fake-model"),
-    );
-    let event_tx = test_event_sender().clone();
-    let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        std::env::temp_dir(),
-        skill_registry.clone(),
-    ));
-    let device_repo = Arc::new(MemDeviceRepo::new());
-    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-
-    let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
-        started_at: Arc::new(Instant::now()),
-        session_engine,
-        turn_executor,
-        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
-        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
-        model_provider,
-        scheduler,
-        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-        reminder_store: Arc::new(ReminderStore::new()),
-        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
-            as Arc<dyn ToolApprovalPolicyRepo>,
-        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
-            as Arc<dyn ToolExecutionRepo>,
-        process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
-        device_repo: device_repo as Arc<dyn DeviceRepo>,
-        device_registry,
-        skill_registry,
-        skill_loader,
-        plugin_registry,
-        plugin_loader,
-        hook_registry,
-        plugin_manager: None,
-        event_tx,
-        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
-        tts_engine: None,
-        stt_engine: None,
-        ms365_calendar_service: test_ms365_calendar_service(),
-        ms365_planner_service: test_ms365_planner_service(),
-        ms365_todo_service: test_ms365_todo_service(),
-        ms365_mail_service: test_ms365_mail_service(),
-        ms365_files_service: test_ms365_files_service(),
-        ms365_users_service: test_ms365_users_service(),
-        comms_client: None,
-        token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
-    };
-
-    let now = chrono::Utc::now();
-    let session = session_repo
-        .create(NewSession {
-            id: Uuid::now_v7(),
-            kind: "direct".to_string(),
-            status: "waiting_for_approval".to_string(),
-            workspace_root: None,
-            channel_ref: None,
-            requester_session_id: None,
-            latest_turn_id: None,
-            runtime_profile: None,
-            policy_profile: None,
-            metadata: serde_json::json!({
-                "approval_mode": "manual",
-            }),
-            created_at: now,
-            updated_at: now,
-            last_activity_at: now,
-        })
-        .await
-        .unwrap();
-
-    let app = build_router(state, None);
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{}/status", session.id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["status"], "waiting_for_approval");
-    assert_eq!(
-        json["status_reason"],
-        "blocked on operator approval (manual); resume after an approval decision is recorded"
+        json["audit"]["last_transcript_at"],
+        "2026-03-29T12:04:00+00:00"
     );
     assert_eq!(
-        json["resume_hint"],
-        "decide the pending approval, then call the approval resume path or send the next operator instruction"
-    );
-}
-
-#[tokio::test]
-async fn get_session_status_surfaces_subagent_resume_hint() {
-    let session_repo = Arc::new(MemSessionRepo::new());
-    let turn_repo = Arc::new(MemTurnRepo::new());
-    let transcript_repo = Arc::new(MemTranscriptRepo::new());
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
-    let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(
-        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
-    );
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
-    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
-    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let approval_repo = Arc::new(MemApprovalRepo::new());
-    let turn_executor = Arc::new(
-        TurnExecutor::new(
-            session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo.clone() as Arc<dyn TurnRepo>,
-            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-            approval_repo.clone() as Arc<dyn ApprovalRepo>,
-            model_provider.clone(),
-            tool_executor,
-            tool_registry,
-            context_assembler,
-            compaction,
-        )
-        .with_default_model("fake-model"),
-    );
-    let event_tx = test_event_sender().clone();
-    let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        std::env::temp_dir(),
-        skill_registry.clone(),
-    ));
-    let device_repo = Arc::new(MemDeviceRepo::new());
-    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-
-    let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
-        started_at: Arc::new(Instant::now()),
-        session_engine,
-        turn_executor,
-        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
-        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
-        model_provider,
-        scheduler,
-        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-        reminder_store: Arc::new(ReminderStore::new()),
-        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
-            as Arc<dyn ToolApprovalPolicyRepo>,
-        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
-            as Arc<dyn ToolExecutionRepo>,
-        process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
-        device_repo: device_repo as Arc<dyn DeviceRepo>,
-        device_registry,
-        skill_registry,
-        skill_loader,
-        plugin_registry,
-        plugin_loader,
-        hook_registry,
-        plugin_manager: None,
-        event_tx,
-        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
-        tts_engine: None,
-        stt_engine: None,
-        ms365_calendar_service: test_ms365_calendar_service(),
-        ms365_planner_service: test_ms365_planner_service(),
-        ms365_todo_service: test_ms365_todo_service(),
-        ms365_mail_service: test_ms365_mail_service(),
-        ms365_files_service: test_ms365_files_service(),
-        ms365_users_service: test_ms365_users_service(),
-        comms_client: None,
-        token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
-    };
-
-    let now = chrono::Utc::now();
-    let session = session_repo
-        .create(NewSession {
-            id: Uuid::now_v7(),
-            kind: "subagent".to_string(),
-            status: "waiting_for_subagent".to_string(),
-            workspace_root: None,
-            channel_ref: None,
-            requester_session_id: Some(Uuid::now_v7()),
-            latest_turn_id: None,
-            runtime_profile: None,
-            policy_profile: None,
-            metadata: serde_json::json!({
-                "subagent_lifecycle": "queued",
-            }),
-            created_at: now,
-            updated_at: now,
-            last_activity_at: now,
-        })
-        .await
-        .unwrap();
-
-    let app = build_router(state, None);
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{}/status", session.id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["status"], "ready");
-    assert_eq!(
-        json["status_reason"],
-        "waiting for delegated work to progress (queued)"
+        json["audit"]["last_operator_note"],
+        "Operator asked for a tighter review pass"
     );
     assert_eq!(
-        json["resume_hint"],
-        "check child session status; current delegated lifecycle is queued"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_next_task_reason_for_approval_pause() {
-    let session_repo = Arc::new(MemSessionRepo::new());
-    let turn_repo = Arc::new(MemTurnRepo::new());
-    let transcript_repo = Arc::new(MemTranscriptRepo::new());
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
-    let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(
-        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
-    );
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
-    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
-    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let approval_repo = Arc::new(MemApprovalRepo::new());
-    let turn_executor = Arc::new(
-        TurnExecutor::new(
-            session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo.clone() as Arc<dyn TurnRepo>,
-            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-            approval_repo.clone() as Arc<dyn ApprovalRepo>,
-            model_provider.clone(),
-            tool_executor,
-            tool_registry,
-            context_assembler,
-            compaction,
-        )
-        .with_default_model("fake-model"),
-    );
-    let event_tx = test_event_sender().clone();
-    let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        std::env::temp_dir(),
-        skill_registry.clone(),
-    ));
-    let device_repo = Arc::new(MemDeviceRepo::new());
-    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-
-    let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
-        started_at: Arc::new(Instant::now()),
-        session_engine,
-        turn_executor,
-        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
-        turn_repo: turn_repo.clone() as Arc<dyn TurnRepo>,
-        model_provider,
-        scheduler,
-        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-        reminder_store: Arc::new(ReminderStore::new()),
-        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
-            as Arc<dyn ToolApprovalPolicyRepo>,
-        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
-            as Arc<dyn ToolExecutionRepo>,
-        process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
-        device_repo: device_repo as Arc<dyn DeviceRepo>,
-        device_registry,
-        skill_registry,
-        skill_loader,
-        plugin_registry,
-        plugin_loader,
-        hook_registry,
-        plugin_manager: None,
-        event_tx,
-        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
-        tts_engine: None,
-        stt_engine: None,
-        ms365_calendar_service: test_ms365_calendar_service(),
-        ms365_planner_service: test_ms365_planner_service(),
-        ms365_todo_service: test_ms365_todo_service(),
-        ms365_mail_service: test_ms365_mail_service(),
-        ms365_files_service: test_ms365_files_service(),
-        ms365_users_service: test_ms365_users_service(),
-        comms_client: None,
-        token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
-    };
-
-    let now = chrono::Utc::now();
-    let session = session_repo
-        .create(NewSession {
-            id: Uuid::now_v7(),
-            kind: "direct".to_string(),
-            status: "waiting_for_approval".to_string(),
-            workspace_root: None,
-            channel_ref: None,
-            requester_session_id: None,
-            latest_turn_id: None,
-            runtime_profile: None,
-            policy_profile: None,
-            metadata: serde_json::json!({
-                "approval_mode": "manual",
-            }),
-            created_at: now,
-            updated_at: now,
-            last_activity_at: now,
-        })
-        .await
-        .unwrap();
-
-    let app = build_router(state, None);
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{}/status", session.id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(
-        json["next_task_reason"],
-        "next action is approval handling because execution is explicitly blocked until an operator decision is recorded"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_next_task_reason_for_preempted_work() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "subagent",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "subagent_lifecycle": "preempted",
-                            "subagent_runtime_status": "parked",
-                            "subagent_runtime_attached": false,
-                            "subagent_last_note": "higher-priority operator request took over"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(
-        json["next_task_reason"],
-        "higher-priority operator request took over"
-    );
-}
-
-#[tokio::test]
-async fn ws_rpc_session_status_surfaces_next_task_reason_and_resume_fields() {
-    use rune_gateway::logging::LogStore;
-    use rune_gateway::tool_execution_repo::InMemoryToolExecutionRepo;
-    use rune_gateway::ws_rpc::RpcDispatcher;
-
-    let session_repo = Arc::new(MemSessionRepo::new());
-    let turn_repo = Arc::new(MemTurnRepo::new());
-    let transcript_repo = Arc::new(MemTranscriptRepo::new());
-    let approval_repo = Arc::new(MemApprovalRepo::new());
-    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
-    let scheduler = Arc::new(Scheduler::new());
-    let session_engine = Arc::new(
-        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
-    );
-    let context_assembler = ContextAssembler::new("You are a test assistant.");
-    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
-    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let turn_executor = Arc::new(
-        TurnExecutor::new(
-            session_repo.clone() as Arc<dyn SessionRepo>,
-            turn_repo.clone() as Arc<dyn TurnRepo>,
-            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
-            approval_repo.clone() as Arc<dyn ApprovalRepo>,
-            model_provider.clone(),
-            tool_executor,
-            tool_registry,
-            context_assembler,
-            compaction,
-        )
-        .with_default_model("fake-model"),
-    );
-    let event_tx = test_event_sender().clone();
-    let skill_registry = Arc::new(SkillRegistry::new());
-    let skill_loader = Arc::new(SkillLoader::new(
-        std::env::temp_dir(),
-        skill_registry.clone(),
-    ));
-    let device_repo = Arc::new(MemDeviceRepo::new());
-    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
-    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
-
-    let state = AppState {
-        config: Arc::new(RwLock::new(AppConfig::default())),
-        started_at: Arc::new(Instant::now()),
-        session_engine,
-        turn_executor,
-        session_repo: session_repo.clone() as Arc<dyn SessionRepo>,
-        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
-        turn_repo: turn_repo as Arc<dyn TurnRepo>,
-        model_provider,
-        scheduler,
-        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
-        reminder_store: Arc::new(ReminderStore::new()),
-        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
-        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
-            as Arc<dyn ToolApprovalPolicyRepo>,
-        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
-            as Arc<dyn ToolExecutionRepo>,
-        process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
-        capabilities: test_capabilities(0),
-        device_repo: device_repo as Arc<dyn DeviceRepo>,
-        device_registry,
-        skill_registry,
-        skill_loader,
-        plugin_registry,
-        plugin_loader,
-        hook_registry,
-        plugin_manager: None,
-        event_tx,
-        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
-        tts_engine: None,
-        stt_engine: None,
-        ms365_calendar_service: test_ms365_calendar_service(),
-        ms365_planner_service: test_ms365_planner_service(),
-        ms365_todo_service: test_ms365_todo_service(),
-        ms365_mail_service: test_ms365_mail_service(),
-        ms365_files_service: test_ms365_files_service(),
-        ms365_users_service: test_ms365_users_service(),
-        comms_client: None,
-        token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: PeerHealthAlertCache::new(),
-    };
-
-    let now = chrono::Utc::now();
-    let session_id = Uuid::now_v7();
-    session_repo
-        .create(NewSession {
-            id: session_id,
-            kind: "subagent".into(),
-            status: "waiting_for_subagent".into(),
-            workspace_root: Some(std::env::temp_dir().to_string_lossy().to_string()),
-            channel_ref: None,
-            requester_session_id: None,
-            latest_turn_id: None,
-            runtime_profile: None,
-            policy_profile: None,
-            metadata: serde_json::json!({
-                "subagent_lifecycle": "queued"
-            }),
-            created_at: now,
-            updated_at: now,
-            last_activity_at: now,
-        })
-        .await
-        .unwrap();
-
-    let dispatcher = RpcDispatcher::new(state);
-    let result = dispatcher
-        .dispatch(
-            "session.status",
-            serde_json::json!({ "session_id": session_id }),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(
-        result["status_reason"],
-        "waiting for delegated work to progress (queued)"
+        json["audit"]["last_subagent_result_at"],
+        "2026-03-29T12:04:00+00:00"
     );
     assert_eq!(
-        result["next_task_reason"],
-        "next action follows delegated session lifecycle: queued"
-    );
-    assert_eq!(
-        result["resume_hint"],
-        "check child session status; current delegated lifecycle is queued"
-    );
-}
-
-
-#[tokio::test]
-async fn session_status_route_surfaces_stall_reason_for_backoff_active_turn() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "direct",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "suppression_reason": "backoff_active",
-                            "operator_note": "Previous turn failed repeatedly. Backing off before retrying again (attempt 2, next retry at 2026-04-01T18:00:00Z)."
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(
-        json["status_reason"],
-        "Previous turn failed repeatedly. Backing off before retrying again (attempt 2, next retry at 2026-04-01T18:00:00Z)."
-    );
-    assert_eq!(
-        json["next_task_reason"],
-        "Previous turn failed repeatedly. Backing off before retrying again (attempt 2, next retry at 2026-04-01T18:00:00Z)."
-    );
-    assert_eq!(
-        json["resume_hint"],
-        "wait for the retry backoff window to expire before retrying this stalled turn"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_startup_restore_reason_for_waiting_subagent() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "subagent",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "subagent_lifecycle": "running",
-                            "subagent_runtime_attached": false,
-                            "subagent_status_updated_at": "2026-04-01T18:00:00Z"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["status"], "ready");
-    assert_eq!(json["subagent_lifecycle"], "running");
-    assert_eq!(json["subagent_runtime_attached"], false);
-    assert_eq!(
-        json["status_reason"],
-        "waiting for delegated work to progress (running; runtime reattachment pending after restart)"
-    );
-    assert_eq!(
-        json["next_task_reason"],
-        "next action is runtime reattachment so delegated work can resume after the restart"
-    );
-    assert_eq!(
-        json["resume_hint"],
-        "wait for runtime startup restore to reattach the delegated session, then recheck child status"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_marks_running_subagent_as_waiting_when_runtime_detached() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "subagent",
-                        "status": "running",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "subagent_lifecycle": "running",
-                            "subagent_runtime_attached": false,
-                            "subagent_status_updated_at": "2026-04-01T18:00:00Z"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["runtime"], "kind=subagent | channel=local | status=waiting_for_subagent");
-    assert_eq!(json["status"], "waiting_for_subagent");
-    assert_eq!(json["subagent_lifecycle"], "running");
-    assert_eq!(json["subagent_runtime_attached"], false);
-    assert_eq!(
-        json["status_reason"],
-        "waiting for delegated work to progress (running; runtime reattachment pending after restart)"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_stall_reason_for_retry_budget_exhaustion() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "direct",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "suppression_reason": "retry_budget_exhausted",
-                            "operator_note": "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint."
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(
-        json["status_reason"],
-        "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint."
-    );
-    assert_eq!(
-        json["next_task_reason"],
-        "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint."
-    );
-    assert_eq!(
-        json["resume_hint"],
-        "fix the repeated failure fingerprint before resuming this stalled turn"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_prefers_operator_note_for_approval_pause_next_task_reason() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "direct",
-                        "status": "waiting_for_approval",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "operator_note": "security approval is pending before this exec can resume",
-                            "subagent_last_note": "stale delegated note should not win"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(
-        json["next_task_reason"],
-        "security approval is pending before this exec can resume"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_prefers_preempted_note_when_effective_status_waits_for_subagent() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "subagent",
-                        "status": "running",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "subagent_lifecycle": "preempted",
-                            "subagent_runtime_status": "parked",
-                            "subagent_runtime_attached": false,
-                            "subagent_last_note": "interactive takeover is active; resume after the operator lane finishes"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["status"], "ready");
-    assert_eq!(
-        json["status_reason"],
-        "interactive takeover is active; resume after the operator lane finishes"
-    );
-    assert_eq!(
-        json["next_task_reason"],
-        "interactive takeover is active; resume after the operator lane finishes"
-    );
-    assert_eq!(
-        json["resume_hint"],
-        "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
-    );
-}
-
-#[tokio::test]
-async fn session_status_route_surfaces_runtime_reattachment_next_task_reason_for_running_subagent() {
-    let app = build_test_app(None);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "kind": "subagent",
-                        "status": "running",
-                        "workspace_root": std::env::temp_dir().to_string_lossy().to_string(),
-                        "metadata": {
-                            "subagent_lifecycle": "running",
-                            "subagent_runtime_attached": false,
-                            "subagent_status_updated_at": "2026-04-01T18:00:00Z"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let created = body_json(response).await;
-    let session_id = created["id"].as_str().unwrap();
-
-    let response = app
-        .oneshot(
-            Request::get(format!("/sessions/{session_id}/status"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["status"], "waiting_for_subagent");
-    assert_eq!(
-        json["next_task_reason"],
-        "next action is runtime reattachment so delegated work can resume after the restart"
+        json["audit"]["last_subagent_result_excerpt"],
+        "Identified result routing gap: parent session lacks last delegated outcome summary when descendant completes."
     );
 }

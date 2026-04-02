@@ -7,7 +7,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
@@ -17,13 +17,12 @@ use uuid::Uuid;
 use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
 use rune_runtime::comms::CommsMessage;
 use rune_runtime::heartbeat::HeartbeatState;
-use rune_runtime::request_session_abort;
 use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
     SessionTarget, compute_initial_next_run,
 };
 use rune_runtime::{LaneStats, Skill, SkillScanSummary};
-use rune_store::models::{SessionRow, TranscriptItemRow, TurnRow};
+use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
 use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
 use rune_tools::{ToolCall, ToolExecutor};
@@ -41,9 +40,7 @@ use crate::ms365::{
     UpdateTodoTaskRequest, UserProfile, UserSummary,
 };
 use crate::pairing::{DeviceRole, PairingError, PairingRequest, StoredPairedDevice};
-use crate::state::{
-    AppState, ProjectTokenMetricsSnapshot, SessionEvent, TokenMetricsSnapshot, TokenMetricsStore,
-};
+use crate::state::{AppState, SessionEvent, TokenMetricsSnapshot, TokenMetricsStore};
 use crate::ws::active_ws_connections;
 use crate::{SupervisorDeps, run_job_lifecycle};
 
@@ -74,7 +71,7 @@ pub struct InstanceHealthResponse {
     pub peers: Vec<PeerHealthResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DelegationArtifactResponse {
     pub name: String,
     pub kind: String,
@@ -108,13 +105,13 @@ pub struct DelegationTaskRequest {
     pub task: DelegationTaskPayload,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DelegationErrorResponse {
     pub code: String,
     pub message: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DelegationTaskResultResponse {
     pub task_id: String,
     pub status: String,
@@ -128,7 +125,7 @@ pub struct DelegationTaskResultResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DelegationTaskStatusEnvelope {
     pub receiver: DelegationEndpointResponse,
     pub result: DelegationTaskResultResponse,
@@ -174,7 +171,7 @@ pub struct DelegationCapabilityMatchResponse {
     pub detail: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DelegationEndpointResponse {
     pub instance_id: String,
     pub instance_name: String,
@@ -248,16 +245,8 @@ pub struct PeerHealthAlert {
     pub peer_id: String,
     pub peer_name: String,
     pub status: String,
-    pub observed_status: String,
     pub detail: String,
     pub checked_at: String,
-    pub last_seen_at: Option<String>,
-    pub health_url: String,
-    pub first_observed_at: Option<String>,
-    pub last_observed_at: Option<String>,
-    pub last_notified_at: Option<String>,
-    pub consecutive_failures: u32,
-    pub should_notify: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -266,12 +255,6 @@ pub struct PeerHealthAlertsResponse {
     pub alerts: Vec<PeerHealthAlert>,
     pub alert_count: usize,
     pub checked_at: String,
-    pub failover_ready: bool,
-    pub work_absorption_required: bool,
-    pub target_recovery_sla_seconds: u64,
-    pub network_partition_suspected: bool,
-    pub split_brain_guard: String,
-    pub summary: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -860,87 +843,32 @@ pub async fn peer_health_alerts(
     State(state): State<AppState>,
 ) -> Result<Json<PeerHealthAlertsResponse>, GatewayError> {
     let peers = collect_peer_health(state.capabilities.peers.clone()).await;
-    Ok(Json(
-        peer_health_alerts_from_peers(&state.peer_health_alert_cache, peers).await,
-    ))
+    Ok(Json(peer_health_alerts_from_peers(peers)))
 }
 
-async fn peer_health_alerts_from_peers(
-    cache: &crate::state::PeerHealthAlertCache,
-    peers: Vec<PeerHealthResponse>,
-) -> PeerHealthAlertsResponse {
-    let checked_at = Utc::now();
-    let healthy_peer_ids = peers
-        .iter()
-        .filter(|peer| peer.status == "healthy")
-        .map(|peer| peer.id.clone())
-        .collect::<Vec<_>>();
-    cache.clear_healthy(&healthy_peer_ids).await;
-
-    let mut alerts = Vec::new();
-    for peer in peers.into_iter().filter(|peer| peer.status != "healthy") {
-        let state = cache.transition(&peer.id, &peer.status, checked_at).await;
-        let should_notify = matches!(state.last_notified_at, None)
-            || state.status != "degraded" && state.consecutive_failures == 1;
-
-        alerts.push(PeerHealthAlert {
+fn peer_health_alerts_from_peers(peers: Vec<PeerHealthResponse>) -> PeerHealthAlertsResponse {
+    let checked_at = Utc::now().to_rfc3339();
+    let alerts = peers
+        .into_iter()
+        .filter(|peer| peer.status != "healthy")
+        .map(|peer| PeerHealthAlert {
             severity: match peer.status.as_str() {
                 "unreachable" => "critical".to_string(),
                 _ => "warning".to_string(),
             },
-            peer_id: peer.id.clone(),
+            peer_id: peer.id,
             peer_name: peer.name,
             status: peer.status,
-            observed_status: peer.observed_status,
             detail: peer.detail,
             checked_at: peer.checked_at,
-            last_seen_at: peer.last_seen_at,
-            health_url: peer.health_url,
-            first_observed_at: Some(state.first_observed_at.to_rfc3339()),
-            last_observed_at: Some(state.last_observed_at.to_rfc3339()),
-            last_notified_at: state.last_notified_at.map(|value| value.to_rfc3339()),
-            consecutive_failures: state.consecutive_failures,
-            should_notify,
-        });
-    }
-
-    let unreachable_count = alerts
-        .iter()
-        .filter(|alert| alert.status == "unreachable")
-        .count();
-    let degraded_count = alerts
-        .iter()
-        .filter(|alert| alert.status == "degraded")
-        .count();
-    let work_absorption_required = unreachable_count > 0;
-    let failover_ready = degraded_count == 0;
-    let network_partition_suspected = unreachable_count > 0 && degraded_count > 0;
-    let target_recovery_sla_seconds = 60;
+        })
+        .collect::<Vec<_>>();
     let status = if alerts.is_empty() { "ok" } else { "degraded" };
-    let summary = if alerts.is_empty() {
-        "all peers healthy; no failover action required".to_string()
-    } else if work_absorption_required {
-        format!(
-            "{} unreachable peer(s) require work absorption; {} degraded peer(s) observed",
-            unreachable_count, degraded_count
-        )
-    } else {
-        format!(
-            "{} degraded peer(s) observed; failover absorption not required yet",
-            degraded_count
-        )
-    };
     PeerHealthAlertsResponse {
         status: status.to_string(),
         alert_count: alerts.len(),
         alerts,
-        checked_at: checked_at.to_rfc3339(),
-        failover_ready,
-        work_absorption_required,
-        target_recovery_sla_seconds,
-        network_partition_suspected,
-        split_brain_guard: "failover absorption only activates for peers reported unreachable by health probes; degraded peers stay non-failover to avoid split-brain during partitions".to_string(),
-        summary,
+        checked_at,
     }
 }
 
@@ -1068,8 +996,6 @@ pub struct StatusPaths {
 pub struct LaneStatsResponse {
     pub main_active: usize,
     pub main_capacity: usize,
-    pub priority_active: usize,
-    pub priority_capacity: usize,
     pub subagent_active: usize,
     pub subagent_capacity: usize,
     pub cron_active: usize,
@@ -1431,7 +1357,6 @@ pub struct DashboardSummaryResponse {
     pub auth_enabled: bool,
     pub ws_subscribers: usize,
     pub channels: Vec<String>,
-    pub peer_health: PeerHealthAlertsResponse,
 }
 
 #[derive(Serialize)]
@@ -1658,12 +1583,6 @@ pub async fn dashboard_summary(
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
     let config = state.config.read().await;
 
-    let peer_health = peer_health_alerts_from_peers(
-        &state.peer_health_alert_cache,
-        collect_peer_health(state.capabilities.peers.clone()).await,
-    )
-    .await;
-
     Ok(Json(DashboardSummaryResponse {
         gateway_status: "running",
         bind: format!("{}:{}", config.gateway.host, config.gateway.port),
@@ -1675,7 +1594,6 @@ pub async fn dashboard_summary(
         auth_enabled: config.gateway.auth_token.is_some(),
         ws_subscribers: state.event_tx.receiver_count(),
         channels: configured_channels(&config),
-        peer_health,
     }))
 }
 
@@ -2077,11 +1995,6 @@ pub async fn cron_add(
     let next_run_at = compute_initial_next_run(&schedule);
     let mut job = Job {
         id,
-        max_retries: None,
-        retry_count: 0,
-        suppression_reason: None,
-        suppressed_at: None,
-        last_error: None,
         name: body.name,
         schedule,
         payload,
@@ -2132,11 +2045,6 @@ pub async fn cron_update(
 
     let update = JobUpdate {
         name: body.name,
-        max_retries: None,
-        retry_count: None,
-        suppression_reason: None,
-        suppressed_at: None,
-        last_error: None,
         enabled: body.enabled,
         schedule: new_schedule,
         payload: new_payload,
@@ -2280,9 +2188,6 @@ pub struct CreateSessionRequest {
     /// Optional upstream delegation plan metadata captured from a parent instance.
     #[serde(default)]
     pub delegation_plan: Option<serde_json::Value>,
-    /// Optional raw metadata merged into the created session record.
-    #[serde(default)]
-    pub metadata: Option<serde_json::Value>,
 }
 
 fn default_kind() -> String {
@@ -2490,26 +2395,6 @@ pub async fn create_session(
             .map_err(|e| GatewayError::Internal(e.to_string()))?
     };
 
-    let row = if let Some(metadata) = body.metadata {
-        if let Some(metadata_obj) = metadata.as_object() {
-            let mut merged = row.metadata.clone();
-            if let Some(existing) = merged.as_object_mut() {
-                for (key, value) in metadata_obj {
-                    existing.insert(key.clone(), value.clone());
-                }
-            }
-            state
-                .session_repo
-                .update_metadata(row.id, merged, Utc::now())
-                .await
-                .map_err(|e| GatewayError::Internal(e.to_string()))?
-        } else {
-            row
-        }
-    } else {
-        row
-    };
-
     let _ = state.event_tx.send(SessionEvent {
         session_id: row.id.to_string(),
         kind: "session_created".to_string(),
@@ -2554,17 +2439,11 @@ pub async fn create_session(
 pub struct SessionAuditSummary {
     pub transcript_items: u32,
     pub status_notes: u32,
+    pub subagent_results: u32,
     pub last_transcript_at: Option<String>,
     pub last_operator_note: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ParentSubagentResultSummary {
-    pub session_id: String,
-    pub summary: String,
-    pub recorded_at: String,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub artifacts: Vec<DelegationArtifactResponse>,
+    pub last_subagent_result_at: Option<String>,
+    pub last_subagent_result_excerpt: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2572,12 +2451,6 @@ pub struct SessionStatusResponse {
     pub session_id: String,
     pub runtime: String,
     pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status_reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_task_reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resume_hint: Option<String>,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_ref: Option<String>,
@@ -2623,7 +2496,6 @@ pub struct SessionStatusResponse {
     pub subagent_last_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audit: Option<SessionAuditSummary>,
-    pub latest_subagent_result: Option<ParentSubagentResultSummary>,
     pub unresolved: Vec<String>,
 }
 
@@ -2699,10 +2571,6 @@ pub async fn get_session_status(
         .or_else(|| model_override.clone());
     let approval_mode =
         metadata_string(metadata, "approval_mode").unwrap_or_else(|| "on-miss".to_string());
-    let effective_status = effective_session_status(&row.status, metadata);
-    let status_reason = session_status_reason(effective_status, metadata, approval_mode.as_str());
-    let next_task_reason = session_next_task_reason(effective_status, metadata);
-    let resume_hint = session_resume_hint(effective_status, metadata);
     let security_mode =
         metadata_string(metadata, "security_mode").unwrap_or_else(|| "allowlist".to_string());
     let reasoning = metadata_string(metadata, "reasoning").unwrap_or_else(|| "off".to_string());
@@ -2745,6 +2613,10 @@ pub async fn get_session_status(
         .iter()
         .filter(|item| item.kind == "status_note")
         .count() as u32;
+    let subagent_results = transcript_items
+        .iter()
+        .filter(|item| item.kind == "subagent_result")
+        .count() as u32;
     let last_transcript_at = transcript_items
         .last()
         .map(|item| item.created_at.to_rfc3339());
@@ -2755,18 +2627,36 @@ pub async fn get_session_status(
         .and_then(|item| item.payload.get("content"))
         .and_then(|value| value.as_str())
         .map(ToOwned::to_owned);
+    let last_subagent_result = transcript_items
+        .iter()
+        .rev()
+        .find(|item| item.kind == "subagent_result");
+    let last_subagent_result_at = last_subagent_result.map(|item| item.created_at.to_rfc3339());
+    let last_subagent_result_excerpt = last_subagent_result
+        .and_then(|item| item.payload.get("content").or_else(|| item.payload.get("summary")))
+        .and_then(|value| value.as_str())
+        .map(|text| {
+            const MAX_CHARS: usize = 200;
+            if text.chars().count() <= MAX_CHARS {
+                text.to_string()
+            } else {
+                let truncated: String = text.chars().take(MAX_CHARS).collect();
+                format!("{truncated}…")
+            }
+        });
     let audit = if row.kind == "subagent" {
         Some(SessionAuditSummary {
             transcript_items: transcript_items.len() as u32,
             status_notes,
+            subagent_results,
             last_transcript_at,
             last_operator_note,
+            last_subagent_result_at,
+            last_subagent_result_excerpt,
         })
     } else {
         None
     };
-
-    let latest_subagent_result = latest_subagent_result(&transcript_items);
 
     let mut unresolved = Vec::new();
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
@@ -2790,12 +2680,9 @@ pub async fn get_session_status(
             "kind={} | channel={} | status={}",
             row.kind,
             row.channel_ref.as_deref().unwrap_or("local"),
-            effective_status
+            row.status
         ),
-        status: effective_status.to_string(),
-        status_reason,
-        next_task_reason,
-        resume_hint,
+        status: row.status,
         kind: row.kind,
         channel_ref: row.channel_ref,
         parent_session_id,
@@ -2824,236 +2711,8 @@ pub async fn get_session_status(
         subagent_status_updated_at,
         subagent_last_note,
         audit,
-        latest_subagent_result,
         unresolved,
     }))
-}
-
-fn subagent_runtime_reattachment_pending(metadata: &serde_json::Value) -> bool {
-    metadata_string(metadata, "subagent_lifecycle").is_some()
-        && matches!(
-            metadata.get("subagent_runtime_attached"),
-            Some(serde_json::Value::Bool(false))
-        )
-}
-
-fn effective_session_status<'a>(status: &'a str, metadata: &serde_json::Value) -> &'a str {
-    let lifecycle = metadata_string(metadata, "subagent_lifecycle");
-    let attached = metadata_bool(metadata, "subagent_runtime_attached");
-
-    if matches!(status, "running" | "ready" | "waiting_for_subagent")
-        && matches!(lifecycle.as_deref(), Some("running") | Some("queued"))
-        && attached == Some(false)
-    {
-        return "waiting_for_subagent";
-    }
-
-    status
-}
-
-fn waiting_for_subagent_status_reason(metadata: &serde_json::Value) -> Option<String> {
-    let lifecycle = metadata_string(metadata, "subagent_lifecycle");
-    let subagent_note = metadata_string(metadata, "subagent_last_note");
-    match (lifecycle.as_deref(), subagent_runtime_reattachment_pending(metadata)) {
-        (Some("preempted"), false) => Some(subagent_note.unwrap_or_else(|| {
-            "waiting for delegated work to progress (preempted by higher-priority work)"
-                .to_string()
-        })),
-        (Some(lifecycle), true) => Some(format!(
-            "waiting for delegated work to progress ({lifecycle}; runtime reattachment pending after restart)"
-        )),
-        (Some(lifecycle), false) => {
-            Some(format!("waiting for delegated work to progress ({lifecycle})"))
-        }
-        (None, _) => None,
-    }
-}
-
-pub(crate) fn session_status_reason(
-    status: &str,
-    metadata: &serde_json::Value,
-    approval_mode: &str,
-) -> Option<String> {
-    match status {
-        "waiting_for_approval" => Some(format!(
-            "blocked on operator approval ({approval_mode}); resume after an approval decision is recorded"
-        )),
-        "waiting_for_subagent" => Some(
-            waiting_for_subagent_status_reason(metadata)
-                .unwrap_or_else(|| "waiting for delegated work to progress".to_string()),
-        ),
-        "waiting_for_tool" => Some("paused until the active tool call finishes".to_string()),
-        status if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("cancelled")
-            && matches!(status, "cancelled" | "ready" | "running" | "suspended") =>
-        {
-            Some(
-                "delegated work was cancelled explicitly; inspect the latest status note for the operator-provided reason"
-                    .to_string(),
-            )
-        }
-        status if matches!(status, "running" | "ready" | "suspended")
-            && metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") =>
-        {
-            Some(
-                metadata_string(metadata, "subagent_last_note").unwrap_or_else(|| {
-                    "work was preempted by a higher-priority task; inspect the latest operator note for takeover context"
-                        .to_string()
-                }),
-            )
-        }
-        status if matches!(status, "running" | "ready")
-            && metadata_string(metadata, "suppression_reason").as_deref() == Some("backoff_active") => {
-            Some(
-                metadata_string(metadata, "operator_note").unwrap_or_else(|| {
-                    "execution is intentionally stalled until the retry backoff window expires"
-                        .to_string()
-                }),
-            )
-        }
-        status if matches!(status, "running" | "ready")
-            && metadata_string(metadata, "suppression_reason").as_deref()
-                == Some("retry_budget_exhausted") =>
-        {
-            Some(
-                metadata_string(metadata, "operator_note").unwrap_or_else(|| {
-                    "execution is stalled because the retry budget for the current failure fingerprint is exhausted"
-                        .to_string()
-                }),
-            )
-        }
-        _ => None,
-    }
-}
-
-pub(crate) fn session_next_task_reason(
-    status: &str,
-    metadata: &serde_json::Value,
-) -> Option<String> {
-    let lifecycle = metadata_string(metadata, "subagent_lifecycle");
-    let subagent_note = metadata_string(metadata, "subagent_last_note");
-    let operator_note = metadata_string(metadata, "operator_note");
-
-    if status == "waiting_for_approval" {
-        return Some(
-            operator_note.or(subagent_note).unwrap_or_else(|| {
-                "next action is approval handling because execution is explicitly blocked until an operator decision is recorded".to_string()
-            }),
-        );
-    }
-
-    if status == "waiting_for_subagent" {
-        if let Some(note) = subagent_note {
-            return Some(note);
-        }
-        if subagent_runtime_reattachment_pending(metadata) {
-            return Some(
-                "next action is runtime reattachment so delegated work can resume after the restart"
-                    .to_string(),
-            );
-        }
-        return Some(match lifecycle.as_deref() {
-            Some(lifecycle) => format!("next action follows delegated session lifecycle: {lifecycle}"),
-            None => {
-                "next action is delegated-session follow-up because the parent is waiting on child progress".to_string()
-            }
-        });
-    }
-
-    if lifecycle.as_deref() == Some("preempted") {
-        return Some(
-            subagent_note.unwrap_or_else(|| {
-                "next action is to finish the higher-priority takeover before resuming this parked work".to_string()
-            }),
-        );
-    }
-
-    if lifecycle.as_deref() == Some("cancelled") {
-        return Some(
-            subagent_note.unwrap_or_else(|| {
-                "next action is to restart or replace the cancelled delegated work before continuing this lane".to_string()
-            }),
-        );
-    }
-
-    if matches!(status, "running" | "ready") {
-        if subagent_runtime_reattachment_pending(metadata) {
-            return Some(
-                "next action is runtime reattachment so delegated work can resume after the restart"
-                    .to_string(),
-            );
-        }
-
-        match metadata_string(metadata, "suppression_reason").as_deref() {
-            Some("backoff_active") | Some("retry_budget_exhausted") => {
-                if let Some(note) = operator_note {
-                    return Some(note);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if let Some(operator_note) = operator_note {
-        return Some(operator_note);
-    }
-
-    metadata_string(metadata, "next_task_reason")
-}
-
-pub(crate) fn session_resume_hint(status: &str, metadata: &serde_json::Value) -> Option<String> {
-    match status {
-        "waiting_for_approval" => Some(
-            "decide the pending approval, then call the approval resume path or send the next operator instruction"
-                .to_string(),
-        ),
-        "waiting_for_subagent" => Some(
-            if subagent_runtime_reattachment_pending(metadata) {
-                "wait for runtime startup restore to reattach the delegated session, then recheck child status"
-                    .to_string()
-            } else {
-                metadata_string(metadata, "subagent_lifecycle")
-                    .map(|lifecycle| format!("check child session status; current delegated lifecycle is {lifecycle}"))
-                    .unwrap_or_else(|| "check child session status or steer/cancel the delegated session".to_string())
-            },
-        ),
-        "waiting_for_tool" => Some(
-            "wait for tool completion or cancel the in-flight tool execution before resuming".to_string(),
-        ),
-        status if matches!(status, "running" | "ready")
-            && metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
-            "this work was preempted by a higher-priority task; review the latest status note, then steer or resume once the takeover is complete"
-                .to_string(),
-        ),
-        "suspended" if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("preempted") => Some(
-            "preempted work is parked safely; send a resume/steer instruction after the higher-priority task finishes"
-                .to_string(),
-        ),
-        status if metadata_string(metadata, "subagent_lifecycle").as_deref() == Some("cancelled")
-            && matches!(status, "cancelled" | "ready" | "running" | "suspended") =>
-        {
-            Some(
-                "delegated work has been cancelled; spawn a replacement subagent or steer the parent session with a new plan"
-                    .to_string(),
-            )
-        }
-        status if matches!(status, "running" | "ready")
-            && metadata_string(metadata, "suppression_reason").as_deref() == Some("backoff_active") => {
-            Some(
-                "wait for the retry backoff window to expire before retrying this stalled turn"
-                    .to_string(),
-            )
-        }
-        status if matches!(status, "running" | "ready")
-            && metadata_string(metadata, "suppression_reason").as_deref()
-                == Some("retry_budget_exhausted") =>
-        {
-            Some(
-                "fix the repeated failure fingerprint before resuming this stalled turn"
-                    .to_string(),
-            )
-        }
-        _ => None,
-    }
 }
 
 /// A single node in a session delegation tree.
@@ -3062,6 +2721,10 @@ pub struct SessionTreeNode {
     pub id: String,
     pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_subagent_result_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_subagent_result_excerpt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3084,7 +2747,6 @@ pub struct SessionTreeNode {
     pub subagent_status_updated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_last_note: Option<String>,
-    pub latest_subagent_result: Option<ParentSubagentResultSummary>,
     pub created_at: String,
     pub turn_count: u32,
     pub children: Vec<SessionTreeNode>,
@@ -3144,19 +2806,47 @@ pub async fn get_session_tree(
         turn_counts.insert(*sid, turns.len() as u32);
     }
 
+    let mut last_subagent_result_map = std::collections::HashMap::new();
+    for sid in &subtree_ids {
+        let transcript_items = state
+            .transcript_repo
+            .list_by_session(*sid)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+        let last_subagent_result = transcript_items
+            .iter()
+            .rev()
+            .find(|item| item.kind == "subagent_result");
+        let last_subagent_result_at = last_subagent_result.map(|item| item.created_at.to_rfc3339());
+        let last_subagent_result_excerpt = last_subagent_result
+            .and_then(|item| item.payload.get("content").or_else(|| item.payload.get("summary")))
+            .and_then(|value| value.as_str())
+            .map(|text| {
+                const MAX_CHARS: usize = 200;
+                if text.chars().count() <= MAX_CHARS {
+                    text.to_string()
+                } else {
+                    let truncated: String = text.chars().take(MAX_CHARS).collect();
+                    format!("{truncated}…")
+                }
+            });
+        last_subagent_result_map.insert(*sid, (last_subagent_result_at, last_subagent_result_excerpt));
+    }
+
     fn build_node(
         row: &rune_store::models::SessionRow,
         children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
         turn_counts: &std::collections::HashMap<Uuid, u32>,
-        latest_results: &std::collections::HashMap<Uuid, ParentSubagentResultSummary>,
+        last_subagent_result_map: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
     ) -> SessionTreeNode {
-        let mut children = Vec::new();
-        if let Some(kids) = children_map.get(&row.id) {
-            for child in kids {
-                children.push(build_node(child, children_map, turn_counts, latest_results));
-            }
-        }
-        let latest_subagent_result = latest_results.get(&row.id).cloned();
+        let children = children_map
+            .get(&row.id)
+            .map(|kids| {
+                kids.iter()
+                    .map(|child| build_node(child, children_map, turn_counts, last_subagent_result_map))
+                    .collect()
+            })
+            .unwrap_or_default();
         let orchestration_status = metadata_string(&row.metadata, "orchestration_status")
             .or_else(|| metadata_string(&row.metadata, "subagent_lifecycle"));
         let delegation_roles = row
@@ -3184,10 +2874,16 @@ pub async fn get_session_tree(
                 .and_then(|value| value.as_u64())
                 .map(|value| value as u32)
         };
+        let (last_subagent_result_at, last_subagent_result_excerpt) = last_subagent_result_map
+            .get(&row.id)
+            .cloned()
+            .unwrap_or((None, None));
         SessionTreeNode {
             id: row.id.to_string(),
             kind: row.kind.clone(),
             status: row.status.clone(),
+            last_subagent_result_at,
+            last_subagent_result_excerpt,
             parent_session_id: row.requester_session_id.map(|id| id.to_string()),
             mode: metadata_string(&row.metadata, "mode"),
             channel: row.channel_ref.clone(),
@@ -3202,31 +2898,13 @@ pub async fn get_session_tree(
                 "subagent_status_updated_at",
             ),
             subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
-            latest_subagent_result,
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
             children,
         }
     }
 
-    let mut latest_results = std::collections::HashMap::new();
-    for sid in &subtree_ids {
-        if let Some(row) = all_rows
-            .iter()
-            .find(|row| &row.id == sid && row.kind == "subagent")
-        {
-            let transcript_items = state
-                .transcript_repo
-                .list_by_session(row.id)
-                .await
-                .map_err(|e| GatewayError::Internal(e.to_string()))?;
-            if let Some(summary) = latest_subagent_result(&transcript_items) {
-                latest_results.insert(row.id, summary);
-            }
-        }
-    }
-
-    let tree = build_node(&root, &children_map, &turn_counts, &latest_results);
+    let tree = build_node(&root, &children_map, &turn_counts, &last_subagent_result_map);
     Ok(Json(tree))
 }
 
@@ -3532,21 +3210,6 @@ pub async fn agent_kill(
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
     let note = format!("[kill] session cancelled: {reason}");
 
-    let current_status = session
-        .status
-        .parse::<rune_core::SessionStatus>()
-        .map_err(|_| {
-            GatewayError::Internal(format!(
-                "invalid persisted session status: {}",
-                session.status
-            ))
-        })?;
-    current_status
-        .transition(rune_core::SessionStatus::Cancelled)
-        .map_err(|e| GatewayError::BadRequest(e.to_string()))?;
-
-    request_session_abort(id, reason.to_string()).await;
-
     // Mark session as cancelled.
     state
         .session_repo
@@ -3848,43 +3511,6 @@ fn metadata_bool(metadata: &Value, key: &str) -> Option<bool> {
     metadata.get(key).and_then(Value::as_bool)
 }
 
-fn latest_subagent_result(
-    transcript_items: &[TranscriptItemRow],
-) -> Option<ParentSubagentResultSummary> {
-    transcript_items.iter().rev().find_map(|item| {
-        if item.kind != "subagent_result" {
-            return None;
-        }
-
-        let session_id = item
-            .payload
-            .get("session_id")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)?;
-        let summary = item
-            .payload
-            .get("summary")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .unwrap_or_default();
-        let artifacts = item
-            .payload
-            .get("artifacts")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        Some(ParentSubagentResultSummary {
-            session_id,
-            summary,
-            recorded_at: item.created_at.to_rfc3339(),
-            artifacts,
-        })
-    })
-}
-
 fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
     DashboardSessionItem {
         id: row.id.to_string(),
@@ -3902,8 +3528,6 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
     LaneStatsResponse {
         main_active: stats.main_active,
         main_capacity: stats.main_capacity,
-        priority_active: stats.priority_active,
-        priority_capacity: stats.priority_capacity,
         subagent_active: stats.subagent_active,
         subagent_capacity: stats.subagent_capacity,
         cron_active: stats.cron_active,
@@ -5545,31 +5169,9 @@ pub struct UsageProjectSummaryResponse {
 }
 
 #[derive(Serialize)]
-pub struct UsageProjectCacheSummaryResponse {
-    pub project_id: String,
-    pub total_input_tokens: u64,
-    pub cached_tokens: u64,
-    pub uncached_tokens: u64,
-    pub cache_hit_ratio_percent: f64,
-}
-
-impl From<ProjectTokenMetricsSnapshot> for UsageProjectCacheSummaryResponse {
-    fn from(value: ProjectTokenMetricsSnapshot) -> Self {
-        Self {
-            project_id: value.project_id,
-            total_input_tokens: value.total_input_tokens,
-            cached_tokens: value.cached_tokens,
-            uncached_tokens: value.uncached_tokens,
-            cache_hit_ratio_percent: value.cache_hit_ratio_percent,
-        }
-    }
-}
-
-#[derive(Serialize)]
 pub struct UsageSummaryResponse {
     pub entries: Vec<UsageEntryResponse>,
     pub projects: Vec<UsageProjectSummaryResponse>,
-    pub project_cache: Vec<UsageProjectCacheSummaryResponse>,
     pub total_prompt_tokens: u64,
     pub total_completion_tokens: u64,
     pub total_tokens: u64,
@@ -5673,13 +5275,6 @@ pub async fn get_dashboard_usage(
         .list_usage(from, params.to, limit)
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
-    let project_cache = state
-        .token_metrics
-        .project_snapshot()
-        .await
-        .into_iter()
-        .map(UsageProjectCacheSummaryResponse::from)
-        .collect::<Vec<_>>();
 
     let sessions = state
         .session_repo
@@ -5804,7 +5399,6 @@ pub async fn get_dashboard_usage(
     Ok(Json(UsageSummaryResponse {
         entries,
         projects,
-        project_cache,
         total_prompt_tokens,
         total_completion_tokens,
         total_tokens: total_prompt_tokens + total_completion_tokens,
@@ -6674,10 +6268,6 @@ pub struct MemorySearchQuery {
     pub q: Option<String>,
     #[serde(rename = "limit")]
     pub _limit: Option<usize>,
-    #[serde(default)]
-    pub include_remote: Option<bool>,
-    #[serde(default)]
-    pub include_private: Option<bool>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -6691,8 +6281,6 @@ pub struct MemorySearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_name: Option<String>,
     pub remote: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -6725,7 +6313,6 @@ pub fn parse_memory_search_output(output: &str) -> Vec<MemorySearchResult> {
                 instance_id: None,
                 instance_name: None,
                 remote: false,
-                scope: None,
             })
         })
         .collect()
@@ -6738,108 +6325,21 @@ struct RemoteMemorySearchResponse {
     pub results: Vec<MemorySearchResult>,
     #[serde(default)]
     pub message: String,
-    #[serde(default)]
-    pub remote_pending: usize,
-}
-
-fn memory_result_is_private(result: &MemorySearchResult) -> bool {
-    let path = result.file_path.to_ascii_lowercase();
-    path.starts_with("memory/private/") || path.contains("/private/")
-}
-
-fn memory_result_scope(result: &MemorySearchResult) -> &'static str {
-    if memory_result_is_private(result) {
-        "private"
-    } else if result.file_path.starts_with("memory/projects/")
-        || result.file_path.contains("/projects/")
-    {
-        "project"
-    } else {
-        "shared"
-    }
-}
-
-fn annotate_memory_results(
-    results: Vec<MemorySearchResult>,
-    instance_id: &str,
-    instance_name: &str,
-    remote: bool,
-    include_private: bool,
-) -> Vec<MemorySearchResult> {
-    results
-        .into_iter()
-        .filter(|result| include_private || !memory_result_is_private(result))
-        .map(|mut result| {
-            result.remote = remote;
-            if result.instance_id.is_none() {
-                result.instance_id = Some(instance_id.to_string());
-            }
-            if result.instance_name.is_none() {
-                result.instance_name = Some(instance_name.to_string());
-            }
-            result.scope = Some(memory_result_scope(&result).to_string());
-            result
-        })
-        .collect()
-}
-
-fn merge_memory_search_results(
-    mut local_results: Vec<MemorySearchResult>,
-    mut remote_results: Vec<MemorySearchResult>,
-    limit: usize,
-) -> Vec<MemorySearchResult> {
-    local_results.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
-    remote_results.sort_by(|a, b| {
-        a.instance_id
-            .as_deref()
-            .unwrap_or("")
-            .cmp(b.instance_id.as_deref().unwrap_or(""))
-            .then(a.file_path.cmp(&b.file_path))
-            .then(a.line.cmp(&b.line))
-    });
-
-    let mut seen = std::collections::HashSet::new();
-    let mut combined = Vec::with_capacity(local_results.len() + remote_results.len());
-    for result in local_results.into_iter().chain(remote_results.into_iter()) {
-        let key = (
-            result.instance_id.clone().unwrap_or_default(),
-            result.file_path.clone(),
-            result.line,
-            result.snippet.clone(),
-        );
-        if seen.insert(key) {
-            combined.push(result);
-        }
-    }
-    combined.truncate(limit);
-    combined
 }
 
 async fn federated_memory_search(
     state: &AppState,
     query: &str,
     limit: usize,
-    include_remote: bool,
-    include_private: bool,
     local_results: Vec<MemorySearchResult>,
 ) -> (Vec<MemorySearchResult>, usize) {
-    let identity = state.capabilities.identity.clone();
     let peers = {
         let config = state.config.read().await;
         config.instance.peers.clone()
     };
 
-    let local_results = annotate_memory_results(
-        local_results,
-        &identity.id,
-        &identity.name,
-        false,
-        include_private,
-    );
-
-    if !include_remote || peers.is_empty() {
-        let combined = merge_memory_search_results(local_results, Vec::new(), limit);
-        return (combined, 0);
+    if peers.is_empty() {
+        return (local_results, 0);
     }
 
     let client = match reqwest::Client::builder()
@@ -6847,10 +6347,7 @@ async fn federated_memory_search(
         .build()
     {
         Ok(client) => client,
-        Err(_) => {
-            let combined = merge_memory_search_results(local_results, Vec::new(), limit);
-            return (combined, peers.len());
-        }
+        Err(_) => return (local_results, peers.len()),
     };
 
     let mut merged = Vec::new();
@@ -6862,9 +6359,8 @@ async fn federated_memory_search(
             .trim_end_matches("/api/v1/instance/health")
             .trim_end_matches('/');
         let endpoint = format!(
-            "{base}/api/memory/search?q={}&limit={limit}&include_remote=false&include_private={}",
+            "{base}/api/memory/search?q={}&limit={limit}",
             urlencoding::encode(query),
-            include_private,
         );
 
         let response = match client.get(&endpoint).send().await {
@@ -6887,14 +6383,28 @@ async fn federated_memory_search(
                 continue;
             }
         };
-        remote_pending += payload.remote_pending;
 
-        let mut peer_results =
-            annotate_memory_results(payload.results, &peer.id, &peer.id, true, include_private);
+        let mut peer_results = payload
+            .results
+            .into_iter()
+            .map(|mut result| {
+                result.remote = true;
+                if result.instance_id.is_none() {
+                    result.instance_id = Some(peer.id.clone());
+                }
+                if result.instance_name.is_none() {
+                    result.instance_name = Some(peer.id.clone());
+                }
+                result
+            })
+            .collect::<Vec<_>>();
         merged.append(&mut peer_results);
     }
 
-    let combined = merge_memory_search_results(local_results, merged, limit);
+    let local_count = local_results.len();
+    let mut combined = local_results;
+    combined.extend(merged);
+    combined.truncate(limit.max(local_count));
     (combined, remote_pending)
 }
 
@@ -6933,8 +6443,6 @@ pub async fn memory_search(
     }
 
     let limit = query._limit.unwrap_or(10).clamp(1, 50);
-    let include_remote = query.include_remote.unwrap_or(true);
-    let include_private = query.include_private.unwrap_or(false);
     let workspace_root = {
         let config = state.config.read().await;
         config
@@ -6960,16 +6468,8 @@ pub async fn memory_search(
         .await
         .map_err(|error| GatewayError::Internal(error.to_string()))?;
     let local_results = parse_memory_search_output(&result.output);
-    let (results, remote_pending) = federated_memory_search(
-        &state,
-        &q,
-        limit,
-        include_remote,
-        include_private,
-        local_results,
-    )
-    .await;
-    let local_count = results.iter().filter(|result| !result.remote).count();
+    let local_count = local_results.len();
+    let (results, remote_pending) = federated_memory_search(&state, &q, limit, local_results).await;
     let remote_results = results.iter().filter(|result| result.remote).count();
     let message = if results.is_empty() {
         format!("No results found for query: {q}")
@@ -8733,61 +8233,48 @@ mod tests {
             );
         }
     }
-    #[tokio::test]
-    async fn peer_health_alerts_empty_when_all_peers_healthy() {
-        let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(
-            &cache,
-            vec![PeerHealthResponse {
-                id: "peer-a".to_string(),
-                name: "Peer A".to_string(),
-                health_url: "http://peer-a/api/v1/instance/health".to_string(),
-                status: "healthy".to_string(),
-                detail: "200 OK".to_string(),
-                checked_at: "2026-03-29T00:00:00Z".to_string(),
-                latency_ms: Some(12),
-                last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
-                observed_status: "healthy".to_string(),
-                load: Some(InstanceLoadResponse {
-                    session_count: 1,
-                    ws_subscribers: 0,
-                    ws_connections: 0,
-                }),
-                advertised_addr: Some("http://peer-a".to_string()),
-                roles: vec!["gateway".to_string()],
-                capability_hash: Some("abc".to_string()),
-                capabilities_version: Some(1),
-                comms_transport: Some("http".to_string()),
-                configured_models: vec!["gpt-4.1".to_string()],
-                active_projects: vec!["/workspace/rune".to_string()],
-            }],
-        )
-        .await;
+    #[test]
+    fn peer_health_alerts_empty_when_all_peers_healthy() {
+        let response = peer_health_alerts_from_peers(vec![PeerHealthResponse {
+            id: "peer-a".to_string(),
+            name: "Peer A".to_string(),
+            health_url: "http://peer-a/api/v1/instance/health".to_string(),
+            status: "healthy".to_string(),
+            detail: "200 OK".to_string(),
+            checked_at: "2026-03-29T00:00:00Z".to_string(),
+            latency_ms: Some(12),
+            last_seen_at: Some("2026-03-29T00:00:00Z".to_string()),
+            observed_status: "healthy".to_string(),
+            load: Some(InstanceLoadResponse {
+                session_count: 1,
+                ws_subscribers: 0,
+                ws_connections: 0,
+            }),
+            advertised_addr: Some("http://peer-a".to_string()),
+            roles: vec!["gateway".to_string()],
+            capability_hash: Some("abc".to_string()),
+            capabilities_version: Some(1),
+            comms_transport: Some("http".to_string()),
+            configured_models: vec!["gpt-4.1".to_string()],
+            active_projects: vec!["/workspace/rune".to_string()],
+        }]);
         assert_eq!(response.status, "ok");
         assert!(response.alerts.is_empty());
-        assert!(response.failover_ready);
-        assert!(!response.work_absorption_required);
-        assert_eq!(
-            response.summary,
-            "all peers healthy; no failover action required"
-        );
     }
 
-    #[tokio::test]
-    async fn peer_health_alerts_expose_observed_status_last_seen_and_health_url() {
-        let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(
-            &cache,
-            vec![PeerHealthResponse {
+    #[test]
+    fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
+        let response = peer_health_alerts_from_peers(vec![
+            PeerHealthResponse {
                 id: "peer-a".to_string(),
                 name: "Peer A".to_string(),
                 health_url: "http://peer-a/api/v1/instance/health".to_string(),
-                status: "degraded".to_string(),
-                detail: "invalid health payload".to_string(),
+                status: "unreachable".to_string(),
+                detail: "connection refused".to_string(),
                 checked_at: "2026-03-29T00:00:00Z".to_string(),
-                latency_ms: Some(12),
-                last_seen_at: Some("2026-03-28T23:59:58Z".to_string()),
-                observed_status: "invalid-payload".to_string(),
+                latency_ms: None,
+                last_seen_at: None,
+                observed_status: "unreachable".to_string(),
                 load: None,
                 advertised_addr: None,
                 roles: Vec::new(),
@@ -8796,214 +8283,33 @@ mod tests {
                 comms_transport: None,
                 configured_models: Vec::new(),
                 active_projects: Vec::new(),
-            }],
-        )
-        .await;
-        assert_eq!(response.alert_count, 1);
-        assert_eq!(response.alerts[0].status, "degraded");
-        assert_eq!(response.alerts[0].observed_status, "invalid-payload");
-        assert_eq!(
-            response.alerts[0].last_seen_at.as_deref(),
-            Some("2026-03-28T23:59:58Z")
-        );
-        assert_eq!(
-            response.alerts[0].health_url,
-            "http://peer-a/api/v1/instance/health"
-        );
-    }
-
-    #[tokio::test]
-    async fn peer_health_alerts_expose_partition_guard_metadata() {
-        let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(
-            &cache,
-            vec![
-                PeerHealthResponse {
-                    id: "peer-a".to_string(),
-                    name: "Peer A".to_string(),
-                    health_url: "http://peer-a/api/v1/instance/health".to_string(),
-                    status: "unreachable".to_string(),
-                    detail: "timeout".to_string(),
-                    checked_at: "2025-01-01T00:00:00Z".to_string(),
-                    latency_ms: None,
-                    last_seen_at: Some("2025-01-01T00:00:10Z".to_string()),
-                    observed_status: "unknown".to_string(),
-                    load: None,
-                    advertised_addr: None,
-                    roles: Vec::new(),
-                    capability_hash: None,
-                    capabilities_version: None,
-                    comms_transport: None,
-                    configured_models: Vec::new(),
-                    active_projects: Vec::new(),
-                },
-                PeerHealthResponse {
-                    id: "peer-b".to_string(),
-                    name: "Peer B".to_string(),
-                    health_url: "http://peer-b/api/v1/instance/health".to_string(),
-                    status: "degraded".to_string(),
-                    detail: "high latency".to_string(),
-                    checked_at: "2025-01-01T00:00:05Z".to_string(),
-                    latency_ms: Some(900),
-                    last_seen_at: Some("2025-01-01T00:00:12Z".to_string()),
-                    observed_status: "degraded".to_string(),
-                    load: None,
-                    advertised_addr: None,
-                    roles: Vec::new(),
-                    capability_hash: None,
-                    capabilities_version: None,
-                    comms_transport: None,
-                    configured_models: Vec::new(),
-                    active_projects: Vec::new(),
-                },
-            ],
-        )
-        .await;
-
-        assert!(response.network_partition_suspected);
-        assert_eq!(response.target_recovery_sla_seconds, 60);
-        assert!(
-            response
-                .split_brain_guard
-                .contains("degraded peers stay non-failover")
-        );
-    }
-
-    #[tokio::test]
-    async fn peer_health_alerts_flag_unreachable_and_degraded_peers() {
-        let cache = crate::state::PeerHealthAlertCache::new();
-        let response = peer_health_alerts_from_peers(
-            &cache,
-            vec![
-                PeerHealthResponse {
-                    id: "peer-a".to_string(),
-                    name: "Peer A".to_string(),
-                    health_url: "http://peer-a/api/v1/instance/health".to_string(),
-                    status: "unreachable".to_string(),
-                    detail: "connection refused".to_string(),
-                    checked_at: "2026-03-29T00:00:00Z".to_string(),
-                    latency_ms: None,
-                    last_seen_at: None,
-                    observed_status: "unreachable".to_string(),
-                    load: None,
-                    advertised_addr: None,
-                    roles: Vec::new(),
-                    capability_hash: None,
-                    capabilities_version: None,
-                    comms_transport: None,
-                    configured_models: Vec::new(),
-                    active_projects: Vec::new(),
-                },
-                PeerHealthResponse {
-                    id: "peer-b".to_string(),
-                    name: "Peer B".to_string(),
-                    health_url: "http://peer-b/api/v1/instance/health".to_string(),
-                    status: "degraded".to_string(),
-                    detail: "500 Internal Server Error".to_string(),
-                    checked_at: "2026-03-29T00:00:03Z".to_string(),
-                    latency_ms: Some(55),
-                    last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
-                    observed_status: "degraded".to_string(),
-                    load: None,
-                    advertised_addr: None,
-                    roles: Vec::new(),
-                    capability_hash: None,
-                    capabilities_version: None,
-                    comms_transport: None,
-                    configured_models: Vec::new(),
-                    active_projects: Vec::new(),
-                },
-            ],
-        )
-        .await;
+            },
+            PeerHealthResponse {
+                id: "peer-b".to_string(),
+                name: "Peer B".to_string(),
+                health_url: "http://peer-b/api/v1/instance/health".to_string(),
+                status: "degraded".to_string(),
+                detail: "500 Internal Server Error".to_string(),
+                checked_at: "2026-03-29T00:00:03Z".to_string(),
+                latency_ms: Some(55),
+                last_seen_at: Some("2026-03-29T00:00:02Z".to_string()),
+                observed_status: "degraded".to_string(),
+                load: None,
+                advertised_addr: None,
+                roles: Vec::new(),
+                capability_hash: None,
+                capabilities_version: None,
+                comms_transport: None,
+                configured_models: Vec::new(),
+                active_projects: Vec::new(),
+            },
+        ]);
         assert_eq!(response.status, "degraded");
         assert_eq!(response.alerts.len(), 2);
         assert_eq!(response.alerts[0].severity, "critical");
         assert_eq!(response.alerts[0].peer_id, "peer-a");
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
-        assert!(!response.failover_ready);
-        assert!(response.work_absorption_required);
-        assert_eq!(
-            response.summary,
-            "1 unreachable peer(s) require work absorption; 1 degraded peer(s) observed"
-        );
-    }
-
-    #[test]
-    fn local_memory_results_are_attributed_to_current_instance() {
-        let mut results = vec![MemorySearchResult {
-            source: "memory/2026-03-30.md#12".to_string(),
-            file_path: "memory/2026-03-30.md".to_string(),
-            line: 12,
-            snippet: "borrow checker pattern".to_string(),
-            instance_id: None,
-            instance_name: None,
-            remote: false,
-            scope: None,
-        }];
-
-        let identity = rune_config::InstanceIdentity {
-            id: "local-instance".to_string(),
-            name: "Local Instance".to_string(),
-            advertised_addr: None,
-            roles: Vec::new(),
-            capabilities_version: 1,
-            capability_hash: "local-capability-hash".to_string(),
-        };
-
-        for result in &mut results {
-            result.remote = false;
-            if result.instance_id.is_none() {
-                result.instance_id = Some(identity.id.clone());
-            }
-            if result.instance_name.is_none() {
-                result.instance_name = Some(identity.name.clone());
-            }
-        }
-
-        assert_eq!(results[0].instance_id.as_deref(), Some("local-instance"));
-        assert_eq!(results[0].instance_name.as_deref(), Some("Local Instance"));
-        assert!(!results[0].remote);
-    }
-
-    #[test]
-    fn remote_memory_results_capture_nested_pending_and_peer_attribution() {
-        let peer = rune_config::PeerConfig {
-            id: "peer-1".to_string(),
-            health_url: "http://peer-1/api/v1/instance/health".to_string(),
-        };
-        let payload = RemoteMemorySearchResponse {
-            query: "borrow checker".to_string(),
-            results: vec![MemorySearchResult {
-                source: "memory/shared.md#4".to_string(),
-                file_path: "memory/shared.md".to_string(),
-                line: 4,
-                snippet: "shared fact".to_string(),
-                instance_id: None,
-                instance_name: None,
-                remote: false,
-                scope: None,
-            }],
-            message: "ok".to_string(),
-            remote_pending: 2,
-        };
-
-        let mut remote_pending = 0usize;
-        remote_pending += payload.remote_pending;
-        let mut result = payload.results.into_iter().next().unwrap();
-        result.remote = true;
-        if result.instance_id.is_none() {
-            result.instance_id = Some(peer.id.clone());
-        }
-        if result.instance_name.is_none() {
-            result.instance_name = Some(peer.id.clone());
-        }
-
-        assert_eq!(remote_pending, 2);
-        assert_eq!(result.instance_id.as_deref(), Some("peer-1"));
-        assert_eq!(result.instance_name.as_deref(), Some("peer-1"));
-        assert!(result.remote);
     }
 }
 
@@ -9016,86 +8322,40 @@ pub struct DelegationTaskStatusPath {
     pub task_id: String,
 }
 
-#[derive(Clone, Debug)]
-struct DelegationTaskRecord {
-    receiver: DelegationEndpointResponse,
-    result: DelegationTaskResultResponse,
-    timeout_deadline: DateTime<Utc>,
-}
+pub async fn submit_delegation_task(
+    State(_state): State<AppState>,
+    Json(request): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
+    let now = Utc::now().to_rfc3339();
+    let result = DelegationTaskResultResponse {
+        task_id: request.task_id.clone(),
+        status: "accepted".to_string(),
+        accepted_at: now,
+        started_at: None,
+        output: None,
+        artifacts: request.task.artifacts.clone(),
+        error: None,
+        finished_at: None,
+    };
 
-fn delegation_task_store() -> &'static tokio::sync::Mutex<HashMap<String, DelegationTaskRecord>> {
-    static STORE: once_cell::sync::Lazy<tokio::sync::Mutex<HashMap<String, DelegationTaskRecord>>> =
-        once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
-    &STORE
-}
-
-fn local_delegation_receiver(request: &DelegationTaskRequest) -> DelegationEndpointResponse {
-    let target = request
-        .task
-        .target_peer_id
-        .clone()
-        .unwrap_or_else(|| "local-instance".to_string());
-    DelegationEndpointResponse {
-        instance_id: target.clone(),
-        instance_name: target,
+    let receiver = DelegationEndpointResponse {
+        instance_id: request
+            .task
+            .target_peer_id
+            .clone()
+            .unwrap_or_else(|| "local-instance".to_string()),
+        instance_name: request
+            .task
+            .target_peer_id
+            .clone()
+            .unwrap_or_else(|| "Local Instance".to_string()),
         transport: request.sender.transport.clone(),
         capabilities_version: request.sender.capabilities_version,
         capability_hash: request.sender.capability_hash.clone(),
         health_url: None,
         submit_url: None,
         result_url: request.sender.result_url.clone(),
-    }
-}
-
-pub async fn submit_delegation_task(
-    State(_state): State<AppState>,
-    Json(request): Json<DelegationTaskRequest>,
-) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
-    if request.protocol_version != 1 {
-        return Err(GatewayError::BadRequest(format!(
-            "unsupported delegation protocol_version '{}' (expected 1)",
-            request.protocol_version
-        )));
-    }
-    if request.task.task.trim().is_empty() {
-        return Err(GatewayError::BadRequest(
-            "delegation task field cannot be empty".to_string(),
-        ));
-    }
-    if request.task.expected_output.trim().is_empty() {
-        return Err(GatewayError::BadRequest(
-            "delegation expected_output field cannot be empty".to_string(),
-        ));
-    }
-    if request.task.timeout_secs == 0 {
-        return Err(GatewayError::BadRequest(
-            "delegation timeout_secs must be greater than zero".to_string(),
-        ));
-    }
-
-    let accepted_at = Utc::now();
-    let started_at = accepted_at + Duration::seconds(1);
-    let receiver = local_delegation_receiver(&request);
-    let result = DelegationTaskResultResponse {
-        task_id: request.task_id.clone(),
-        status: "running".to_string(),
-        accepted_at: accepted_at.to_rfc3339(),
-        started_at: Some(started_at.to_rfc3339()),
-        output: None,
-        artifacts: request.task.artifacts.clone(),
-        error: None,
-        finished_at: None,
     };
-    let deadline = accepted_at + Duration::seconds(request.task.timeout_secs as i64);
-
-    delegation_task_store().lock().await.insert(
-        request.task_id.clone(),
-        DelegationTaskRecord {
-            receiver: receiver.clone(),
-            result: result.clone(),
-            timeout_deadline: deadline,
-        },
-    );
 
     Ok((
         StatusCode::CREATED,
@@ -9106,99 +8366,27 @@ pub async fn submit_delegation_task(
 pub async fn delegation_task_status(
     Path(path): Path<DelegationTaskStatusPath>,
 ) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
-    let mut store = delegation_task_store().lock().await;
-    let record = store
-        .get_mut(&path.task_id)
-        .ok_or_else(|| GatewayError::AssetNotFound(format!("delegation task {}", path.task_id)))?;
-
-    if record.result.finished_at.is_none() && Utc::now() >= record.timeout_deadline {
-        record.result.status = "timeout".to_string();
-        record.result.error = Some(DelegationErrorResponse {
-            code: "deadline_exceeded".to_string(),
-            message: format!(
-                "delegation task exceeded timeout at {}",
-                record.timeout_deadline.to_rfc3339()
-            ),
-        });
-        record.result.finished_at = Some(record.timeout_deadline.to_rfc3339());
-        record.result.output = None;
-    }
-
+    let now = Utc::now().to_rfc3339();
     Ok(Json(DelegationTaskStatusEnvelope {
-        receiver: record.receiver.clone(),
-        result: record.result.clone(),
+        receiver: DelegationEndpointResponse {
+            instance_id: "local-instance".to_string(),
+            instance_name: "Local Instance".to_string(),
+            transport: "http".to_string(),
+            capabilities_version: 1,
+            capability_hash: "local-dev".to_string(),
+            health_url: None,
+            submit_url: None,
+            result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
+        },
+        result: DelegationTaskResultResponse {
+            task_id: path.task_id,
+            status: "accepted".to_string(),
+            accepted_at: now,
+            started_at: None,
+            output: None,
+            artifacts: Vec::new(),
+            error: None,
+            finished_at: None,
+        },
     }))
-}
-
-#[cfg(test)]
-mod memory_search_federation_tests {
-    use super::*;
-
-    #[test]
-    fn annotate_memory_results_sets_scope_and_source_attribution() {
-        let results = annotate_memory_results(
-            vec![MemorySearchResult {
-                source: "memory/projects/phoenix/notes.md#7".to_string(),
-                file_path: "memory/projects/phoenix/notes.md".to_string(),
-                line: 7,
-                snippet: "borrow checker patterns".to_string(),
-                instance_id: None,
-                instance_name: None,
-                remote: false,
-                scope: None,
-            }],
-            "desktop-a",
-            "Desktop A",
-            true,
-            true,
-        );
-
-        assert_eq!(results.len(), 1);
-        let result = &results[0];
-        assert_eq!(result.instance_id.as_deref(), Some("desktop-a"));
-        assert_eq!(result.instance_name.as_deref(), Some("Desktop A"));
-        assert!(result.remote);
-        assert_eq!(result.scope.as_deref(), Some("project"));
-    }
-
-    #[test]
-    fn merge_memory_search_results_prefers_local_and_deduplicates_remote_matches() {
-        let local = vec![MemorySearchResult {
-            source: "MEMORY.md#3".to_string(),
-            file_path: "MEMORY.md".to_string(),
-            line: 3,
-            snippet: "borrow checker patterns".to_string(),
-            instance_id: Some("local".to_string()),
-            instance_name: Some("Local".to_string()),
-            remote: false,
-            scope: Some("shared".to_string()),
-        }];
-        let remote = vec![
-            MemorySearchResult {
-                source: "memory/2026-03-27.md#4".to_string(),
-                file_path: "memory/2026-03-27.md".to_string(),
-                line: 4,
-                snippet: "borrow checker patterns".to_string(),
-                instance_id: Some("peer-a".to_string()),
-                instance_name: Some("Peer A".to_string()),
-                remote: true,
-                scope: Some("shared".to_string()),
-            },
-            MemorySearchResult {
-                source: "memory/2026-03-27.md#4".to_string(),
-                file_path: "memory/2026-03-27.md".to_string(),
-                line: 4,
-                snippet: "borrow checker patterns".to_string(),
-                instance_id: Some("peer-a".to_string()),
-                instance_name: Some("Peer A".to_string()),
-                remote: true,
-                scope: Some("shared".to_string()),
-            },
-        ];
-
-        let merged = merge_memory_search_results(local, remote, 10);
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged[0].instance_id.as_deref(), Some("local"));
-        assert_eq!(merged[1].instance_id.as_deref(), Some("peer-a"));
-    }
 }
