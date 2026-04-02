@@ -1102,7 +1102,20 @@ pub struct SessionTreeNode {
     pub id: String,
     pub kind: String,
     pub status: String,
+    pub last_subagent_result_at: Option<String>,
+    pub last_subagent_result_excerpt: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub mode: Option<String>,
     pub channel: Option<String>,
+    pub orchestration_status: Option<String>,
+    #[serde(default)]
+    pub delegation_roles: Vec<String>,
+    pub delegation_depth: Option<u32>,
+    pub subagent_lifecycle: Option<String>,
+    pub subagent_runtime_status: Option<String>,
+    pub subagent_runtime_attached: Option<bool>,
+    pub subagent_status_updated_at: Option<String>,
+    pub subagent_last_note: Option<String>,
     pub created_at: Option<String>,
     pub turn_count: Option<u32>,
     pub children: Vec<SessionTreeNode>,
@@ -1127,13 +1140,49 @@ impl SessionTreeNode {
         if self.kind != "direct" {
             write!(f, " kind={}", self.kind)?;
         }
+        if let Some(parent_session_id) = &self.parent_session_id {
+            write!(f, " parent={parent_session_id}")?;
+        }
+        if let Some(mode) = &self.mode {
+            write!(f, " mode={mode}")?;
+        }
+        if let Some(orchestration_status) = &self.orchestration_status {
+            write!(f, " orchestration={orchestration_status}")?;
+        }
+        if !self.delegation_roles.is_empty() {
+            write!(f, " roles={}", self.delegation_roles.join(","))?;
+        }
+        if let Some(delegation_depth) = self.delegation_depth {
+            write!(f, " depth={delegation_depth}")?;
+        }
+        if let Some(subagent_lifecycle) = &self.subagent_lifecycle {
+            write!(f, " lifecycle={subagent_lifecycle}")?;
+        }
+        if let Some(subagent_runtime_status) = &self.subagent_runtime_status {
+            write!(f, " runtime={subagent_runtime_status}")?;
+        }
+        if let Some(subagent_runtime_attached) = self.subagent_runtime_attached {
+            write!(f, " attached={subagent_runtime_attached}")?;
+        }
         if let Some(ref ch) = self.channel {
             write!(f, " ({ch})")?;
         }
         if let Some(turns) = self.turn_count {
             write!(f, " turns={turns}")?;
         }
+        if let Some(last_subagent_result_at) = &self.last_subagent_result_at {
+            write!(f, " last_result_at={last_subagent_result_at}")?;
+        }
         writeln!(f)?;
+        if let Some(subagent_status_updated_at) = &self.subagent_status_updated_at {
+            writeln!(f, "{prefix}    status-updated={subagent_status_updated_at}")?;
+        }
+        if let Some(subagent_last_note) = &self.subagent_last_note {
+            writeln!(f, "{prefix}    note={subagent_last_note}")?;
+        }
+        if let Some(last_subagent_result_excerpt) = &self.last_subagent_result_excerpt {
+            writeln!(f, "{prefix}    result={last_subagent_result_excerpt}")?;
+        }
 
         let child_prefix = if prefix.is_empty() {
             String::new()
