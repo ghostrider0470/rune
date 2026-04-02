@@ -3323,6 +3323,74 @@ async fn repeated_failing_message_is_suppressed_when_backoff_active() {
 }
 
 #[tokio::test]
+async fn successful_retry_clears_persisted_anti_thrash_metadata() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let fake_model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("all good now")]));
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            fake_model.clone(),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let session = h
+        .session_repo
+        .create(NewSession {
+            id: Uuid::now_v7(),
+            kind: "direct".to_string(),
+            status: "ready".to_string(),
+            workspace_root: Some("ws".to_string()),
+            channel_ref: Some("telegram:dm:hamza:hamza".to_string()),
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "anti_thrash": {
+                    "failure_fingerprint": "message:model exploded:retry this",
+                    "retry_count": 2,
+                    "budget_exhausted": false,
+                    "suppression_reason": "backoff_active",
+                    "stall_reason": "retry backoff active for repeated failure fingerprint",
+                    "operator_note": "Previous turn failed repeatedly. Backing off before retrying again.",
+                    "next_retry_at": null,
+                    "last_error": "model exploded"
+                }
+            }),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            last_activity_at: chrono::Utc::now(),
+        })
+        .await
+        .unwrap();
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "retry this".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-success".to_string(),
+    });
+
+    session_loop.handle_event(event).await.unwrap();
+
+    let session = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert!(session.metadata.get("anti_thrash").is_none());
+}
+
+#[tokio::test]
 async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() {
     let h = TestHarness::new();
     let engine = Arc::new(h.session_engine());
