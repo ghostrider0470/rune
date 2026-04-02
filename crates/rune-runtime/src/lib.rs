@@ -54,7 +54,7 @@ pub use context_budget::{
 pub use dispatcher::{DispatchDecision, MessageDispatcher, OrchestratorRegistry};
 pub use engine::SessionEngine;
 pub use error::RuntimeError;
-pub use executor::TurnExecutor;
+pub use executor::{TurnExecutor, clear_session_abort, request_session_abort};
 pub use hooks::{HookEvent, HookHandler, HookRegistry};
 pub use lane_queue::{Lane, LanePermit, LaneQueue, LaneStats, ToolPermit};
 pub use mem0::Mem0Engine;

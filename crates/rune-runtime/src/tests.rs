@@ -2897,3 +2897,682 @@ async fn create_subagent_session_with_context_persists_delegation_slice_and_scra
         "agents/acme/scratchpads/subagent-1.md"
     );
 }
+
+#[test]
+fn session_loop_classifies_configurable_sources_in_priority_order() {
+    let heartbeat = crate::session_loop::SessionLoop::source_priority_for_test("heartbeat");
+    let telegram = crate::session_loop::SessionLoop::source_priority_for_test("telegram");
+    let comms = crate::session_loop::SessionLoop::source_priority_for_test("comms");
+    let cron = crate::session_loop::SessionLoop::source_priority_for_test("cron");
+    let background = crate::session_loop::SessionLoop::source_priority_for_test("reaction");
+
+    assert_eq!(heartbeat, 0);
+    assert_eq!(telegram, 1);
+    assert_eq!(comms, 2);
+    assert_eq!(cron, 3);
+    assert_eq!(background, 4);
+    assert!(heartbeat < telegram);
+    assert!(telegram < comms);
+    assert!(comms < cron);
+    assert!(cron < background);
+}
+
+#[test]
+fn session_loop_normalizes_source_priority_aliases() {
+    let heartbeat = crate::session_loop::SessionLoop::source_priority_for_test("health_check");
+    let telegram = crate::session_loop::SessionLoop::source_priority_for_test("telegram_message");
+    let comms = crate::session_loop::SessionLoop::source_priority_for_test("comms_directive");
+    let cron = crate::session_loop::SessionLoop::source_priority_for_test("scheduled");
+
+    assert_eq!(heartbeat, crate::session_loop::PRIORITY_IMMEDIATE);
+    assert_eq!(telegram, crate::session_loop::PRIORITY_USER_MESSAGE);
+    assert_eq!(comms, crate::session_loop::PRIORITY_COMMS_DIRECTIVE);
+    assert_eq!(cron, crate::session_loop::PRIORITY_CRON);
+}
+
+#[test]
+fn session_loop_prioritizes_user_messages_above_background_events() {
+    let message = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "hamza".to_string(),
+        content: "urgent".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-1".to_string(),
+    });
+    let reaction = rune_channels::InboundEvent::Reaction {
+        channel_id: rune_core::ChannelId::new(),
+        message_id: "msg-2".to_string(),
+        emoji: "🔥".to_string(),
+        user: "peer".to_string(),
+    };
+
+    let user_priority = crate::session_loop::SessionLoop::event_priority_for_test(&message);
+    let background_priority = crate::session_loop::SessionLoop::event_priority_for_test(&reaction);
+
+    assert!(user_priority < background_priority);
+    assert_eq!(user_priority, crate::session_loop::PRIORITY_USER_MESSAGE);
+}
+
+#[test]
+fn session_loop_maps_event_priority_to_trigger_kind() {
+    let heartbeat = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "heartbeat:agent".to_string(),
+        sender: "health".to_string(),
+        content: "ok".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-heartbeat".to_string(),
+    });
+    let cron = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "cron:daily".to_string(),
+        sender: "scheduler".to_string(),
+        content: "cron: run".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-cron".to_string(),
+    });
+    let user = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "urgent".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-user".to_string(),
+    });
+
+    assert_eq!(
+        crate::session_loop::SessionLoop::trigger_kind_for_test(&heartbeat),
+        rune_core::TriggerKind::Heartbeat
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::trigger_kind_for_test(&cron),
+        rune_core::TriggerKind::CronJob
+    );
+    assert_eq!(
+        crate::session_loop::SessionLoop::trigger_kind_for_test(&user),
+        rune_core::TriggerKind::UserMessage
+    );
+}
+
+#[test]
+fn session_loop_assigns_comms_directives_between_user_and_cron_priority() {
+    let directive = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "system".to_string(),
+        content: "directive: switch to issue #418".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-3".to_string(),
+    });
+    let cron = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "chat-1".to_string(),
+        sender: "scheduler".to_string(),
+        content: "cron: hourly sync".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-4".to_string(),
+    });
+
+    let directive_priority = crate::session_loop::SessionLoop::event_priority_for_test(&directive);
+    let cron_priority = crate::session_loop::SessionLoop::event_priority_for_test(&cron);
+
+    assert_eq!(
+        directive_priority,
+        crate::session_loop::PRIORITY_COMMS_DIRECTIVE
+    );
+    assert_eq!(cron_priority, crate::session_loop::PRIORITY_CRON);
+    assert!(directive_priority > crate::session_loop::PRIORITY_USER_MESSAGE);
+    assert!(directive_priority < cron_priority);
+}
+
+#[derive(Debug)]
+struct SequenceChannelAdapter {
+    events: Arc<Mutex<Vec<rune_channels::InboundEvent>>>,
+}
+
+#[async_trait]
+impl rune_channels::ChannelAdapter for SequenceChannelAdapter {
+    async fn receive(
+        &mut self,
+    ) -> Result<rune_channels::InboundEvent, rune_channels::ChannelError> {
+        let mut events = self.events.lock().await;
+        if events.is_empty() {
+            Err(rune_channels::ChannelError::ConnectionLost {
+                reason: "no more events".to_string(),
+            })
+        } else {
+            Ok(events.remove(0))
+        }
+    }
+
+    async fn send(
+        &self,
+        _action: rune_channels::OutboundAction,
+    ) -> Result<rune_channels::DeliveryReceipt, rune_channels::ChannelError> {
+        Ok(rune_channels::DeliveryReceipt {
+            provider_message_id: Uuid::now_v7().to_string(),
+            delivered_at: chrono::Utc::now(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn next_event_prefers_higher_priority_items_already_waiting() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let events = Arc::new(Mutex::new(vec![
+        rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+            channel_id: rune_core::ChannelId::new(),
+            raw_chat_id: "cron:daily".to_string(),
+            sender: "scheduler".to_string(),
+            content: "run cron".to_string(),
+            attachments: vec![],
+            timestamp: chrono::Utc::now(),
+            provider_message_id: "cron-1".to_string(),
+        }),
+        rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+            channel_id: rune_core::ChannelId::new(),
+            raw_chat_id: "telegram:dm:hamza".to_string(),
+            sender: "hamza".to_string(),
+            content: "urgent".to_string(),
+            attachments: vec![],
+            timestamp: chrono::Utc::now(),
+            provider_message_id: "user-1".to_string(),
+        }),
+    ]));
+    let adapter = SequenceChannelAdapter { events };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let first = session_loop.next_event().await;
+    let second = session_loop.next_event().await;
+
+    match first {
+        rune_channels::InboundEvent::Message(msg) => {
+            assert_eq!(msg.raw_chat_id, "telegram:dm:hamza");
+        }
+        other => panic!("expected message, got {other:?}"),
+    }
+    match second {
+        rune_channels::InboundEvent::Message(msg) => {
+            assert_eq!(msg.raw_chat_id, "cron:daily");
+        }
+        other => panic!("expected message, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn stop_command_registers_abort_for_active_channel_session() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let routing_key = "telegram:dm:hamza:hamza";
+    let session = session_loop
+        .find_or_create_session(routing_key)
+        .await
+        .unwrap();
+    let stop = rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "/stop switch to issue #418".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "stop-1".to_string(),
+    };
+
+    assert!(session_loop.handle_command(&stop).await.unwrap());
+
+    let abort = crate::executor::execute_for_abort_test(session.id).await;
+    assert_eq!(
+        abort.as_deref(),
+        Some("stop requested from channel telegram:dm:hamza: switch to issue #418")
+    );
+    crate::clear_session_abort(session.id).await;
+}
+
+#[tokio::test]
+async fn message_handling_persists_channel_source_priority_metadata() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FakeModelProvider::new(vec![
+                FakeModelProvider::text_response("done"),
+            ])),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "hello".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-meta-1".to_string(),
+    });
+
+    session_loop.handle_event(event).await.unwrap();
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        session.metadata["channel_source_priority"]["telegram"],
+        serde_json::json!(crate::session_loop::PRIORITY_USER_MESSAGE)
+    );
+}
+
+#[tokio::test]
+async fn repeated_failing_message_sets_backoff_metadata() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            Arc::new(FailingModelProvider),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "retry this".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-fail-1".to_string(),
+    });
+
+    assert!(session_loop.handle_event(event).await.is_err());
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        session.metadata["anti_thrash"]["retry_count"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        session.metadata["anti_thrash"]["suppression_reason"],
+        serde_json::json!("backoff_active")
+    );
+    assert!(session.metadata["anti_thrash"]["next_retry_at"].is_string());
+}
+
+#[tokio::test]
+async fn repeated_failing_message_is_suppressed_when_backoff_active() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let fake_model = Arc::new(FailingModelProvider);
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            fake_model.clone(),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let mk_event = |id: &str| {
+        rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+            channel_id: rune_core::ChannelId::new(),
+            raw_chat_id: "telegram:dm:hamza".to_string(),
+            sender: "hamza".to_string(),
+            content: "retry this".to_string(),
+            attachments: vec![],
+            timestamp: chrono::Utc::now(),
+            provider_message_id: id.to_string(),
+        })
+    };
+
+    assert!(
+        session_loop
+            .handle_event(mk_event("msg-fail-1"))
+            .await
+            .is_err()
+    );
+    assert!(
+        session_loop
+            .handle_event(mk_event("msg-fail-2"))
+            .await
+            .is_ok()
+    );
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        session.metadata["anti_thrash"]["operator_note"],
+        serde_json::json!(format!(
+            "Previous turn failed repeatedly. Backing off before retrying again (attempt {}, next retry at {}).",
+            1,
+            session.metadata["anti_thrash"]["next_retry_at"]
+                .as_str()
+                .unwrap()
+        ))
+    );
+}
+
+#[tokio::test]
+async fn successful_retry_clears_persisted_anti_thrash_metadata() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let fake_model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("all good now")]));
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            fake_model.clone(),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let session = h
+        .session_repo
+        .create(NewSession {
+            id: Uuid::now_v7(),
+            kind: "direct".to_string(),
+            status: "ready".to_string(),
+            workspace_root: Some("ws".to_string()),
+            channel_ref: Some("telegram:dm:hamza:hamza".to_string()),
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "anti_thrash": {
+                    "failure_fingerprint": "message:model exploded:retry this",
+                    "retry_count": 2,
+                    "budget_exhausted": false,
+                    "suppression_reason": "backoff_active",
+                    "stall_reason": "retry backoff active for repeated failure fingerprint",
+                    "operator_note": "Previous turn failed repeatedly. Backing off before retrying again.",
+                    "next_retry_at": null,
+                    "last_error": "model exploded",
+                    "objective_fingerprint": "sha256:existing",
+                    "objective_snapshot": {"kind": "message", "content": "retry this", "content_preview": "retry this"}
+                }
+            }),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            last_activity_at: chrono::Utc::now(),
+        })
+        .await
+        .unwrap();
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "retry this".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-success".to_string(),
+    });
+
+    session_loop.handle_event(event).await.unwrap();
+
+    let session = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert!(session.metadata.get("anti_thrash").is_none());
+}
+
+#[tokio::test]
+async fn repeated_failure_metadata_survives_repo_reload_for_operator_inspection() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let fake_model = Arc::new(FailingModelProvider);
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            fake_model.clone(),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let event = rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+        channel_id: rune_core::ChannelId::new(),
+        raw_chat_id: "telegram:dm:hamza".to_string(),
+        sender: "hamza".to_string(),
+        content: "retry this".to_string(),
+        attachments: vec![],
+        timestamp: chrono::Utc::now(),
+        provider_message_id: "msg-fail-persist".to_string(),
+    });
+
+    assert!(session_loop.handle_event(event).await.is_err());
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    let anti = crate::session_metadata::anti_thrash_state(&session).unwrap();
+    assert_eq!(anti.retry_count, 1);
+    assert_eq!(anti.last_error.as_deref(), Some("model exploded"));
+    assert_eq!(anti.objective_snapshot, Some(serde_json::json!({
+        "kind": "message",
+        "content": "retry this",
+        "content_preview": "retry this"
+    })));
+    assert!(anti
+        .objective_fingerprint
+        .as_deref()
+        .unwrap()
+        .starts_with("sha256:"));
+}
+
+#[tokio::test]
+async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let fake_model = Arc::new(FailingModelProvider);
+    let adapter = SequenceChannelAdapter {
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let session_loop = crate::session_loop::SessionLoop::new(
+        engine,
+        Arc::new(h.turn_executor(
+            fake_model.clone(),
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )),
+        h.session_repo.clone(),
+        Box::new(adapter),
+        rune_config::AgentsConfig::default(),
+        rune_config::ModelsConfig::default(),
+    );
+
+    let mk_event = |id: &str| {
+        rune_channels::InboundEvent::Message(rune_channels::ChannelMessage {
+            channel_id: rune_core::ChannelId::new(),
+            raw_chat_id: "telegram:dm:hamza".to_string(),
+            sender: "hamza".to_string(),
+            content: "retry this".to_string(),
+            attachments: vec![],
+            timestamp: chrono::Utc::now(),
+            provider_message_id: id.to_string(),
+        })
+    };
+
+    assert!(session_loop.handle_event(mk_event("msg-fail-1")).await.is_err());
+
+    let first_session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    let next_retry = first_session.metadata["anti_thrash"]["next_retry_at"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let rewound = {
+        let anti = first_session.metadata["anti_thrash"].as_object().unwrap();
+        let mut anti = anti.clone();
+        anti.insert(
+            "next_retry_at".to_string(),
+            serde_json::json!((chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339()),
+        );
+        let mut metadata = first_session.metadata.as_object().unwrap().clone();
+        metadata.insert("anti_thrash".to_string(), serde_json::Value::Object(anti));
+        serde_json::Value::Object(metadata)
+    };
+    h.session_repo
+        .update_metadata(first_session.id, rewound, chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert!(session_loop.handle_event(mk_event("msg-fail-2")).await.is_err());
+
+    let second_session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(
+        second_session.metadata["anti_thrash"]["next_retry_at"].as_str(),
+        Some(next_retry.as_str())
+    );
+    let rewound = {
+        let anti = second_session.metadata["anti_thrash"].as_object().unwrap();
+        let mut anti = anti.clone();
+        anti.insert(
+            "next_retry_at".to_string(),
+            serde_json::json!((chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339()),
+        );
+        let mut metadata = second_session.metadata.as_object().unwrap().clone();
+        metadata.insert("anti_thrash".to_string(), serde_json::Value::Object(anti));
+        serde_json::Value::Object(metadata)
+    };
+    h.session_repo
+        .update_metadata(second_session.id, rewound, chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert!(session_loop.handle_event(mk_event("msg-fail-3")).await.is_err());
+
+    let session = h
+        .session_repo
+        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(session.metadata["anti_thrash"]["retry_count"], serde_json::json!(3));
+    assert_eq!(
+        session.metadata["anti_thrash"]["budget_exhausted"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        session.metadata["anti_thrash"]["suppression_reason"],
+        serde_json::json!("retry_budget_exhausted")
+    );
+    assert_eq!(
+        session.metadata["anti_thrash"]["stall_reason"],
+        serde_json::json!("retry budget exhausted for repeated failure fingerprint")
+    );
+    assert_eq!(
+        session.metadata["anti_thrash"]["operator_note"],
+        serde_json::json!(
+            "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint."
+        )
+    );
+    assert!(session.metadata["anti_thrash"]["next_retry_at"].is_null());
+    assert_eq!(
+        session.metadata["anti_thrash"]["objective_snapshot"]["kind"],
+        serde_json::json!("message")
+    );
+    assert_eq!(
+        session.metadata["anti_thrash"]["objective_snapshot"]["content"],
+        serde_json::json!("retry this")
+    );
+    assert!(session.metadata["anti_thrash"]["objective_fingerprint"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+}

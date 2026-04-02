@@ -20,6 +20,8 @@ use tracing::debug;
 pub enum Lane {
     /// Direct user sessions and channel sessions. Max 4 concurrent.
     Main,
+    /// High-priority control/comms traffic that should preempt background work.
+    Priority,
     /// Subagent sessions. Max 8 concurrent.
     Subagent,
     /// Scheduled / cron jobs. Effectively uncapped (1024).
@@ -43,6 +45,7 @@ impl fmt::Display for Lane {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Lane::Main => write!(f, "main"),
+            Lane::Priority => write!(f, "priority"),
             Lane::Subagent => write!(f, "subagent"),
             Lane::Cron => write!(f, "cron"),
             Lane::Heartbeat => write!(f, "heartbeat"),
@@ -53,6 +56,7 @@ impl fmt::Display for Lane {
 // ── Per-lane capacity defaults ───────────────────────────────────────
 
 const MAIN_CAPACITY: usize = 4;
+const PRIORITY_CAPACITY: usize = 16;
 const SUBAGENT_CAPACITY: usize = 8;
 const CRON_CAPACITY: usize = 1024;
 const HEARTBEAT_CAPACITY: usize = 1024;
@@ -140,6 +144,7 @@ impl LaneSemaphore {
 /// Central lane-based concurrency controller.
 pub struct LaneQueue {
     main: LaneSemaphore,
+    priority: LaneSemaphore,
     subagent: LaneSemaphore,
     cron: LaneSemaphore,
     heartbeat: LaneSemaphore,
@@ -151,6 +156,7 @@ impl LaneQueue {
     pub fn new() -> Self {
         Self {
             main: LaneSemaphore::new(MAIN_CAPACITY),
+            priority: LaneSemaphore::new(PRIORITY_CAPACITY),
             subagent: LaneSemaphore::new(SUBAGENT_CAPACITY),
             cron: LaneSemaphore::new(CRON_CAPACITY),
             heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
@@ -163,11 +169,23 @@ impl LaneQueue {
 
     /// Create a `LaneQueue` with custom per-lane capacities.
     pub fn with_capacities(main: usize, subagent: usize, cron: usize) -> Self {
+        Self::with_all_capacities(main, PRIORITY_CAPACITY, subagent, cron, HEARTBEAT_CAPACITY)
+    }
+
+    /// Create a queue with custom capacities for every execution lane.
+    pub fn with_all_capacities(
+        main: usize,
+        priority: usize,
+        subagent: usize,
+        cron: usize,
+        heartbeat: usize,
+    ) -> Self {
         Self {
             main: LaneSemaphore::new(main),
+            priority: LaneSemaphore::new(priority),
             subagent: LaneSemaphore::new(subagent),
             cron: LaneSemaphore::new(cron),
-            heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
+            heartbeat: LaneSemaphore::new(heartbeat),
             tool_limits: ToolConcurrencyQueue::new(
                 DEFAULT_GLOBAL_TOOL_CAPACITY,
                 DEFAULT_PROJECT_TOOL_CAPACITY,
@@ -183,11 +201,33 @@ impl LaneQueue {
         global_tool_capacity: usize,
         project_tool_capacity: usize,
     ) -> Self {
+        Self::with_all_limits(
+            main,
+            PRIORITY_CAPACITY,
+            subagent,
+            cron,
+            HEARTBEAT_CAPACITY,
+            global_tool_capacity,
+            project_tool_capacity,
+        )
+    }
+
+    /// Create a queue with custom capacities for every lane and tool concurrency limits.
+    pub fn with_all_limits(
+        main: usize,
+        priority: usize,
+        subagent: usize,
+        cron: usize,
+        heartbeat: usize,
+        global_tool_capacity: usize,
+        project_tool_capacity: usize,
+    ) -> Self {
         Self {
             main: LaneSemaphore::new(main),
+            priority: LaneSemaphore::new(priority),
             subagent: LaneSemaphore::new(subagent),
             cron: LaneSemaphore::new(cron),
-            heartbeat: LaneSemaphore::new(HEARTBEAT_CAPACITY),
+            heartbeat: LaneSemaphore::new(heartbeat),
             tool_limits: ToolConcurrencyQueue::new(global_tool_capacity, project_tool_capacity),
         }
     }
@@ -228,6 +268,8 @@ impl LaneQueue {
         LaneStats {
             main_active: self.main.active(),
             main_capacity: self.main.capacity,
+            priority_active: self.priority.active(),
+            priority_capacity: self.priority.capacity,
             subagent_active: self.subagent.active(),
             subagent_capacity: self.subagent.capacity,
             cron_active: self.cron.active(),
@@ -243,6 +285,7 @@ impl LaneQueue {
     fn lane_semaphore(&self, lane: &Lane) -> &LaneSemaphore {
         match lane {
             Lane::Main => &self.main,
+            Lane::Priority => &self.priority,
             Lane::Subagent => &self.subagent,
             Lane::Cron => &self.cron,
             Lane::Heartbeat => &self.heartbeat,
@@ -369,6 +412,8 @@ impl Drop for ToolPermit {
 pub struct LaneStats {
     pub main_active: usize,
     pub main_capacity: usize,
+    pub priority_active: usize,
+    pub priority_capacity: usize,
     pub subagent_active: usize,
     pub subagent_capacity: usize,
     pub cron_active: usize,
@@ -384,9 +429,11 @@ impl fmt::Display for LaneStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "main={}/{} subagent={}/{} cron={}/{} heartbeat={}/{} tools={}/{} per_project={}",
+            "main={}/{} priority={}/{} subagent={}/{} cron={}/{} heartbeat={}/{} tools={}/{} per_project={}",
             self.main_active,
             self.main_capacity,
+            self.priority_active,
+            self.priority_capacity,
             self.subagent_active,
             self.subagent_capacity,
             self.cron_active,
@@ -471,6 +518,42 @@ mod tests {
 
         let observed = observed.lock().unwrap().clone();
         assert_eq!(observed, vec!["first", "second"]);
+    }
+
+    #[tokio::test]
+    async fn priority_lane_is_independent_from_cron_lane() {
+        let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
+        let _cron = queue.acquire(Lane::Cron).await;
+
+        let priority =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Priority)).await;
+        assert!(
+            priority.is_ok(),
+            "priority lane should not be blocked by cron saturation"
+        );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_lane_is_independent_from_priority_lane() {
+        let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
+        let _priority = queue.acquire(Lane::Priority).await;
+
+        let heartbeat =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Heartbeat)).await;
+        assert!(
+            heartbeat.is_ok(),
+            "heartbeat lane should remain immediate under priority load"
+        );
+    }
+
+    #[tokio::test]
+    async fn stats_reflect_priority_utilisation() {
+        let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
+        let _priority = queue.acquire(Lane::Priority).await;
+
+        let stats = queue.stats();
+        assert_eq!(stats.priority_active, 1);
+        assert_eq!(stats.priority_capacity, 16);
     }
 
     #[tokio::test]
@@ -593,6 +676,8 @@ mod tests {
         let stats = queue.stats();
         assert_eq!(stats.main_active, 0);
         assert_eq!(stats.main_capacity, 4);
+        assert_eq!(stats.priority_active, 0);
+        assert_eq!(stats.priority_capacity, 16);
         assert_eq!(stats.subagent_active, 0);
         assert_eq!(stats.subagent_capacity, 8);
         assert_eq!(stats.cron_active, 0);
@@ -607,6 +692,7 @@ mod tests {
     #[test]
     fn lane_display() {
         assert_eq!(Lane::Main.to_string(), "main");
+        assert_eq!(Lane::Priority.to_string(), "priority");
         assert_eq!(Lane::Subagent.to_string(), "subagent");
         assert_eq!(Lane::Cron.to_string(), "cron");
         assert_eq!(Lane::Heartbeat.to_string(), "heartbeat");
@@ -617,6 +703,8 @@ mod tests {
         let stats = LaneStats {
             main_active: 2,
             main_capacity: 4,
+            priority_active: 1,
+            priority_capacity: 16,
             subagent_active: 1,
             subagent_capacity: 8,
             cron_active: 0,
@@ -629,7 +717,7 @@ mod tests {
         };
         assert_eq!(
             stats.to_string(),
-            "main=2/4 subagent=1/8 cron=0/1024 heartbeat=1/1024 tools=0/32 per_project=4"
+            "main=2/4 priority=1/16 subagent=1/8 cron=0/1024 heartbeat=1/1024 tools=0/32 per_project=4"
         );
     }
 }

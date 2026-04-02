@@ -405,7 +405,8 @@ Rune already ships the delegated-session lifecycle slice described here. This pa
   - spawn tool forwards requester-session linkage and accepts requester-session aliases for delegated launches
 - `crates/rune-gateway/src/routes.rs`
   - REST routes expose subagent/session lifecycle inspection, parent linkage filtering, and steer/cancel lifecycle transitions
-  - session status views surface orchestration metadata including mode, delegation roles/depth, parent linkage, and unresolved parity notes
+  - session status views surface orchestration metadata including mode, delegation roles/depth, parent linkage, status reasons, next-task selection reasons, approval-aware resume hints, and unresolved parity notes
+  - cancel endpoints reject impossible terminal transitions instead of rewriting already-completed delegated sessions
 - `crates/rune-gateway/src/ws_rpc.rs`
   - WebSocket RPC mirrors spawn/list/status/steer/cancel delegated-session flows for operator and UI clients
 - `crates/rune-cli/src/output.rs`

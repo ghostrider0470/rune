@@ -4,7 +4,7 @@
 //! containing a `PLUGIN.md` manifest file with YAML frontmatter. Each plugin
 //! is spawned as a subprocess communicating via stdin/stdout JSON-RPC.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -20,19 +20,35 @@ use crate::hooks::{HookEvent, HookHandler, HookRegistry};
 // Manifest
 // ---------------------------------------------------------------------------
 
-/// Parsed from PLUGIN.md frontmatter.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+pub const PLUGIN_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const DEFAULT_PLUGIN_VERSION: &str = "0.0.0";
+const DEFAULT_PLUGIN_BINARY: &str = "./plugin";
+
+/// Parsed native plugin manifest contract.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginManifest {
     /// Unique plugin name.
     pub name: String,
+    /// Versioned manifest schema understood by the runtime.
+    pub schema_version: u32,
     /// Semver version string.
     pub version: String,
     /// Human-readable description.
     pub description: String,
     /// Path to the plugin binary (relative to plugin dir or absolute).
     pub binary: PathBuf,
+    /// Runtime capabilities declared by the plugin author.
+    pub capabilities: Vec<String>,
+    /// Canonicalized capabilities for deterministic comparisons.
+    pub capability_set: Vec<String>,
     /// Hook events this plugin subscribes to.
     pub hooks: Vec<String>,
+    /// Canonicalized hook subscriptions for deterministic comparisons.
+    pub hook_set: Vec<String>,
+    /// Optional manifest author identifier.
+    pub author: Option<String>,
+    /// Optional homepage or source URL.
+    pub homepage: Option<String>,
     /// The directory containing the PLUGIN.md file.
     #[serde(skip)]
     pub source_dir: PathBuf,
@@ -41,12 +57,66 @@ pub struct PluginManifest {
 /// YAML frontmatter parsed from a PLUGIN.md file.
 #[derive(Clone, Debug, Deserialize)]
 pub struct PluginFrontmatter {
+    pub schema_version: Option<u32>,
     pub name: Option<String>,
     pub version: Option<String>,
     pub description: Option<String>,
     pub binary: Option<String>,
+    pub capabilities: Option<String>,
     pub hooks: Option<String>,
+    pub author: Option<String>,
+    pub homepage: Option<String>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginManifestDiagnostic {
+    pub field: String,
+    pub message: String,
+}
+
+impl PluginManifestDiagnostic {
+    fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginManifestValidationError {
+    pub path: PathBuf,
+    pub diagnostics: Vec<PluginManifestDiagnostic>,
+}
+
+impl PluginManifestValidationError {
+    fn new(path: impl Into<PathBuf>, diagnostics: Vec<PluginManifestDiagnostic>) -> Self {
+        Self {
+            path: path.into(),
+            diagnostics,
+        }
+    }
+
+    pub fn diagnostics(&self) -> &[PluginManifestDiagnostic] {
+        &self.diagnostics
+    }
+}
+
+impl std::fmt::Display for PluginManifestValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "invalid plugin manifest at {}",
+            self.path.display()
+        )?;
+        for diagnostic in &self.diagnostics {
+            write!(f, "\n- {}: {}", diagnostic.field, diagnostic.message)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for PluginManifestValidationError {}
 
 // ---------------------------------------------------------------------------
 // Instance
@@ -470,17 +540,14 @@ impl PluginLoader {
 
 /// Parse PLUGIN.md frontmatter into a [`PluginManifest`].
 pub fn parse_plugin_frontmatter(content: &str) -> Option<PluginFrontmatter> {
-    // Reuse the same YAML frontmatter parser from the skill system
-    let content = content.trim();
-    if !content.starts_with("---") {
+    let normalized = content.replace("\r\n", "\n");
+    let content = normalized.trim();
+    if !content.starts_with("---\n") {
         return None;
     }
-
-    let after_first = &content[3..];
-    let end_pos = after_first.find("\n---")?;
-    let yaml_block = after_first[..end_pos].trim();
-
-    // Use the same minimal YAML parser
+    let rest = &content[4..];
+    let end = rest.find("\n---")?;
+    let yaml_block = &rest[..end];
     let value = parse_yaml_to_json(yaml_block)?;
     serde_json::from_value(value).ok()
 }
@@ -506,6 +573,10 @@ fn parse_yaml_to_json(yaml: &str) -> Option<serde_json::Value> {
                 key,
                 serde_json::Value::Bool(value.parse::<bool>().unwrap_or(false)),
             );
+        } else if let Ok(number) = value.parse::<u64>() {
+            map.insert(key, serde_json::Value::Number(number.into()));
+        } else if let Ok(number) = value.parse::<i64>() {
+            map.insert(key, serde_json::Value::Number(number.into()));
         } else if value.starts_with('{') || value.starts_with('[') {
             if let Ok(parsed) = serde_json::from_str(value) {
                 map.insert(key, parsed);
@@ -524,6 +595,178 @@ fn parse_yaml_to_json(yaml: &str) -> Option<serde_json::Value> {
     Some(serde_json::Value::Object(map))
 }
 
+fn canonicalize_csv_items(items: &[String]) -> Vec<String> {
+    let mut deduped = BTreeSet::new();
+    for item in items {
+        deduped.insert(item.trim().to_string());
+    }
+    deduped
+        .into_iter()
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+fn parse_csv_field(_field: &str, value: Option<String>) -> Result<Vec<String>, PluginManifestDiagnostic> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+
+    let items = value
+        .split(',')
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .map(|item| item.to_string())
+        .collect::<Vec<_>>();
+
+    Ok(items)
+}
+
+fn validate_plugin_frontmatter(
+    path: &Path,
+    frontmatter: PluginFrontmatter,
+) -> Result<PluginManifest, PluginManifestValidationError> {
+    let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let dir_name = source_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let mut diagnostics = Vec::new();
+
+    let schema_version = frontmatter
+        .schema_version
+        .unwrap_or(PLUGIN_MANIFEST_SCHEMA_VERSION);
+    if schema_version != PLUGIN_MANIFEST_SCHEMA_VERSION {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "schema_version",
+            format!(
+                "unsupported schema version {schema_version}; supported version is {PLUGIN_MANIFEST_SCHEMA_VERSION}"
+            ),
+        ));
+    }
+
+    let name = frontmatter.name.unwrap_or_else(|| dir_name.clone());
+    if name.trim().is_empty() {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "name",
+            "must be non-empty",
+        ));
+    }
+
+    let version = frontmatter
+        .version
+        .unwrap_or_else(|| DEFAULT_PLUGIN_VERSION.to_string());
+    if version.trim().is_empty() {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "version",
+            "must be non-empty; use an explicit semver string or omit it to default to 0.0.0",
+        ));
+    }
+
+    let description = frontmatter
+        .description
+        .unwrap_or_else(|| format!("Plugin: {name}"));
+    if description.trim().is_empty() {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "description",
+            "must be non-empty",
+        ));
+    }
+
+    let binary_value = frontmatter
+        .binary
+        .unwrap_or_else(|| DEFAULT_PLUGIN_BINARY.to_string());
+    if binary_value.trim().is_empty() {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "binary",
+            "must be non-empty; use a relative executable path or omit it to default to ./plugin",
+        ));
+    }
+    let binary = PathBuf::from(binary_value.trim());
+
+    let capabilities = match parse_csv_field("capabilities", frontmatter.capabilities) {
+        Ok(items) => items,
+        Err(err) => {
+            diagnostics.push(err);
+            Vec::new()
+        }
+    };
+    let capability_set = canonicalize_csv_items(&capabilities);
+
+    let hooks = match parse_csv_field("hooks", frontmatter.hooks) {
+        Ok(items) => items,
+        Err(err) => {
+            diagnostics.push(err);
+            Vec::new()
+        }
+    };
+    let hook_set = canonicalize_csv_items(&hooks);
+
+    let author = frontmatter.author.map(|value| value.trim().to_string());
+    if author.as_deref().is_some_and(|value| value.is_empty()) {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "author",
+            "must be non-empty when provided",
+        ));
+    }
+
+    let homepage = frontmatter.homepage.map(|value| value.trim().to_string());
+    if homepage.as_deref().is_some_and(|value| value.is_empty()) {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "homepage",
+            "must be non-empty when provided",
+        ));
+    }
+
+    let mut duplicate_capabilities = BTreeMap::<String, usize>::new();
+    for capability in &capabilities {
+        *duplicate_capabilities.entry(capability.clone()).or_default() += 1;
+    }
+    let duplicate_capabilities = duplicate_capabilities
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(capability, _)| capability)
+        .collect::<Vec<_>>();
+    if !duplicate_capabilities.is_empty() {
+        diagnostics.push(PluginManifestDiagnostic::new(
+            "capabilities",
+            format!(
+                "contains duplicate entries: {}",
+                duplicate_capabilities.join(", ")
+            ),
+        ));
+    }
+
+    for hook in &hooks {
+        if HookEvent::from_str(hook).is_none() {
+            diagnostics.push(PluginManifestDiagnostic::new(
+                "hooks",
+                format!("unknown hook event `{hook}`"),
+            ));
+        }
+    }
+
+    if diagnostics.is_empty() {
+        Ok(PluginManifest {
+            name,
+            schema_version,
+            version,
+            description,
+            binary,
+            capabilities,
+            capability_set,
+            hooks,
+            hook_set,
+            author: author.filter(|value| !value.is_empty()),
+            homepage: homepage.filter(|value| !value.is_empty()),
+            source_dir: source_dir.to_path_buf(),
+        })
+    } else {
+        Err(PluginManifestValidationError::new(path, diagnostics))
+    }
+}
+
 /// Load a plugin manifest from a PLUGIN.md file path.
 async fn load_plugin_manifest(path: &Path) -> Result<PluginManifest, String> {
     let content = tokio::fs::read_to_string(path)
@@ -533,45 +776,7 @@ async fn load_plugin_manifest(path: &Path) -> Result<PluginManifest, String> {
     let frontmatter = parse_plugin_frontmatter(&content)
         .ok_or_else(|| "no valid frontmatter found".to_string())?;
 
-    let source_dir = path
-        .parent()
-        .ok_or_else(|| "no parent directory".to_string())?;
-
-    let dir_name = source_dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
-    let name = frontmatter.name.unwrap_or_else(|| dir_name.to_string());
-    let version = frontmatter.version.unwrap_or_else(|| "0.0.0".to_string());
-    let description = frontmatter
-        .description
-        .unwrap_or_else(|| format!("Plugin: {name}"));
-
-    let binary = frontmatter
-        .binary
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("./plugin"));
-
-    // Parse hooks as comma-separated list
-    let hooks = frontmatter
-        .hooks
-        .map(|h| {
-            h.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(PluginManifest {
-        name,
-        version,
-        description,
-        binary,
-        hooks,
-        source_dir: source_dir.to_path_buf(),
-    })
+    validate_plugin_frontmatter(path, frontmatter).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -586,10 +791,12 @@ mod tests {
     #[test]
     fn parse_manifest_basic() {
         let content = r#"---
+schema_version: 1
 name: my-plugin
 version: 1.0.0
 description: A test plugin
 binary: ./run.sh
+capabilities: hooks, notifications
 hooks: pre_tool_call, post_tool_call
 ---
 
@@ -598,10 +805,12 @@ hooks: pre_tool_call, post_tool_call
 Body content here.
 "#;
         let fm = parse_plugin_frontmatter(content).unwrap();
+        assert_eq!(fm.schema_version, Some(1));
         assert_eq!(fm.name.as_deref(), Some("my-plugin"));
         assert_eq!(fm.version.as_deref(), Some("1.0.0"));
         assert_eq!(fm.description.as_deref(), Some("A test plugin"));
         assert_eq!(fm.binary.as_deref(), Some("./run.sh"));
+        assert_eq!(fm.capabilities.as_deref(), Some("hooks, notifications"));
         assert_eq!(fm.hooks.as_deref(), Some("pre_tool_call, post_tool_call"));
     }
 
@@ -615,6 +824,7 @@ name: minimal
         assert_eq!(fm.name.as_deref(), Some("minimal"));
         assert!(fm.version.is_none());
         assert!(fm.hooks.is_none());
+        assert!(fm.capabilities.is_none());
     }
 
     #[test]
@@ -623,16 +833,99 @@ name: minimal
         assert!(parse_plugin_frontmatter(content).is_none());
     }
 
+    #[test]
+    fn validate_manifest_builds_versioned_contract() {
+        let frontmatter = PluginFrontmatter {
+            schema_version: Some(1),
+            name: Some("native-plugin".into()),
+            version: Some("1.2.3".into()),
+            description: Some("Native plugin".into()),
+            binary: Some("./bin/native".into()),
+            capabilities: Some("hooks, commands".into()),
+            hooks: Some("pre_tool_call, post_tool_call".into()),
+            author: Some("Rune Team".into()),
+            homepage: Some("https://example.com/native-plugin".into()),
+        };
+
+        let manifest = validate_plugin_frontmatter(Path::new("/tmp/native/PLUGIN.md"), frontmatter)
+            .expect("manifest should validate");
+
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.capabilities, vec!["hooks", "commands"]);
+        assert_eq!(manifest.capability_set, vec!["commands", "hooks"]);
+        assert_eq!(manifest.hooks, vec!["pre_tool_call", "post_tool_call"]);
+        assert_eq!(manifest.hook_set, vec!["post_tool_call", "pre_tool_call"]);
+        assert_eq!(manifest.binary, PathBuf::from("./bin/native"));
+        assert_eq!(manifest.author.as_deref(), Some("Rune Team"));
+        assert_eq!(manifest.homepage.as_deref(), Some("https://example.com/native-plugin"));
+    }
+
+    #[test]
+    fn validate_manifest_reports_precise_diagnostics() {
+        let frontmatter = PluginFrontmatter {
+            schema_version: Some(99),
+            name: Some(String::new()),
+            version: Some(String::new()),
+            description: Some(String::new()),
+            binary: Some(String::new()),
+            capabilities: Some("hooks, hooks".into()),
+            hooks: Some("pre_tool_call, unknown_event".into()),
+            author: Some(String::new()),
+            homepage: Some(String::new()),
+        };
+
+        let error = validate_plugin_frontmatter(Path::new("/tmp/bad/PLUGIN.md"), frontmatter)
+            .expect_err("manifest should fail validation");
+        let rendered = error.to_string();
+
+        assert!(rendered.contains("schema_version"));
+        assert!(rendered.contains("name"));
+        assert!(rendered.contains("version"));
+        assert!(rendered.contains("description"));
+        assert!(rendered.contains("binary"));
+        assert!(rendered.contains("capabilities"));
+        assert!(rendered.contains("hooks"));
+        assert!(rendered.contains("author"));
+        assert!(rendered.contains("homepage"));
+        assert!(rendered.contains("unsupported schema version 99"));
+    }
+
+    #[test]
+    fn validate_manifest_defaults_metadata_and_canonicalizes_duplicates() {
+        let frontmatter = PluginFrontmatter {
+            schema_version: None,
+            name: Some("native-plugin".into()),
+            version: None,
+            description: Some("Native plugin".into()),
+            binary: None,
+            capabilities: Some("hooks, commands, hooks".into()),
+            hooks: Some("post_tool_call, pre_tool_call, post_tool_call".into()),
+            author: None,
+            homepage: None,
+        };
+
+        let manifest = validate_plugin_frontmatter(Path::new("/tmp/native/PLUGIN.md"), frontmatter)
+            .expect_err("duplicates should fail validation");
+        let rendered = manifest.to_string();
+        assert!(rendered.contains("capabilities"));
+    }
+
     #[tokio::test]
     async fn registry_crud() {
         let reg = PluginRegistry::new();
 
         let manifest = PluginManifest {
             name: "test-plugin".into(),
+            schema_version: 1,
             version: "1.0.0".into(),
             description: "Test".into(),
             binary: PathBuf::from("./test"),
+            capabilities: vec!["hooks".into()],
+            capability_set: vec!["hooks".into()],
             hooks: vec!["pre_tool_call".into()],
+            hook_set: vec!["pre_tool_call".into()],
+            author: None,
+            homepage: None,
             source_dir: PathBuf::from("/tmp"),
         };
 
@@ -653,16 +946,17 @@ name: minimal
     async fn loader_scan_discovers_plugins() {
         let tmp = TempDir::new().unwrap();
 
-        // Create a plugin directory with PLUGIN.md
         let plugin_dir = tmp.path().join("my-plugin");
         tokio::fs::create_dir_all(&plugin_dir).await.unwrap();
         tokio::fs::write(
             plugin_dir.join("PLUGIN.md"),
             r#"---
+schema_version: 1
 name: my-plugin
 version: 1.0.0
 description: A test plugin
 binary: ./run.sh
+capabilities: hooks, notifications
 hooks: pre_tool_call, post_tool_call
 ---
 
@@ -672,7 +966,6 @@ hooks: pre_tool_call, post_tool_call
         .await
         .unwrap();
 
-        // Create directory without PLUGIN.md (should be skipped)
         let no_plugin = tmp.path().join("not-a-plugin");
         tokio::fs::create_dir_all(&no_plugin).await.unwrap();
 
@@ -685,8 +978,12 @@ hooks: pre_tool_call, post_tool_call
         assert_eq!(summary.removed, 0);
 
         let manifest = registry.get("my-plugin").await.unwrap();
+        assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.version, "1.0.0");
+        assert_eq!(manifest.capabilities, vec!["hooks", "notifications"]);
+        assert_eq!(manifest.capability_set, vec!["hooks", "notifications"]);
         assert_eq!(manifest.hooks, vec!["pre_tool_call", "post_tool_call"]);
+        assert_eq!(manifest.hook_set, vec!["post_tool_call", "pre_tool_call"]);
     }
 
     #[tokio::test]
@@ -700,6 +997,7 @@ hooks: pre_tool_call, post_tool_call
         tokio::fs::write(
             plugin_dir.join("PLUGIN.md"),
             r#"---
+schema_version: 1
 name: ephemeral
 version: 0.1.0
 description: Will be removed

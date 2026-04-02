@@ -66,6 +66,7 @@ cp config.example.toml config.toml
 ```
 
 If you are wiring multiple Rune instances together, set `[instance]` in `config.toml` and check `http://127.0.0.1:8787/api/v1/instance/health` after startup to confirm identity, capability manifest, and peer reachability. Then run `rune gateway instance-health` locally for the same summary over the CLI, and `rune gateway delegation-plan --strategy least_busy` (or `--strategy named --peer-id <peer>`) to inspect the sender/receiver contract before turning on cross-instance delegation.
+For restarts and rejoin events, keep the same persisted instance ID, re-check the health endpoint after boot, and re-run `rune gateway delegation-plan` if the node's capability hash or advertised address changed. Failover absorption is intentionally conservative: degraded peers do not trigger takeover, only peers reported unreachable by health probes do.
 
 Open:
 

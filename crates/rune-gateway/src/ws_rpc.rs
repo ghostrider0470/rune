@@ -16,6 +16,7 @@ use rune_tools::{ToolCall, ToolExecutor};
 use crate::a2ui::{A2uiActionParams, A2uiEvent, A2uiFormSubmitParams, broadcast_a2ui_event};
 use crate::events::{RuntimeEvent, TurnEvent, UsageSummary, broadcast_runtime_event};
 use crate::state::AppState;
+use crate::routes::{session_next_task_reason, session_resume_hint, session_status_reason};
 use crate::ws::active_ws_connections;
 
 // ── Error type ───────────────────────────────────────────────────────────────
@@ -562,6 +563,9 @@ impl RpcDispatcher {
         let model_override = metadata_str(metadata, "selected_model").map(str::to_string);
         let current_model = latest_model.clone().or_else(|| model_override.clone());
         let approval_mode = metadata_str(metadata, "approval_mode").unwrap_or("on-miss");
+        let status_reason = session_status_reason(&row.status, metadata, approval_mode);
+        let next_task_reason = session_next_task_reason(&row.status, metadata);
+        let resume_hint = session_resume_hint(&row.status, metadata);
         let security_mode = metadata_str(metadata, "security_mode").unwrap_or("allowlist");
         let reasoning = metadata_str(metadata, "reasoning").unwrap_or("off");
         let verbose = metadata
@@ -634,6 +638,9 @@ impl RpcDispatcher {
                 row.status
             ),
             "status": row.status,
+            "status_reason": status_reason,
+            "next_task_reason": next_task_reason,
+            "resume_hint": resume_hint,
             "kind": row.kind,
             "channel_ref": row.channel_ref,
             "parent_session_id": parent_session_id,
@@ -962,6 +969,10 @@ impl RpcDispatcher {
                 "main": {
                     "active": stats.main_active,
                     "capacity": stats.main_capacity,
+                },
+                "priority": {
+                    "active": stats.priority_active,
+                    "capacity": stats.priority_capacity,
                 },
                 "subagent": {
                     "active": stats.subagent_active,
@@ -1632,6 +1643,8 @@ impl RpcDispatcher {
             json!({
                 "main_active": stats.main_active,
                 "main_capacity": stats.main_capacity,
+                "priority_active": stats.priority_active,
+                "priority_capacity": stats.priority_capacity,
                 "subagent_active": stats.subagent_active,
                 "subagent_capacity": stats.subagent_capacity,
                 "cron_active": stats.cron_active,

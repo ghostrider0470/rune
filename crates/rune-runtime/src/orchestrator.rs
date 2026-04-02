@@ -18,6 +18,27 @@ pub enum AgentStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalLease {
+    pub goal_key: String,
+    pub owner_agent_id: String,
+    pub leased_at: DateTime<Utc>,
+    pub lease_expires_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovered_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovered_from_agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalConflictRecord {
+    pub goal_key: String,
+    pub requested_by: String,
+    pub active_owner: String,
+    pub detected_at: DateTime<Utc>,
+    pub resolution: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentEntry {
     pub agent_id: String,
     pub role: String,
@@ -25,6 +46,8 @@ pub struct AgentEntry {
     pub worktree_path: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_issue: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_key: Option<String>,
     pub file_locks: Vec<String>,
     pub started_at: DateTime<Utc>,
     pub status: AgentStatus,
@@ -52,6 +75,10 @@ pub struct OrchestratorState {
     /// (e.g. `/home/user/Development/my-project`).
     pub repo_path: PathBuf,
     pub active_agents: Vec<AgentEntry>,
+    #[serde(default)]
+    pub goal_leases: Vec<GoalLease>,
+    #[serde(default)]
+    pub goal_conflicts: Vec<GoalConflictRecord>,
     /// Glob pattern -> agent_id that holds the lock.
     pub file_locks: HashMap<String, String>,
     pub merge_queue: Vec<MergeQueueEntry>,
@@ -100,6 +127,14 @@ impl OrchestratorState {
         std::fs::rename(&tmp, &path).map_err(|e| OrchestratorError::Io(e.to_string()))?;
         Ok(())
     }
+}
+
+
+#[derive(Debug, Clone)]
+pub enum GoalClaimOutcome {
+    Claimed(GoalLease),
+    DuplicateSuppressed(GoalConflictRecord),
+    RecoveredStaleLease(GoalLease),
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +273,116 @@ fn path_match_parts(pattern: &[&str], path: &[&str]) -> bool {
     }
 }
 
+impl OrchestratorState {
+    pub fn claim_goal(
+        &mut self,
+        agent_id: &str,
+        goal_key: &str,
+        lease_expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> GoalClaimOutcome {
+        if let Some(existing) = self
+            .goal_leases
+            .iter_mut()
+            .find(|lease| lease.goal_key == goal_key)
+        {
+            if existing.owner_agent_id == agent_id {
+                existing.leased_at = now;
+                existing.lease_expires_at = lease_expires_at;
+                let claimed = existing.clone();
+                self.attach_goal_to_agent(agent_id, goal_key);
+                return GoalClaimOutcome::Claimed(claimed);
+            }
+
+            if existing.lease_expires_at > now {
+                let conflict = GoalConflictRecord {
+                    goal_key: goal_key.to_string(),
+                    requested_by: agent_id.to_string(),
+                    active_owner: existing.owner_agent_id.clone(),
+                    detected_at: now,
+                    resolution: "duplicate_suppressed".to_string(),
+                };
+                self.goal_conflicts.push(conflict.clone());
+                return GoalClaimOutcome::DuplicateSuppressed(conflict);
+            }
+
+            let previous_owner = existing.owner_agent_id.clone();
+            existing.owner_agent_id = agent_id.to_string();
+            existing.leased_at = now;
+            existing.lease_expires_at = lease_expires_at;
+            existing.recovered_at = Some(now);
+            existing.recovered_from_agent_id = Some(previous_owner.clone());
+            let recovered = existing.clone();
+            self.attach_goal_to_agent(agent_id, goal_key);
+            self.detach_goal_from_agent(&previous_owner, goal_key);
+            return GoalClaimOutcome::RecoveredStaleLease(recovered);
+        }
+
+        let lease = GoalLease {
+            goal_key: goal_key.to_string(),
+            owner_agent_id: agent_id.to_string(),
+            leased_at: now,
+            lease_expires_at,
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        };
+        self.goal_leases.push(lease.clone());
+        self.attach_goal_to_agent(agent_id, goal_key);
+        GoalClaimOutcome::Claimed(lease)
+    }
+
+    pub fn release_goal(&mut self, agent_id: &str, goal_key: &str) {
+        self.goal_leases
+            .retain(|lease| !(lease.goal_key == goal_key && lease.owner_agent_id == agent_id));
+        self.detach_goal_from_agent(agent_id, goal_key);
+    }
+
+    pub fn expire_goal_leases(&mut self, now: DateTime<Utc>) -> Vec<GoalLease> {
+        let mut expired = Vec::new();
+        self.goal_leases.retain(|lease| {
+            if lease.lease_expires_at > now {
+                return true;
+            }
+            expired.push(lease.clone());
+            false
+        });
+
+        for lease in &expired {
+            self.detach_goal_from_agent(&lease.owner_agent_id, &lease.goal_key);
+        }
+
+        expired
+    }
+
+    pub fn active_goal_owner(&self, goal_key: &str, now: DateTime<Utc>) -> Option<&GoalLease> {
+        self.goal_leases
+            .iter()
+            .find(|lease| lease.goal_key == goal_key && lease.lease_expires_at > now)
+    }
+
+    fn attach_goal_to_agent(&mut self, agent_id: &str, goal_key: &str) {
+        if let Some(agent) = self
+            .active_agents
+            .iter_mut()
+            .find(|agent| agent.agent_id == agent_id)
+        {
+            agent.goal_key = Some(goal_key.to_string());
+        }
+    }
+
+    fn detach_goal_from_agent(&mut self, agent_id: &str, goal_key: &str) {
+        if let Some(agent) = self
+            .active_agents
+            .iter_mut()
+            .find(|agent| agent.agent_id == agent_id)
+        {
+            if agent.goal_key.as_deref() == Some(goal_key) {
+                agent.goal_key = None;
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FileLockManager
 // ---------------------------------------------------------------------------
@@ -355,6 +500,8 @@ mod tests {
             lint_command: None,
             repo_path: PathBuf::from("/home/user/Development/test-project"),
             active_agents: vec![],
+            goal_leases: vec![],
+            goal_conflicts: vec![],
             file_locks: HashMap::new(),
             merge_queue: vec![],
             last_merge_to_default: None,
@@ -514,6 +661,225 @@ mod tests {
             .path()
             .join("agents/test-project/.orchestrator-state.json");
         assert!(expected.exists());
+    }
+
+    #[test]
+    fn claim_goal_suppresses_duplicate_when_lease_is_active() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.active_agents.push(AgentEntry {
+            agent_id: "agent-1".into(),
+            role: "worker".into(),
+            branch: "agent/rune/a1".into(),
+            worktree_path: PathBuf::from("/tmp/a1"),
+            github_issue: Some("779".into()),
+            goal_key: None,
+            file_locks: vec![],
+            started_at: now,
+            status: AgentStatus::Active,
+        });
+        state.active_agents.push(AgentEntry {
+            agent_id: "agent-2".into(),
+            role: "worker".into(),
+            branch: "agent/rune/a2".into(),
+            worktree_path: PathBuf::from("/tmp/a2"),
+            github_issue: Some("779".into()),
+            goal_key: None,
+            file_locks: vec![],
+            started_at: now,
+            status: AgentStatus::Active,
+        });
+
+        let first = state.claim_goal(
+            "agent-1",
+            "issue-779",
+            now + chrono::Duration::minutes(5),
+            now,
+        );
+        let GoalClaimOutcome::Claimed(first_lease) = first else {
+            panic!("expected initial goal claim")
+        };
+        assert_eq!(first_lease.owner_agent_id, "agent-1");
+
+        let second = state.claim_goal(
+            "agent-2",
+            "issue-779",
+            now + chrono::Duration::minutes(5),
+            now,
+        );
+        let GoalClaimOutcome::DuplicateSuppressed(conflict) = second else {
+            panic!("expected duplicate suppression")
+        };
+        assert_eq!(conflict.active_owner, "agent-1");
+        assert_eq!(state.goal_conflicts.len(), 1);
+        assert_eq!(state.active_agents[1].goal_key, None);
+    }
+
+    #[test]
+    fn claim_goal_recovers_stale_lease_and_reassigns_owner() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.active_agents.push(AgentEntry {
+            agent_id: "agent-1".into(),
+            role: "worker".into(),
+            branch: "agent/rune/a1".into(),
+            worktree_path: PathBuf::from("/tmp/a1"),
+            github_issue: Some("779".into()),
+            goal_key: None,
+            file_locks: vec![],
+            started_at: now,
+            status: AgentStatus::Stale,
+        });
+        state.active_agents.push(AgentEntry {
+            agent_id: "agent-2".into(),
+            role: "worker".into(),
+            branch: "agent/rune/a2".into(),
+            worktree_path: PathBuf::from("/tmp/a2"),
+            github_issue: Some("779".into()),
+            goal_key: None,
+            file_locks: vec![],
+            started_at: now,
+            status: AgentStatus::Active,
+        });
+
+        let GoalClaimOutcome::Claimed(initial_lease) = state.claim_goal(
+            "agent-1",
+            "issue-779",
+            now + chrono::Duration::seconds(30),
+            now,
+        ) else {
+            panic!("expected initial claim")
+        };
+        assert_eq!(initial_lease.owner_agent_id, "agent-1");
+
+        let recovery_time = now + chrono::Duration::minutes(2);
+        let recovered = state.claim_goal(
+            "agent-2",
+            "issue-779",
+            recovery_time + chrono::Duration::minutes(5),
+            recovery_time,
+        );
+        let GoalClaimOutcome::RecoveredStaleLease(lease) = recovered else {
+            panic!("expected stale lease recovery")
+        };
+        assert_eq!(lease.owner_agent_id, "agent-2");
+        assert_eq!(lease.recovered_from_agent_id.as_deref(), Some("agent-1"));
+        assert_eq!(state.active_agents[0].goal_key, None);
+        assert_eq!(state.active_agents[1].goal_key.as_deref(), Some("issue-779"));
+    }
+
+    #[test]
+    fn save_and_load_preserves_goal_leases_and_conflicts() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut state = make_state();
+        let now = Utc::now();
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-779".into(),
+            owner_agent_id: "agent-1".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(5),
+            recovered_at: Some(now + chrono::Duration::minutes(1)),
+            recovered_from_agent_id: Some("agent-0".into()),
+        });
+        state.goal_conflicts.push(GoalConflictRecord {
+            goal_key: "issue-779".into(),
+            requested_by: "agent-2".into(),
+            active_owner: "agent-1".into(),
+            detected_at: now,
+            resolution: "duplicate_suppressed".into(),
+        });
+
+        state.save(workspace.path()).unwrap();
+        let loaded = OrchestratorState::load(workspace.path(), "test-project")
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.goal_leases.len(), 1);
+        assert_eq!(loaded.goal_conflicts.len(), 1);
+        assert_eq!(loaded.goal_leases[0].goal_key, "issue-779");
+        assert_eq!(loaded.goal_conflicts[0].resolution, "duplicate_suppressed");
+    }
+
+    #[test]
+    fn active_goal_owner_filters_expired_leases() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-778".into(),
+            owner_agent_id: "agent-1".into(),
+            leased_at: now - chrono::Duration::minutes(10),
+            lease_expires_at: now - chrono::Duration::minutes(5),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-779".into(),
+            owner_agent_id: "agent-2".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(5),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+
+        assert!(state.active_goal_owner("issue-778", now).is_none());
+        let lease = state
+            .active_goal_owner("issue-779", now)
+            .expect("active owner should be visible");
+        assert_eq!(lease.owner_agent_id, "agent-2");
+    }
+
+    #[test]
+    fn expire_goal_leases_releases_agent_goal_keys() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.active_agents.push(AgentEntry {
+            agent_id: "agent-1".into(),
+            role: "worker".into(),
+            branch: "agent/rune/a1".into(),
+            worktree_path: PathBuf::from("/tmp/a1"),
+            github_issue: Some("778".into()),
+            goal_key: Some("issue-778".into()),
+            file_locks: vec![],
+            started_at: now - chrono::Duration::minutes(10),
+            status: AgentStatus::Stale,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-778".into(),
+            owner_agent_id: "agent-1".into(),
+            leased_at: now - chrono::Duration::minutes(10),
+            lease_expires_at: now - chrono::Duration::minutes(1),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+
+        let expired = state.expire_goal_leases(now);
+        assert_eq!(expired.len(), 1);
+        assert!(state.goal_leases.is_empty());
+        assert_eq!(state.active_agents[0].goal_key, None);
+    }
+
+    #[test]
+    fn save_and_load_preserves_active_agent_goal_assignment() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut state = make_state();
+        let now = Utc::now();
+        state.active_agents.push(AgentEntry {
+            agent_id: "agent-1".into(),
+            role: "worker".into(),
+            branch: "agent/rune/a1".into(),
+            worktree_path: PathBuf::from("/tmp/a1"),
+            github_issue: Some("778".into()),
+            goal_key: Some("issue-778".into()),
+            file_locks: vec!["src/**".into()],
+            started_at: now,
+            status: AgentStatus::Active,
+        });
+
+        state.save(workspace.path()).unwrap();
+        let loaded = OrchestratorState::load(workspace.path(), "test-project")
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.active_agents.len(), 1);
+        assert_eq!(loaded.active_agents[0].goal_key.as_deref(), Some("issue-778"));
     }
 
     #[test]

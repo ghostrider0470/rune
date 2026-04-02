@@ -27,6 +27,31 @@ Use this doc as the configuration entrypoint for:
 - which deeper docs cover deployment/storage/runtime config semantics
 - how config relates to provider, channel, and auth behavior
 
+
+## Plugin discovery and decision reporting
+
+Rune scans plugin directories in configured order. Discovery is deterministic:
+- earlier scan directories have higher precedence
+- first plugin name wins across directories
+- later duplicates are skipped, not merged
+- disabled plugins are skipped by config override before activation
+- incompatible Claude plugin manifests are rejected before registration
+
+Gateway plugin status surfaces runtime-visible discovery metadata per plugin:
+- `kind` — `native` or `claude`
+- `last_decision` — `loaded`, `skipped_duplicate`, `disabled_by_override`, `rejected_incompatible`, or `parse_failed`
+- `last_detail` — human-readable reason for the decision
+
+Use this when troubleshooting why a plugin did not activate after startup or reload.
+
+Operational notes:
+- duplicate plugin names across scan roots are an override mechanism; only the highest-precedence copy loads
+- Claude plugin manifests must declare a non-empty manifest version
+- native `PLUGIN.md` manifests use schema version `1` today and are rejected if they declare another version
+- native manifests preserve declared `capabilities` and `hooks` order for display, while also producing deterministic canonical sets for runtime comparison and auditing
+- native manifests may optionally declare `author` and `homepage`; if present they must be non-empty
+- `/api/plugins` and `/api/plugins/{name}` return the latest discovery decision alongside component counts
+
 ## Read next
 
 - use [`DEPLOYMENT.md`](DEPLOYMENT.md) and [`DATABASES.md`](DATABASES.md) when configuration questions are really about runtime/storage layout

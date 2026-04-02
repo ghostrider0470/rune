@@ -1166,6 +1166,43 @@ Minimum protocol requirements:
 
 For early phases, out-of-process isolation is the safer default.
 
+### Native `PLUGIN.md` manifest v1
+
+Rune-native plugins use a YAML frontmatter contract at the top of `PLUGIN.md`.
+The runtime currently supports schema version `1`.
+
+Required operator-visible behavior:
+
+- `schema_version` defaults to `1` when omitted, but any other value is rejected with a field-specific diagnostic
+- `name` defaults to the plugin directory name when omitted and must not be empty
+- `version` defaults to `0.0.0` when omitted and must not be empty when provided
+- `description` defaults to `Plugin: <name>` when omitted and must not be empty when provided
+- `binary` defaults to `./plugin` when omitted and must not be empty when provided
+- `capabilities` is a comma-separated declaration list; duplicate entries are rejected
+- `hooks` is a comma-separated list of runtime hook event names; unknown events are rejected explicitly
+
+Example:
+
+```md
+---
+schema_version: 1
+name: example-plugin
+version: 1.2.3
+description: Example native plugin
+binary: ./bin/example
+capabilities: hooks, commands
+hooks: pre_tool_call, post_tool_call
+---
+```
+
+Validation failures must be readable without source inspection. Runtime diagnostics render as:
+
+- manifest path
+- exact field name
+- human-readable reason for rejection
+
+This keeps plugin author feedback actionable in logs, doctor output, and future plugin management surfaces.
+
 ---
 
 ## 15. Config, doctor, and observability protocol
@@ -1374,7 +1411,9 @@ What it does require is preservation of the behavioral contract seen by operator
 
 ---
 
-## Issue #73 subagent control transport status
+## Issue #73 subagent control transport gap
+
+Status: resolved on current `main`.
 
 The current client-visible `rune agents` surface supports:
 
@@ -1384,16 +1423,22 @@ The current client-visible `rune agents` surface supports:
 - `tree`
 - `templates`
 - `start --template`
-- `spawn`
 - `steer`
 - `kill`
 
-Gateway-backed public transport for interactive subagent control is now shipped through `POST /agents/{id}/steer` and `POST /agents/{id}/kill`, with matching CLI client methods and command handlers.
+Rune now exposes a supported client-facing transport contract for interactive subagent control through both gateway HTTP routes and CLI commands:
 
-Current remaining gap is narrower than transport absence: deeper runtime attachment/streaming parity for live subagent execution is still incomplete, so control actions should be described as shipped transport with conservative runtime semantics rather than full remote execution parity.
+- `POST /agents/{id}/steer`
+- `POST /agents/{id}/kill`
+- `rune agents steer <id> --message ...`
+- `rune agents kill <id> [--reason ...]`
 
-Evidence in repo includes:
+Those actions also have operator-visible success/failure semantics via structured gateway responses plus CLI renderers (`AgentSteerResponse`, `AgentKillResponse`). The remaining limitation is narrower than transport absence: runtime attachment/execution parity for delegated sessions is still conservative, but inspect/steer/kill transport is shipped.
 
-1. gateway routes + route tests for steer/kill success and error cases, and
-2. CLI parse/client/output coverage for `rune agents steer` / `rune agents kill`.
+Parity status on current `main` should therefore be treated as:
+
+- inspectable: yes
+- startable: yes
+- steerable through a supported public transport: yes
+- kill/cancel through a supported public transport: yes
 

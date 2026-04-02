@@ -238,11 +238,16 @@ impl MemoryToolExecutor {
 
         let memory_dir = self.workspace_root.join("memory");
         if memory_dir.is_dir() {
-            if let Ok(mut entries) = tokio::fs::read_dir(&memory_dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "md") {
-                        files.push(path);
+            let mut stack = vec![memory_dir];
+            while let Some(dir) = stack.pop() {
+                if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            stack.push(path);
+                        } else if path.extension().is_some_and(|e| e == "md") {
+                            files.push(path);
+                        }
                     }
                 }
             }
@@ -369,6 +374,154 @@ impl MemoryToolExecutor {
         // Return more than max_results so ranking pipeline can select diverse results
         results.truncate(max_results * 3);
         results
+    }
+
+    async fn memory_bank_files(&self) -> Result<Vec<PathBuf>, ToolError> {
+        let root = self.workspace_root.join("memory-bank");
+        if !root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut pending = vec![root];
+        let mut files = Vec::new();
+        while let Some(dir) = pending.pop() {
+            let mut entries = tokio::fs::read_dir(&dir).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("failed to read {}: {e}", dir.display()))
+            })?;
+            while let Some(entry) = entries.next_entry().await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("failed to read {}: {e}", dir.display()))
+            })? {
+                let path = entry.path();
+                let ty = entry.file_type().await.map_err(|e| {
+                    ToolError::ExecutionFailed(format!("failed to stat {}: {e}", path.display()))
+                })?;
+                if ty.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "md") {
+                    files.push(path);
+                }
+            }
+        }
+
+        files.sort();
+        Ok(files)
+    }
+
+    fn validate_memory_bank_path(&self, path_str: &str) -> Result<PathBuf, ToolError> {
+        let rel = Path::new(path_str);
+        if rel.is_absolute()
+            || rel.components().any(|c| {
+                matches!(
+                    c,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(ToolError::InvalidArgument(
+                "memory_bank path traversal is not allowed".into(),
+            ));
+        }
+
+        let full = self.workspace_root.join("memory-bank").join(rel);
+        if let Ok(canonical) = full.canonicalize() {
+            if let Ok(root) = self.workspace_root.join("memory-bank").canonicalize() {
+                if !canonical.starts_with(&root) {
+                    return Err(ToolError::InvalidArgument(
+                        "resolved path escapes memory-bank boundary".into(),
+                    ));
+                }
+            }
+        }
+        Ok(full)
+    }
+
+    #[instrument(skip(self, call), fields(tool = "memory_bank_list"))]
+    async fn memory_bank_list(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let scope = call.arguments.get("path").and_then(|v| v.as_str());
+        let mut files = self.memory_bank_files().await?;
+
+        if let Some(scope) = scope {
+            let scope = scope.trim_matches('/');
+            if scope.contains("..") {
+                return Err(ToolError::InvalidArgument(
+                    "memory_bank path traversal is not allowed".into(),
+                ));
+            }
+            files.retain(|path| {
+                path.strip_prefix(self.workspace_root.join("memory-bank"))
+                    .ok()
+                    .is_some_and(|rel| rel.starts_with(scope))
+            });
+        }
+
+        let output = if files.is_empty() {
+            "No Memory Bank documents found.".to_string()
+        } else {
+            files
+                .into_iter()
+                .filter_map(|path| {
+                    path.strip_prefix(&self.workspace_root)
+                        .ok()
+                        .map(|rel| rel.display().to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(
+                    "
+",
+                )
+        };
+
+        Ok(ToolResult {
+            tool_call_id: call.tool_call_id.clone(),
+            output,
+            is_error: false,
+            tool_execution_id: None,
+        })
+    }
+
+    #[instrument(skip(self, call), fields(tool = "memory_bank_get"))]
+    async fn memory_bank_get(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let path_str = call
+            .arguments
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArgument("missing required parameter: path".into()))?;
+        let full_path = self.validate_memory_bank_path(path_str)?;
+
+        if full_path.extension().is_none_or(|ext| ext != "md") {
+            return Err(ToolError::InvalidArgument(
+                "memory_bank_get only reads markdown files under memory-bank/".into(),
+            ));
+        }
+
+        let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("failed to read memory-bank/{path_str}: {e}"))
+        })?;
+        let from = call
+            .arguments
+            .get("from")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
+        let line_count = call
+            .arguments
+            .get("lines")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
+        let file_lines: Vec<&str> = content.lines().collect();
+        let start = from.saturating_sub(1).min(file_lines.len());
+        let end = match line_count {
+            Some(count) => (start + count).min(file_lines.len()),
+            None => file_lines.len(),
+        };
+        Ok(ToolResult {
+            tool_call_id: call.tool_call_id.clone(),
+            output: file_lines[start..end].join(
+                "
+",
+            ),
+            is_error: false,
+            tool_execution_id: None,
+        })
     }
 
     /// Search memory, preferring persisted hybrid search when configured.
@@ -506,12 +659,50 @@ impl MemoryToolExecutor {
     }
 }
 
+pub fn memory_bank_list_tool_definition() -> crate::ToolDefinition {
+    crate::ToolDefinition {
+        name: "memory_bank_list".into(),
+        description: "List discoverable Memory Bank documents in the workspace, including architecture decision records and knowledge indexes.".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Optional workspace-relative Memory Bank subdirectory to scope listing, e.g. 'adr'"
+                }
+            }
+        }),
+        category: rune_core::ToolCategory::FileRead,
+        requires_approval: false,
+    }
+}
+
+pub fn memory_bank_get_tool_definition() -> crate::ToolDefinition {
+    crate::ToolDefinition {
+        name: "memory_bank_get".into(),
+        description: "Read a Memory Bank markdown document from the workspace, including architecture decision records.".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Workspace-relative path under memory-bank/ to read" },
+                "from": { "type": "integer", "description": "1-indexed line number to start from" },
+                "lines": { "type": "integer", "description": "Maximum number of lines to return" }
+            },
+            "required": ["path"]
+        }),
+        category: rune_core::ToolCategory::FileRead,
+        requires_approval: false,
+    }
+}
+
 #[async_trait]
 impl ToolExecutor for MemoryToolExecutor {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         match call.tool_name.as_str() {
             "memory_search" => self.memory_search(&call).await,
             "memory_get" => self.memory_get(&call).await,
+            "memory_bank_list" => self.memory_bank_list(&call).await,
+            "memory_bank_get" => self.memory_bank_get(&call).await,
             other => Err(ToolError::NotFound(other.into())),
         }
     }
@@ -857,6 +1048,67 @@ mod tests {
             serde_json::json!({"path": "memory/../../etc/passwd"}),
         );
         let err = exec.execute(call).await.unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn memory_bank_list_returns_seeded_documents() {
+        let tmp = TempDir::new().unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory-bank/adr"))
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("memory-bank/README.md"), "# Memory Bank")
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join("memory-bank/adr/ADR-0001.md"), "# ADR")
+            .await
+            .unwrap();
+
+        let exec = MemoryToolExecutor::new(tmp.path());
+        let call = make_call("memory_bank_list", serde_json::json!({}));
+        let result = exec.execute(call).await.unwrap();
+
+        assert!(result.output.contains("memory-bank/README.md"));
+        assert!(result.output.contains("memory-bank/adr/ADR-0001.md"));
+    }
+
+    #[tokio::test]
+    async fn memory_bank_get_reads_seeded_document() {
+        let tmp = TempDir::new().unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory-bank/adr"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            tmp.path().join("memory-bank/adr/ADR-0001.md"),
+            "# ADR\n\nDecision line\nSecond line",
+        )
+        .await
+        .unwrap();
+
+        let exec = MemoryToolExecutor::new(tmp.path());
+        let call = make_call(
+            "memory_bank_get",
+            serde_json::json!({"path": "adr/ADR-0001.md", "from": 3, "lines": 1}),
+        );
+        let result = exec.execute(call).await.unwrap();
+
+        assert_eq!(result.output, "Decision line");
+    }
+
+    #[tokio::test]
+    async fn memory_bank_get_rejects_path_traversal() {
+        let tmp = TempDir::new().unwrap();
+        tokio::fs::create_dir_all(tmp.path().join("memory-bank/adr"))
+            .await
+            .unwrap();
+
+        let exec = MemoryToolExecutor::new(tmp.path());
+        let call = make_call(
+            "memory_bank_get",
+            serde_json::json!({"path": "../docs/adr/ADR-0001.md"}),
+        );
+        let err = exec.execute(call).await.unwrap_err();
+
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }
 

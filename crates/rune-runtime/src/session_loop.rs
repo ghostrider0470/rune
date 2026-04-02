@@ -2,17 +2,20 @@
 //!
 //! This is the core pipeline: channel message → find/create session → execute turn → reply.
 
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{Duration, Utc};
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use rune_channels::{ChannelAdapter, InboundEvent, OutboundAction};
 use rune_config::{AgentsConfig, ModelsConfig};
-use rune_core::SessionKind;
+use rune_core::{SessionKind, TriggerKind};
 use rune_store::models::SessionRow;
 use rune_store::repos::SessionRepo;
 use rune_stt::SttEngine;
@@ -20,7 +23,14 @@ use rune_stt::SttEngine;
 use crate::engine::SessionEngine;
 use crate::error::RuntimeError;
 use crate::executor::TurnExecutor;
-use crate::session_metadata::{selected_model, set_selected_model};
+use crate::session_metadata::{
+    RetryBudgetState, anti_thrash_state, clear_anti_thrash_state, selected_model,
+    set_anti_thrash_state, set_channel_source_priority, set_selected_model,
+};
+
+const MAX_FAILURE_RETRIES_PER_FINGERPRINT: u32 = 3;
+const BASE_FAILURE_BACKOFF_SECS: i64 = 5;
+const MAX_FAILURE_BACKOFF_SECS: i64 = 300;
 
 /// Trait for downloading files from Telegram (or any provider using `telegram-file:` URLs).
 ///
@@ -43,6 +53,43 @@ Rune commands:
 /// Maps channel routing key → session_id.
 type SessionIndex = HashMap<String, Uuid>;
 
+type EventPriority = u8;
+pub const PRIORITY_IMMEDIATE: EventPriority = 0;
+pub const PRIORITY_USER_MESSAGE: EventPriority = 1;
+pub const PRIORITY_COMMS_DIRECTIVE: EventPriority = 2;
+pub const PRIORITY_CRON: EventPriority = 3;
+pub const PRIORITY_BACKGROUND: EventPriority = 4;
+
+#[derive(Clone, Debug)]
+struct QueuedEvent {
+    priority: EventPriority,
+    sequence: u64,
+    event: InboundEvent,
+}
+
+impl PartialEq for QueuedEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority == other.priority && self.sequence == other.sequence
+    }
+}
+
+impl Eq for QueuedEvent {}
+
+impl PartialOrd for QueuedEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for QueuedEvent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .priority
+            .cmp(&self.priority)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
 /// The main session loop that ties channels to the runtime.
 pub struct SessionLoop {
     engine: Arc<SessionEngine>,
@@ -57,6 +104,58 @@ pub struct SessionLoop {
     stt_engine: Option<Arc<RwLock<SttEngine>>>,
     file_downloader: Option<Arc<dyn TelegramFileDownloader>>,
     command_registry: Option<Arc<crate::command_registry::CommandRegistry>>,
+    pending_events: Mutex<BinaryHeap<QueuedEvent>>,
+    next_sequence: std::sync::atomic::AtomicU64,
+}
+
+fn classify_message_priority(raw_chat_id: &str, sender: &str, content: &str) -> EventPriority {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return PRIORITY_BACKGROUND;
+    }
+
+    let source = classify_message_source(raw_chat_id, sender);
+    if source != PRIORITY_BACKGROUND {
+        return source;
+    }
+
+    if is_comms_directive_message(trimmed) {
+        return PRIORITY_COMMS_DIRECTIVE;
+    }
+
+    if is_cron_message(trimmed) {
+        return PRIORITY_CRON;
+    }
+
+    PRIORITY_USER_MESSAGE
+}
+
+fn classify_message_source(raw_chat_id: &str, sender: &str) -> EventPriority {
+    let source = raw_chat_id
+        .split([':', '/'])
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or(sender);
+    SessionLoop::classify_source_priority(source)
+}
+
+fn is_comms_directive_message(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    let directive_prefixes = [
+        "directive:",
+        "comms directive:",
+        "[directive]",
+        "[comms] directive",
+    ];
+    directive_prefixes
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+}
+
+fn is_cron_message(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    let cron_prefixes = ["cron:", "scheduled:", "heartbeat:", "reminder:"];
+    cron_prefixes.iter().any(|prefix| lower.starts_with(prefix))
 }
 
 /// MIME types considered audio for transcription purposes.
@@ -101,6 +200,8 @@ impl SessionLoop {
             stt_engine: None,
             file_downloader: None,
             command_registry: None,
+            pending_events: Mutex::new(BinaryHeap::new()),
+            next_sequence: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -155,17 +256,7 @@ impl SessionLoop {
         info!("session loop started, waiting for inbound events");
 
         loop {
-            let event = {
-                let mut ch = self.channel.lock().await;
-                match ch.receive().await {
-                    Ok(event) => event,
-                    Err(e) => {
-                        error!(error = %e, "channel receive error, retrying in 5s");
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                }
-            };
+            let event = self.next_event().await;
 
             if let Err(e) = self.handle_event(event).await {
                 error!(error = %e, "failed to handle inbound event");
@@ -173,7 +264,280 @@ impl SessionLoop {
         }
     }
 
-    async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
+    fn failure_fingerprint_for_message(error: &str, content: &str) -> String {
+        let normalized_error = error.trim().to_ascii_lowercase();
+        let normalized_content = content.trim().to_ascii_lowercase();
+        let content_marker = if normalized_content.len() > 96 {
+            &normalized_content[..96]
+        } else {
+            normalized_content.as_str()
+        };
+        format!("message:{}:{}", normalized_error, content_marker)
+    }
+
+    fn compute_backoff_secs(retry_count: u32) -> i64 {
+        let exponent = retry_count.saturating_sub(1).min(10);
+        let factor = 1_i64.checked_shl(exponent).unwrap_or(i64::MAX);
+        (BASE_FAILURE_BACKOFF_SECS.saturating_mul(factor)).min(MAX_FAILURE_BACKOFF_SECS)
+    }
+    fn objective_snapshot_for_message(content: &str) -> serde_json::Value {
+        let normalized_content = content.trim();
+        let content_preview: String = normalized_content.chars().take(160).collect();
+        serde_json::json!({
+            "kind": "message",
+            "content": normalized_content,
+            "content_preview": content_preview,
+        })
+    }
+
+    fn objective_fingerprint_for_message(content: &str) -> String {
+        let snapshot = Self::objective_snapshot_for_message(content);
+        let encoded = serde_json::to_vec(&snapshot).unwrap_or_default();
+        let digest = Sha256::digest(encoded);
+        format!("sha256:{:x}", digest)
+    }
+
+
+    async fn anti_thrash_guard(
+        &self,
+        session: &SessionRow,
+        content: &str,
+    ) -> Result<bool, RuntimeError> {
+        let Some(state) = anti_thrash_state(session) else {
+            return Ok(false);
+        };
+
+        let fingerprint = Self::failure_fingerprint_for_message(
+            state.last_error.as_deref().unwrap_or_default(),
+            content,
+        );
+        if fingerprint != state.failure_fingerprint {
+            return Ok(false);
+        }
+
+        if state.budget_exhausted {
+            return Ok(true);
+        }
+
+        if let Some(next_retry_at) = state.next_retry_at.as_deref() {
+            if let Ok(next_retry_at) = chrono::DateTime::parse_from_rfc3339(next_retry_at) {
+                if next_retry_at.with_timezone(&Utc) > Utc::now() {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn record_turn_failure(
+        &self,
+        session: &SessionRow,
+        content: &str,
+        error: &str,
+    ) -> Result<(), RuntimeError> {
+        let fingerprint = Self::failure_fingerprint_for_message(error, content);
+        let prior = anti_thrash_state(session);
+        let retry_count = match prior.as_ref() {
+            Some(state) if state.failure_fingerprint == fingerprint => {
+                state.retry_count.saturating_add(1)
+            }
+            _ => 1,
+        };
+        let budget_exhausted = retry_count >= MAX_FAILURE_RETRIES_PER_FINGERPRINT;
+        let next_retry_at = if budget_exhausted {
+            None
+        } else {
+            Some(
+                (Utc::now() + Duration::seconds(Self::compute_backoff_secs(retry_count)))
+                    .to_rfc3339(),
+            )
+        };
+        let suppression_reason = if budget_exhausted {
+            Some("retry_budget_exhausted".to_string())
+        } else {
+            Some("backoff_active".to_string())
+        };
+        let stall_reason = if budget_exhausted {
+            Some("retry budget exhausted for repeated failure fingerprint".to_string())
+        } else {
+            Some("retry backoff active for repeated failure fingerprint".to_string())
+        };
+        let operator_note = if budget_exhausted {
+            Some(format!(
+                "Previous turn failed repeatedly and the retry budget is exhausted (attempt {}). Fix the underlying failure before retrying this fingerprint.",
+                retry_count
+            ))
+        } else if let Some(next_retry_at_value) = next_retry_at.as_deref() {
+            Some(format!(
+                "Previous turn failed repeatedly. Backing off before retrying again (attempt {}, next retry at {}).",
+                retry_count, next_retry_at_value
+            ))
+        } else {
+            Some(format!(
+                "Previous turn failed repeatedly. Backing off before retrying again (attempt {}).",
+                retry_count
+            ))
+        };
+        let metadata = set_anti_thrash_state(
+            &session.metadata,
+            &RetryBudgetState {
+                failure_fingerprint: fingerprint,
+                retry_count,
+                budget_exhausted,
+                suppression_reason,
+                stall_reason,
+                operator_note,
+                next_retry_at,
+                last_error: Some(error.to_string()),
+                objective_fingerprint: Some(Self::objective_fingerprint_for_message(content)),
+                objective_snapshot: Some(Self::objective_snapshot_for_message(content)),
+            },
+        );
+        self.session_repo
+            .update_metadata(session.id, metadata, Utc::now())
+            .await
+            .map(|_| ())
+            .map_err(RuntimeError::Store)
+    }
+
+    async fn clear_turn_failure_state(&self, session: &SessionRow) -> Result<(), RuntimeError> {
+        if anti_thrash_state(session).is_none() {
+            return Ok(());
+        }
+        self.session_repo
+            .update_metadata(
+                session.id,
+                clear_anti_thrash_state(&session.metadata),
+                Utc::now(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(RuntimeError::Store)
+    }
+
+    fn classify_event_priority(event: &InboundEvent) -> EventPriority {
+        match event {
+            InboundEvent::Message(msg) => {
+                classify_message_priority(&msg.raw_chat_id, &msg.sender, &msg.content)
+            }
+            InboundEvent::Reaction { .. }
+            | InboundEvent::Edit { .. }
+            | InboundEvent::Delete { .. }
+            | InboundEvent::MemberJoin { .. }
+            | InboundEvent::MemberLeave { .. } => PRIORITY_BACKGROUND,
+        }
+    }
+
+    fn trigger_kind_for_event(event: &InboundEvent) -> TriggerKind {
+        match event {
+            InboundEvent::Message(msg) => {
+                match Self::classify_event_priority(&InboundEvent::Message(msg.clone())) {
+                    PRIORITY_IMMEDIATE => TriggerKind::Heartbeat,
+                    PRIORITY_CRON => TriggerKind::CronJob,
+                    _ => TriggerKind::UserMessage,
+                }
+            }
+            InboundEvent::Reaction { .. }
+            | InboundEvent::Edit { .. }
+            | InboundEvent::Delete { .. }
+            | InboundEvent::MemberJoin { .. }
+            | InboundEvent::MemberLeave { .. } => TriggerKind::SystemWake,
+        }
+    }
+
+    pub fn classify_source_priority(source: &str) -> EventPriority {
+        match source.trim().to_ascii_lowercase().as_str() {
+            "heartbeat" | "health" | "health-check" | "health_check" => PRIORITY_IMMEDIATE,
+            "telegram" | "telegram-message" | "telegram_message" | "user" => PRIORITY_USER_MESSAGE,
+            "comms" | "directive" | "comms-directive" | "comms_directive" => {
+                PRIORITY_COMMS_DIRECTIVE
+            }
+            "cron" | "scheduler" | "scheduled" => PRIORITY_CRON,
+            _ => PRIORITY_BACKGROUND,
+        }
+    }
+
+    #[must_use]
+    pub fn event_priority_for_test(event: &InboundEvent) -> EventPriority {
+        Self::classify_event_priority(event)
+    }
+
+    #[must_use]
+    pub fn source_priority_for_test(source: &str) -> EventPriority {
+        Self::classify_source_priority(source)
+    }
+
+    #[must_use]
+    pub fn trigger_kind_for_test(event: &InboundEvent) -> TriggerKind {
+        Self::trigger_kind_for_event(event)
+    }
+
+    async fn enqueue_event(&self, event: InboundEvent) {
+        let priority = Self::classify_event_priority(&event);
+        let sequence = self
+            .next_sequence
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut pending = self.pending_events.lock().await;
+        pending.push(QueuedEvent {
+            priority,
+            sequence,
+            event,
+        });
+    }
+
+    async fn pop_pending_event(&self) -> Option<InboundEvent> {
+        self.pending_events
+            .lock()
+            .await
+            .pop()
+            .map(|queued| queued.event)
+    }
+
+    async fn receive_raw_event(&self) -> Result<InboundEvent, rune_channels::ChannelError> {
+        let mut ch = self.channel.lock().await;
+        ch.receive().await
+    }
+
+    pub(crate) async fn next_event(&self) -> InboundEvent {
+        if let Some(event) = self.pop_pending_event().await {
+            return event;
+        }
+
+        loop {
+            let event = match self.receive_raw_event().await {
+                Ok(event) => event,
+                Err(e) => {
+                    error!(error = %e, "channel receive error, retrying in 5s");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
+
+            self.enqueue_event(event).await;
+
+            while let Ok(next_event) = tokio::time::timeout(
+                std::time::Duration::from_millis(10),
+                self.receive_raw_event(),
+            )
+            .await
+            {
+                match next_event {
+                    Ok(event) => self.enqueue_event(event).await,
+                    Err(e) => {
+                        error!(error = %e, "channel receive error while draining priority queue");
+                        break;
+                    }
+                }
+            }
+
+            if let Some(event) = self.pop_pending_event().await {
+                return event;
+            }
+        }
+    }
+
+    pub(crate) async fn handle_event(&self, event: InboundEvent) -> Result<(), RuntimeError> {
         match event {
             InboundEvent::Message(msg) => {
                 if self.handle_command(&msg).await? {
@@ -181,9 +545,24 @@ impl SessionLoop {
                 }
 
                 let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
-                debug!(routing_key = %routing_key, "received inbound message");
+                let source = msg
+                    .raw_chat_id
+                    .split([':', '/'])
+                    .next()
+                    .filter(|segment| !segment.is_empty())
+                    .unwrap_or(msg.sender.as_str())
+                    .to_ascii_lowercase();
+                let source_priority = Self::classify_source_priority(&source);
+                debug!(routing_key = %routing_key, source = %source, priority = source_priority, "received inbound message");
 
                 let session = self.find_or_create_session(&routing_key).await?;
+                let metadata =
+                    set_channel_source_priority(&session.metadata, &source, source_priority);
+                if metadata != session.metadata {
+                    self.session_repo
+                        .update_metadata(session.id, metadata, chrono::Utc::now())
+                        .await?;
+                }
                 self.maybe_send_resumed_session_notice(&msg, &routing_key, &session)
                     .await;
 
@@ -209,6 +588,11 @@ impl SessionLoop {
                 } else {
                     enriched_content.clone()
                 };
+
+                if self.anti_thrash_guard(&session, &final_text).await? {
+                    info!(session_id = %session.id, "suppressing repeated failing turn while anti-thrash backoff is active");
+                    return Ok(());
+                }
 
                 info!(session_id = %session.id, len = final_text.len(), "executing turn");
 
@@ -260,14 +644,17 @@ impl SessionLoop {
                     Some(tokio::spawn(drain_chunks(chunk_rx)))
                 };
 
+                let trigger_kind =
+                    Self::trigger_kind_for_event(&InboundEvent::Message(msg.clone()));
                 let result = self
                     .turn_executor
-                    .execute_streaming_with_attachments(
+                    .execute_triggered(
                         session.id,
                         &final_text,
                         msg.attachments.clone(),
                         None,
-                        chunk_tx,
+                        trigger_kind,
+                        Some(chunk_tx),
                     )
                     .await;
 
@@ -280,6 +667,7 @@ impl SessionLoop {
 
                 match result {
                     Ok((turn, usage)) => {
+                        self.clear_turn_failure_state(&session).await?;
                         debug!(
                             turn_id = %turn.id,
                             prompt_tokens = usage.prompt_tokens,
@@ -325,6 +713,8 @@ impl SessionLoop {
                         }
                     }
                     Err(e) => {
+                        self.record_turn_failure(&session, &final_text, &e.to_string())
+                            .await?;
                         error!(session_id = %session.id, error = %e, "turn failed");
                         let brief = {
                             let full = e.to_string();
@@ -368,7 +758,7 @@ impl SessionLoop {
         Ok(())
     }
 
-    async fn handle_command(
+    pub(crate) async fn handle_command(
         &self,
         msg: &rune_channels::ChannelMessage,
     ) -> Result<bool, RuntimeError> {
@@ -406,6 +796,10 @@ impl SessionLoop {
             }
             "/reset" => {
                 self.handle_reset_command(msg).await?;
+                Ok(true)
+            }
+            "/stop" => {
+                self.handle_stop_command(msg, args).await?;
                 Ok(true)
             }
             "/commands" => {
@@ -493,6 +887,43 @@ impl SessionLoop {
             )
             .await;
         }
+        Ok(())
+    }
+
+    async fn handle_stop_command(
+        &self,
+        msg: &rune_channels::ChannelMessage,
+        args: &str,
+    ) -> Result<(), RuntimeError> {
+        let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+        let session = match self.find_or_create_session(&routing_key).await {
+            Ok(session) => session,
+            Err(error) => {
+                self.send_command_reply(msg, &format!("No active session to stop: {error}"))
+                    .await;
+                return Ok(());
+            }
+        };
+
+        let reason = if args.trim().is_empty() {
+            format!("stop requested from channel {}", msg.raw_chat_id)
+        } else {
+            format!(
+                "stop requested from channel {}: {}",
+                msg.raw_chat_id,
+                args.trim()
+            )
+        };
+        crate::request_session_abort(session.id, reason.clone()).await;
+
+        self.send_command_reply(
+            msg,
+            &format!(
+                "Stopping active work for session {}. Reason: {}",
+                session.id, reason
+            ),
+        )
+        .await;
         Ok(())
     }
 
@@ -603,7 +1034,10 @@ impl SessionLoop {
         ))
     }
 
-    async fn find_or_create_session(&self, routing_key: &str) -> Result<SessionRow, RuntimeError> {
+    pub(crate) async fn find_or_create_session(
+        &self,
+        routing_key: &str,
+    ) -> Result<SessionRow, RuntimeError> {
         // 1. Check in-memory cache
         {
             let index = self.sessions.lock().await;
