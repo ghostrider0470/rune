@@ -16625,7 +16625,7 @@ async fn session_status_route_marks_running_subagent_as_waiting_when_runtime_det
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["runtime"], "kind=subagent | channel=local | status=waiting_for_subagent");
-    assert_eq!(json["status"], "ready");
+    assert_eq!(json["status"], "waiting_for_subagent");
     assert_eq!(json["subagent_lifecycle"], "running");
     assert_eq!(json["subagent_runtime_attached"], false);
     assert_eq!(
@@ -16839,7 +16839,7 @@ async fn session_status_route_surfaces_runtime_reattachment_next_task_reason_for
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["status"], "ready");
+    assert_eq!(json["status"], "waiting_for_subagent");
     assert_eq!(
         json["next_task_reason"],
         "next action is runtime reattachment so delegated work can resume after the restart"
