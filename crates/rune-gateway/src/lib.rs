@@ -24,7 +24,9 @@ pub use events::{
 pub use logging::init_logging;
 pub use routes::{DoctorCheck, parse_memory_search_output, storage_path_checks_for_tests};
 pub use server::{GatewayHandle, Services, build_router, start};
-pub use state::{AppState, SessionEvent, TokenMetricsStore, WebChatRateLimiter};
+pub use state::{
+    AppState, PeerHealthAlertCache, SessionEvent, TokenMetricsStore, WebChatRateLimiter,
+};
 pub use supervisor::BackgroundSupervisor;
 pub(crate) use supervisor::{SupervisorDeps, run_job_lifecycle};
 
