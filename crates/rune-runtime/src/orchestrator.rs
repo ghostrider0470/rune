@@ -337,6 +337,25 @@ impl OrchestratorState {
         self.detach_goal_from_agent(agent_id, goal_key);
     }
 
+    pub fn goal_lease(&self, goal_key: &str) -> Option<&GoalLease> {
+        self.goal_leases
+            .iter()
+            .find(|lease| lease.goal_key == goal_key)
+    }
+
+    pub fn agent_goal_lease(&self, agent_id: &str) -> Option<&GoalLease> {
+        self.goal_leases
+            .iter()
+            .find(|lease| lease.owner_agent_id == agent_id)
+    }
+
+    pub fn stale_goal_leases(&self, now: DateTime<Utc>) -> Vec<&GoalLease> {
+        self.goal_leases
+            .iter()
+            .filter(|lease| lease.lease_expires_at <= now)
+            .collect()
+    }
+
     pub fn expire_goal_leases(&mut self, now: DateTime<Utc>) -> Vec<GoalLease> {
         let mut expired = Vec::new();
         self.goal_leases.retain(|lease| {
@@ -880,6 +899,67 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.active_agents.len(), 1);
         assert_eq!(loaded.active_agents[0].goal_key.as_deref(), Some("issue-778"));
+    }
+
+    #[test]
+    fn goal_lease_helpers_surface_goal_and_agent_ownership() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.active_agents.push(AgentEntry {
+            agent_id: "agent-1".into(),
+            role: "worker".into(),
+            branch: "agent/rune/a1".into(),
+            worktree_path: PathBuf::from("/tmp/a1"),
+            github_issue: Some("766".into()),
+            goal_key: None,
+            file_locks: vec![],
+            started_at: now,
+            status: AgentStatus::Active,
+        });
+
+        let GoalClaimOutcome::Claimed(lease) = state.claim_goal(
+            "agent-1",
+            "issue-766",
+            now + chrono::Duration::minutes(5),
+            now,
+        ) else {
+            panic!("expected claim")
+        };
+
+        let by_goal = state.goal_lease("issue-766").expect("lease by goal");
+        assert_eq!(by_goal.owner_agent_id, "agent-1");
+        let by_agent = state.agent_goal_lease("agent-1").expect("lease by agent");
+        assert_eq!(by_agent.goal_key, "issue-766");
+        assert_eq!(by_agent.leased_at, lease.leased_at);
+        assert!(state.goal_lease("issue-999").is_none());
+        assert!(state.agent_goal_lease("agent-2").is_none());
+    }
+
+    #[test]
+    fn stale_goal_leases_lists_only_expired_entries_without_mutating_state() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-stale".into(),
+            owner_agent_id: "agent-1".into(),
+            leased_at: now - chrono::Duration::minutes(10),
+            lease_expires_at: now - chrono::Duration::minutes(1),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-active".into(),
+            owner_agent_id: "agent-2".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(5),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+
+        let stale = state.stale_goal_leases(now);
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].goal_key, "issue-stale");
+        assert_eq!(state.goal_leases.len(), 2);
     }
 
     #[test]
