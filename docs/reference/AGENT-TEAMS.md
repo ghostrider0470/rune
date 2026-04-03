@@ -417,6 +417,25 @@ Rune should make these true for every agent team:
 
 ---
 
+
+## 12.1 Goal lease inspection surfaces
+
+Feature #766 now includes a compact inspection layer for durable goal ownership state so parent agents, dashboards, and future gateway routes can answer "who owns what right now?" without re-implementing filtering rules.
+
+State helpers available on `OrchestratorState`:
+- `goal_lease(goal_key)` — fetch the persisted lease record for a specific goal key
+- `agent_goal_lease(agent_id)` — fetch the lease currently held by a specific agent
+- `active_goal_leases(now)` — return only unexpired leases suitable for operator-visible current-state views
+- `stale_goal_leases(now)` — list expired leases without mutating state, useful for diagnostics before recovery
+- `current_goal_owners(now)` — reduce active leases into a lightweight `goal_key -> owner_agent_id` map
+- `goal_lease_summary(now, recent_conflict_limit)` — produce one inspection payload with total/active/stale counts, active owners, stale goal keys, and recent duplicate-suppression conflict records
+
+Operational guidance:
+- use `goal_lease_summary(...)` for overview/status surfaces that need one truthful snapshot
+- use the more specific helpers for targeted enforcement or per-goal diagnostics
+- inspection helpers intentionally exclude expired leases from "active owner" views so stale ownership is never presented as current execution
+- stale leases remain persisted until explicit recovery/expiry handling runs, preserving auditability while keeping active views honest
+
 ## 13. Practical guidance for Rune agents
 
 When deciding whether to use an agent team:
