@@ -88,7 +88,10 @@ systemctl --user daemon-reload
 
 ## Tests and quality checks
 
+Treat documentation as part of the same delivery slice as code and validation. If a change affects runtime behavior, configuration, troubleshooting, contributor workflow, or architecture, update the matching canonical docs in the same PR.
+
 ```bash
+cargo check
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```

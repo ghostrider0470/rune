@@ -17,9 +17,19 @@ Rune work uses tiered validation:
 - [`DEVELOPMENT.md`](DEVELOPMENT.md)
 - [`../INDEX.md`](../INDEX.md)
 
+## Definition of done for validation
+
+Validation is part of the shipped slice, not a private local checkpoint. Before a PR is merged, the work should include:
+- code changes required by the issue
+- validation evidence proportionate to the risk and surface area
+- canonical documentation updates whenever the change affects operator behavior, contributor workflow, runtime semantics, configuration, troubleshooting, or architecture
+
+A change is not done if tests passed but the durable docs for the new behavior are still missing.
+
 ## Common checks
 
 ```bash
+cargo check
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```
