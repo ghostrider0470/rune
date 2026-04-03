@@ -422,7 +422,7 @@ Do **not** use it as a reason to eliminate filesystem-based memory/transcript la
 
 ### Recommendation
 
-Support only if there is a strong external requirement from enterprise hosting environments.
+Support only if there is a strong external requirement from enterprise hosting environments. Today that support is not shipped; track backend work in issue #782.
 
 It should **not** be the default target because:
 
