@@ -1,10 +1,12 @@
-//! Implementation of memory tools: `memory_search` and `memory_get`.
+//! Implementation of memory tools: `memory_search`, `memory_get`, and `memory_write`.
 //!
 //! Memory in Rune is file-oriented: MEMORY.md and memory/*.md files in the workspace.
 //! Search prefers the persisted hybrid backend when one is configured, falling back
 //! to local keyword scanning when persistence or embeddings are unavailable.
 
 use std::path::{Component, Path, PathBuf};
+
+use chrono::Utc;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -582,6 +584,65 @@ impl MemoryToolExecutor {
         })
     }
 
+    /// Append a note to today's daily memory file using append-only semantics.
+    #[instrument(skip(self, call), fields(tool = "memory_write"))]
+    async fn memory_write(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let text = call
+            .arguments
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArgument("missing required parameter: text".into()))?;
+
+        if text.trim().is_empty() {
+            return Err(ToolError::InvalidArgument(
+                "memory_write requires non-empty text".into(),
+            ));
+        }
+
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let relative_path = format!("memory/{today}.md");
+        let full_path = self.workspace_root.join(&relative_path);
+
+        if let Some(parent) = full_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!(
+                    "failed to create memory directory for {relative_path}: {e}"
+                ))
+            })?;
+        }
+
+        let mut note = String::new();
+        if full_path.exists() {
+            note.push('\n');
+        }
+        note.push_str(text.trim_end());
+        note.push('\n');
+
+        use tokio::io::AsyncWriteExt;
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&full_path)
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("failed to open {relative_path} for append: {e}"))
+            })?;
+
+        file.write_all(note.as_bytes()).await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("failed to append to {relative_path}: {e}"))
+        })?;
+        file.flush().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("failed to flush {relative_path}: {e}"))
+        })?;
+
+        Ok(ToolResult {
+            tool_call_id: call.tool_call_id.clone(),
+            output: format!("Appended note to {relative_path}"),
+            is_error: false,
+            tool_execution_id: None,
+        })
+    }
+
     /// Read a specific snippet from a memory file.
     #[instrument(skip(self, call), fields(tool = "memory_get"))]
     async fn memory_get(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
@@ -695,6 +756,25 @@ pub fn memory_bank_get_tool_definition() -> crate::ToolDefinition {
     }
 }
 
+pub fn memory_write_tool_definition() -> crate::ToolDefinition {
+    crate::ToolDefinition {
+        name: "memory_write".into(),
+        description: "Append a note to today's daily memory file under memory/YYYY-MM-DD.md.".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Note text to append to today's daily memory file"
+                }
+            },
+            "required": ["text"]
+        }),
+        category: rune_core::ToolCategory::FileWrite,
+        requires_approval: false,
+    }
+}
+
 #[async_trait]
 impl ToolExecutor for MemoryToolExecutor {
     async fn execute(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
@@ -703,6 +783,7 @@ impl ToolExecutor for MemoryToolExecutor {
             "memory_get" => self.memory_get(&call).await,
             "memory_bank_list" => self.memory_bank_list(&call).await,
             "memory_bank_get" => self.memory_bank_get(&call).await,
+            "memory_write" => self.memory_write(&call).await,
             other => Err(ToolError::NotFound(other.into())),
         }
     }
@@ -1124,4 +1205,32 @@ mod tests {
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }
+
+    #[tokio::test]
+    async fn memory_write_appends_to_todays_daily_note() {
+        let tmp = TempDir::new().unwrap();
+        let exec = MemoryToolExecutor::new(tmp.path());
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let relative = format!("memory/{today}.md");
+
+        let first = make_call("memory_write", serde_json::json!({"text": "first note"}));
+        let second = make_call("memory_write", serde_json::json!({"text": "second note"}));
+
+        exec.execute(first).await.unwrap();
+        exec.execute(second).await.unwrap();
+
+        let content = tokio::fs::read_to_string(tmp.path().join(relative)).await.unwrap();
+        assert_eq!(content, "first note\n\nsecond note\n");
+    }
+
+    #[tokio::test]
+    async fn memory_write_rejects_blank_text() {
+        let tmp = TempDir::new().unwrap();
+        let exec = MemoryToolExecutor::new(tmp.path());
+        let call = make_call("memory_write", serde_json::json!({"text": "   "}));
+
+        let err = exec.execute(call).await.unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgument(_)));
+    }
+
 }

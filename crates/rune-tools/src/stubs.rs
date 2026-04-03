@@ -175,6 +175,7 @@ pub fn register_builtin_stubs(registry: &mut ToolRegistry) {
     registry.register(crate::comms_tool::comms_read_tool_definition());
     registry.register(crate::memory_tool::memory_bank_list_tool_definition());
     registry.register(crate::memory_tool::memory_bank_get_tool_definition());
+    registry.register(crate::memory_tool::memory_write_tool_definition());
 }
 
 /// Validate that a tool call's arguments satisfy the `required` fields in the tool schema.
