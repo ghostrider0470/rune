@@ -24,6 +24,7 @@ use crate::compaction::NoOpCompaction;
 use crate::context::ContextAssembler;
 use crate::engine::SessionEngine;
 use crate::executor::TurnExecutor;
+use crate::hooks::{HookEvent, HookHandler, HookRegistry};
 use crate::skill::{Skill, SkillRegistry};
 
 #[derive(Debug)]
@@ -3575,4 +3576,188 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
         .as_str()
         .unwrap()
         .starts_with("sha256:"));
+}
+
+struct BlockingHookHandler;
+
+#[async_trait]
+impl HookHandler for BlockingHookHandler {
+    async fn handle(
+        &self,
+        _event: &HookEvent,
+        _context: &mut serde_json::Value,
+    ) -> Result<(), String> {
+        Err("blocked by policy".to_string())
+    }
+
+    fn plugin_name(&self) -> &str {
+        "blocking-hook"
+    }
+
+    fn fail_closed(&self) -> bool {
+        true
+    }
+}
+
+struct ApprovalMetadataHookHandler;
+
+#[async_trait]
+impl HookHandler for ApprovalMetadataHookHandler {
+    async fn handle(
+        &self,
+        _event: &HookEvent,
+        context: &mut serde_json::Value,
+    ) -> Result<(), String> {
+        context["approval_required"] = serde_json::Value::Bool(true);
+        context["approval_mode"] = serde_json::Value::String("on-miss".to_string());
+        Ok(())
+    }
+
+    fn plugin_name(&self) -> &str {
+        "approval-metadata-hook"
+    }
+}
+
+#[tokio::test]
+async fn fail_closed_pre_tool_hook_blocks_before_approval_path() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"rm -rf /tmp/demo"}"#),
+        FakeModelProvider::text_response("done"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    let hook_registry = Arc::new(HookRegistry::new());
+    hook_registry
+        .register(HookEvent::PreToolCall, Box::new(BlockingHookHandler))
+        .await;
+
+    let executor = h
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::with_steps(vec![FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: "should not be reached".to_string(),
+            }])),
+            registry,
+        )
+        .with_hook_registry(hook_registry);
+
+    let (turn, _) = executor.execute(session.id, "Run it", None).await.unwrap();
+    assert_eq!(turn.status, "completed");
+
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_eq!(session_row.status, "running");
+
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    assert!(approvals.is_empty());
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let items: Vec<rune_core::TranscriptItem> = transcript
+        .iter()
+        .map(|row| serde_json::from_value(row.payload.clone()).unwrap())
+        .collect();
+
+    assert!(items.iter().any(|item| matches!(item,
+        rune_core::TranscriptItem::StatusNote { note, .. }
+        if note.contains("hook_pre_tool_call") && note.contains("\"outcome\":\"blocked\"")
+    )));
+
+    assert!(items.iter().any(|item| matches!(item,
+        rune_core::TranscriptItem::ToolResult { output, is_error, .. }
+        if *is_error && output == "hook `blocking-hook` failed: blocked by policy"
+    )));
+}
+
+#[tokio::test]
+async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_approval() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::tool_call_response(
+        "exec",
+        r#"{"command":"rm -rf /tmp/demo"}"#,
+    )]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: true,
+    });
+
+    let hook_registry = Arc::new(HookRegistry::new());
+    hook_registry
+        .register(
+            HookEvent::PreToolCall,
+            Box::new(ApprovalMetadataHookHandler),
+        )
+        .await;
+
+    let executor = h
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::with_steps(vec![FakeToolStep::ApprovalRequired {
+                tool: "exec".to_string(),
+                details: serde_json::to_string(&ApprovalRequest {
+                    tool_name: "exec".to_string(),
+                    risk_level: RiskLevel::Medium,
+                    scope: ApprovalScope::ExactCall,
+                    presented_payload: serde_json::json!({"command": "rm -rf /tmp/demo"}),
+                    command: Some("rm -rf /tmp/demo".to_string()),
+                })
+                .unwrap(),
+            }])),
+            registry,
+        )
+        .with_hook_registry(hook_registry);
+
+    let (turn, _) = executor.execute(session.id, "Run it", None).await.unwrap();
+    assert_eq!(turn.status, "tool_executing");
+
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_eq!(session_row.status, "waiting_for_approval");
+
+    let approvals = h.approval_repo.list(true).await.unwrap();
+    assert_eq!(approvals.len(), 1);
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let items: Vec<rune_core::TranscriptItem> = transcript
+        .iter()
+        .map(|row| serde_json::from_value(row.payload.clone()).unwrap())
+        .collect();
+
+    assert!(items.iter().any(|item| matches!(item,
+        rune_core::TranscriptItem::StatusNote { note, .. }
+        if note.contains("hook_pre_tool_call") && note.contains("\"outcome\":\"applied\"")
+    )));
+    assert!(items.iter().any(|item| matches!(item, rune_core::TranscriptItem::ApprovalRequest { .. })));
 }
