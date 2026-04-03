@@ -30,6 +30,8 @@ For a single emitted event:
 - session-kind filters may skip handlers before execution
 - suppression rules may suppress handlers before execution
 - the runtime emits one structured execution record per handler attempt or pre-execution disposition
+- pre-tool and post-tool execution records are appended to the session transcript as `status_note` entries prefixed with `hook_pre_tool_call ` or `hook_post_tool_call ` followed by a JSON array of execution records
+- fail-closed pre-tool handlers stop the tool call before execution and the recorded block reason is surfaced as the tool result error text
 
 Hook context is event-scoped working state, not a durable plugin state store.
 
