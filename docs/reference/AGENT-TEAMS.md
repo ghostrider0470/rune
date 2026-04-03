@@ -404,9 +404,10 @@ Rune should make these true for every agent team:
 - keep backward-compatible support for existing `delegation_context` / `delegation_plan` payloads during migration
 
 ### Phase 3 — team observability
-- add parent-side team summaries to session status/tree surfaces
-- expose worker counts, waiting/synthesizing state, and latest team events
-- make it obvious when fields reflect durable persisted state versus live runtime attachment
+Status: partially landed on current `main`
+- session status already exposes durable orchestration explainability including status reasons, next-task reasons, approval-aware resume hints, unresolved parity notes, and latest delegated-result summaries
+- remaining work is parent-side multi-worker rollups on status/tree surfaces: explicit team counts, waiting/synthesizing lead state, and latest team events across more than one worker
+- keep making it obvious when fields reflect durable persisted state versus live runtime attachment
 
 ### Phase 4 — safety integration
 - wire delegation flows more tightly to goal leases, file locks, and branch reservation primitives
