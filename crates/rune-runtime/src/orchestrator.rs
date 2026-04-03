@@ -356,6 +356,20 @@ impl OrchestratorState {
             .collect()
     }
 
+    pub fn active_goal_leases(&self, now: DateTime<Utc>) -> Vec<&GoalLease> {
+        self.goal_leases
+            .iter()
+            .filter(|lease| lease.lease_expires_at > now)
+            .collect()
+    }
+
+    pub fn current_goal_owners(&self, now: DateTime<Utc>) -> HashMap<String, String> {
+        self.active_goal_leases(now)
+            .into_iter()
+            .map(|lease| (lease.goal_key.clone(), lease.owner_agent_id.clone()))
+            .collect()
+    }
+
     pub fn expire_goal_leases(&mut self, now: DateTime<Utc>) -> Vec<GoalLease> {
         let mut expired = Vec::new();
         self.goal_leases.retain(|lease| {
@@ -933,6 +947,69 @@ mod tests {
         assert_eq!(by_agent.leased_at, lease.leased_at);
         assert!(state.goal_lease("issue-999").is_none());
         assert!(state.agent_goal_lease("agent-2").is_none());
+    }
+
+
+    #[test]
+    fn active_goal_leases_only_include_unexpired_entries() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-stale".into(),
+            owner_agent_id: "agent-1".into(),
+            leased_at: now - chrono::Duration::minutes(10),
+            lease_expires_at: now - chrono::Duration::minutes(1),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-active".into(),
+            owner_agent_id: "agent-2".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(5),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+
+        let active = state.active_goal_leases(now);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].goal_key, "issue-active");
+    }
+
+    #[test]
+    fn current_goal_owners_returns_goal_to_agent_map_for_active_leases() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-stale".into(),
+            owner_agent_id: "agent-1".into(),
+            leased_at: now - chrono::Duration::minutes(10),
+            lease_expires_at: now - chrono::Duration::minutes(1),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-766".into(),
+            owner_agent_id: "agent-2".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(5),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-765".into(),
+            owner_agent_id: "agent-3".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(10),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+
+        let owners = state.current_goal_owners(now);
+        assert_eq!(owners.len(), 2);
+        assert_eq!(owners.get("issue-766").map(String::as_str), Some("agent-2"));
+        assert_eq!(owners.get("issue-765").map(String::as_str), Some("agent-3"));
+        assert!(!owners.contains_key("issue-stale"));
     }
 
     #[test]
