@@ -22,23 +22,77 @@ The following choices are confirmed:
 
 | Component | Choice | Notes |
 |-----------|--------|-------|
-| Primary DB | **PostgreSQL** via **Diesel** + **diesel-async** | ORM with async support, schema-first migrations |
-| Embedded fallback | **postgresql_embedded** | Auto-managed Postgres when no `DATABASE_URL` configured |
+| Primary DB | **PostgreSQL** via async repo implementations | Default production backend; external or embedded Postgres |
+| Embedded fallback | **postgresql_embedded** | Auto-managed Postgres when no `database_url` configured and backend resolves to Postgres |
+| Optional local backend | **SQLite** | Lowest-friction local/dev path; default when backend = `auto` and no Postgres/Cosmos config exists |
+| Optional Azure-native backend | **Azure Cosmos DB for NoSQL** | First-class document backend for Azure deployments needing managed NoSQL |
 | Full-text search | **PostgreSQL FTS** (tsvector/tsquery) | Built-in, powerful ranking and language support |
 | Vector search | **pgvector** | PostgreSQL extension for vector similarity search |
 | Embeddings | **Remote only** (Azure OpenAI / OpenAI API) | No local embedding models in phase 1 |
 | File storage | **Filesystem** | Mounted paths for all durable content |
 
 Key points:
-- **Diesel** + **diesel-async** is the confirmed ORM — schema-first, compile-time checked queries, managed migrations
-- When no `DATABASE_URL` is configured, the system starts an embedded PostgreSQL instance via `postgresql_embedded` (data stored under `/data/db`)
-- When a connection string is provided, connects to the external Postgres server directly
-- PostgreSQL FTS (tsvector/tsquery) for full-text search — more powerful than SQLite FTS5, with ranking and language support
-- pgvector for vector search — mature PostgreSQL extension, well-supported ecosystem
+- Rune resolves storage through a `StorageBackend` factory with first-class `postgres`, `sqlite`, and `cosmos` backends
+- `backend = "auto"` resolves to PostgreSQL when `database_url` is set, otherwise Cosmos when `cosmos_endpoint` is set, otherwise SQLite
+- When backend resolves to PostgreSQL without a `database_url`, the system starts an embedded PostgreSQL instance via `postgresql_embedded` (data stored under `/data/db`)
+- When a PostgreSQL connection string is provided, Rune connects to the external Postgres server directly
+- Cosmos uses explicit endpoint + key configuration and bootstraps its own `rune` database/container
+- SQLite remains the simplest zero-config local option and defaults to `{db_dir}/rune.db` when `sqlite_path` is unset
+- PostgreSQL FTS (tsvector/tsquery) and pgvector remain the richest integrated search path; Cosmos provides backend-native vector support; SQLite uses non-vector stubs unless paired with LanceDB
 - Remote embeddings only — no local embedding models in phase 1
-- Single operational database remains the default, while the runtime preserves optional backends behind the StorageBackend factory when enterprise requirements justify them
 
 ---
+
+## Runtime backend matrix
+
+| Backend | Select with | Connection/auth config | Startup / doctor / status surfaces | Bootstrap / migrations | Capability notes |
+|---|---|---|---|---|---|
+| SQLite | `backend = "sqlite"` or `auto` fallback | `sqlite_path` optional; defaults to `{db_dir}/rune.db` | Reports `sqlite` | Creates DB file on first use; SQLite migrations run automatically when enabled | Good local/dev option; no integrated vector search without LanceDB |
+| PostgreSQL | `backend = "postgres"` or `auto` with `database_url` | `database_url = "postgres://..."`; if omitted under explicit Postgres, embedded Postgres starts automatically | Reports `postgres (external)` or `postgres (embedded)` depending on resolution | Runs SQL migrations/bootstraps schema; embedded mode provisions local server first | Best feature coverage: strong concurrency, FTS, optional `pgvector` |
+| Azure Cosmos DB for NoSQL | `backend = "cosmos"` or `auto` with `cosmos_endpoint` | `cosmos_endpoint` + `cosmos_key` required | Reports `cosmos (nosql)` / `azure-cosmos` | Creates `rune` database + `rune` container if missing; no relational SQL migrations | Document model; vector support is backend-native, relational/FTS expectations differ from Postgres |
+| Azure SQL Database | _Not implemented yet_ | Would likely require a SQL Server/TDS connection mode plus Azure AD or SQL auth config | Not reported today | Not defined today | Track in issue #782; current SQL-family support is PostgreSQL only |
+
+### Current state of Azure SQL support
+
+Azure SQL Database is a **tracked roadmap request, not a shipped backend**. The current `StorageBackend` enum only supports `auto`, `sqlite`, `postgres`, and `cosmos`. In practice that means:
+
+- Rune **cannot** be pointed at Azure SQL today as a supported storage backend
+- `database_url` is treated as a PostgreSQL connection string, not a generic SQL URL
+- `rune doctor`, gateway topology/status, and capability reporting only recognize SQLite, PostgreSQL, and Cosmos
+- migration/bootstrap behavior exists for SQLite, PostgreSQL, and Cosmos only
+
+For Azure-hosted relational deployments today, use **Azure Database for PostgreSQL** rather than Azure SQL Database.
+
+### Configuration examples
+
+#### SQLite
+
+```toml
+[database]
+backend = "sqlite"
+run_migrations = true
+sqlite_path = "/data/db/rune.db"
+```
+
+#### PostgreSQL (Azure Database for PostgreSQL or any external Postgres)
+
+```toml
+[database]
+backend = "postgres"
+run_migrations = true
+database_url = "postgresql://user:pass@host:5432/rune?sslmode=require"
+```
+
+#### Cosmos DB for NoSQL
+
+```toml
+[database]
+backend = "cosmos"
+run_migrations = true
+cosmos_endpoint = "https://example.documents.azure.com:443/"
+cosmos_key = "<account-key>"
+```
+
 
 ## Evaluation criteria
 

@@ -13,8 +13,13 @@ name = "rune-local"
 # ]
 
 [database]
+# backend = "auto" # auto => postgres when database_url is set, cosmos when cosmos_endpoint is set, otherwise sqlite
 run_migrations = true
 # database_url = "postgresql://user:pass@localhost/rune"
+# sqlite_path = "/data/db/rune.db"
+# cosmos_endpoint = "https://example.documents.azure.com:443/"
+# cosmos_key = "<cosmos-account-key>"
+# Azure SQL Database is not supported yet; use Azure Database for PostgreSQL for Azure-hosted relational deployments today.
 
 [channels]
 # telegram_token = "YOUR_BOT_TOKEN"
