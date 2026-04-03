@@ -58,6 +58,8 @@ Operational contract:
 
 Use hook execution records and block markers when diagnosing runtime-visible tool or turn behavior changes caused by plugins.
 
+Detailed operator guidance lives in [`HOOKS.md`](HOOKS.md).
+
 For the canonical architecture decision, see [`../adr/ADR-0005-hook-lifecycle-contract-and-isolated-execution-boundaries.md`](../adr/ADR-0005-hook-lifecycle-contract-and-isolated-execution-boundaries.md).
 
 Operational notes:

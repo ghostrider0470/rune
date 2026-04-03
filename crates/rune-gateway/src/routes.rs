@@ -1995,6 +1995,11 @@ pub async fn cron_add(
     let next_run_at = compute_initial_next_run(&schedule);
     let mut job = Job {
         id,
+        max_retries: None,
+        retry_count: 0,
+        suppression_reason: None,
+        suppressed_at: None,
+        last_error: None,
         name: body.name,
         schedule,
         payload,
@@ -2045,6 +2050,11 @@ pub async fn cron_update(
 
     let update = JobUpdate {
         name: body.name,
+        max_retries: None,
+        retry_count: None,
+        suppression_reason: None,
+        suppressed_at: None,
+        last_error: None,
         enabled: body.enabled,
         schedule: new_schedule,
         payload: new_payload,
@@ -3509,6 +3519,68 @@ fn metadata_string(metadata: &Value, key: &str) -> Option<String> {
 
 fn metadata_bool(metadata: &Value, key: &str) -> Option<bool> {
     metadata.get(key).and_then(Value::as_bool)
+}
+
+pub(crate) fn session_status_reason(status: &str, metadata: &Value, approval_mode: &str) -> String {
+    if status.eq_ignore_ascii_case("waiting_approval") || metadata_bool(metadata, "approval_pending").unwrap_or(false) {
+        return format!("waiting for operator approval ({approval_mode})");
+    }
+    if let Some(reason) = metadata_string(metadata, "hook_block_reason") {
+        return format!("blocked by hook policy: {reason}");
+    }
+    if let Some(reason) = metadata_string(metadata, "status_reason") {
+        return reason;
+    }
+    match status {
+        "running" => "session actively processing work".to_string(),
+        "queued" => "session is queued for execution".to_string(),
+        "completed" => "session completed successfully".to_string(),
+        "failed" => metadata_string(metadata, "last_error")
+            .map(|err| format!("session failed: {err}"))
+            .unwrap_or_else(|| "session failed".to_string()),
+        "cancelled" => "session was cancelled".to_string(),
+        other => format!("session status: {other}"),
+    }
+}
+
+pub(crate) fn session_next_task_reason(status: &str, metadata: &Value) -> String {
+    if status.eq_ignore_ascii_case("waiting_approval") || metadata_bool(metadata, "approval_pending").unwrap_or(false) {
+        return "operator approval decision required before execution can continue".to_string();
+    }
+    if metadata.get("hook_blocked").and_then(Value::as_bool).unwrap_or(false) {
+        return "resolve or disable the blocking hook before retrying the event".to_string();
+    }
+    if let Some(reason) = metadata_string(metadata, "next_task_reason") {
+        return reason;
+    }
+    match status {
+        "running" => "allow the active run to finish or steer it with a higher-priority task".to_string(),
+        "queued" => "wait for the scheduler to start the queued work".to_string(),
+        "completed" => "start the next roadmap-aligned slice or review the transcript".to_string(),
+        "failed" => "inspect the latest error and retry once the failure cause is fixed".to_string(),
+        "cancelled" => "restart the session only if the task is still relevant".to_string(),
+        _ => "inspect session metadata and transcript for the next action".to_string(),
+    }
+}
+
+pub(crate) fn session_resume_hint(status: &str, metadata: &Value) -> String {
+    if let Some(hint) = metadata_string(metadata, "resume_hint") {
+        return hint;
+    }
+    if status.eq_ignore_ascii_case("waiting_approval") || metadata_bool(metadata, "approval_pending").unwrap_or(false) {
+        return "decide the pending approval, then resume the stored tool call".to_string();
+    }
+    if metadata.get("hook_blocked").and_then(Value::as_bool).unwrap_or(false) {
+        return "fix the blocking hook failure or change its fail-closed policy before rerunning".to_string();
+    }
+    match status {
+        "running" => "session is already active; send steering only if priorities changed".to_string(),
+        "queued" => "no manual resume needed; queued sessions resume automatically when capacity is available".to_string(),
+        "completed" => "resume by sending a new message or spawning a follow-up session".to_string(),
+        "failed" => "resume by retrying after addressing the recorded failure".to_string(),
+        "cancelled" => "resume by starting a new run; cancelled runs do not auto-resume".to_string(),
+        _ => "resume semantics depend on the session kind and latest transcript state".to_string(),
+    }
 }
 
 fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
