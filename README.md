@@ -13,6 +13,7 @@ Rune is an active parity-seeking runtime buildout, not a parity-complete replace
 Today, the project already has:
 - standalone and service-style runtime operation
 - durable PostgreSQL-backed state with embedded local fallback
+- first-class Cosmos DB for NoSQL backend support for Azure-native document deployments
 - gateway, dashboard, sessions, cron, and tool-execution surfaces
 - strong Azure-oriented model-provider support
 - GitHub Project 2 as the live execution control plane
@@ -126,7 +127,7 @@ Rune sits between messaging channels and model providers. It manages:
 ## Core features (current-state view)
 
 - **Gateway + dashboard** — health/status surfaces and an operator dashboard are live
-- **Durable storage** — PostgreSQL-backed persistence with embedded local fallback for zero-config development
+- **Durable storage** — SQLite, PostgreSQL (external or embedded), and Azure Cosmos DB for NoSQL backends are shipped today; Azure SQL Database config is reserved but intentionally unsupported pending issue #782
 - **Tool runtime** — built-in file, exec/process, cron, session, and memory-oriented tools are implemented
 - **Provider layer** — Azure AI Foundry, Azure OpenAI, OpenAI, and Anthropic provider paths are part of the active runtime shape
 - **Docs + execution discipline** — ADR trail, source-of-truth boundaries, and Project 2 execution model are now explicit
