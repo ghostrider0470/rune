@@ -50,16 +50,18 @@ Key points:
 | SQLite | `backend = "sqlite"` or `auto` fallback | `sqlite_path` optional; defaults to `{db_dir}/rune.db` | Reports `sqlite` | Creates DB file on first use; SQLite migrations run automatically when enabled | Good local/dev option; no integrated vector search without LanceDB |
 | PostgreSQL | `backend = "postgres"` or `auto` with `database_url` | `database_url = "postgres://..."`; if omitted under explicit Postgres, embedded Postgres starts automatically | Reports `postgres (external)` or `postgres (embedded)` depending on resolution | Runs SQL migrations/bootstraps schema; embedded mode provisions local server first | Best feature coverage: strong concurrency, FTS, optional `pgvector` |
 | Azure Cosmos DB for NoSQL | `backend = "cosmos"` or `auto` with `cosmos_endpoint` | `cosmos_endpoint` + `cosmos_key` required | Reports `cosmos (nosql)` / `azure-cosmos` | Creates `rune` database + `rune` container if missing; no relational SQL migrations | Document model; vector support is backend-native, relational/FTS expectations differ from Postgres |
-| Azure SQL Database | _Not implemented yet_ | Would likely require a SQL Server/TDS connection mode plus Azure AD or SQL auth config | Not reported today | Not defined today | Track in issue #782; current SQL-family support is PostgreSQL only |
+| Azure SQL Database | `backend = "azure_sql"` or `auto` with Azure SQL fields present | Reserved config today: `azure_sql_server`, `azure_sql_database`, plus either `azure_sql_access_token` or `azure_sql_user` + `azure_sql_password` | `rune doctor` warns explicitly; startup fails fast with actionable unsupported-backend messages; runtime status does not report Azure SQL as active because it is not shippable yet | No SQL Server migrations/bootstraps exist yet; current behavior is deliberate fail-fast rather than partial startup | Tracked in issue #782; config surface and detection are reserved now, but runnable SQL-family support is still PostgreSQL-only |
 
 ### Current state of Azure SQL support
 
-Azure SQL Database is a **tracked roadmap request, not a shipped backend**. The current `StorageBackend` enum only supports `auto`, `sqlite`, `postgres`, and `cosmos`. In practice that means:
+Azure SQL Database is a **tracked roadmap request, not a shipped backend**. The current codebase reserves the config surface and detects misconfiguration early, but does not provide a runnable SQL Server implementation yet. In practice that means:
 
 - Rune **cannot** be pointed at Azure SQL today as a supported storage backend
-- `database_url` is treated as a PostgreSQL connection string, not a generic SQL URL
-- `rune doctor`, gateway topology/status, and capability reporting only recognize SQLite, PostgreSQL, and Cosmos
-- migration/bootstrap behavior exists for SQLite, PostgreSQL, and Cosmos only
+- `StorageBackend::AzureSql` exists only to make intent explicit and fail fast with an actionable error
+- `backend = "auto"` still resolves `database_url` as PostgreSQL, then `cosmos_endpoint` as Cosmos, and treats Azure SQL-specific fields as an unsupported configuration that should stop startup
+- `rune doctor` emits dedicated Azure SQL warnings/failures so operators can see exactly why the backend is not viable yet
+- runtime status/topology still only reports SQLite, PostgreSQL, and Cosmos as active backends
+- migration/bootstrap behavior exists for SQLite, PostgreSQL, and Cosmos only; no SQL Server migration path is shipped yet
 
 For Azure-hosted relational deployments today, use **Azure Database for PostgreSQL** rather than Azure SQL Database.
 
