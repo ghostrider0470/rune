@@ -300,7 +300,7 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
             }
         }
         StorageBackend::Cosmos => "cosmos",
-        StorageBackend::AzureSql => "azure-sql (unimplemented)",
+        StorageBackend::AzureSql => "azure-sql",
         StorageBackend::Auto => {
             if config.database.database_url.is_some() {
                 "postgres (external)"
@@ -312,7 +312,7 @@ fn emit_startup_banner(config: &AppConfig, flags: &StartupFlags, resolved_mode: 
                 || config.database.azure_sql_password.is_some()
                 || config.database.azure_sql_access_token.is_some()
             {
-                "azure-sql (unimplemented)"
+                "azure-sql"
             } else {
                 "sqlite"
             }
