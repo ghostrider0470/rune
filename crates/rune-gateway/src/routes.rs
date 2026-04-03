@@ -3111,6 +3111,8 @@ pub struct AgentSteerRequest {
 #[derive(Serialize)]
 pub struct AgentSteerResponse {
     pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     pub accepted: bool,
     pub detail: String,
 }
@@ -3125,6 +3127,8 @@ pub struct AgentKillRequest {
 #[derive(Serialize)]
 pub struct AgentKillResponse {
     pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     pub killed: bool,
     pub detail: String,
 }
@@ -3149,6 +3153,7 @@ pub async fn agent_steer(
     }
 
     let now = chrono::Utc::now();
+    let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
     let note = format!("[steer] operator instruction injected: {}", body.message);
 
     // Append a status_note transcript item for auditability.
@@ -3192,6 +3197,7 @@ pub async fn agent_steer(
 
     Ok(Json(AgentSteerResponse {
         session_id: id.to_string(),
+        parent_session_id,
         accepted: true,
         detail: format!("steering instruction delivered to session {}", id),
     }))
@@ -3217,6 +3223,7 @@ pub async fn agent_kill(
     }
 
     let now = chrono::Utc::now();
+    let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
     let note = format!("[kill] session cancelled: {reason}");
 
@@ -3268,6 +3275,7 @@ pub async fn agent_kill(
 
     Ok(Json(AgentKillResponse {
         session_id: id.to_string(),
+        parent_session_id,
         killed: true,
         detail: format!("session {} cancelled: {reason}", id),
     }))

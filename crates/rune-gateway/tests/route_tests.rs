@@ -2790,7 +2790,7 @@ async fn ws_rpc_health_reports_session_count() {
             status: "created".into(),
             workspace_root: None,
             channel_ref: None,
-            requester_session_id: None,
+            requester_session_id: Some(Uuid::nil()),
             latest_turn_id: None,
             runtime_profile: None,
             policy_profile: None,
@@ -2808,7 +2808,7 @@ async fn ws_rpc_health_reports_session_count() {
             status: "running".into(),
             workspace_root: None,
             channel_ref: None,
-            requester_session_id: None,
+            requester_session_id: Some(Uuid::nil()),
             latest_turn_id: None,
             runtime_profile: None,
             policy_profile: None,
@@ -3211,7 +3211,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
             status: "created".into(),
             workspace_root: None,
             channel_ref: None,
-            requester_session_id: None,
+            requester_session_id: Some(Uuid::nil()),
             latest_turn_id: None,
             runtime_profile: None,
             policy_profile: None,
@@ -10475,7 +10475,7 @@ async fn agent_steer_success() {
             status: "running".into(),
             workspace_root: None,
             channel_ref: None,
-            requester_session_id: None,
+            requester_session_id: Some(Uuid::nil()),
             latest_turn_id: None,
             runtime_profile: None,
             policy_profile: None,
@@ -10579,6 +10579,7 @@ async fn agent_steer_success() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["session_id"], agent_id.to_string());
+    assert_eq!(json["parent_session_id"], Uuid::nil().to_string());
     assert_eq!(json["accepted"], true);
     assert!(
         json["detail"]
@@ -10663,7 +10664,7 @@ async fn agent_kill_success() {
             status: "running".into(),
             workspace_root: None,
             channel_ref: None,
-            requester_session_id: None,
+            requester_session_id: Some(Uuid::nil()),
             latest_turn_id: None,
             runtime_profile: None,
             policy_profile: None,
@@ -10825,7 +10826,7 @@ async fn ws_rpc_agent_steer_and_kill() {
             status: "running".into(),
             workspace_root: None,
             channel_ref: None,
-            requester_session_id: None,
+            requester_session_id: Some(Uuid::nil()),
             latest_turn_id: None,
             runtime_profile: None,
             policy_profile: None,
@@ -10929,6 +10930,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         .unwrap();
     assert_eq!(steer_result["accepted"], true);
     assert_eq!(steer_result["session_id"], agent_id.to_string());
+    assert_eq!(steer_result["parent_session_id"], Uuid::nil().to_string());
 
     // Test agent.kill via WS-RPC.
     let kill_result = dispatcher
@@ -10943,6 +10945,7 @@ async fn ws_rpc_agent_steer_and_kill() {
         .unwrap();
     assert_eq!(kill_result["killed"], true);
     assert_eq!(kill_result["session_id"], agent_id.to_string());
+    assert_eq!(kill_result["parent_session_id"], Uuid::nil().to_string());
 
     // Test not-found via WS-RPC.
     let fake_id = Uuid::now_v7();
