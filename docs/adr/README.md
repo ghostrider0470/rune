@@ -17,3 +17,5 @@ Start here:
 ## Planned next ADRs
 
 - multi-database storage architecture
+
+- [ADR-0005: Hook lifecycle contract and isolated execution boundaries](ADR-0005-hook-lifecycle-contract-and-isolated-execution-boundaries.md)

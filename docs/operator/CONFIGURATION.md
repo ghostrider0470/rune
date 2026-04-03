@@ -44,6 +44,22 @@ Gateway plugin status surfaces runtime-visible discovery metadata per plugin:
 
 Use this when troubleshooting why a plugin did not activate after startup or reload.
 
+## Hook execution behavior
+
+Plugin hook execution is lifecycle-based and reports per-handler outcomes.
+
+Operational contract:
+- hooks run for explicit lifecycle phases only
+- handlers execute in registration order
+- hook failures are isolated to the handler boundary
+- fail-open failures are reported as `warned` and do not stop sibling handlers
+- fail-closed failures are reported as `blocked`, set `hook_blocked`/`hook_block_reason`, and stop further handlers for that event
+- suppressed and filtered handlers are reported as `suppressed` or `skipped` rather than silently disappearing
+
+Use hook execution records and block markers when diagnosing runtime-visible tool or turn behavior changes caused by plugins.
+
+For the canonical architecture decision, see [`../adr/ADR-0005-hook-lifecycle-contract-and-isolated-execution-boundaries.md`](../adr/ADR-0005-hook-lifecycle-contract-and-isolated-execution-boundaries.md).
+
 Operational notes:
 - duplicate plugin names across scan roots are an override mechanism; only the highest-precedence copy loads
 - Claude plugin manifests must declare a non-empty manifest version
