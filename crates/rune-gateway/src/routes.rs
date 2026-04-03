@@ -7163,7 +7163,7 @@ fn doctor_topology_summary(config: &rune_config::AppConfig) -> DoctorTopologySum
         }
         rune_config::StorageBackend::Sqlite => "sqlite-local",
         rune_config::StorageBackend::Cosmos => "azure-cosmos",
-        rune_config::StorageBackend::AzureSql => "azure-sql-unimplemented",
+        rune_config::StorageBackend::AzureSql => "azure-sql",
         rune_config::StorageBackend::Auto => {
             if config.database.database_url.is_some() {
                 "azure-or-external-postgres"
@@ -7175,7 +7175,7 @@ fn doctor_topology_summary(config: &rune_config::AppConfig) -> DoctorTopologySum
                 || config.database.azure_sql_password.is_some()
                 || config.database.azure_sql_access_token.is_some()
             {
-                "azure-sql-unimplemented"
+                "azure-sql"
             } else {
                 "sqlite-local"
             }

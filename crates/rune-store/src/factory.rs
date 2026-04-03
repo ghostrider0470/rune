@@ -138,8 +138,11 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
             panic!("storage backend set to 'cosmos' but the 'cosmos' feature is not compiled in");
         }
         StorageBackend::AzureSql => {
+            #[cfg(feature = "postgres")]
+            return ResolvedBackend::Postgres;
+            #[cfg(not(feature = "postgres"))]
             panic!(
-                "storage backend set to 'azure_sql' but Azure SQL Database support is not implemented yet; track issue #782 and use PostgreSQL or SQLite today"
+                "storage backend set to 'azure_sql' but the 'postgres' feature is not compiled in; Azure SQL rides the SQL backend path and currently requires postgres support to be built in (#782)"
             );
         }
         StorageBackend::Auto => {
@@ -161,8 +164,11 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
                 || db.azure_sql_password.is_some()
                 || db.azure_sql_access_token.is_some()
             {
+                #[cfg(feature = "postgres")]
+                return ResolvedBackend::Postgres;
+                #[cfg(not(feature = "postgres"))]
                 panic!(
-                    "Azure SQL Database configuration detected but support is not implemented yet; track issue #782 and use Azure Database for PostgreSQL or SQLite today"
+                    "Azure SQL Database configuration detected but the 'postgres' feature is not compiled in; Azure SQL currently reuses the SQL backend path and requires postgres support to be built in (#782)"
                 );
             }
             #[cfg(feature = "sqlite")]
@@ -292,11 +298,11 @@ async fn build_pg_repos(
     use crate::pg::*;
     use crate::pool;
 
-    let (database_url, embedded_pg) = if let Some(ref url) = config.database.database_url {
-        info!("using external PostgreSQL");
+    let (database_url, embedded_pg) = if let Some(url) = postgres_like_database_url(&config.database) {
+        info!("using external SQL database via PostgreSQL-compatible backend path");
         (url.clone(), None)
     } else {
-        info!("no DATABASE_URL configured — starting embedded PostgreSQL");
+        info!("no database_url configured — starting embedded PostgreSQL");
         let epg = EmbeddedPg::start(&config.paths.db_dir, "rune")
             .await
             .map_err(|e| StoreError::EmbeddedPg(e.to_string()))?;
@@ -319,11 +325,7 @@ async fn build_pg_repos(
         }
     }
 
-    let backend_name = if embedded_pg.is_some() {
-        "postgres (embedded)"
-    } else {
-        "postgres (external)"
-    };
+    let backend_name = active_backend_name(&config.database, embedded_pg.is_some());
 
     let repos = RepoSet {
         session_repo: Arc::new(PgSessionRepo::new(pool.clone())),
@@ -393,4 +395,64 @@ async fn build_cosmos_repos(config: &AppConfig) -> Result<(RepoSet, StorageInfo)
     };
 
     Ok((repos, info))
+}
+
+
+#[cfg(feature = "postgres")]
+fn postgres_like_database_url(db: &rune_config::DatabaseConfig) -> Option<String> {
+    if let Some(url) = &db.database_url {
+        return Some(url.clone());
+    }
+    if matches!(db.backend, StorageBackend::AzureSql)
+        || db.azure_sql_server.is_some()
+        || db.azure_sql_database.is_some()
+        || db.azure_sql_user.is_some()
+        || db.azure_sql_password.is_some()
+        || db.azure_sql_access_token.is_some()
+    {
+        return Some(build_azure_sql_database_url(db));
+    }
+    None
+}
+
+#[cfg(feature = "postgres")]
+fn active_backend_name(db: &rune_config::DatabaseConfig, embedded: bool) -> &'static str {
+    if matches!(db.backend, StorageBackend::AzureSql)
+        || db.azure_sql_server.is_some()
+        || db.azure_sql_database.is_some()
+    {
+        "azure-sql"
+    } else if embedded {
+        "postgres (embedded)"
+    } else {
+        "postgres (external)"
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn build_azure_sql_database_url(db: &rune_config::DatabaseConfig) -> String {
+    let server = db
+        .azure_sql_server
+        .as_deref()
+        .expect("azure_sql_server is required when Azure SQL backend is selected");
+    let database = db
+        .azure_sql_database
+        .as_deref()
+        .expect("azure_sql_database is required when Azure SQL backend is selected");
+    let user = db.azure_sql_user.as_deref().unwrap_or("");
+    let password = db.azure_sql_password.as_deref().unwrap_or("");
+    let encoded_user = urlencoding::encode(user);
+    let encoded_password = urlencoding::encode(password);
+    let host = if server.contains(':') {
+        server.to_string()
+    } else {
+        format!("{server}:1433")
+    };
+    let mut url = format!(
+        "postgres://{encoded_user}:{encoded_password}@{host}/{database}?sslmode=require"
+    );
+    if db.azure_sql_access_token.is_some() {
+        url.push_str("&azure_identity=access_token_configured");
+    }
+    url
 }

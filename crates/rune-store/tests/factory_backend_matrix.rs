@@ -1,25 +1,4 @@
 #![cfg(feature = "sqlite")]
-#[test]
-#[should_panic(expected = "Azure SQL Database support is not implemented yet")]
-fn explicit_azure_sql_backend_panics_with_actionable_message() {
-    let mut config = AppConfig::default();
-    config.database.backend = StorageBackend::AzureSql;
-    config.database.azure_sql_server = Some("server.database.windows.net".into());
-    config.database.azure_sql_database = Some("rune".into());
-
-    let _ = rune_store::build_repos(&config);
-}
-
-#[test]
-#[should_panic(expected = "Azure SQL Database configuration detected but support is not implemented yet")]
-fn auto_backend_panics_when_azure_sql_fields_are_present() {
-    let mut config = AppConfig::default();
-    config.database.backend = StorageBackend::Auto;
-    config.database.azure_sql_server = Some("server.database.windows.net".into());
-
-    let _ = rune_store::build_repos(&config);
-}
-
 use chrono::Utc;
 use rune_config::{AppConfig, StorageBackend, VectorBackend};
 use rune_store::build_repos;
@@ -35,6 +14,81 @@ type BuildReposResult = (
 
 #[cfg(not(feature = "postgres"))]
 type BuildReposResult = (rune_store::RepoSet, rune_store::StorageInfo);
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn explicit_azure_sql_backend_builds_and_reports_backend() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+
+    let mut config = AppConfig::default();
+    config.database.backend = StorageBackend::AzureSql;
+    config.database.azure_sql_server = Some("server.database.windows.net".into());
+    config.database.azure_sql_database = Some("rune".into());
+    config.database.azure_sql_user = Some("hamza".into());
+    config.database.azure_sql_password = Some("secret".into());
+    config.database.run_migrations = false;
+    config.database.max_connections = 5;
+    config.paths.db_dir = temp.path().join("db-dir");
+
+    let (_repos, info, embedded) = build_repos(&config)
+        .await
+        .expect("azure sql backend should resolve through sql backend path");
+
+    assert_eq!(info.backend_name, "azure-sql");
+    assert!(embedded.is_none(), "azure sql should not start embedded postgres");
+    let url = info.database_url.expect("azure sql should synthesize a connection url");
+    assert!(url.starts_with("postgres://hamza:secret@server.database.windows.net:1433/rune?"));
+    assert!(url.contains("sslmode=require"));
+}
+
+#[cfg(not(feature = "postgres"))]
+#[test]
+#[should_panic(expected = "the 'postgres' feature is not compiled in")]
+fn explicit_azure_sql_backend_requires_postgres_feature() {
+    let mut config = AppConfig::default();
+    config.database.backend = StorageBackend::AzureSql;
+    config.database.azure_sql_server = Some("server.database.windows.net".into());
+    config.database.azure_sql_database = Some("rune".into());
+
+    let _ = rune_store::build_repos(&config);
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn auto_backend_with_azure_sql_fields_builds_and_reports_backend() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+
+    let mut config = AppConfig::default();
+    config.database.backend = StorageBackend::Auto;
+    config.database.azure_sql_server = Some("server.database.windows.net".into());
+    config.database.azure_sql_database = Some("rune".into());
+    config.database.azure_sql_user = Some("hamza@example.com".into());
+    config.database.azure_sql_password = Some("s3cret!".into());
+    config.database.run_migrations = false;
+    config.paths.db_dir = temp.path().join("db-dir");
+
+    let (_repos, info, embedded) = build_repos(&config)
+        .await
+        .expect("auto backend should resolve azure sql fields through sql backend path");
+
+    assert_eq!(info.backend_name, "azure-sql");
+    assert!(embedded.is_none());
+    let url = info.database_url.expect("azure sql auto should synthesize a connection url");
+    assert!(url.contains("hamza%40example.com"));
+    assert!(url.contains("s3cret%21"));
+    assert!(url.contains("sslmode=require"));
+}
+
+#[cfg(not(feature = "postgres"))]
+#[test]
+#[should_panic(expected = "the 'postgres' feature is not compiled in")]
+fn auto_backend_with_azure_sql_fields_requires_postgres_feature() {
+    let mut config = AppConfig::default();
+    config.database.backend = StorageBackend::Auto;
+    config.database.azure_sql_server = Some("server.database.windows.net".into());
+
+    let _ = rune_store::build_repos(&config);
+}
 
 async fn build_backend_matrix_repos(config: &AppConfig) -> BuildReposResult {
     build_repos(config)
