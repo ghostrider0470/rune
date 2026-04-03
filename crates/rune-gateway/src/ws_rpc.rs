@@ -718,6 +718,7 @@ impl RpcDispatcher {
             .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
 
         let now = chrono::Utc::now();
+        let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
         let note = format!("[steer] operator instruction injected: {message}");
 
         self.state
@@ -749,6 +750,7 @@ impl RpcDispatcher {
 
         Ok(json!({
             "session_id": session_id.to_string(),
+            "parent_session_id": parent_session_id,
             "accepted": true,
             "detail": format!("steering instruction delivered to session {session_id}"),
         }))
@@ -770,6 +772,7 @@ impl RpcDispatcher {
             .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
 
         let now = chrono::Utc::now();
+        let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
         let note = format!("[kill] session cancelled: {reason}");
 
         let current = self
@@ -827,6 +830,7 @@ impl RpcDispatcher {
 
         Ok(json!({
             "session_id": session_id.to_string(),
+            "parent_session_id": parent_session_id,
             "killed": true,
             "detail": format!("session {session_id} cancelled: {reason}"),
         }))
