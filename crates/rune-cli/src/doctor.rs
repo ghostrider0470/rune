@@ -265,15 +265,23 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
     let mut results = Vec::new();
 
     let using_external_postgres = config.database.database_url.is_some();
+    let azure_sql_configured = config.database.azure_sql_server.is_some()
+        || config.database.azure_sql_database.is_some()
+        || config.database.azure_sql_user.is_some()
+        || config.database.azure_sql_password.is_some()
+        || config.database.azure_sql_access_token.is_some();
     let resolved_backend = match config.database.backend {
         rune_config::StorageBackend::Postgres => "postgres",
         rune_config::StorageBackend::Sqlite => "sqlite",
         rune_config::StorageBackend::Cosmos => "cosmos",
+        rune_config::StorageBackend::AzureSql => "azure_sql",
         rune_config::StorageBackend::Auto => {
             if using_external_postgres {
                 "postgres"
             } else if config.database.cosmos_endpoint.is_some() {
                 "cosmos"
+            } else if azure_sql_configured {
+                "azure_sql"
             } else {
                 "sqlite"
             }
@@ -289,7 +297,7 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             config.database.backend
         ),
         hint: if matches!(config.database.backend, rune_config::StorageBackend::Auto) {
-            Some("Auto resolves to PostgreSQL when database_url is set, otherwise Cosmos when cosmos_endpoint is set, otherwise SQLite".into())
+            Some("Auto resolves to PostgreSQL when database_url is set, otherwise Cosmos when cosmos_endpoint is set, otherwise flags unsupported Azure SQL config, otherwise SQLite".into())
         } else {
             None
         },
@@ -336,6 +344,43 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
 
     if resolved_backend == "postgres" && !using_external_postgres {
         results.extend(check_embedded_postgres_layout(config));
+    }
+
+
+    if azure_sql_configured || matches!(config.database.backend, rune_config::StorageBackend::AzureSql) {
+        let missing_identity = config.database.azure_sql_server.is_none()
+            || config.database.azure_sql_database.is_none();
+        let auth_configured = config.database.azure_sql_access_token.is_some()
+            || (config.database.azure_sql_user.is_some() && config.database.azure_sql_password.is_some());
+        results.push(CheckResult {
+            name: "database.azure_sql".into(),
+            category: "database".into(),
+            status: CheckStatus::Warn,
+            message: "Azure SQL Database config detected, but Rune does not support Azure SQL yet".into(),
+            hint: Some("Track issue #782. Use Azure Database for PostgreSQL or SQLite today; do not expect Azure SQL startup to succeed yet".into()),
+        });
+        results.push(CheckResult {
+            name: "database.azure_sql.identity".into(),
+            category: "database".into(),
+            status: if missing_identity { CheckStatus::Fail } else { CheckStatus::Warn },
+            message: if missing_identity {
+                "Azure SQL config is missing azure_sql_server or azure_sql_database".into()
+            } else {
+                "Azure SQL server/database fields are present".into()
+            },
+            hint: Some("When Azure SQL support lands, server and database names will be required".into()),
+        });
+        results.push(CheckResult {
+            name: "database.azure_sql.auth".into(),
+            category: "database".into(),
+            status: if auth_configured { CheckStatus::Warn } else { CheckStatus::Fail },
+            message: if auth_configured {
+                "Azure SQL auth material is present, but the backend is still unsupported".into()
+            } else {
+                "Azure SQL auth material is incomplete (set access token or username/password pair)".into()
+            },
+            hint: Some("Current releases ignore these fields except to warn; they are reserved for future Azure SQL support in issue #782".into()),
+        });
     }
 
     results.push(CheckResult {
@@ -1181,15 +1226,24 @@ fn build_backend_matrix_raw(config: &AppConfig) -> Vec<BackendMatrixRawEntry> {
 }
 
 fn resolved_storage_backend(config: &AppConfig) -> &'static str {
+    let azure_sql_configured = config.database.azure_sql_server.is_some()
+        || config.database.azure_sql_database.is_some()
+        || config.database.azure_sql_user.is_some()
+        || config.database.azure_sql_password.is_some()
+        || config.database.azure_sql_access_token.is_some();
+
     match config.database.backend {
         rune_config::StorageBackend::Postgres => "postgres",
         rune_config::StorageBackend::Sqlite => "sqlite",
         rune_config::StorageBackend::Cosmos => "cosmos",
+        rune_config::StorageBackend::AzureSql => "azure_sql",
         rune_config::StorageBackend::Auto => {
             if config.database.database_url.is_some() {
                 "postgres"
             } else if config.database.cosmos_endpoint.is_some() {
                 "cosmos"
+            } else if azure_sql_configured {
+                "azure_sql"
             } else {
                 "sqlite"
             }
@@ -1742,6 +1796,58 @@ mod tests {
         }));
         assert!(warmed.iter().any(|r| {
             r.name == "database.embedded.password_file" && r.status == CheckStatus::Pass
+        }));
+    }
+
+    #[tokio::test]
+    async fn azure_sql_backend_checks_warn_as_unimplemented() {
+        let tmp = TempDir::new().unwrap();
+        create_path_layout(tmp.path()).await;
+        let mut config = test_config_with_paths(tmp.path());
+        config.database.backend = rune_config::StorageBackend::AzureSql;
+        config.database.azure_sql_server = Some("server.database.windows.net".into());
+        config.database.azure_sql_database = Some("rune".into());
+        config.database.azure_sql_user = Some("hamza".into());
+        config.database.azure_sql_password = Some("secret".into());
+
+        let results = check_database_config(&config).await;
+        assert!(results.iter().any(|r| {
+            r.name == "database.backend"
+                && r.status == CheckStatus::Pass
+                && r.message.contains("resolved runtime backend = azure_sql")
+        }));
+        assert!(results.iter().any(|r| {
+            r.name == "database.azure_sql"
+                && r.status == CheckStatus::Warn
+                && r.message.contains("does not support Azure SQL yet")
+        }));
+        assert!(results.iter().any(|r| {
+            r.name == "database.azure_sql.identity" && r.status == CheckStatus::Warn
+        }));
+        assert!(results.iter().any(|r| {
+            r.name == "database.azure_sql.auth" && r.status == CheckStatus::Warn
+        }));
+    }
+
+    #[tokio::test]
+    async fn azure_sql_auto_detection_surfaces_missing_fields() {
+        let tmp = TempDir::new().unwrap();
+        create_path_layout(tmp.path()).await;
+        let mut config = test_config_with_paths(tmp.path());
+        config.database.backend = rune_config::StorageBackend::Auto;
+        config.database.azure_sql_server = Some("server.database.windows.net".into());
+
+        let results = check_database_config(&config).await;
+        assert!(results.iter().any(|r| {
+            r.name == "database.backend"
+                && r.status == CheckStatus::Pass
+                && r.message.contains("resolved runtime backend = azure_sql")
+        }));
+        assert!(results.iter().any(|r| {
+            r.name == "database.azure_sql.identity" && r.status == CheckStatus::Fail
+        }));
+        assert!(results.iter().any(|r| {
+            r.name == "database.azure_sql.auth" && r.status == CheckStatus::Fail
         }));
     }
 

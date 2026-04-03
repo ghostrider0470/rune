@@ -137,6 +137,11 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
             #[cfg(not(feature = "cosmos"))]
             panic!("storage backend set to 'cosmos' but the 'cosmos' feature is not compiled in");
         }
+        StorageBackend::AzureSql => {
+            panic!(
+                "storage backend set to 'azure_sql' but Azure SQL Database support is not implemented yet; track issue #782 and use PostgreSQL or SQLite today"
+            );
+        }
         StorageBackend::Auto => {
             if db.database_url.is_some() {
                 #[cfg(feature = "postgres")]
@@ -149,6 +154,16 @@ fn resolve_backend(db: &rune_config::DatabaseConfig) -> ResolvedBackend {
                 return ResolvedBackend::Cosmos;
                 #[cfg(not(feature = "cosmos"))]
                 panic!("cosmos_endpoint is set but the 'cosmos' feature is not compiled in");
+            }
+            if db.azure_sql_server.is_some()
+                || db.azure_sql_database.is_some()
+                || db.azure_sql_user.is_some()
+                || db.azure_sql_password.is_some()
+                || db.azure_sql_access_token.is_some()
+            {
+                panic!(
+                    "Azure SQL Database configuration detected but support is not implemented yet; track issue #782 and use Azure Database for PostgreSQL or SQLite today"
+                );
             }
             #[cfg(feature = "sqlite")]
             return ResolvedBackend::Sqlite;
