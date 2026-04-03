@@ -1,4 +1,24 @@
 #![cfg(feature = "sqlite")]
+#[test]
+#[should_panic(expected = "Azure SQL Database support is not implemented yet")]
+fn explicit_azure_sql_backend_panics_with_actionable_message() {
+    let mut config = AppConfig::default();
+    config.database.backend = StorageBackend::AzureSql;
+    config.database.azure_sql_server = Some("server.database.windows.net".into());
+    config.database.azure_sql_database = Some("rune".into());
+
+    let _ = rune_store::build_repos(&config);
+}
+
+#[test]
+#[should_panic(expected = "Azure SQL Database configuration detected but support is not implemented yet")]
+fn auto_backend_panics_when_azure_sql_fields_are_present() {
+    let mut config = AppConfig::default();
+    config.database.backend = StorageBackend::Auto;
+    config.database.azure_sql_server = Some("server.database.windows.net".into());
+
+    let _ = rune_store::build_repos(&config);
+}
 
 use chrono::Utc;
 use rune_config::{AppConfig, StorageBackend, VectorBackend};

@@ -770,6 +770,8 @@ pub enum StorageBackend {
     Sqlite,
     Postgres,
     Cosmos,
+    #[serde(alias = "sqlserver", alias = "mssql")]
+    AzureSql,
 }
 
 /// Which backend to use for vector/semantic memory.
@@ -832,7 +834,23 @@ pub struct DatabaseConfig {
     /// Cosmos DB master key for auth.
     #[serde(default)]
     pub cosmos_key: Option<String>,
+    /// Azure SQL Database server hostname or fully qualified server name.
+    #[serde(default)]
+    pub azure_sql_server: Option<String>,
+    /// Azure SQL Database name.
+    #[serde(default)]
+    pub azure_sql_database: Option<String>,
+    /// Azure SQL Database SQL auth username or Microsoft Entra principal name.
+    #[serde(default)]
+    pub azure_sql_user: Option<String>,
+    /// Azure SQL Database SQL auth password.
+    #[serde(default)]
+    pub azure_sql_password: Option<String>,
+    /// Azure SQL Database access token for token-based auth flows.
+    #[serde(default)]
+    pub azure_sql_access_token: Option<String>,
 }
+
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
@@ -844,6 +862,11 @@ impl Default for DatabaseConfig {
             sqlite_path: None,
             cosmos_endpoint: None,
             cosmos_key: None,
+            azure_sql_server: None,
+            azure_sql_database: None,
+            azure_sql_user: None,
+            azure_sql_password: None,
+            azure_sql_access_token: None,
         }
     }
 }
