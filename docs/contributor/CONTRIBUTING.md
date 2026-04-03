@@ -20,6 +20,16 @@ Contributors should use Rune's docs and issue trail in a way that keeps strategy
 Use repo docs to understand the system.
 Use GitHub Project 2, issues, and PRs to understand active execution.
 Use ADRs for durable decisions.
+Documentation is part of delivery, not optional cleanup after shipping code.
+
+## Documentation as a delivery requirement
+
+Every non-trivial Rune change should explicitly answer:
+- what durable docs changed with this work?
+- what operator/contributor/reference surface is now different?
+- does this decision deserve an ADR or equivalent canonical record?
+
+Issue scopes and PRs should treat docs the same way they treat validation: as part of done. If the user-visible or operator-visible surface changed, the same PR should carry the matching docs update.
 
 ## Current contributor use
 

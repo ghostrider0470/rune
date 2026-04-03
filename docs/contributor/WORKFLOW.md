@@ -25,6 +25,23 @@ Use this doc as the workflow entrypoint for:
 - where execution authority lives now
 - how contributor flow relates to issues, PRs, and Project 2
 
+## Definition of done
+
+Rune work is not done when code exists locally. Rune work is done when the shipped slice includes:
+- code changes
+- validation evidence appropriate to the change
+- canonical documentation updates for any operator-visible, contributor-visible, runtime-significant, or architecture-significant behavior
+
+If a change introduces new behavior, config, workflow, failure mode, or decision surface, the matching docs update is part of the same PR rather than follow-up backlog residue.
+
+## Documentation expectations
+
+Before merging non-trivial work, contributors should decide which durable docs must move with the code:
+- ADRs for architecture-significant decisions
+- operator docs/runbooks for runtime-visible behavior and troubleshooting
+- contributor/reference docs for development workflow, subsystem contracts, or config surfaces
+- README/docs index updates when navigation or first-stop guidance changes
+
 ## Read next
 
 - use [`EXECUTION-SPEED-POLICY.md`](EXECUTION-SPEED-POLICY.md) when you need the speed/safety operating rules behind this workflow
