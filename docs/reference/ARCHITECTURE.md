@@ -100,6 +100,7 @@ This is the orchestration-state slice for issue #779 under feature #766. It does
 Operator-facing inspection helpers now exist at the state layer too:
 - `active_goal_leases(now)` returns only currently valid lease records for dashboards or health checks
 - `current_goal_owners(now)` reduces active leases into a `goal_key -> owner_agent_id` map for lightweight inspection surfaces
+- `goal_lease_summary(now, recent_conflict_limit)` packages active-owner snapshots, stale-goal keys, lease counts, and the most recent conflict records into one operator-facing inspection payload
 - both helpers intentionally exclude expired leases so operators and future gateway routes do not misread stale ownership as active execution
 
 - Retry budget state now stores both failure fingerprint and objective fingerprint/snapshot so operators can inspect which objective keeps re-failing after restart.

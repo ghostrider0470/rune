@@ -29,13 +29,23 @@ pub struct GoalLease {
     pub recovered_from_agent_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalConflictRecord {
     pub goal_key: String,
     pub requested_by: String,
     pub active_owner: String,
     pub detected_at: DateTime<Utc>,
     pub resolution: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalLeaseSummary {
+    pub total_leases: usize,
+    pub active_leases: usize,
+    pub stale_leases: usize,
+    pub active_goal_owners: HashMap<String, String>,
+    pub stale_goal_keys: Vec<String>,
+    pub recent_conflicts: Vec<GoalConflictRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -368,6 +378,31 @@ impl OrchestratorState {
             .into_iter()
             .map(|lease| (lease.goal_key.clone(), lease.owner_agent_id.clone()))
             .collect()
+    }
+
+    pub fn goal_lease_summary(&self, now: DateTime<Utc>, recent_conflict_limit: usize) -> GoalLeaseSummary {
+        let active_goal_owners = self.current_goal_owners(now);
+        let stale_goal_keys = self
+            .stale_goal_leases(now)
+            .into_iter()
+            .map(|lease| lease.goal_key.clone())
+            .collect::<Vec<_>>();
+        let recent_conflicts = self
+            .goal_conflicts
+            .iter()
+            .rev()
+            .take(recent_conflict_limit)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        GoalLeaseSummary {
+            total_leases: self.goal_leases.len(),
+            active_leases: active_goal_owners.len(),
+            stale_leases: stale_goal_keys.len(),
+            active_goal_owners,
+            stale_goal_keys,
+            recent_conflicts,
+        }
     }
 
     pub fn expire_goal_leases(&mut self, now: DateTime<Utc>) -> Vec<GoalLease> {
@@ -1037,6 +1072,62 @@ mod tests {
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0].goal_key, "issue-stale");
         assert_eq!(state.goal_leases.len(), 2);
+    }
+
+    #[test]
+    fn goal_lease_summary_reports_active_stale_and_recent_conflicts() {
+        let mut state = make_state();
+        let now = Utc::now();
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-stale".into(),
+            owner_agent_id: "agent-1".into(),
+            leased_at: now - chrono::Duration::minutes(10),
+            lease_expires_at: now - chrono::Duration::minutes(1),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-active-a".into(),
+            owner_agent_id: "agent-2".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(5),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_leases.push(GoalLease {
+            goal_key: "issue-active-b".into(),
+            owner_agent_id: "agent-3".into(),
+            leased_at: now,
+            lease_expires_at: now + chrono::Duration::minutes(10),
+            recovered_at: None,
+            recovered_from_agent_id: None,
+        });
+        state.goal_conflicts.push(GoalConflictRecord {
+            goal_key: "issue-older".into(),
+            requested_by: "agent-9".into(),
+            active_owner: "agent-2".into(),
+            detected_at: now - chrono::Duration::minutes(2),
+            resolution: "duplicate_suppressed".into(),
+        });
+        state.goal_conflicts.push(GoalConflictRecord {
+            goal_key: "issue-newer".into(),
+            requested_by: "agent-10".into(),
+            active_owner: "agent-3".into(),
+            detected_at: now - chrono::Duration::minutes(1),
+            resolution: "duplicate_suppressed".into(),
+        });
+
+        let summary = state.goal_lease_summary(now, 1);
+        assert_eq!(summary.total_leases, 3);
+        assert_eq!(summary.active_leases, 2);
+        assert_eq!(summary.stale_leases, 1);
+        assert_eq!(
+            summary.active_goal_owners.get("issue-active-a").map(String::as_str),
+            Some("agent-2")
+        );
+        assert_eq!(summary.stale_goal_keys, vec!["issue-stale".to_string()]);
+        assert_eq!(summary.recent_conflicts.len(), 1);
+        assert_eq!(summary.recent_conflicts[0].goal_key, "issue-newer");
     }
 
     #[test]
