@@ -1083,10 +1083,47 @@ impl TurnExecutor {
                             "turn_id": turn_id.into_uuid().to_string(),
                             "session_kind": format!("{:?}", session_kind),
                         });
-                        hook_reg.emit(&HookEvent::PreToolCall, &mut hook_ctx).await;
+                        let records = hook_reg.emit(&HookEvent::PreToolCall, &mut hook_ctx).await;
+                        if !records.is_empty() {
+                            let note = TranscriptItem::StatusNote {
+                                status: SessionStatus::Running,
+                                note: format!(
+                                    "hook_pre_tool_call {}",
+                                    serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string())
+                                ),
+                            };
+                            self.append_transcript(session_id, Some(turn_id.into_uuid()), &note)
+                                .await?;
+                        }
                         // Allow hooks to modify arguments
                         if let Some(modified_args) = hook_ctx.get("arguments").cloned() {
                             args = modified_args;
+                        }
+                        if hook_ctx
+                            .get("hook_blocked")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
+                        {
+                            let output = hook_ctx
+                                .get("hook_block_reason")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("blocked by hook policy")
+                                .to_string();
+                            let tool_result = ToolResult {
+                                tool_call_id: tool_call_id.clone(),
+                                output,
+                                is_error: true,
+                                tool_execution_id: None,
+                            };
+                            let result_item = TranscriptItem::ToolResult {
+                                tool_call_id: tool_result.tool_call_id.clone(),
+                                output: tool_result.output.clone(),
+                                is_error: tool_result.is_error,
+                                tool_execution_id: tool_result.tool_execution_id,
+                            };
+                            self.append_transcript(session_id, Some(turn_id.into_uuid()), &result_item)
+                                .await?;
+                            continue;
                         }
                     }
 
@@ -1269,7 +1306,18 @@ impl TurnExecutor {
                             "is_error": tool_result.is_error,
                             "session_kind": format!("{:?}", session_kind),
                         });
-                        hook_reg.emit(&HookEvent::PostToolCall, &mut hook_ctx).await;
+                        let records = hook_reg.emit(&HookEvent::PostToolCall, &mut hook_ctx).await;
+                        if !records.is_empty() {
+                            let note = TranscriptItem::StatusNote {
+                                status: SessionStatus::Running,
+                                note: format!(
+                                    "hook_post_tool_call {}",
+                                    serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string())
+                                ),
+                            };
+                            self.append_transcript(session_id, Some(turn_id.into_uuid()), &note)
+                                .await?;
+                        }
                     }
                 }
 

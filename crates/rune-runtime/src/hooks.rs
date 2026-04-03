@@ -399,6 +399,28 @@ mod tests {
 
     struct SuppressedHandler;
 
+    struct MutatingFailClosedHandler;
+
+    #[async_trait::async_trait]
+    impl HookHandler for MutatingFailClosedHandler {
+        async fn handle(
+            &self,
+            _event: &HookEvent,
+            context: &mut serde_json::Value,
+        ) -> Result<(), String> {
+            context["mutation_before_block"] = serde_json::Value::Bool(true);
+            Err("must block after mutation".to_string())
+        }
+
+        fn plugin_name(&self) -> &str {
+            "mutating-fail-closed-plugin"
+        }
+
+        fn fail_closed(&self) -> bool {
+            true
+        }
+    }
+
     #[async_trait::async_trait]
     impl HookHandler for SuppressedHandler {
         async fn handle(
@@ -627,6 +649,25 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].outcome.as_str(), "suppressed");
         assert_eq!(records[0].reason.as_deref(), Some("policy disabled this hook"));
+    }
+
+    #[tokio::test]
+    async fn fail_closed_preserves_prior_context_mutations() {
+        let registry = HookRegistry::new();
+        registry
+            .register(HookEvent::PreToolCall, Box::new(MutatingFailClosedHandler))
+            .await;
+
+        let mut ctx = serde_json::json!({});
+        let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].outcome.as_str(), "blocked");
+        assert_eq!(ctx["mutation_before_block"], true);
+        assert_eq!(
+            ctx["hook_block_reason"],
+            "hook `mutating-fail-closed-plugin` failed: must block after mutation"
+        );
     }
 
 }
