@@ -163,3 +163,32 @@ async fn postgres_integrated_matrix_row_builds_and_round_trips() {
     );
     assert_session_round_trip(repos).await;
 }
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn postgres_auto_matrix_row_prefers_database_url_over_sqlite_path() {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let sqlite_path = temp.path().join("ignored-auto.db");
+
+    let mut config = AppConfig::default();
+    config.database.backend = StorageBackend::Auto;
+    config.database.database_url = Some("postgres://user:pass@localhost:5432/rune".into());
+    config.database.sqlite_path = Some(sqlite_path);
+    config.vector.backend = VectorBackend::Integrated;
+    config.vector.lancedb_uri = None;
+    config.paths.db_dir = temp.path().join("db-dir");
+
+    let result = build_backend_matrix_repos(&config).await;
+    let info = &result.1;
+
+    assert!(
+        info.backend_name.starts_with("postgres"),
+        "auto backend should resolve database_url to postgres, got {}",
+        info.backend_name
+    );
+    assert_eq!(
+        info.database_url.as_deref(),
+        Some("postgres://user:pass@localhost:5432/rune")
+    );
+    assert_postgres_result(&result);
+}
