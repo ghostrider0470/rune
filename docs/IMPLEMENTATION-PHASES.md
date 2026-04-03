@@ -22,9 +22,10 @@ Each phase must end with:
 2. an acceptance test set
 3. explicit known gaps
 4. a decision on whether to freeze behavior or keep iterating
+5. durable documentation updates for the behavior, operations, and decisions introduced by that phase
 
 A phase is not done when the code exists.
-A phase is done when the behavior is inspectable and testable.
+A phase is done when the behavior is inspectable, testable, and documented in its canonical location.
 
 ---
 
