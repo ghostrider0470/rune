@@ -1387,6 +1387,14 @@ pub struct DashboardSessionItem {
     pub retry_budget_exhausted: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suppression_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective_snapshot: Option<Value>,
     pub channel_ref: Option<String>,
     pub routing_ref: Option<String>,
     pub created_at: String,
@@ -3842,6 +3850,10 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
         next_retry_at: row.metadata.pointer("/anti_thrash/next_retry_at").and_then(|v| v.as_str()).map(str::to_string),
         retry_budget_exhausted: row.metadata.pointer("/anti_thrash/budget_exhausted").and_then(|v| v.as_bool()),
         suppression_reason: row.metadata.pointer("/anti_thrash/suppression_reason").and_then(|v| v.as_str()).map(str::to_string),
+        last_error: row.metadata.pointer("/anti_thrash/last_error").and_then(|v| v.as_str()).map(str::to_string),
+        failure_fingerprint: row.metadata.pointer("/anti_thrash/failure_fingerprint").and_then(|v| v.as_str()).map(str::to_string),
+        objective_fingerprint: row.metadata.pointer("/anti_thrash/objective_fingerprint").and_then(|v| v.as_str()).map(str::to_string),
+        objective_snapshot: row.metadata.pointer("/anti_thrash/objective_snapshot").cloned(),
         routing_ref: row.channel_ref.clone(),
         channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),
