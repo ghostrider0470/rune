@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use rune_core::{HookExecutionRecord, HookPolicyOutcome};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -144,37 +145,6 @@ pub struct HookRegistrationRecord {
 
 type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HookPolicyOutcome {
-    Applied,
-    Warned,
-    Blocked,
-    Suppressed,
-    Skipped,
-}
-
-impl HookPolicyOutcome {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Applied => "applied",
-            Self::Warned => "warned",
-            Self::Blocked => "blocked",
-            Self::Suppressed => "suppressed",
-            Self::Skipped => "skipped",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HookExecutionRecord {
-    pub plugin: String,
-    pub event: String,
-    pub order: usize,
-    pub outcome: HookPolicyOutcome,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
 
 /// Maps hook events to registered handlers. Thread-safe.
 #[derive(Clone)]
