@@ -297,7 +297,7 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             config.database.backend
         ),
         hint: if matches!(config.database.backend, rune_config::StorageBackend::Auto) {
-            Some("Auto resolves to PostgreSQL when database_url is set, otherwise Cosmos when cosmos_endpoint is set, otherwise flags unsupported Azure SQL config, otherwise SQLite".into())
+            Some("Auto resolves to PostgreSQL when database_url is set, otherwise Cosmos when cosmos_endpoint is set, otherwise Azure SQL when azure_sql_* settings are present, otherwise SQLite".into())
         } else {
             None
         },
@@ -356,8 +356,8 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             name: "database.azure_sql".into(),
             category: "database".into(),
             status: CheckStatus::Warn,
-            message: "Azure SQL Database config detected, but Rune does not support Azure SQL yet".into(),
-            hint: Some("Track issue #782. Use Azure Database for PostgreSQL or SQLite today; do not expect Azure SQL startup to succeed yet".into()),
+            message: "Azure SQL Database config detected; Rune resolves it through the shared SQL-family backend path".into(),
+            hint: Some("Verify connectivity against your target Azure SQL environment. Rune currently reuses the existing SQL backend path rather than a dedicated SQL Server-native implementation".into()),
         });
         results.push(CheckResult {
             name: "database.azure_sql.identity".into(),
@@ -368,14 +368,14 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
             } else {
                 "Azure SQL server/database fields are present".into()
             },
-            hint: Some("When Azure SQL support lands, server and database names will be required".into()),
+            hint: Some("Azure SQL requires both azure_sql_server and azure_sql_database to resolve the backend".into()),
         });
         results.push(CheckResult {
             name: "database.azure_sql.auth".into(),
             category: "database".into(),
             status: if auth_configured { CheckStatus::Warn } else { CheckStatus::Fail },
             message: if auth_configured {
-                "Azure SQL auth material is present, but the backend is still unsupported".into()
+                "Azure SQL auth material is present for the shared SQL-family backend path".into()
             } else {
                 "Azure SQL auth material is incomplete (set access token or username/password pair)".into()
             },
@@ -1800,7 +1800,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn azure_sql_backend_checks_warn_as_unimplemented() {
+    async fn azure_sql_backend_checks_surface_shared_sql_path() {
         let tmp = TempDir::new().unwrap();
         create_path_layout(tmp.path()).await;
         let mut config = test_config_with_paths(tmp.path());
@@ -1819,7 +1819,7 @@ mod tests {
         assert!(results.iter().any(|r| {
             r.name == "database.azure_sql"
                 && r.status == CheckStatus::Warn
-                && r.message.contains("does not support Azure SQL yet")
+                && r.message.contains("shared SQL-family backend path")
         }));
         assert!(results.iter().any(|r| {
             r.name == "database.azure_sql.identity" && r.status == CheckStatus::Warn
