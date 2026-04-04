@@ -75,6 +75,34 @@ Deeper follow-up documentation is still useful for:
 - architecture-level invariants and tradeoffs
 - diagrams or richer deployment/control-plane context if that becomes useful
 
+## Autonomy control-plane reference
+
+Rune's autonomy-control-plane direction is now explicit: the runtime should make long-running autonomous work governable rather than implicit. This epic is captured by issue #763.
+
+Target operating model:
+- goals are explicit durable objectives rather than only inferred from free-form turns
+- goal ownership uses lease semantics so one runtime/agent can hold execution rights while recovery remains possible after restart or failure
+- cancellation and preemption are first-class control-plane actions with durable auditability, not just ad hoc status mutation
+- approvals participate in the same durable control plane so blocked work, resumed work, and ownership/lease context survive restarts coherently
+- task picking must be explainable: operators should be able to inspect why Rune chose the next slice, what it deferred, and what higher-priority constraint won
+
+Why this matters:
+- reduces duplicate or drifting background work
+- makes autonomous execution interruptible without losing operator trust
+- lets future scheduler, heartbeat, and multi-project routing surfaces act on explicit governable state instead of heuristics alone
+
+Current shipped foundation relevant to #763:
+- durable session/subagent lifecycle metadata and status reasons
+- approval-aware resume hints and operator-visible blocked-state diagnostics
+- anti-thrash retry suppression state in session metadata
+- orchestrator goal leases and duplicate-suppression audit trails
+
+Known remaining gaps for #763:
+- no first-class runtime-wide goal registry/control-plane API yet
+- cancellation/preemption semantics are stronger for delegated sessions than for arbitrary autonomous objectives
+- approval state is durable, but not yet unified with explicit objective ownership/lease accounting
+- task-picking explainability exists in slices (for example session-status reasons) rather than as one canonical autonomy decision model
+
 ## Anti-thrash runtime guardrails
 
 Rune now carries a first anti-thrash foundation in the runtime session layer:
