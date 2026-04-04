@@ -170,6 +170,7 @@ impl HookPolicyOutcome {
 pub struct HookExecutionRecord {
     pub plugin: String,
     pub event: String,
+    pub order: usize,
     pub outcome: HookPolicyOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -266,7 +267,7 @@ impl HookRegistry {
 
         let mut records = Vec::with_capacity(event_handlers.len());
 
-        for handler in event_handlers {
+        for (order, handler) in event_handlers.iter().enumerate() {
             if let Some(allowed) = handler.session_kinds_filter() {
                 if !session_kind.is_empty()
                     && !allowed
@@ -282,6 +283,7 @@ impl HookRegistry {
                     records.push(HookExecutionRecord {
                         plugin: handler.plugin_name().to_string(),
                         event: event.as_str().to_string(),
+                        order,
                         outcome: HookPolicyOutcome::Skipped,
                         reason: Some(format!("session kind `{session_kind}` not allowed")),
                     });
@@ -299,6 +301,7 @@ impl HookRegistry {
                 records.push(HookExecutionRecord {
                     plugin: handler.plugin_name().to_string(),
                     event: event.as_str().to_string(),
+                    order,
                     outcome: HookPolicyOutcome::Suppressed,
                     reason: Some(reason),
                 });
@@ -321,6 +324,7 @@ impl HookRegistry {
                 records.push(HookExecutionRecord {
                     plugin: handler.plugin_name().to_string(),
                     event: event.as_str().to_string(),
+                    order,
                     outcome,
                     reason: Some(e.clone()),
                 });
@@ -336,6 +340,7 @@ impl HookRegistry {
                 records.push(HookExecutionRecord {
                     plugin: handler.plugin_name().to_string(),
                     event: event.as_str().to_string(),
+                    order,
                     outcome: HookPolicyOutcome::Applied,
                     reason: None,
                 });
@@ -579,6 +584,8 @@ mod tests {
 
         assert_eq!(count.load(Ordering::SeqCst), 2);
         assert_eq!(records.len(), 2);
+        assert_eq!(records[0].order, 0);
+        assert_eq!(records[1].order, 1);
         assert_eq!(ctx["handled_by_plugin-a"], true);
         assert_eq!(ctx["handled_by_plugin-b"], true);
     }
@@ -590,6 +597,35 @@ mod tests {
         let records = registry.emit(&HookEvent::PostToolCall, &mut ctx).await;
         assert_eq!(ctx, serde_json::json!({"key": "value"}));
         assert!(records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn emit_records_order_for_skipped_and_applied_handlers() {
+        let registry = HookRegistry::new();
+        let count = Arc::new(AtomicU32::new(0));
+
+        registry
+            .register(HookEvent::PreToolCall, Box::new(SuppressedHandler))
+            .await;
+        registry
+            .register(
+                HookEvent::PreToolCall,
+                Box::new(TestHandler {
+                    name: "runner".into(),
+                    call_count: count.clone(),
+                }),
+            )
+            .await;
+
+        let mut ctx = serde_json::json!({"suppress": true});
+        let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
+
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].order, 0);
+        assert_eq!(records[0].outcome.as_str(), "suppressed");
+        assert_eq!(records[1].order, 1);
+        assert_eq!(records[1].outcome.as_str(), "applied");
     }
 
     #[tokio::test]
@@ -619,6 +655,8 @@ mod tests {
         // The surviving handler should still have been called
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert_eq!(records.len(), 2);
+        assert_eq!(records[0].order, 0);
+        assert_eq!(records[1].order, 1);
         assert_eq!(ctx["handled_by_survivor"], true);
     }
 
@@ -723,6 +761,7 @@ mod tests {
         let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
 
         assert_eq!(records.len(), 1);
+        assert_eq!(records[0].order, 0);
         assert_eq!(records[0].outcome.as_str(), "blocked");
         assert_eq!(ctx["hook_blocked"], true);
         assert_eq!(
@@ -743,6 +782,7 @@ mod tests {
         let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
 
         assert_eq!(records.len(), 1);
+        assert_eq!(records[0].order, 0);
         assert_eq!(records[0].outcome.as_str(), "suppressed");
         assert_eq!(
             records[0].reason.as_deref(),
@@ -761,6 +801,7 @@ mod tests {
         let records = registry.emit(&HookEvent::PreToolCall, &mut ctx).await;
 
         assert_eq!(records.len(), 1);
+        assert_eq!(records[0].order, 0);
         assert_eq!(records[0].outcome.as_str(), "blocked");
         assert_eq!(ctx["mutation_before_block"], true);
         assert_eq!(
