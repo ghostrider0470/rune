@@ -32,7 +32,7 @@ use rune_gateway::ms365::{
     GraphMs365CalendarService, GraphMs365FilesService, GraphMs365MailService,
     GraphMs365PlannerService, GraphMs365TodoService, GraphMs365UsersService,
 };
-use rune_gateway::{Services, init_logging_with_store, start, LogStore};
+use rune_gateway::{LogStore, Services, init_logging_with_store, start};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
 use rune_mcp::{McpManager, McpToolExecutor};
 use rune_models::{

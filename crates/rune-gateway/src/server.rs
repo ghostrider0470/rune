@@ -33,13 +33,13 @@ use tokio::sync::RwLock;
 
 use crate::auth::bearer_auth;
 use crate::error::GatewayError;
+use crate::logging::LogStore;
 use crate::ms365::{
     Ms365CalendarService, Ms365FilesService, Ms365MailService, Ms365PlannerService,
     Ms365TodoService, Ms365UsersService,
 };
 use crate::pairing::DeviceRegistry;
 use crate::routes;
-use crate::logging::LogStore;
 use crate::state::{AppState, SessionEvent, TokenMetricsStore};
 use crate::supervisor::{BackgroundSupervisor, SupervisorDeps};
 use crate::webchat;
