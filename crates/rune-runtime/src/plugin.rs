@@ -5,6 +5,7 @@
 //! is spawned as a subprocess communicating via stdin/stdout JSON-RPC.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -29,6 +30,8 @@ const DEFAULT_PLUGIN_BINARY: &str = "./plugin";
 pub struct PluginManifest {
     /// Unique plugin name.
     pub name: String,
+    /// Absolute path to the manifest used to construct this contract.
+    pub manifest_path: PathBuf,
     /// Versioned manifest schema understood by the runtime.
     pub schema_version: u32,
     /// Semver version string.
@@ -89,6 +92,12 @@ pub struct PluginManifestValidationError {
     pub diagnostics: Vec<PluginManifestDiagnostic>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginManifestReport {
+    pub manifest: PluginManifest,
+    pub warnings: Vec<PluginManifestDiagnostic>,
+}
+
 impl PluginManifestValidationError {
     fn new(path: impl Into<PathBuf>, diagnostics: Vec<PluginManifestDiagnostic>) -> Self {
         Self {
@@ -102,8 +111,8 @@ impl PluginManifestValidationError {
     }
 }
 
-impl std::fmt::Display for PluginManifestValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for PluginManifestValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "invalid plugin manifest at {}", self.path.display())?;
         for diagnostic in &self.diagnostics {
             write!(f, "\n- {}: {}", diagnostic.field, diagnostic.message)?;
@@ -113,6 +122,12 @@ impl std::fmt::Display for PluginManifestValidationError {
 }
 
 impl std::error::Error for PluginManifestValidationError {}
+
+impl PluginManifestReport {
+    pub fn has_warnings(&self) -> bool {
+        !self.warnings.is_empty()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Instance
@@ -485,7 +500,18 @@ impl PluginLoader {
 
             discovered += 1;
             match load_plugin_manifest(&plugin_md).await {
-                Ok(manifest) => {
+                Ok(report) => {
+                    if report.has_warnings() {
+                        for warning in &report.warnings {
+                            info!(
+                                path = %plugin_md.display(),
+                                field = %warning.field,
+                                detail = %warning.message,
+                                "plugin manifest default applied"
+                            );
+                        }
+                    }
+                    let manifest = report.manifest;
                     seen_names.push(manifest.name.clone());
                     self.registry.register(manifest).await;
                     loaded += 1;
@@ -623,8 +649,9 @@ fn parse_csv_field(
 fn validate_plugin_frontmatter(
     path: &Path,
     frontmatter: PluginFrontmatter,
-) -> Result<PluginManifest, PluginManifestValidationError> {
+) -> Result<PluginManifestReport, PluginManifestValidationError> {
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let manifest_path = path.to_path_buf();
     let dir_name = source_dir
         .file_name()
         .and_then(|n| n.to_str())
@@ -632,6 +659,7 @@ fn validate_plugin_frontmatter(
         .to_string();
 
     let mut diagnostics = Vec::new();
+    let mut warnings = Vec::new();
 
     let schema_version = frontmatter
         .schema_version
@@ -645,14 +673,24 @@ fn validate_plugin_frontmatter(
         ));
     }
 
-    let name = frontmatter.name.unwrap_or_else(|| dir_name.clone());
+    let name = frontmatter.name.unwrap_or_else(|| {
+        warnings.push(PluginManifestDiagnostic::new(
+            "name",
+            format!("missing name; defaulted to directory name `{dir_name}`"),
+        ));
+        dir_name.clone()
+    });
     if name.trim().is_empty() {
         diagnostics.push(PluginManifestDiagnostic::new("name", "must be non-empty"));
     }
 
-    let version = frontmatter
-        .version
-        .unwrap_or_else(|| DEFAULT_PLUGIN_VERSION.to_string());
+    let version = frontmatter.version.unwrap_or_else(|| {
+        warnings.push(PluginManifestDiagnostic::new(
+            "version",
+            format!("missing version; defaulted to {DEFAULT_PLUGIN_VERSION}"),
+        ));
+        DEFAULT_PLUGIN_VERSION.to_string()
+    });
     if version.trim().is_empty() {
         diagnostics.push(PluginManifestDiagnostic::new(
             "version",
@@ -660,9 +698,14 @@ fn validate_plugin_frontmatter(
         ));
     }
 
-    let description = frontmatter
-        .description
-        .unwrap_or_else(|| format!("Plugin: {name}"));
+    let description = frontmatter.description.unwrap_or_else(|| {
+        let default_description = format!("Plugin: {name}");
+        warnings.push(PluginManifestDiagnostic::new(
+            "description",
+            format!("missing description; defaulted to `{default_description}`"),
+        ));
+        default_description
+    });
     if description.trim().is_empty() {
         diagnostics.push(PluginManifestDiagnostic::new(
             "description",
@@ -670,9 +713,13 @@ fn validate_plugin_frontmatter(
         ));
     }
 
-    let binary_value = frontmatter
-        .binary
-        .unwrap_or_else(|| DEFAULT_PLUGIN_BINARY.to_string());
+    let binary_value = frontmatter.binary.unwrap_or_else(|| {
+        warnings.push(PluginManifestDiagnostic::new(
+            "binary",
+            format!("missing binary; defaulted to {DEFAULT_PLUGIN_BINARY}"),
+        ));
+        DEFAULT_PLUGIN_BINARY.to_string()
+    });
     if binary_value.trim().is_empty() {
         diagnostics.push(PluginManifestDiagnostic::new(
             "binary",
@@ -746,8 +793,10 @@ fn validate_plugin_frontmatter(
     }
 
     if diagnostics.is_empty() {
-        Ok(PluginManifest {
+        Ok(PluginManifestReport {
+            manifest: PluginManifest {
             name,
+            manifest_path,
             schema_version,
             version,
             description,
@@ -759,6 +808,8 @@ fn validate_plugin_frontmatter(
             author: author.filter(|value| !value.is_empty()),
             homepage: homepage.filter(|value| !value.is_empty()),
             source_dir: source_dir.to_path_buf(),
+        },
+            warnings,
         })
     } else {
         Err(PluginManifestValidationError::new(path, diagnostics))
@@ -766,7 +817,7 @@ fn validate_plugin_frontmatter(
 }
 
 /// Load a plugin manifest from a PLUGIN.md file path.
-async fn load_plugin_manifest(path: &Path) -> Result<PluginManifest, String> {
+pub async fn load_plugin_manifest(path: &Path) -> Result<PluginManifestReport, String> {
     let content = tokio::fs::read_to_string(path)
         .await
         .map_err(|e| format!("read error: {e}"))?;
@@ -845,9 +896,11 @@ name: minimal
             homepage: Some("https://example.com/native-plugin".into()),
         };
 
-        let manifest = validate_plugin_frontmatter(Path::new("/tmp/native/PLUGIN.md"), frontmatter)
+        let report = validate_plugin_frontmatter(Path::new("/tmp/native/PLUGIN.md"), frontmatter)
             .expect("manifest should validate");
+        let manifest = report.manifest;
 
+        assert!(report.warnings.is_empty());
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.capabilities, vec!["hooks", "commands"]);
         assert_eq!(manifest.capability_set, vec!["commands", "hooks"]);
@@ -911,12 +964,43 @@ name: minimal
         assert!(rendered.contains("capabilities"));
     }
 
+
+    #[test]
+    fn validate_manifest_reports_defaults_as_warnings() {
+        let frontmatter = PluginFrontmatter {
+            schema_version: None,
+            name: None,
+            version: None,
+            description: None,
+            binary: None,
+            capabilities: None,
+            hooks: None,
+            author: None,
+            homepage: None,
+        };
+
+        let report = validate_plugin_frontmatter(Path::new("/tmp/example-plugin/PLUGIN.md"), frontmatter)
+            .expect("defaults should still produce a valid manifest");
+
+        assert_eq!(report.manifest.name, "example-plugin");
+        assert_eq!(report.manifest.manifest_path, PathBuf::from("/tmp/example-plugin/PLUGIN.md"));
+        assert_eq!(report.manifest.version, DEFAULT_PLUGIN_VERSION);
+        assert_eq!(report.manifest.description, "Plugin: example-plugin");
+        assert_eq!(report.manifest.binary, PathBuf::from(DEFAULT_PLUGIN_BINARY));
+        assert_eq!(report.warnings.len(), 4);
+        assert!(report.warnings.iter().any(|w| w.field == "name"));
+        assert!(report.warnings.iter().any(|w| w.field == "version"));
+        assert!(report.warnings.iter().any(|w| w.field == "description"));
+        assert!(report.warnings.iter().any(|w| w.field == "binary"));
+    }
+
     #[tokio::test]
     async fn registry_crud() {
         let reg = PluginRegistry::new();
 
         let manifest = PluginManifest {
             name: "test-plugin".into(),
+            manifest_path: PathBuf::from("/tmp/test-plugin/PLUGIN.md"),
             schema_version: 1,
             version: "1.0.0".into(),
             description: "Test".into(),
@@ -979,6 +1063,7 @@ hooks: pre_tool_call, post_tool_call
         assert_eq!(summary.removed, 0);
 
         let manifest = registry.get("my-plugin").await.unwrap();
+        assert_eq!(manifest.manifest_path, plugin_dir.join("PLUGIN.md"));
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.version, "1.0.0");
         assert_eq!(manifest.capabilities, vec!["hooks", "notifications"]);

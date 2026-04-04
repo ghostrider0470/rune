@@ -83,3 +83,5 @@ Deeper follow-up documentation is still useful for:
 - secrets and env override guidance
 - gateway/auth/runtime configuration pointers
 - channel/model/provider configuration navigation
+
+- native plugin manifest reports now preserve manifest_path and emit explicit warnings when runtime defaults name/version/description/binary
