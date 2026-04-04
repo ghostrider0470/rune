@@ -27,6 +27,17 @@ This closes an operator-visibility gap for approval pauses, delegated waits, pre
 explicitly cancelled delegated work.
 
 
+Rune also derives `next_task_reason` from task-picking audit metadata when explicit text is not already stored.
+If session metadata includes any of the following keys, the status surface composes them into one operator-facing reason:
+
+- `task_pick_reason` — the slice Rune chose next
+- `task_pick_constraint` — the constraint or higher-priority signal that won
+- `deferred_task_reason` — work Rune intentionally postponed
+
+This gives operators a compact explanation of why a session kept its current lane, what won preemption,
+and what was deferred, without opening the raw metadata blob or transcript.
+
+
 ## Goal lease visibility on session status
 
 `GET /sessions/{id}/status` and session-tree payloads now expose `goal_lease` when a session carries durable orchestration lease metadata. This gives operators a compact control-plane snapshot without reading raw session metadata.

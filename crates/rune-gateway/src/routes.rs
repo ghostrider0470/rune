@@ -3627,7 +3627,7 @@ pub(crate) fn session_next_task_reason(status: &str, metadata: &Value) -> String
     {
         return "resolve or disable the blocking hook before retrying the event".to_string();
     }
-    if let Some(reason) = metadata_string(metadata, "next_task_reason") {
+    if let Some(reason) = session_task_picking_reason(status, metadata) {
         return reason;
     }
     match status {
@@ -3641,6 +3641,40 @@ pub(crate) fn session_next_task_reason(status: &str, metadata: &Value) -> String
         }
         "cancelled" => "restart the session only if the task is still relevant".to_string(),
         _ => "inspect session metadata and transcript for the next action".to_string(),
+    }
+}
+
+fn session_task_picking_reason(status: &str, metadata: &Value) -> Option<String> {
+    if let Some(reason) = metadata_string(metadata, "next_task_reason") {
+        return Some(reason);
+    }
+
+    let deferred = metadata_string(metadata, "deferred_task_reason");
+    let picked = metadata_string(metadata, "task_pick_reason");
+    let constraint = metadata_string(metadata, "task_pick_constraint");
+
+    if deferred.is_none() && picked.is_none() && constraint.is_none() {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    if let Some(picked) = picked {
+        parts.push(format!("picked next slice: {picked}"));
+    }
+    if let Some(constraint) = constraint {
+        parts.push(format!("winning constraint: {constraint}"));
+    }
+    if let Some(deferred) = deferred {
+        parts.push(format!("deferred work: {deferred}"));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(match status {
+            "running" => format!("{}", parts.join("; ")),
+            _ => format!("{}", parts.join("; ")),
+        })
     }
 }
 
