@@ -2643,7 +2643,11 @@ pub async fn get_session_status(
         .find(|item| item.kind == "subagent_result");
     let last_subagent_result_at = last_subagent_result.map(|item| item.created_at.to_rfc3339());
     let last_subagent_result_excerpt = last_subagent_result
-        .and_then(|item| item.payload.get("content").or_else(|| item.payload.get("summary")))
+        .and_then(|item| {
+            item.payload
+                .get("content")
+                .or_else(|| item.payload.get("summary"))
+        })
         .and_then(|value| value.as_str())
         .map(|text| {
             const MAX_CHARS: usize = 200;
@@ -2829,7 +2833,11 @@ pub async fn get_session_tree(
             .find(|item| item.kind == "subagent_result");
         let last_subagent_result_at = last_subagent_result.map(|item| item.created_at.to_rfc3339());
         let last_subagent_result_excerpt = last_subagent_result
-            .and_then(|item| item.payload.get("content").or_else(|| item.payload.get("summary")))
+            .and_then(|item| {
+                item.payload
+                    .get("content")
+                    .or_else(|| item.payload.get("summary"))
+            })
             .and_then(|value| value.as_str())
             .map(|text| {
                 const MAX_CHARS: usize = 200;
@@ -2840,20 +2848,28 @@ pub async fn get_session_tree(
                     format!("{truncated}…")
                 }
             });
-        last_subagent_result_map.insert(*sid, (last_subagent_result_at, last_subagent_result_excerpt));
+        last_subagent_result_map.insert(
+            *sid,
+            (last_subagent_result_at, last_subagent_result_excerpt),
+        );
     }
 
     fn build_node(
         row: &rune_store::models::SessionRow,
         children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
         turn_counts: &std::collections::HashMap<Uuid, u32>,
-        last_subagent_result_map: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
+        last_subagent_result_map: &std::collections::HashMap<
+            Uuid,
+            (Option<String>, Option<String>),
+        >,
     ) -> SessionTreeNode {
         let children = children_map
             .get(&row.id)
             .map(|kids| {
                 kids.iter()
-                    .map(|child| build_node(child, children_map, turn_counts, last_subagent_result_map))
+                    .map(|child| {
+                        build_node(child, children_map, turn_counts, last_subagent_result_map)
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -2914,7 +2930,12 @@ pub async fn get_session_tree(
         }
     }
 
-    let tree = build_node(&root, &children_map, &turn_counts, &last_subagent_result_map);
+    let tree = build_node(
+        &root,
+        &children_map,
+        &turn_counts,
+        &last_subagent_result_map,
+    );
     Ok(Json(tree))
 }
 
@@ -3153,7 +3174,9 @@ pub async fn agent_steer(
     }
 
     let now = chrono::Utc::now();
-    let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
+    let parent_session_id = session
+        .requester_session_id
+        .map(|parent| parent.to_string());
     let note = format!("[steer] operator instruction injected: {}", body.message);
 
     // Append a status_note transcript item for auditability.
@@ -3223,7 +3246,9 @@ pub async fn agent_kill(
     }
 
     let now = chrono::Utc::now();
-    let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
+    let parent_session_id = session
+        .requester_session_id
+        .map(|parent| parent.to_string());
     let reason = body.reason.as_deref().unwrap_or("operator-initiated");
     let note = format!("[kill] session cancelled: {reason}");
 
@@ -3530,7 +3555,9 @@ fn metadata_bool(metadata: &Value, key: &str) -> Option<bool> {
 }
 
 pub(crate) fn session_status_reason(status: &str, metadata: &Value, approval_mode: &str) -> String {
-    if status.eq_ignore_ascii_case("waiting_approval") || metadata_bool(metadata, "approval_pending").unwrap_or(false) {
+    if status.eq_ignore_ascii_case("waiting_approval")
+        || metadata_bool(metadata, "approval_pending").unwrap_or(false)
+    {
         return format!("waiting for operator approval ({approval_mode})");
     }
     if let Some(reason) = metadata_string(metadata, "hook_block_reason") {
@@ -3552,20 +3579,30 @@ pub(crate) fn session_status_reason(status: &str, metadata: &Value, approval_mod
 }
 
 pub(crate) fn session_next_task_reason(status: &str, metadata: &Value) -> String {
-    if status.eq_ignore_ascii_case("waiting_approval") || metadata_bool(metadata, "approval_pending").unwrap_or(false) {
+    if status.eq_ignore_ascii_case("waiting_approval")
+        || metadata_bool(metadata, "approval_pending").unwrap_or(false)
+    {
         return "operator approval decision required before execution can continue".to_string();
     }
-    if metadata.get("hook_blocked").and_then(Value::as_bool).unwrap_or(false) {
+    if metadata
+        .get("hook_blocked")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return "resolve or disable the blocking hook before retrying the event".to_string();
     }
     if let Some(reason) = metadata_string(metadata, "next_task_reason") {
         return reason;
     }
     match status {
-        "running" => "allow the active run to finish or steer it with a higher-priority task".to_string(),
+        "running" => {
+            "allow the active run to finish or steer it with a higher-priority task".to_string()
+        }
         "queued" => "wait for the scheduler to start the queued work".to_string(),
         "completed" => "start the next roadmap-aligned slice or review the transcript".to_string(),
-        "failed" => "inspect the latest error and retry once the failure cause is fixed".to_string(),
+        "failed" => {
+            "inspect the latest error and retry once the failure cause is fixed".to_string()
+        }
         "cancelled" => "restart the session only if the task is still relevant".to_string(),
         _ => "inspect session metadata and transcript for the next action".to_string(),
     }
@@ -3575,11 +3612,18 @@ pub(crate) fn session_resume_hint(status: &str, metadata: &Value) -> String {
     if let Some(hint) = metadata_string(metadata, "resume_hint") {
         return hint;
     }
-    if status.eq_ignore_ascii_case("waiting_approval") || metadata_bool(metadata, "approval_pending").unwrap_or(false) {
+    if status.eq_ignore_ascii_case("waiting_approval")
+        || metadata_bool(metadata, "approval_pending").unwrap_or(false)
+    {
         return "decide the pending approval, then resume the stored tool call".to_string();
     }
-    if metadata.get("hook_blocked").and_then(Value::as_bool).unwrap_or(false) {
-        return "fix the blocking hook failure or change its fail-closed policy before rerunning".to_string();
+    if metadata
+        .get("hook_blocked")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return "fix the blocking hook failure or change its fail-closed policy before rerunning"
+            .to_string();
     }
     match status {
         "running" => "session is already active; send steering only if priorities changed".to_string(),

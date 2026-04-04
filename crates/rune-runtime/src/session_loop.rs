@@ -297,7 +297,6 @@ impl SessionLoop {
         format!("sha256:{:x}", digest)
     }
 
-
     async fn anti_thrash_guard(
         &self,
         session: &SessionRow,

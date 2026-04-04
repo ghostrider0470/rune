@@ -625,7 +625,9 @@ impl MemoryToolExecutor {
             .open(&full_path)
             .await
             .map_err(|e| {
-                ToolError::ExecutionFailed(format!("failed to open {relative_path} for append: {e}"))
+                ToolError::ExecutionFailed(format!(
+                    "failed to open {relative_path} for append: {e}"
+                ))
             })?;
 
         file.write_all(note.as_bytes()).await.map_err(|e| {
@@ -759,7 +761,8 @@ pub fn memory_bank_get_tool_definition() -> crate::ToolDefinition {
 pub fn memory_write_tool_definition() -> crate::ToolDefinition {
     crate::ToolDefinition {
         name: "memory_write".into(),
-        description: "Append a note to today's daily memory file under memory/YYYY-MM-DD.md.".into(),
+        description: "Append a note to today's daily memory file under memory/YYYY-MM-DD.md."
+            .into(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1219,7 +1222,9 @@ mod tests {
         exec.execute(first).await.unwrap();
         exec.execute(second).await.unwrap();
 
-        let content = tokio::fs::read_to_string(tmp.path().join(relative)).await.unwrap();
+        let content = tokio::fs::read_to_string(tmp.path().join(relative))
+            .await
+            .unwrap();
         assert_eq!(content, "first note\n\nsecond note\n");
     }
 
@@ -1232,5 +1237,4 @@ mod tests {
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArgument(_)));
     }
-
 }

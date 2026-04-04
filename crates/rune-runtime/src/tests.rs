@@ -3327,7 +3327,9 @@ async fn repeated_failing_message_is_suppressed_when_backoff_active() {
 async fn successful_retry_clears_persisted_anti_thrash_metadata() {
     let h = TestHarness::new();
     let engine = Arc::new(h.session_engine());
-    let fake_model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response("all good now")]));
+    let fake_model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("all good now"),
+    ]));
     let adapter = SequenceChannelAdapter {
         events: Arc::new(Mutex::new(Vec::new())),
     };
@@ -3435,16 +3437,20 @@ async fn repeated_failure_metadata_survives_repo_reload_for_operator_inspection(
     let anti = crate::session_metadata::anti_thrash_state(&session).unwrap();
     assert_eq!(anti.retry_count, 1);
     assert_eq!(anti.last_error.as_deref(), Some("model exploded"));
-    assert_eq!(anti.objective_snapshot, Some(serde_json::json!({
-        "kind": "message",
-        "content": "retry this",
-        "content_preview": "retry this"
-    })));
-    assert!(anti
-        .objective_fingerprint
-        .as_deref()
-        .unwrap()
-        .starts_with("sha256:"));
+    assert_eq!(
+        anti.objective_snapshot,
+        Some(serde_json::json!({
+            "kind": "message",
+            "content": "retry this",
+            "content_preview": "retry this"
+        }))
+    );
+    assert!(
+        anti.objective_fingerprint
+            .as_deref()
+            .unwrap()
+            .starts_with("sha256:")
+    );
 }
 
 #[tokio::test]
@@ -3480,7 +3486,12 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
         })
     };
 
-    assert!(session_loop.handle_event(mk_event("msg-fail-1")).await.is_err());
+    assert!(
+        session_loop
+            .handle_event(mk_event("msg-fail-1"))
+            .await
+            .is_err()
+    );
 
     let first_session = h
         .session_repo
@@ -3508,7 +3519,12 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
         .await
         .unwrap();
 
-    assert!(session_loop.handle_event(mk_event("msg-fail-2")).await.is_err());
+    assert!(
+        session_loop
+            .handle_event(mk_event("msg-fail-2"))
+            .await
+            .is_err()
+    );
 
     let second_session = h
         .session_repo
@@ -3536,7 +3552,12 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
         .await
         .unwrap();
 
-    assert!(session_loop.handle_event(mk_event("msg-fail-3")).await.is_err());
+    assert!(
+        session_loop
+            .handle_event(mk_event("msg-fail-3"))
+            .await
+            .is_err()
+    );
 
     let session = h
         .session_repo
@@ -3544,7 +3565,10 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(session.metadata["anti_thrash"]["retry_count"], serde_json::json!(3));
+    assert_eq!(
+        session.metadata["anti_thrash"]["retry_count"],
+        serde_json::json!(3)
+    );
     assert_eq!(
         session.metadata["anti_thrash"]["budget_exhausted"],
         serde_json::json!(true)
@@ -3572,10 +3596,12 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
         session.metadata["anti_thrash"]["objective_snapshot"]["content"],
         serde_json::json!("retry this")
     );
-    assert!(session.metadata["anti_thrash"]["objective_fingerprint"]
-        .as_str()
-        .unwrap()
-        .starts_with("sha256:"));
+    assert!(
+        session.metadata["anti_thrash"]["objective_fingerprint"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
 }
 
 struct BlockingHookHandler;
@@ -3653,10 +3679,12 @@ async fn fail_closed_pre_tool_hook_blocks_before_approval_path() {
     let executor = h
         .turn_executor(
             model,
-            Arc::new(FakeToolExecutor::with_steps(vec![FakeToolStep::ApprovalRequired {
-                tool: "exec".to_string(),
-                details: "should not be reached".to_string(),
-            }])),
+            Arc::new(FakeToolExecutor::with_steps(vec![
+                FakeToolStep::ApprovalRequired {
+                    tool: "exec".to_string(),
+                    details: "should not be reached".to_string(),
+                },
+            ])),
             registry,
         )
         .with_hook_registry(hook_registry);
@@ -3700,10 +3728,9 @@ async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_ap
         .unwrap();
     engine.mark_running(session.id).await.unwrap();
 
-    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::tool_call_response(
-        "exec",
-        r#"{"command":"rm -rf /tmp/demo"}"#,
-    )]));
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"rm -rf /tmp/demo"}"#),
+    ]));
 
     let mut registry = ToolRegistry::new();
     registry.register(RtToolDefinition {
@@ -3725,17 +3752,19 @@ async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_ap
     let executor = h
         .turn_executor(
             model,
-            Arc::new(FakeToolExecutor::with_steps(vec![FakeToolStep::ApprovalRequired {
-                tool: "exec".to_string(),
-                details: serde_json::to_string(&ApprovalRequest {
-                    tool_name: "exec".to_string(),
-                    risk_level: RiskLevel::Medium,
-                    scope: ApprovalScope::ExactCall,
-                    presented_payload: serde_json::json!({"command": "rm -rf /tmp/demo"}),
-                    command: Some("rm -rf /tmp/demo".to_string()),
-                })
-                .unwrap(),
-            }])),
+            Arc::new(FakeToolExecutor::with_steps(vec![
+                FakeToolStep::ApprovalRequired {
+                    tool: "exec".to_string(),
+                    details: serde_json::to_string(&ApprovalRequest {
+                        tool_name: "exec".to_string(),
+                        risk_level: RiskLevel::Medium,
+                        scope: ApprovalScope::ExactCall,
+                        presented_payload: serde_json::json!({"command": "rm -rf /tmp/demo"}),
+                        command: Some("rm -rf /tmp/demo".to_string()),
+                    })
+                    .unwrap(),
+                },
+            ])),
             registry,
         )
         .with_hook_registry(hook_registry);
@@ -3759,5 +3788,9 @@ async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_ap
         rune_core::TranscriptItem::StatusNote { note, .. }
         if note.contains("hook_pre_tool_call") && note.contains("\"outcome\":\"applied\"")
     )));
-    assert!(items.iter().any(|item| matches!(item, rune_core::TranscriptItem::ApprovalRequest { .. })));
+    assert!(
+        items
+            .iter()
+            .any(|item| matches!(item, rune_core::TranscriptItem::ApprovalRequest { .. }))
+    );
 }

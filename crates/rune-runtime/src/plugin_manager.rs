@@ -9,7 +9,9 @@ use tracing::info;
 use crate::agent_registry::AgentRegistry;
 use crate::command_registry::CommandRegistry;
 use crate::hooks::HookRegistry;
-use crate::plugin_scanner::{PluginDecisionKind, PluginDiscoveryDecision, PluginScanner, UnifiedScanSummary};
+use crate::plugin_scanner::{
+    PluginDecisionKind, PluginDiscoveryDecision, PluginScanner, UnifiedScanSummary,
+};
 use crate::skill::SkillRegistry;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

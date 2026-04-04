@@ -204,7 +204,10 @@ impl GitToolExecutor {
         call: &ToolCall,
         workspace_root: &std::path::Path,
     ) -> Result<Option<ToolResult>, ToolError> {
-        if matches!(operation, "pr_status" | "pr_open" | "pr_merge" | "repo_state" | "staged" | "suggest_branch") {
+        if matches!(
+            operation,
+            "pr_status" | "pr_open" | "pr_merge" | "repo_state" | "staged" | "suggest_branch"
+        ) {
             return Ok(None);
         }
 
@@ -646,10 +649,16 @@ impl GitToolExecutor {
             .or(current_branch.clone());
         let on_protected_branch = branch_inferred
             .as_deref()
-            .map(|branch| protected_branches.iter().any(|candidate| candidate == branch))
+            .map(|branch| {
+                protected_branches
+                    .iter()
+                    .any(|candidate| candidate == branch)
+            })
             .unwrap_or(false);
 
-        let head_rev = self.run_git_capture(workspace_root, ["rev-parse", "HEAD"]).await?;
+        let head_rev = self
+            .run_git_capture(workspace_root, ["rev-parse", "HEAD"])
+            .await?;
         let head_sha = if head_rev.status.success() {
             Some(String::from_utf8_lossy(&head_rev.stdout).trim().to_owned())
         } else {
@@ -675,7 +684,9 @@ impl GitToolExecutor {
                 .run_git_capture(workspace_root, ["rev-parse", &remote_ref])
                 .await?;
             if merge_base.status.success() && base_rev.status.success() {
-                let merge_base_sha = String::from_utf8_lossy(&merge_base.stdout).trim().to_owned();
+                let merge_base_sha = String::from_utf8_lossy(&merge_base.stdout)
+                    .trim()
+                    .to_owned();
                 let base_sha = String::from_utf8_lossy(&base_rev.stdout).trim().to_owned();
                 let in_sync = merge_base_sha == base_sha;
                 base_sync = serde_json::json!({
@@ -767,16 +778,7 @@ impl GitToolExecutor {
 
         let mut cmd = tokio::process::Command::new("gh");
         cmd.args([
-            "pr",
-            "create",
-            "--base",
-            base,
-            "--head",
-            &head,
-            "--title",
-            title,
-            "--body",
-            body,
+            "pr", "create", "--base", base, "--head", &head, "--title", title, "--body", body,
         ]);
         cmd.current_dir(workspace_root);
         cmd.stdout(Stdio::piped());
@@ -1457,7 +1459,11 @@ mod tests {
         let exec = GitToolExecutor::new(dir.path());
         let call = make_call(serde_json::json!({"operation": "repo_state"}));
         let result = exec.execute(call).await.unwrap();
-        assert!(!result.is_error, "repo_state should succeed: {}", result.output);
+        assert!(
+            !result.is_error,
+            "repo_state should succeed: {}",
+            result.output
+        );
         assert!(result.output.contains("\"dirty\":true"));
         assert!(result.output.contains("\"current_branch\":\"main\""));
         assert!(result.output.contains("\"on_protected_branch\":true"));
@@ -1471,7 +1477,6 @@ mod tests {
         let err = exec.execute(call).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidArguments { .. }));
     }
-
 }
 
 #[cfg(test)]
@@ -1510,7 +1515,6 @@ mod synthetic_git_tool_tests {
         );
     }
 
-
     #[tokio::test]
     async fn pr_status_reports_missing_pr_for_branch_without_pull_request() {
         let dir = tempfile::tempdir().unwrap();
@@ -1546,7 +1550,12 @@ mod synthetic_git_tool_tests {
         let result = exec.execute(call).await.unwrap();
         assert!(result.is_error);
         assert!(result.output.contains("\"has_pr\":false"));
-        assert!(result.output.contains("no pull request found for branch") || result.output.contains("failed to inspect pull request status"));
+        assert!(
+            result.output.contains("no pull request found for branch")
+                || result
+                    .output
+                    .contains("failed to inspect pull request status")
+        );
     }
 
     #[tokio::test]

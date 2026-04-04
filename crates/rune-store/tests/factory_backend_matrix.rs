@@ -35,8 +35,13 @@ async fn explicit_azure_sql_backend_builds_and_reports_backend() {
         .expect("azure sql backend should resolve through sql backend path");
 
     assert_eq!(info.backend_name, "azure-sql");
-    assert!(embedded.is_none(), "azure sql should not start embedded postgres");
-    let url = info.database_url.expect("azure sql should synthesize a connection url");
+    assert!(
+        embedded.is_none(),
+        "azure sql should not start embedded postgres"
+    );
+    let url = info
+        .database_url
+        .expect("azure sql should synthesize a connection url");
     assert!(url.starts_with("postgres://hamza:secret@server.database.windows.net:1433/rune?"));
     assert!(url.contains("sslmode=require"));
 }
@@ -73,7 +78,9 @@ async fn auto_backend_with_azure_sql_fields_builds_and_reports_backend() {
 
     assert_eq!(info.backend_name, "azure-sql");
     assert!(embedded.is_none());
-    let url = info.database_url.expect("azure sql auto should synthesize a connection url");
+    let url = info
+        .database_url
+        .expect("azure sql auto should synthesize a connection url");
     assert!(url.contains("hamza%40example.com"));
     assert!(url.contains("s3cret%21"));
     assert!(url.contains("sslmode=require"));

@@ -346,12 +346,17 @@ async fn check_database_config(config: &AppConfig) -> Vec<CheckResult> {
         results.extend(check_embedded_postgres_layout(config));
     }
 
-
-    if azure_sql_configured || matches!(config.database.backend, rune_config::StorageBackend::AzureSql) {
+    if azure_sql_configured
+        || matches!(
+            config.database.backend,
+            rune_config::StorageBackend::AzureSql
+        )
+    {
         let missing_identity = config.database.azure_sql_server.is_none()
             || config.database.azure_sql_database.is_none();
         let auth_configured = config.database.azure_sql_access_token.is_some()
-            || (config.database.azure_sql_user.is_some() && config.database.azure_sql_password.is_some());
+            || (config.database.azure_sql_user.is_some()
+                && config.database.azure_sql_password.is_some());
         results.push(CheckResult {
             name: "database.azure_sql".into(),
             category: "database".into(),
@@ -1819,14 +1824,19 @@ mod tests {
         assert!(results.iter().any(|r| {
             r.name == "database.azure_sql"
                 && r.status == CheckStatus::Warn
-                && r.message.contains("route it through the shared SQL-family backend path")
+                && r.message
+                    .contains("route it through the shared SQL-family backend path")
         }));
-        assert!(results.iter().any(|r| {
-            r.name == "database.azure_sql.identity" && r.status == CheckStatus::Warn
-        }));
-        assert!(results.iter().any(|r| {
-            r.name == "database.azure_sql.auth" && r.status == CheckStatus::Warn
-        }));
+        assert!(
+            results.iter().any(|r| {
+                r.name == "database.azure_sql.identity" && r.status == CheckStatus::Warn
+            })
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| { r.name == "database.azure_sql.auth" && r.status == CheckStatus::Warn })
+        );
     }
 
     #[tokio::test]
@@ -1843,12 +1853,16 @@ mod tests {
                 && r.status == CheckStatus::Pass
                 && r.message.contains("resolved runtime backend = azure_sql")
         }));
-        assert!(results.iter().any(|r| {
-            r.name == "database.azure_sql.identity" && r.status == CheckStatus::Fail
-        }));
-        assert!(results.iter().any(|r| {
-            r.name == "database.azure_sql.auth" && r.status == CheckStatus::Fail
-        }));
+        assert!(
+            results.iter().any(|r| {
+                r.name == "database.azure_sql.identity" && r.status == CheckStatus::Fail
+            })
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| { r.name == "database.azure_sql.auth" && r.status == CheckStatus::Fail })
+        );
     }
 
     #[test]

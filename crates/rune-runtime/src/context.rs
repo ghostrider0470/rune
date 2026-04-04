@@ -653,7 +653,12 @@ fn sanitize_tool_calls(messages: &mut Vec<ChatMessage>) {
         let msg = original[i].clone();
 
         match msg.role {
-            Role::Assistant if msg.tool_calls.as_ref().is_some_and(|calls| !calls.is_empty()) => {
+            Role::Assistant
+                if msg
+                    .tool_calls
+                    .as_ref()
+                    .is_some_and(|calls| !calls.is_empty()) =>
+            {
                 let pending_ids: Vec<String> = msg
                     .tool_calls
                     .as_ref()

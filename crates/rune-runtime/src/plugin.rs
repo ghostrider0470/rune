@@ -104,11 +104,7 @@ impl PluginManifestValidationError {
 
 impl std::fmt::Display for PluginManifestValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "invalid plugin manifest at {}",
-            self.path.display()
-        )?;
+        write!(f, "invalid plugin manifest at {}", self.path.display())?;
         for diagnostic in &self.diagnostics {
             write!(f, "\n- {}: {}", diagnostic.field, diagnostic.message)?;
         }
@@ -606,7 +602,10 @@ fn canonicalize_csv_items(items: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn parse_csv_field(_field: &str, value: Option<String>) -> Result<Vec<String>, PluginManifestDiagnostic> {
+fn parse_csv_field(
+    _field: &str,
+    value: Option<String>,
+) -> Result<Vec<String>, PluginManifestDiagnostic> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };
@@ -648,10 +647,7 @@ fn validate_plugin_frontmatter(
 
     let name = frontmatter.name.unwrap_or_else(|| dir_name.clone());
     if name.trim().is_empty() {
-        diagnostics.push(PluginManifestDiagnostic::new(
-            "name",
-            "must be non-empty",
-        ));
+        diagnostics.push(PluginManifestDiagnostic::new("name", "must be non-empty"));
     }
 
     let version = frontmatter
@@ -721,7 +717,9 @@ fn validate_plugin_frontmatter(
 
     let mut duplicate_capabilities = BTreeMap::<String, usize>::new();
     for capability in &capabilities {
-        *duplicate_capabilities.entry(capability.clone()).or_default() += 1;
+        *duplicate_capabilities
+            .entry(capability.clone())
+            .or_default() += 1;
     }
     let duplicate_capabilities = duplicate_capabilities
         .into_iter()
@@ -857,7 +855,10 @@ name: minimal
         assert_eq!(manifest.hook_set, vec!["post_tool_call", "pre_tool_call"]);
         assert_eq!(manifest.binary, PathBuf::from("./bin/native"));
         assert_eq!(manifest.author.as_deref(), Some("Rune Team"));
-        assert_eq!(manifest.homepage.as_deref(), Some("https://example.com/native-plugin"));
+        assert_eq!(
+            manifest.homepage.as_deref(),
+            Some("https://example.com/native-plugin")
+        );
     }
 
     #[test]
