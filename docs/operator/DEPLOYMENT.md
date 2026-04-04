@@ -538,7 +538,7 @@ Not recommended as default deployment targets for the parity-first container arc
 
 - **Cosmos DB NoSQL:** wrong default model for the runtime core
 - **Cosmos DB for PostgreSQL:** overbuilt for early parity needs
-- **Azure SQL:** tracked roadmap request only today (issue #782), not a shipped backend; use Azure Database for PostgreSQL instead
+- **Azure SQL:** now wired as a config-supported SQL-family backend label (issue #782), but it currently rides the shared SQL backend path rather than a dedicated SQL Server-native implementation; Azure Database for PostgreSQL remains the lower-risk default for mature relational deployments
 
 ---
 
