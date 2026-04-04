@@ -2933,6 +2933,8 @@ pub struct SessionTreeNode {
     pub subagent_status_updated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_last_note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_subagent_result: Option<ParentSubagentResultSummary>,
     pub created_at: String,
     pub turn_count: u32,
     pub children: Vec<SessionTreeNode>,
@@ -2981,8 +2983,9 @@ pub async fn get_session_tree(
     let mut subtree_ids = Vec::new();
     collect_ids(root.id, &children_map, &mut subtree_ids);
 
-    // Pre-compute turn counts.
+    // Pre-compute turn counts and latest subagent result summaries.
     let mut turn_counts = std::collections::HashMap::new();
+    let mut latest_results = std::collections::HashMap::new();
     for sid in &subtree_ids {
         let turns = state
             .turn_repo
@@ -2990,18 +2993,26 @@ pub async fn get_session_tree(
             .await
             .map_err(|e| GatewayError::Internal(e.to_string()))?;
         turn_counts.insert(*sid, turns.len() as u32);
+
+        let transcript_items = state
+            .transcript_repo
+            .list_by_session(*sid)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+        latest_results.insert(*sid, latest_subagent_result(&transcript_items));
     }
 
     fn build_node(
         row: &rune_store::models::SessionRow,
         children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
         turn_counts: &std::collections::HashMap<Uuid, u32>,
+        latest_results: &std::collections::HashMap<Uuid, Option<ParentSubagentResultSummary>>,
     ) -> SessionTreeNode {
         let children = children_map
             .get(&row.id)
             .map(|kids| {
                 kids.iter()
-                    .map(|child| build_node(child, children_map, turn_counts))
+                    .map(|child| build_node(child, children_map, turn_counts, latest_results))
                     .collect()
             })
             .unwrap_or_default();
@@ -3050,13 +3061,14 @@ pub async fn get_session_tree(
                 "subagent_status_updated_at",
             ),
             subagent_last_note: metadata_string(&row.metadata, "subagent_last_note"),
+            latest_subagent_result: latest_results.get(&row.id).cloned().flatten(),
             created_at: row.created_at.to_rfc3339(),
             turn_count: turn_counts.get(&row.id).copied().unwrap_or(0),
             children,
         }
     }
 
-    let tree = build_node(&root, &children_map, &turn_counts);
+    let tree = build_node(&root, &children_map, &turn_counts, &latest_results);
     Ok(Json(tree))
 }
 
