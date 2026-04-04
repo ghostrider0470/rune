@@ -26,6 +26,25 @@ Current behavior:
 This closes an operator-visibility gap for approval pauses, delegated waits, preempted work, and
 explicitly cancelled delegated work.
 
+
+## Goal lease visibility on session status
+
+`GET /sessions/{id}/status` and session-tree payloads now expose `goal_lease` when a session carries durable orchestration lease metadata. This gives operators a compact control-plane snapshot without reading raw session metadata.
+
+`goal_lease` currently includes:
+
+- `goal_key` — the durable objective identifier
+- `owner_agent_id` — the agent/session currently holding the lease
+- `state` — `active` or `expired`, derived from `goal_lease_expires_at`
+- `leased_at` and `lease_expires_at` — lease timing for takeover/debug decisions
+- `recovered_at` and `recovered_from_agent_id` — present when ownership was recovered from a stale worker
+
+Operational guidance:
+
+- treat `state=expired` as audit information, not current ownership truth
+- use `goal_lease` together with `status_reason` / `next_task_reason` to distinguish an actively owned objective from a stuck or abandoned one
+- when recovery fields are present, the current owner already replaced a stale worker; use that history before manually reassigning work
+
 ## Lane queue visibility and priority routing
 
 `GET /status` exposes `lane_stats` so operators can verify that high-priority work is isolated from normal background contention. The payload includes independent utilisation/capacity counters for `main`, `priority`, `subagent`, `cron`, and `heartbeat`, plus global/per-project tool concurrency.

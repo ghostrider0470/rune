@@ -3687,13 +3687,13 @@ fn session_goal_lease(metadata: &Value) -> Option<Value> {
 }
 
 pub(crate) fn session_resume_hint(status: &str, metadata: &Value) -> String {
-    if let Some(hint) = metadata_string(metadata, "resume_hint") {
-        return hint;
-    }
     if status.eq_ignore_ascii_case("waiting_approval")
         || metadata_bool(metadata, "approval_pending").unwrap_or(false)
     {
         return "decide the pending approval, then resume the stored tool call".to_string();
+    }
+    if let Some(hint) = metadata_string(metadata, "resume_hint") {
+        return hint;
     }
     if metadata
         .get("hook_blocked")
