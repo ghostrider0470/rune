@@ -109,6 +109,63 @@ struct EventFrame {
     state_version: u64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LogsWsQuery {
+    pub source: Option<String>,
+}
+
+/// `GET /ws/logs` -- upgrade to WebSocket for live log streaming.
+pub async fn logs_ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<LogsWsQuery>,
+    State(state): State<AppState>,
+) -> Response {
+    let rx = state.log_store.subscribe();
+    ws.on_upgrade(move |socket| handle_logs_socket(socket, rx, params.source))
+}
+
+async fn handle_logs_socket(
+    mut socket: WebSocket,
+    mut rx: broadcast::Receiver<crate::logging::LogEntry>,
+    source_filter: Option<String>,
+) {
+    let _connection_guard = ActiveConnectionGuard::new();
+    let source_filter = source_filter
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+
+    loop {
+        tokio::select! {
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+            entry = rx.recv() => {
+                match entry {
+                    Ok(entry) => {
+                        if let Some(source) = source_filter.as_deref()
+                            && !entry.target.to_ascii_lowercase().contains(source) {
+                            continue;
+                        }
+                        let payload = match serde_json::to_string(&entry) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        };
+                        if socket.send(Message::Text(payload.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    }
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 /// `GET /ws` -- upgrade to WebSocket for RPC and live event streaming.

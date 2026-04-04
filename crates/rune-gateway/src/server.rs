@@ -39,6 +39,7 @@ use crate::ms365::{
 };
 use crate::pairing::DeviceRegistry;
 use crate::routes;
+use crate::logging::LogStore;
 use crate::state::{AppState, SessionEvent, TokenMetricsStore};
 use crate::supervisor::{BackgroundSupervisor, SupervisorDeps};
 use crate::webchat;
@@ -93,6 +94,7 @@ pub struct Services {
     pub ms365_files_service: Arc<dyn Ms365FilesService>,
     pub ms365_users_service: Arc<dyn Ms365UsersService>,
     pub command_registry: Option<Arc<CommandRegistry>>,
+    pub log_store: LogStore,
 }
 
 /// Start the gateway HTTP server.
@@ -306,7 +308,7 @@ pub async fn start(services: Services) -> Result<GatewayHandle, GatewayError> {
         hook_registry,
         plugin_manager: Some(plugin_manager),
         event_tx,
-        log_store: crate::logging::LogStore::new(1000),
+        log_store: services.log_store,
         webchat_rate_limiter: Arc::new(crate::state::WebChatRateLimiter::new(
             Duration::from_secs(webchat_send_window_seconds),
             webchat_send_max_requests,
@@ -675,6 +677,7 @@ pub fn build_router(state: AppState, auth_token: Option<String>) -> Router {
         .route("/api/peers/alerts", get(routes::peer_health_alerts))
         .route("/api/dashboard/usage", get(routes::get_dashboard_usage))
         .route("/ws", get(ws::ws_handler))
+        .route("/ws/logs", get(ws::logs_ws_handler))
         // Channel routes
         .route("/api/channels", get(routes::list_channels))
         .route("/api/channels/status", get(routes::channels_status))
