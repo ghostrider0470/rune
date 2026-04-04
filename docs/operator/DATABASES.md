@@ -50,20 +50,19 @@ Key points:
 | SQLite | `backend = "sqlite"` or `auto` fallback | `sqlite_path` optional; defaults to `{db_dir}/rune.db` | Reports `sqlite` | Creates DB file on first use; SQLite migrations run automatically when enabled | Good local/dev option; no integrated vector search without LanceDB |
 | PostgreSQL | `backend = "postgres"` or `auto` with `database_url` | `database_url = "postgres://..."`; if omitted under explicit Postgres, embedded Postgres starts automatically | Reports `postgres (external)` or `postgres (embedded)` depending on resolution | Runs SQL migrations/bootstraps schema; embedded mode provisions local server first | Best feature coverage: strong concurrency, FTS, optional `pgvector` |
 | Azure Cosmos DB for NoSQL | `backend = "cosmos"` or `auto` with `cosmos_endpoint` | `cosmos_endpoint` + `cosmos_key` required | Reports `cosmos (nosql)` / `azure-cosmos` | Creates `rune` database + `rune` container if missing; no relational SQL migrations | Document model; vector support is backend-native, relational/FTS expectations differ from Postgres |
-| Azure SQL Database | `backend = "azure_sql"` or `auto` with Azure SQL fields present | Reserved config today: `azure_sql_server`, `azure_sql_database`, plus either `azure_sql_access_token` or `azure_sql_user` + `azure_sql_password` | `rune doctor` warns explicitly; startup fails fast with actionable unsupported-backend messages; runtime status does not report Azure SQL as active because it is not shippable yet | No SQL Server migrations/bootstraps exist yet; current behavior is deliberate fail-fast rather than partial startup | Tracked in issue #782; config surface and detection are reserved now, but runnable SQL-family support is still PostgreSQL-only |
+| Azure SQL Database | `backend = "azure_sql"` or `auto` with Azure SQL fields present | `azure_sql_server`, `azure_sql_database`, plus either `azure_sql_access_token` or `azure_sql_user` + `azure_sql_password` | Reports `azure-sql` / `azure-sql` in runtime status and doctor topology; repo construction resolves through the SQL backend path | Uses the existing SQL migration/bootstrap path; no separate SQL Server migration set is shipped yet | Current implementation reuses Rune's PostgreSQL-compatible SQL path and synthesizes a TLS-required connection URL; verify driver/protocol compatibility in your target environment |
 
 ### Current state of Azure SQL support
 
-Azure SQL Database is a **tracked roadmap request, not a shipped backend**. The current codebase reserves the config surface and detects misconfiguration early, but does not provide a runnable SQL Server implementation yet. In practice that means:
+Azure SQL Database is now wired as a **supported config-driven backend label** in Rune. The current implementation does **not** ship a native SQL Server protocol stack; instead it reuses the existing PostgreSQL-feature-gated SQL backend path and synthesizes an external SQL connection URL from `azure_sql_*` settings. In practice that means:
 
-- Rune **cannot** be pointed at Azure SQL today as a supported storage backend
-- `StorageBackend::AzureSql` exists only to make intent explicit and fail fast with an actionable error
-- `backend = "auto"` still resolves `database_url` as PostgreSQL, then `cosmos_endpoint` as Cosmos, and treats Azure SQL-specific fields as an unsupported configuration that should stop startup
-- `rune doctor` emits dedicated Azure SQL warnings/failures so operators can see exactly why the backend is not viable yet
-- runtime status/topology still only reports SQLite, PostgreSQL, and Cosmos as active backends
-- migration/bootstrap behavior exists for SQLite, PostgreSQL, and Cosmos only; no SQL Server migration path is shipped yet
+- Rune can now resolve `backend = "azure_sql"` and `backend = "auto"` with Azure SQL fields into a runnable SQL-family backend path
+- startup/runtime status surfaces report the backend as `azure-sql`
+- repo construction, pooling, and migrations reuse the existing SQL backend path rather than a dedicated SQL Server store implementation
+- `azure_sql_server` and `azure_sql_database` are required when selecting Azure SQL explicitly; credentials can be supplied with `azure_sql_user` + `azure_sql_password`, while `azure_sql_access_token` is currently surfaced as configuration intent metadata in the synthesized URL path
+- because this implementation is compatibility-layer based, operator validation against the actual target Azure SQL environment is still important before production rollout
 
-For Azure-hosted relational deployments today, use **Azure Database for PostgreSQL** rather than Azure SQL Database.
+If you need the most mature relational feature coverage today, **Azure Database for PostgreSQL** remains the lower-risk option. Azure SQL support is now present, but it currently rides the shared SQL backend path rather than a dedicated SQL Server-native implementation.
 
 ### Configuration examples
 
