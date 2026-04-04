@@ -10998,6 +10998,9 @@ async fn agent_kill_success() {
     assert_eq!(json["session_id"], agent_id.to_string());
     assert_eq!(json["killed"], true);
     assert!(json["detail"].as_str().unwrap().contains("cancelled"));
+    assert_eq!(json["previous_status"], "running");
+    assert_eq!(json["can_resume"], false);
+    assert!(json["cancelled_at"].as_str().unwrap().contains("T"));
 
     // Verify session status changed.
     let session = session_repo.find_by_id(agent_id).await.unwrap();
@@ -11175,6 +11178,9 @@ async fn ws_rpc_agent_steer_and_kill() {
     assert_eq!(kill_result["killed"], true);
     assert_eq!(kill_result["session_id"], agent_id.to_string());
     assert_eq!(kill_result["parent_session_id"], Uuid::nil().to_string());
+    assert_eq!(kill_result["previous_status"], "running");
+    assert_eq!(kill_result["can_resume"], false);
+    assert!(kill_result["cancelled_at"].as_str().unwrap().contains("T"));
 
     // Test not-found via WS-RPC.
     let fake_id = Uuid::now_v7();

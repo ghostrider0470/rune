@@ -725,7 +725,7 @@ impl RpcDispatcher {
             .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
 
         let now = chrono::Utc::now();
-        let parent_session_id = session
+            let parent_session_id = session
             .requester_session_id
             .map(|parent| parent.to_string());
         let note = format!("[steer] operator instruction injected: {message}");
@@ -781,6 +781,7 @@ impl RpcDispatcher {
             .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
 
         let now = chrono::Utc::now();
+        let previous_status = session.status.clone();
         let parent_session_id = session
             .requester_session_id
             .map(|parent| parent.to_string());
@@ -844,6 +845,9 @@ impl RpcDispatcher {
             "parent_session_id": parent_session_id,
             "killed": true,
             "detail": format!("session {session_id} cancelled: {reason}"),
+            "previous_status": previous_status,
+            "cancelled_at": now.to_rfc3339(),
+            "can_resume": false,
         }))
     }
 

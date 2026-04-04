@@ -27,6 +27,7 @@ Rune already has the base primitives for delegation:
 - `sessions_spawn`-style child creation
 - optional `delegation_context`, `delegation_plan`, and `shared_scratchpad_path`
 - steering and kill/cancel surfaces for child sessions
+- kill/cancel responses include previous status, cancellation timestamp, and explicit non-auto-resume semantics for auditability
 - durable subagent lifecycle metadata on session status/tree APIs
 - orchestration state with file locks, goal leases, and merge queue tracking
 
