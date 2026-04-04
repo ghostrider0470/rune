@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rune_core::{HookExecutionRecord, HookPolicyOutcome};
+use rune_core::{HookExecutionRecord, HookMutationSummary, HookPolicyOutcome};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -145,6 +145,68 @@ pub struct HookRegistrationRecord {
 
 type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
 
+fn diff_context_mutations(
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+) -> Vec<HookMutationSummary> {
+    let mut mutations = Vec::new();
+
+    if before.get("arguments") != after.get("arguments") {
+        mutations.push(HookMutationSummary {
+            field: "arguments".to_string(),
+            status: "modified".to_string(),
+            detail: None,
+        });
+    }
+
+    if before.get("output") != after.get("output") {
+        mutations.push(HookMutationSummary {
+            field: "output".to_string(),
+            status: "modified".to_string(),
+            detail: None,
+        });
+    }
+
+    if before.get("hook_blocked") != after.get("hook_blocked") {
+        let status = if after
+            .get("hook_blocked")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            "set_true"
+        } else {
+            "modified"
+        };
+        mutations.push(HookMutationSummary {
+            field: "hook_blocked".to_string(),
+            status: status.to_string(),
+            detail: None,
+        });
+    }
+
+    if before.get("hook_block_reason") != after.get("hook_block_reason") {
+        mutations.push(HookMutationSummary {
+            field: "hook_block_reason".to_string(),
+            status: "modified".to_string(),
+            detail: after
+                .get("hook_block_reason")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+        });
+    }
+
+    for field in ["approval_required", "approval_mode"] {
+        if before.get(field) != after.get(field) {
+            mutations.push(HookMutationSummary {
+                field: field.to_string(),
+                status: "modified".to_string(),
+                detail: None,
+            });
+        }
+    }
+
+    mutations
+}
 
 /// Maps hook events to registered handlers. Thread-safe.
 #[derive(Clone)]
@@ -255,6 +317,7 @@ impl HookRegistry {
                         event: event.as_str().to_string(),
                         order,
                         outcome: HookPolicyOutcome::Skipped,
+                        mutations: Vec::new(),
                         reason: Some(format!("session kind `{session_kind}` not allowed")),
                     });
                     continue;
@@ -273,17 +336,27 @@ impl HookRegistry {
                     event: event.as_str().to_string(),
                     order,
                     outcome: HookPolicyOutcome::Suppressed,
+                    mutations: Vec::new(),
                     reason: Some(reason),
                 });
                 continue;
             }
 
+            let context_before = context.clone();
             if let Err(e) = handler.handle(event, context).await {
+                if handler.fail_closed() {
+                    context["hook_blocked"] = serde_json::Value::Bool(true);
+                    context["hook_block_reason"] = serde_json::Value::String(format!(
+                        "hook `{}` failed: {e}",
+                        handler.plugin_name()
+                    ));
+                }
                 let outcome = if handler.fail_closed() {
                     HookPolicyOutcome::Blocked
                 } else {
                     HookPolicyOutcome::Warned
                 };
+                let mutations = diff_context_mutations(&context_before, context);
                 warn!(
                     event = %event.as_str(),
                     plugin = %handler.plugin_name(),
@@ -296,22 +369,20 @@ impl HookRegistry {
                     event: event.as_str().to_string(),
                     order,
                     outcome,
+                    mutations,
                     reason: Some(e.clone()),
                 });
                 if handler.fail_closed() {
-                    context["hook_blocked"] = serde_json::Value::Bool(true);
-                    context["hook_block_reason"] = serde_json::Value::String(format!(
-                        "hook `{}` failed: {e}",
-                        handler.plugin_name()
-                    ));
                     break;
                 }
             } else {
+                let mutations = diff_context_mutations(&context_before, context);
                 records.push(HookExecutionRecord {
                     plugin: handler.plugin_name().to_string(),
                     event: event.as_str().to_string(),
                     order,
                     outcome: HookPolicyOutcome::Applied,
+                    mutations,
                     reason: None,
                 });
             }
@@ -508,7 +579,9 @@ mod tests {
             )
             .await;
 
-        let pre = registry.registrations_for_event(&HookEvent::PreToolCall).await;
+        let pre = registry
+            .registrations_for_event(&HookEvent::PreToolCall)
+            .await;
         assert_eq!(pre.len(), 2);
         assert_eq!(pre[0].plugin, "alpha");
         assert_eq!(pre[0].order, 0);
