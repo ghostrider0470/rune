@@ -9913,6 +9913,59 @@ async fn create_subagent_session_accepts_shared_scratchpad_without_delegation_co
     );
 }
 #[tokio::test]
+async fn get_session_tree_defaults_subagent_lifecycle_when_runtime_metadata_missing() {
+    let app = build_test_app(None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"kind":"direct"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let parent_json = body_json(response).await;
+    let parent_id = parent_json["id"].as_str().unwrap().to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "subagent",
+                        "requester_session_id": parent_id
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/sessions/{parent_id}/tree"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let child = &json["children"][0];
+    assert_eq!(child["kind"], "subagent");
+    assert_eq!(child["subagent_lifecycle"], "created");
+    assert_eq!(child["subagent_runtime_status"], "pending");
+    assert_eq!(child["subagent_runtime_attached"], false);
+}
+
 async fn create_subagent_session_accepts_delegation_context_and_scratchpad() {
     let app = build_test_app(None);
 
