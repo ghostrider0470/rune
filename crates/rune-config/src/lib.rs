@@ -851,7 +851,6 @@ pub struct DatabaseConfig {
     pub azure_sql_access_token: Option<String>,
 }
 
-
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {

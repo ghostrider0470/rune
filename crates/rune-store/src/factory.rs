@@ -298,17 +298,18 @@ async fn build_pg_repos(
     use crate::pg::*;
     use crate::pool;
 
-    let (database_url, embedded_pg) = if let Some(url) = postgres_like_database_url(&config.database) {
-        info!("using external SQL database via PostgreSQL-compatible backend path");
-        (url.clone(), None)
-    } else {
-        info!("no database_url configured — starting embedded PostgreSQL");
-        let epg = EmbeddedPg::start(&config.paths.db_dir, "rune")
-            .await
-            .map_err(|e| StoreError::EmbeddedPg(e.to_string()))?;
-        let url = epg.database_url().to_owned();
-        (url, Some(epg))
-    };
+    let (database_url, embedded_pg) =
+        if let Some(url) = postgres_like_database_url(&config.database) {
+            info!("using external SQL database via PostgreSQL-compatible backend path");
+            (url.clone(), None)
+        } else {
+            info!("no database_url configured — starting embedded PostgreSQL");
+            let epg = EmbeddedPg::start(&config.paths.db_dir, "rune")
+                .await
+                .map_err(|e| StoreError::EmbeddedPg(e.to_string()))?;
+            let url = epg.database_url().to_owned();
+            (url, Some(epg))
+        };
 
     let pool = pool::create_pool(&database_url, config.database.max_connections as usize)?;
 
@@ -397,7 +398,6 @@ async fn build_cosmos_repos(config: &AppConfig) -> Result<(RepoSet, StorageInfo)
     Ok((repos, info))
 }
 
-
 #[cfg(feature = "postgres")]
 fn postgres_like_database_url(db: &rune_config::DatabaseConfig) -> Option<String> {
     if let Some(url) = &db.database_url {
@@ -448,9 +448,8 @@ fn build_azure_sql_database_url(db: &rune_config::DatabaseConfig) -> String {
     } else {
         format!("{server}:1433")
     };
-    let mut url = format!(
-        "postgres://{encoded_user}:{encoded_password}@{host}/{database}?sslmode=require"
-    );
+    let mut url =
+        format!("postgres://{encoded_user}:{encoded_password}@{host}/{database}?sslmode=require");
     if db.azure_sql_access_token.is_some() {
         url.push_str("&azure_identity=access_token_configured");
     }

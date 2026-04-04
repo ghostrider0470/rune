@@ -14634,7 +14634,10 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
         child["subagent_last_note"],
         "Review result routing before resuming"
     );
-    assert_eq!(child["last_subagent_result_at"], "2026-03-29T12:05:00+00:00");
+    assert_eq!(
+        child["last_subagent_result_at"],
+        "2026-03-29T12:05:00+00:00"
+    );
     assert_eq!(
         child["last_subagent_result_excerpt"],
         "Delegated architect found the missing result-routing summary and attached an audit-friendly excerpt for the parent tree."

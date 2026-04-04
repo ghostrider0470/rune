@@ -139,7 +139,6 @@ impl OrchestratorState {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub enum GoalClaimOutcome {
     Claimed(GoalLease),
@@ -380,7 +379,11 @@ impl OrchestratorState {
             .collect()
     }
 
-    pub fn goal_lease_summary(&self, now: DateTime<Utc>, recent_conflict_limit: usize) -> GoalLeaseSummary {
+    pub fn goal_lease_summary(
+        &self,
+        now: DateTime<Utc>,
+        recent_conflict_limit: usize,
+    ) -> GoalLeaseSummary {
         let active_goal_owners = self.current_goal_owners(now);
         let stale_goal_keys = self
             .stale_goal_leases(now)
@@ -833,7 +836,10 @@ mod tests {
         assert_eq!(lease.owner_agent_id, "agent-2");
         assert_eq!(lease.recovered_from_agent_id.as_deref(), Some("agent-1"));
         assert_eq!(state.active_agents[0].goal_key, None);
-        assert_eq!(state.active_agents[1].goal_key.as_deref(), Some("issue-779"));
+        assert_eq!(
+            state.active_agents[1].goal_key.as_deref(),
+            Some("issue-779")
+        );
     }
 
     #[test]
@@ -947,7 +953,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(loaded.active_agents.len(), 1);
-        assert_eq!(loaded.active_agents[0].goal_key.as_deref(), Some("issue-778"));
+        assert_eq!(
+            loaded.active_agents[0].goal_key.as_deref(),
+            Some("issue-778")
+        );
     }
 
     #[test]
@@ -983,7 +992,6 @@ mod tests {
         assert!(state.goal_lease("issue-999").is_none());
         assert!(state.agent_goal_lease("agent-2").is_none());
     }
-
 
     #[test]
     fn active_goal_leases_only_include_unexpired_entries() {
@@ -1122,7 +1130,10 @@ mod tests {
         assert_eq!(summary.active_leases, 2);
         assert_eq!(summary.stale_leases, 1);
         assert_eq!(
-            summary.active_goal_owners.get("issue-active-a").map(String::as_str),
+            summary
+                .active_goal_owners
+                .get("issue-active-a")
+                .map(String::as_str),
             Some("agent-2")
         );
         assert_eq!(summary.stale_goal_keys, vec!["issue-stale".to_string()]);

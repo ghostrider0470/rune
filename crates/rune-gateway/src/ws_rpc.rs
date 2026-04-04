@@ -15,8 +15,8 @@ use rune_tools::{ToolCall, ToolExecutor};
 
 use crate::a2ui::{A2uiActionParams, A2uiEvent, A2uiFormSubmitParams, broadcast_a2ui_event};
 use crate::events::{RuntimeEvent, TurnEvent, UsageSummary, broadcast_runtime_event};
-use crate::state::AppState;
 use crate::routes::{session_next_task_reason, session_resume_hint, session_status_reason};
+use crate::state::AppState;
 use crate::ws::active_ws_connections;
 
 // ── Error type ───────────────────────────────────────────────────────────────
@@ -725,7 +725,9 @@ impl RpcDispatcher {
             .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
 
         let now = chrono::Utc::now();
-        let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
+        let parent_session_id = session
+            .requester_session_id
+            .map(|parent| parent.to_string());
         let note = format!("[steer] operator instruction injected: {message}");
 
         self.state
@@ -779,7 +781,9 @@ impl RpcDispatcher {
             .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
 
         let now = chrono::Utc::now();
-        let parent_session_id = session.requester_session_id.map(|parent| parent.to_string());
+        let parent_session_id = session
+            .requester_session_id
+            .map(|parent| parent.to_string());
         let note = format!("[kill] session cancelled: {reason}");
 
         let current = self

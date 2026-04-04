@@ -13,8 +13,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tracing::{debug, info, warn};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info, warn};
 
 use crate::agent_registry::{AgentRegistry, AgentTemplate};
 use crate::claude_plugin;
@@ -46,7 +46,6 @@ pub struct UnifiedScanSummary {
     /// Total MCP server entries discovered (informational; not yet launched).
     pub mcp_servers_found: usize,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PluginDiscoveryKind {
@@ -314,7 +313,12 @@ impl PluginScanner {
             }
         }
 
-        decisions.sort_by(|a, b| a.plugin_name.cmp(&b.plugin_name).then(a.source.cmp(&b.source)).then(a.kind.as_str().cmp(b.kind.as_str())));
+        decisions.sort_by(|a, b| {
+            a.plugin_name
+                .cmp(&b.plugin_name)
+                .then(a.source.cmp(&b.source))
+                .then(a.kind.as_str().cmp(b.kind.as_str()))
+        });
 
         *self.discovered_mcp_servers.write().await = mcp_servers;
         *self.discovery_decisions.write().await = decisions;
@@ -371,7 +375,8 @@ impl PluginScanner {
                 source: path.display().to_string(),
                 kind: PluginDiscoveryKind::Claude,
                 decision: PluginDecisionKind::SkippedDuplicate,
-                detail: "plugin name already discovered from a higher-precedence directory".to_string(),
+                detail: "plugin name already discovered from a higher-precedence directory"
+                    .to_string(),
             });
             debug!(plugin = %plugin_name, "plugin already registered from an earlier directory, skipping");
             return;

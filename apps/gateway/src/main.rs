@@ -2035,12 +2035,43 @@ fn register_real_tool_definitions(registry: &mut ToolRegistry, browse_enabled: b
         },
         ToolDefinition {
             name: "git".into(),
-            description: "Run git operations in the workspace. Supports: status, diff, add, commit, push, pull, log, branch, checkout, merge.".into(),
+            description: "Run git operations in the workspace. Supports: status, diff, add, commit, push, pull, log, branch, checkout, merge, pr_status, pr_open, pr_merge, repo_state, staged, suggest_branch.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "operation": { "type": "string", "description": "Git operation (status, diff, add, commit, push, pull, log, branch, checkout, merge)" },
-                    "args": { "description": "Arguments for the operation (string or array of strings)" }
+                    "operation": {
+                        "type": "string",
+                        "description": "Git operation (status, diff, add, commit, push, pull, log, branch, checkout, merge, pr_status, pr_open, pr_merge, repo_state, staged, suggest_branch)",
+                        "enum": ["status", "diff", "add", "commit", "push", "pull", "log", "branch", "checkout", "merge", "pr_status", "pr_open", "pr_merge", "repo_state", "staged", "suggest_branch"]
+                    },
+                    "args": { "description": "Arguments for the operation (string or array of strings)" },
+                    "mode": { "type": "string", "description": "Optional validation mode for synthetic operations such as staged-file checks." },
+                    "branch": { "type": "string", "description": "Optional branch name for pr_status lookups." },
+                    "issue": { "type": "integer", "description": "Optional issue number used when suggesting branch names." },
+                    "prefix": { "type": "string", "description": "Optional branch prefix used by suggest_branch." },
+                    "name": { "type": "string", "description": "Optional slug source used by suggest_branch when args are omitted." },
+                    "title": { "type": "string", "description": "Pull request title used by pr_open." },
+                    "body": { "type": "string", "description": "Pull request body used by pr_open." },
+                    "base": { "type": "string", "description": "Base branch used by pr_open." },
+                    "head": { "type": "string", "description": "Head branch used by pr_open." },
+                    "target": { "type": "string", "description": "PR number or branch to merge via pr_merge." },
+                    "strategy": { "type": "string", "description": "Merge strategy for pr_merge (squash, merge, rebase)." },
+                    "delete_branch": { "type": "boolean", "description": "Whether pr_merge should delete the branch after merge." },
+                    "protected_branches": { "type": "array", "items": { "type": "string" }, "description": "Protected branch names used by repo_state." },
+                    "base_branch": { "type": "string", "description": "Base branch used by repo_state or safety checks." },
+                    "remote": { "type": "string", "description": "Remote name used by repo_state or safety checks." },
+                    "safety": {
+                        "type": "object",
+                        "description": "Optional safety rails for dirty-tree, base-sync, and protected-branch checks before executing mutating git operations.",
+                        "properties": {
+                            "allow_dirty": { "type": "boolean" },
+                            "require_clean": { "type": "boolean" },
+                            "require_base_in_sync": { "type": "boolean" },
+                            "base_branch": { "type": "string" },
+                            "remote": { "type": "string" },
+                            "protected_branches": { "type": "array", "items": { "type": "string" } }
+                        }
+                    }
                 },
                 "required": ["operation"]
             }),

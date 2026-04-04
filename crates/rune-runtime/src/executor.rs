@@ -1089,7 +1089,8 @@ impl TurnExecutor {
                                 status: SessionStatus::Running,
                                 note: format!(
                                     "hook_pre_tool_call {}",
-                                    serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string())
+                                    serde_json::to_string(&records)
+                                        .unwrap_or_else(|_| "[]".to_string())
                                 ),
                             };
                             self.append_transcript(session_id, Some(turn_id.into_uuid()), &note)
@@ -1121,8 +1122,12 @@ impl TurnExecutor {
                                 is_error: tool_result.is_error,
                                 tool_execution_id: tool_result.tool_execution_id,
                             };
-                            self.append_transcript(session_id, Some(turn_id.into_uuid()), &result_item)
-                                .await?;
+                            self.append_transcript(
+                                session_id,
+                                Some(turn_id.into_uuid()),
+                                &result_item,
+                            )
+                            .await?;
                             continue;
                         }
                     }
@@ -1312,7 +1317,8 @@ impl TurnExecutor {
                                 status: SessionStatus::Running,
                                 note: format!(
                                     "hook_post_tool_call {}",
-                                    serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string())
+                                    serde_json::to_string(&records)
+                                        .unwrap_or_else(|_| "[]".to_string())
                                 ),
                             };
                             self.append_transcript(session_id, Some(turn_id.into_uuid()), &note)

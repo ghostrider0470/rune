@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, COOKIE};
+use reqwest::header::{AUTHORIZATION, COOKIE, HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect::Policy;
 use tracing::instrument;
 
@@ -139,10 +139,15 @@ impl WebFetchToolExecutor {
             }
         };
 
-        let session_update = build_session_update(response.headers(), &request_plan.request_cookie_header);
+        let session_update =
+            build_session_update(response.headers(), &request_plan.request_cookie_header);
         if request_plan.persist_session {
             if let Some(session_key) = request_plan.session_key.as_deref() {
-                self.store_session(session_key, &request_plan.request_headers, session_update.as_ref())?;
+                self.store_session(
+                    session_key,
+                    &request_plan.request_headers,
+                    session_update.as_ref(),
+                )?;
             }
         }
 
@@ -365,7 +370,9 @@ fn build_client(redirect_policy: RedirectPolicyMode) -> Result<reqwest::Client, 
         .redirect(match redirect_policy {
             RedirectPolicyMode::Follow => Policy::limited(DEFAULT_REDIRECT_LIMIT),
             RedirectPolicyMode::Manual => Policy::none(),
-            RedirectPolicyMode::Error => Policy::custom(|attempt| attempt.error("redirect blocked by web_fetch redirect_policy=error")),
+            RedirectPolicyMode::Error => Policy::custom(|attempt| {
+                attempt.error("redirect blocked by web_fetch redirect_policy=error")
+            }),
         })
         .build()
         .map_err(|e| ToolError::ExecutionFailed(format!("failed to build HTTP client: {e}")))
@@ -445,7 +452,10 @@ struct SessionUpdate {
     cookie_header: Option<String>,
 }
 
-fn build_session_update(headers: &HeaderMap, existing_cookie_header: &Option<String>) -> Option<SessionUpdate> {
+fn build_session_update(
+    headers: &HeaderMap,
+    existing_cookie_header: &Option<String>,
+) -> Option<SessionUpdate> {
     let mut jar = CookieJar::from_cookie_header(existing_cookie_header.as_deref());
     let mut changed = false;
 
@@ -635,7 +645,11 @@ mod tests {
         let required = def.parameters["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v.as_str() == Some("url")));
         assert!(def.parameters["properties"].get("session").is_some());
-        assert!(def.parameters["properties"].get("redirect_policy").is_some());
+        assert!(
+            def.parameters["properties"]
+                .get("redirect_policy")
+                .is_some()
+        );
     }
 
     #[tokio::test]

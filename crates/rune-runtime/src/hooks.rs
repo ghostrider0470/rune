@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
-use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Events
@@ -199,7 +199,11 @@ impl HookRegistry {
     /// (e.g., PreToolCall handlers can adjust tool arguments).
     ///
     /// Handler errors are logged but do not stop subsequent handlers from running.
-    pub async fn emit(&self, event: &HookEvent, context: &mut serde_json::Value) -> Vec<HookExecutionRecord> {
+    pub async fn emit(
+        &self,
+        event: &HookEvent,
+        context: &mut serde_json::Value,
+    ) -> Vec<HookExecutionRecord> {
         let handlers = self.handlers.read().await;
         let Some(event_handlers) = handlers.get(event) else {
             return Vec::new();
@@ -373,8 +377,6 @@ mod tests {
             "failing-plugin"
         }
     }
-
-
 
     struct FailClosedHandler;
 
@@ -608,7 +610,6 @@ mod tests {
         assert_eq!(ctx["tool_name"], "bash");
     }
 
-
     #[tokio::test]
     async fn emit_fail_closed_marks_context_blocked() {
         let registry = HookRegistry::new();
@@ -632,7 +633,10 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].outcome.as_str(), "blocked");
         assert_eq!(ctx["hook_blocked"], true);
-        assert_eq!(ctx["hook_block_reason"], "hook `fail-closed-plugin` failed: must block");
+        assert_eq!(
+            ctx["hook_block_reason"],
+            "hook `fail-closed-plugin` failed: must block"
+        );
         assert!(ctx.get("handled_by_after-block").is_none());
     }
 
@@ -648,7 +652,10 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].outcome.as_str(), "suppressed");
-        assert_eq!(records[0].reason.as_deref(), Some("policy disabled this hook"));
+        assert_eq!(
+            records[0].reason.as_deref(),
+            Some("policy disabled this hook")
+        );
     }
 
     #[tokio::test]
@@ -669,5 +676,4 @@ mod tests {
             "hook `mutating-fail-closed-plugin` failed: must block after mutation"
         );
     }
-
 }
