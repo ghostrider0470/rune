@@ -5884,7 +5884,15 @@ async fn dashboard_sessions_surface_anti_thrash_stall_reason() {
                     "operator_note": "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint.",
                     "next_retry_at": null,
                     "budget_exhausted": true,
-                    "suppression_reason": "retry_budget_exhausted"
+                    "suppression_reason": "retry_budget_exhausted",
+                    "last_error": "model exploded",
+                    "failure_fingerprint": "message:model exploded:retry this",
+                    "objective_fingerprint": "sha256:retry-this",
+                    "objective_snapshot": {
+                        "kind": "message",
+                        "content": "retry this",
+                        "content_preview": "retry this"
+                    }
                 }
             }),
             created_at: now,
@@ -5918,6 +5926,14 @@ async fn dashboard_sessions_surface_anti_thrash_stall_reason() {
     );
     assert_eq!(items[0]["retry_budget_exhausted"], true);
     assert_eq!(items[0]["suppression_reason"], "retry_budget_exhausted");
+    assert_eq!(items[0]["last_error"], "model exploded");
+    assert_eq!(
+        items[0]["failure_fingerprint"],
+        "message:model exploded:retry this"
+    );
+    assert_eq!(items[0]["objective_fingerprint"], "sha256:retry-this");
+    assert_eq!(items[0]["objective_snapshot"]["kind"], "message");
+    assert_eq!(items[0]["objective_snapshot"]["content"], "retry this");
 }
 
 #[tokio::test]
