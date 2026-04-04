@@ -132,3 +132,4 @@ Operator-facing inspection helpers now exist at the state layer too:
 - both helpers intentionally exclude expired leases so operators and future gateway routes do not misread stale ownership as active execution
 
 - Retry budget state now stores both failure fingerprint and objective fingerprint/snapshot so operators can inspect which objective keeps re-failing after restart.
+- Gateway dashboard session responses project the anti-thrash state into first-class fields (`stall_reason`, `operator_note`, `next_retry_at`, `retry_budget_exhausted`, `suppression_reason`, `last_error`, `failure_fingerprint`, `objective_fingerprint`, `objective_snapshot`) so operator surfaces can explain degraded-but-alive lanes without raw metadata parsing.

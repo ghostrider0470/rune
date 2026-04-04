@@ -60,3 +60,15 @@ Current semantics:
 This is the first operator-visible M10 anti-thrash foundation rather than the full final status surface. For now, operators can inspect persisted session metadata to distinguish a degraded-but-alive lane from one that is still actively shipping.
 
 - Anti-thrash metadata now persists objective fingerprints and objective snapshots for repeated-failure diagnosis across reloads/restarts.
+- `GET /api/dashboard/sessions` now lifts the anti-thrash fields into top-level operator-visible session diagnostics so dashboards do not need to parse raw metadata blobs.
+
+Dashboard session anti-thrash fields:
+- `stall_reason` — machine-readable/current operator-visible reason the lane is stalled or suppressed
+- `operator_note` — human-facing remediation hint for exhausted budget or active backoff
+- `next_retry_at` — retry release timestamp when backoff is still active
+- `retry_budget_exhausted` — whether the repeated-failure budget is terminally exhausted
+- `suppression_reason` — normalized suppression code such as `backoff_active` or `retry_budget_exhausted`
+- `last_error` — latest recorded failure string associated with the fingerprint
+- `failure_fingerprint` — normalized repeated-failure key
+- `objective_fingerprint` — normalized objective key for the work that keeps failing
+- `objective_snapshot` — structured objective summary captured when suppression was recorded
