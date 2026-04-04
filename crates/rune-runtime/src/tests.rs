@@ -3706,7 +3706,16 @@ async fn fail_closed_pre_tool_hook_blocks_before_approval_path() {
 
     assert!(items.iter().any(|item| matches!(item,
         rune_core::TranscriptItem::HookExecutionNote { event, records }
-        if event == "pre_tool_call" && records.iter().any(|record| record.outcome == rune_core::HookPolicyOutcome::Blocked)
+        if event == "pre_tool_call" && records.iter().any(|record|
+            record.outcome == rune_core::HookPolicyOutcome::Blocked
+                && record.mutations.iter().any(|mutation|
+                    mutation.field == "hook_blocked" && mutation.status == "set_true"
+                )
+                && record.mutations.iter().any(|mutation|
+                    mutation.field == "hook_block_reason"
+                        && mutation.detail.as_deref() == Some("hook `blocking-hook` failed: blocked by policy")
+                )
+        )
     )));
 
     assert!(items.iter().any(|item| matches!(item,
@@ -3786,7 +3795,12 @@ async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_ap
 
     assert!(items.iter().any(|item| matches!(item,
         rune_core::TranscriptItem::HookExecutionNote { event, records }
-        if event == "pre_tool_call" && records.iter().any(|record| record.outcome == rune_core::HookPolicyOutcome::Applied)
+        if event == "pre_tool_call" && records.iter().any(|record|
+            record.outcome == rune_core::HookPolicyOutcome::Applied
+                && record.mutations.iter().any(|mutation|
+                    mutation.field == "approval_required" && mutation.status == "modified"
+                )
+        )
     )));
     assert!(
         items

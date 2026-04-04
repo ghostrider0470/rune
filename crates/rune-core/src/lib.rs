@@ -274,11 +274,21 @@ impl HookPolicyOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookMutationSummary {
+    pub field: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HookExecutionRecord {
     pub plugin: String,
     pub event: String,
     pub order: usize,
     pub outcome: HookPolicyOutcome,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mutations: Vec<HookMutationSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
