@@ -21,7 +21,7 @@ pub use events::{
     ApprovalEvent, ProcessEvent, RuntimeEvent, ToolEvent, TurnEvent, UsageSummary,
     broadcast_runtime_event,
 };
-pub use logging::{init_logging, init_logging_with_store, LogStore};
+pub use logging::{LogStore, init_logging, init_logging_with_store};
 pub use routes::{DoctorCheck, parse_memory_search_output, storage_path_checks_for_tests};
 pub use server::{GatewayHandle, Services, build_router, start};
 pub use state::{

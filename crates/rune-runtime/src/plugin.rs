@@ -795,20 +795,20 @@ fn validate_plugin_frontmatter(
     if diagnostics.is_empty() {
         Ok(PluginManifestReport {
             manifest: PluginManifest {
-            name,
-            manifest_path,
-            schema_version,
-            version,
-            description,
-            binary,
-            capabilities,
-            capability_set,
-            hooks,
-            hook_set,
-            author: author.filter(|value| !value.is_empty()),
-            homepage: homepage.filter(|value| !value.is_empty()),
-            source_dir: source_dir.to_path_buf(),
-        },
+                name,
+                manifest_path,
+                schema_version,
+                version,
+                description,
+                binary,
+                capabilities,
+                capability_set,
+                hooks,
+                hook_set,
+                author: author.filter(|value| !value.is_empty()),
+                homepage: homepage.filter(|value| !value.is_empty()),
+                source_dir: source_dir.to_path_buf(),
+            },
             warnings,
         })
     } else {
@@ -964,7 +964,6 @@ name: minimal
         assert!(rendered.contains("capabilities"));
     }
 
-
     #[test]
     fn validate_manifest_reports_defaults_as_warnings() {
         let frontmatter = PluginFrontmatter {
@@ -979,11 +978,15 @@ name: minimal
             homepage: None,
         };
 
-        let report = validate_plugin_frontmatter(Path::new("/tmp/example-plugin/PLUGIN.md"), frontmatter)
-            .expect("defaults should still produce a valid manifest");
+        let report =
+            validate_plugin_frontmatter(Path::new("/tmp/example-plugin/PLUGIN.md"), frontmatter)
+                .expect("defaults should still produce a valid manifest");
 
         assert_eq!(report.manifest.name, "example-plugin");
-        assert_eq!(report.manifest.manifest_path, PathBuf::from("/tmp/example-plugin/PLUGIN.md"));
+        assert_eq!(
+            report.manifest.manifest_path,
+            PathBuf::from("/tmp/example-plugin/PLUGIN.md")
+        );
         assert_eq!(report.manifest.version, DEFAULT_PLUGIN_VERSION);
         assert_eq!(report.manifest.description, "Plugin: example-plugin");
         assert_eq!(report.manifest.binary, PathBuf::from(DEFAULT_PLUGIN_BINARY));
