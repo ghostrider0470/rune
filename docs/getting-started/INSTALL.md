@@ -53,7 +53,7 @@ cp config.example.toml config.toml
 ```
 
 Then set the provider/channel/auth values needed for your environment. If you are testing federation, also fill `[instance]` with a human-readable `name`, optional `advertised_addr`, and `peers = [{ id, health_url }]`.
-For storage, shipped backends today are SQLite, PostgreSQL (including Azure Database for PostgreSQL), and Azure Cosmos DB for NoSQL. `backend = "azure_sql"` plus the `azure_sql_*` fields are reserved config only right now and intentionally fail fast until issue #782 lands.
+For storage, shipped backends today are SQLite, PostgreSQL (including Azure Database for PostgreSQL), Azure Cosmos DB for NoSQL, and Azure SQL Database. Azure SQL currently rides Rune's SQL-family backend path and uses the `azure_sql_*` config fields documented in `docs/operator/DATABASES.md`.
 
 ## Run
 
