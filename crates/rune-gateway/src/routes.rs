@@ -2992,8 +2992,8 @@ pub async fn get_session_tree(
             .get(&row.id)
             .cloned()
             .unwrap_or((None, None));
-        let subagent_lifecycle = metadata_string(&row.metadata, "subagent_lifecycle")
-            .or_else(|| {
+        let subagent_lifecycle =
+            metadata_string(&row.metadata, "subagent_lifecycle").or_else(|| {
                 if row.kind == "subagent" {
                     Some("created".to_string())
                 } else {
@@ -3009,7 +3009,11 @@ pub async fn get_session_tree(
                 }
             });
         let subagent_runtime_attached = metadata_bool(&row.metadata, "subagent_runtime_attached")
-            .or(if row.kind == "subagent" { Some(false) } else { None });
+            .or(if row.kind == "subagent" {
+                Some(false)
+            } else {
+                None
+            });
         SessionTreeNode {
             id: row.id.to_string(),
             kind: row.kind.clone(),
@@ -3677,9 +3681,12 @@ pub(crate) fn session_status_reason(status: &str, metadata: &Value, approval_mod
     if let Some(reason) = metadata_string(metadata, "hook_block_reason") {
         return format!("blocked by hook policy: {reason}");
     }
-    if let Some(reason) = metadata_string(metadata, "status_reason")
-        .or_else(|| metadata.pointer("/anti_thrash/stall_reason").and_then(|v| v.as_str()).map(str::to_string))
-    {
+    if let Some(reason) = metadata_string(metadata, "status_reason").or_else(|| {
+        metadata
+            .pointer("/anti_thrash/stall_reason")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }) {
         return reason;
     }
     match status {
@@ -3776,14 +3783,8 @@ fn session_goal_lease(metadata: &Value) -> Option<Value> {
 
     let mut lease = Map::new();
     lease.insert("goal_key".to_string(), Value::String(goal_key));
-    lease.insert(
-        "owner_agent_id".to_string(),
-        Value::String(owner_agent_id),
-    );
-    lease.insert(
-        "state".to_string(),
-        Value::String(lease_state.to_string()),
-    );
+    lease.insert("owner_agent_id".to_string(), Value::String(owner_agent_id));
+    lease.insert("state".to_string(), Value::String(lease_state.to_string()));
 
     if let Some(lease_expires_at) = lease_expires_at {
         lease.insert(
@@ -3835,8 +3836,8 @@ pub(crate) fn session_resume_hint(status: &str, metadata: &Value) -> String {
 }
 
 fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
-    let approval_mode = metadata_string(&row.metadata, "approval_mode")
-        .unwrap_or_else(|| "on-failure".to_string());
+    let approval_mode =
+        metadata_string(&row.metadata, "approval_mode").unwrap_or_else(|| "on-failure".to_string());
     DashboardSessionItem {
         id: row.id.to_string(),
         kind: row.kind,
@@ -3844,16 +3845,50 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
         status_reason: session_status_reason(&row.status, &row.metadata, &approval_mode),
         next_task_reason: session_next_task_reason(&row.status, &row.metadata),
         mode: metadata_string(&row.metadata, "mode"),
-        stall_reason: metadata_string(&row.metadata, "stall_reason")
-            .or_else(|| row.metadata.pointer("/anti_thrash/stall_reason").and_then(|v| v.as_str()).map(str::to_string)),
-        operator_note: row.metadata.pointer("/anti_thrash/operator_note").and_then(|v| v.as_str()).map(str::to_string),
-        next_retry_at: row.metadata.pointer("/anti_thrash/next_retry_at").and_then(|v| v.as_str()).map(str::to_string),
-        retry_budget_exhausted: row.metadata.pointer("/anti_thrash/budget_exhausted").and_then(|v| v.as_bool()),
-        suppression_reason: row.metadata.pointer("/anti_thrash/suppression_reason").and_then(|v| v.as_str()).map(str::to_string),
-        last_error: row.metadata.pointer("/anti_thrash/last_error").and_then(|v| v.as_str()).map(str::to_string),
-        failure_fingerprint: row.metadata.pointer("/anti_thrash/failure_fingerprint").and_then(|v| v.as_str()).map(str::to_string),
-        objective_fingerprint: row.metadata.pointer("/anti_thrash/objective_fingerprint").and_then(|v| v.as_str()).map(str::to_string),
-        objective_snapshot: row.metadata.pointer("/anti_thrash/objective_snapshot").cloned(),
+        stall_reason: metadata_string(&row.metadata, "stall_reason").or_else(|| {
+            row.metadata
+                .pointer("/anti_thrash/stall_reason")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        }),
+        operator_note: row
+            .metadata
+            .pointer("/anti_thrash/operator_note")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        next_retry_at: row
+            .metadata
+            .pointer("/anti_thrash/next_retry_at")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        retry_budget_exhausted: row
+            .metadata
+            .pointer("/anti_thrash/budget_exhausted")
+            .and_then(|v| v.as_bool()),
+        suppression_reason: row
+            .metadata
+            .pointer("/anti_thrash/suppression_reason")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        last_error: row
+            .metadata
+            .pointer("/anti_thrash/last_error")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        failure_fingerprint: row
+            .metadata
+            .pointer("/anti_thrash/failure_fingerprint")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        objective_fingerprint: row
+            .metadata
+            .pointer("/anti_thrash/objective_fingerprint")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        objective_snapshot: row
+            .metadata
+            .pointer("/anti_thrash/objective_snapshot")
+            .cloned(),
         routing_ref: row.channel_ref.clone(),
         channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),

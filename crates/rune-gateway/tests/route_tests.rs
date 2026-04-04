@@ -5850,7 +5850,10 @@ async fn dashboard_sessions_includes_kind_activity_and_status_fields() {
     assert_eq!(items[0]["kind"], "channel");
     assert_eq!(items[0]["channel_ref"], "telegram:ops");
     assert_eq!(items[0]["status_reason"], "session status: ready");
-    assert_eq!(items[0]["next_task_reason"], "inspect session metadata and transcript for the next action");
+    assert_eq!(
+        items[0]["next_task_reason"],
+        "inspect session metadata and transcript for the next action"
+    );
     assert!(items[0]["last_activity_at"].is_string());
 }
 
@@ -5859,11 +5862,8 @@ async fn dashboard_sessions_surface_anti_thrash_stall_reason() {
     let now = Utc::now();
     let session_id = Uuid::now_v7();
     let session_repo = Arc::new(MemSessionRepo::new());
-    let (app, _device_repo) = build_test_app_parts_with_session_repo(
-        AppConfig::default(),
-        None,
-        session_repo.clone(),
-    );
+    let (app, _device_repo) =
+        build_test_app_parts_with_session_repo(AppConfig::default(), None, session_repo.clone());
 
     let session_repo: Arc<dyn SessionRepo> = session_repo;
 
@@ -8631,8 +8631,14 @@ async fn get_session_status_surfaces_subagent_metadata() {
     );
     assert_eq!(json["status"], "running");
     assert_eq!(json["status_reason"], "session actively processing work");
-    assert_eq!(json["next_task_reason"], "allow the active run to finish or steer it with a higher-priority task");
-    assert_eq!(json["resume_hint"], "session is already active; send steering only if priorities changed");
+    assert_eq!(
+        json["next_task_reason"],
+        "allow the active run to finish or steer it with a higher-priority task"
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "session is already active; send steering only if priorities changed"
+    );
     assert_eq!(json["kind"], "subagent");
     assert_eq!(json["channel_ref"], Value::Null);
     assert_eq!(
@@ -8804,10 +8810,15 @@ async fn get_session_status_surfaces_orchestration_metadata() {
     );
     assert_eq!(json["delegation_depth"], 2);
     assert_eq!(json["status_reason"], "session actively processing work");
-    assert_eq!(json["next_task_reason"], "allow the active run to finish or steer it with a higher-priority task");
-    assert_eq!(json["resume_hint"], "session is already active; send steering only if priorities changed");
+    assert_eq!(
+        json["next_task_reason"],
+        "allow the active run to finish or steer it with a higher-priority task"
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "session is already active; send steering only if priorities changed"
+    );
 }
-
 
 #[tokio::test]
 async fn get_session_status_surfaces_control_plane_explainability() {
@@ -8928,7 +8939,10 @@ async fn get_session_status_surfaces_control_plane_explainability() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["status_reason"], "waiting for operator approval (on-miss)");
+    assert_eq!(
+        json["status_reason"],
+        "waiting for operator approval (on-miss)"
+    );
     assert_eq!(
         json["next_task_reason"],
         "operator approval decision required before execution can continue"

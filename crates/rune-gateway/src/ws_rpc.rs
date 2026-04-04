@@ -725,7 +725,7 @@ impl RpcDispatcher {
             .map_err(|_| RpcError::not_found(format!("agent session {session_id} not found")))?;
 
         let now = chrono::Utc::now();
-            let parent_session_id = session
+        let parent_session_id = session
             .requester_session_id
             .map(|parent| parent.to_string());
         let note = format!("[steer] operator instruction injected: {message}");

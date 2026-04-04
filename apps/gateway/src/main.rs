@@ -32,7 +32,7 @@ use rune_gateway::ms365::{
     GraphMs365CalendarService, GraphMs365FilesService, GraphMs365MailService,
     GraphMs365PlannerService, GraphMs365TodoService, GraphMs365UsersService,
 };
-use rune_gateway::{Services, init_logging, start};
+use rune_gateway::{Services, init_logging_with_store, start, LogStore};
 use rune_mcp::discovery::McpServerConfig as RuntimeMcpServerConfig;
 use rune_mcp::{McpManager, McpToolExecutor};
 use rune_models::{
@@ -139,7 +139,8 @@ async fn main() -> Result<ExitCode> {
     let resolved_mode = config.mode.resolve(&config);
     config.adjust_paths_for_mode(&resolved_mode);
 
-    init_logging(&config.logging);
+    let log_store = LogStore::new(1000);
+    init_logging_with_store(&config.logging, log_store.clone());
     emit_startup_banner(&config, &flags, &resolved_mode);
 
     // Auto-create missing directories in Standalone mode so that `rune` boots
@@ -158,7 +159,7 @@ async fn main() -> Result<ExitCode> {
         }
     }
 
-    let (services, _embedded_pg, session_loop) = build_services(config).await?;
+    let (services, _embedded_pg, session_loop) = build_services(config, log_store).await?;
     let handle = start(services).await.context("failed to start gateway")?;
 
     // Start the session loop (channel listener) if a channel is configured.
@@ -572,6 +573,7 @@ fn emit_startup_model_resolution(
 /// must be kept alive for the lifetime of the process.
 async fn build_services(
     config: AppConfig,
+    log_store: LogStore,
 ) -> Result<(Services, Option<EmbeddedPg>, Option<SessionLoop>)> {
     let (repos, storage_info, embedded_pg) = build_repos(&config)
         .await
@@ -910,6 +912,7 @@ async fn build_services(
         ms365_files_service: Arc::new(GraphMs365FilesService::new()),
         ms365_users_service: Arc::new(GraphMs365UsersService::new()),
         command_registry: Some(shared_command_registry.clone()),
+        log_store,
     };
 
     Ok((services, embedded_pg, session_loop))
