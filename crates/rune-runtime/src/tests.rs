@@ -3705,8 +3705,8 @@ async fn fail_closed_pre_tool_hook_blocks_before_approval_path() {
         .collect();
 
     assert!(items.iter().any(|item| matches!(item,
-        rune_core::TranscriptItem::StatusNote { note, .. }
-        if note.contains("hook_pre_tool_call") && note.contains("\"outcome\":\"blocked\"")
+        rune_core::TranscriptItem::HookExecutionNote { event, records }
+        if event == "pre_tool_call" && records.iter().any(|record| record.outcome == rune_core::HookPolicyOutcome::Blocked)
     )));
 
     assert!(items.iter().any(|item| matches!(item,
@@ -3785,8 +3785,8 @@ async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_ap
         .collect();
 
     assert!(items.iter().any(|item| matches!(item,
-        rune_core::TranscriptItem::StatusNote { note, .. }
-        if note.contains("hook_pre_tool_call") && note.contains("\"outcome\":\"applied\"")
+        rune_core::TranscriptItem::HookExecutionNote { event, records }
+        if event == "pre_tool_call" && records.iter().any(|record| record.outcome == rune_core::HookPolicyOutcome::Applied)
     )));
     assert!(
         items

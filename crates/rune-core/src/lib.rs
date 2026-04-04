@@ -250,6 +250,39 @@ pub struct AttachmentRef {
     pub provider_file_id: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookPolicyOutcome {
+    Applied,
+    Warned,
+    Blocked,
+    Suppressed,
+    Skipped,
+}
+
+impl HookPolicyOutcome {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::Warned => "warned",
+            Self::Blocked => "blocked",
+            Self::Suppressed => "suppressed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookExecutionRecord {
+    pub plugin: String,
+    pub event: String,
+    pub order: usize,
+    pub outcome: HookPolicyOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Transcript entries persisted during session execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -284,6 +317,10 @@ pub enum TranscriptItem {
     StatusNote {
         status: SessionStatus,
         note: String,
+    },
+    HookExecutionNote {
+        event: String,
+        records: Vec<crate::HookExecutionRecord>,
     },
     SubagentResult {
         session_id: SessionId,

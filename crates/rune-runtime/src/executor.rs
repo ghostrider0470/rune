@@ -1085,13 +1085,9 @@ impl TurnExecutor {
                         });
                         let records = hook_reg.emit(&HookEvent::PreToolCall, &mut hook_ctx).await;
                         if !records.is_empty() {
-                            let note = TranscriptItem::StatusNote {
-                                status: SessionStatus::Running,
-                                note: format!(
-                                    "hook_pre_tool_call {}",
-                                    serde_json::to_string(&records)
-                                        .unwrap_or_else(|_| "[]".to_string())
-                                ),
+                            let note = TranscriptItem::HookExecutionNote {
+                                event: HookEvent::PreToolCall.as_str().to_string(),
+                                records,
                             };
                             self.append_transcript(session_id, Some(turn_id.into_uuid()), &note)
                                 .await?;
@@ -1313,13 +1309,9 @@ impl TurnExecutor {
                         });
                         let records = hook_reg.emit(&HookEvent::PostToolCall, &mut hook_ctx).await;
                         if !records.is_empty() {
-                            let note = TranscriptItem::StatusNote {
-                                status: SessionStatus::Running,
-                                note: format!(
-                                    "hook_post_tool_call {}",
-                                    serde_json::to_string(&records)
-                                        .unwrap_or_else(|_| "[]".to_string())
-                                ),
+                            let note = TranscriptItem::HookExecutionNote {
+                                event: HookEvent::PostToolCall.as_str().to_string(),
+                                records,
                             };
                             self.append_transcript(session_id, Some(turn_id.into_uuid()), &note)
                                 .await?;
@@ -1517,6 +1509,7 @@ fn transcript_item_kind(item: &TranscriptItem) -> &'static str {
         TranscriptItem::ApprovalRequest { .. } => "approval_request",
         TranscriptItem::ApprovalResponse { .. } => "approval_response",
         TranscriptItem::StatusNote { .. } => "status_note",
+        TranscriptItem::HookExecutionNote { .. } => "hook_execution_note",
         TranscriptItem::SubagentResult { .. } => "subagent_result",
         TranscriptItem::SystemInstruction { .. } => "system_instruction",
         TranscriptItem::ChannelDeliveryNote { .. } => "channel_delivery_note",
