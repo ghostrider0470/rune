@@ -8477,6 +8477,9 @@ async fn get_session_status_surfaces_subagent_metadata() {
         "kind=subagent | channel=local | status=running"
     );
     assert_eq!(json["status"], "running");
+    assert_eq!(json["status_reason"], "session actively processing work");
+    assert_eq!(json["next_task_reason"], "allow the active run to finish or steer it with a higher-priority task");
+    assert_eq!(json["resume_hint"], "session is already active; send steering only if priorities changed");
     assert_eq!(json["kind"], "subagent");
     assert_eq!(json["channel_ref"], Value::Null);
     assert_eq!(
@@ -8642,6 +8645,139 @@ async fn get_session_status_surfaces_orchestration_metadata() {
         serde_json::json!(["architect", "coder"])
     );
     assert_eq!(json["delegation_depth"], 2);
+    assert_eq!(json["status_reason"], "session actively processing work");
+    assert_eq!(json["next_task_reason"], "allow the active run to finish or steer it with a higher-priority task");
+    assert_eq!(json["resume_hint"], "session is already active; send steering only if priorities changed");
+}
+
+
+#[tokio::test]
+async fn get_session_status_surfaces_control_plane_explainability() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+
+    let session_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let now = chrono::Utc::now();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "subagent".into(),
+            status: "waiting_for_approval".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "approval_pending": true,
+                "status_reason": "stale status reason should not override approval explainability",
+                "next_task_reason": "stale next task should not override approval explainability",
+                "resume_hint": "stale resume hint should not override approval explainability"
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["status_reason"], "waiting for operator approval (on-miss)");
+    assert_eq!(
+        json["next_task_reason"],
+        "operator approval decision required before execution can continue"
+    );
+    assert_eq!(
+        json["resume_hint"],
+        "decide the pending approval, then resume the stored tool call"
+    );
 }
 
 #[tokio::test]

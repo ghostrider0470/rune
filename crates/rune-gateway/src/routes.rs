@@ -2461,6 +2461,9 @@ pub struct SessionStatusResponse {
     pub session_id: String,
     pub runtime: String,
     pub status: String,
+    pub status_reason: String,
+    pub next_task_reason: String,
+    pub resume_hint: String,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_ref: Option<String>,
@@ -2696,7 +2699,10 @@ pub async fn get_session_status(
             row.channel_ref.as_deref().unwrap_or("local"),
             row.status
         ),
-        status: row.status,
+        status: row.status.clone(),
+        status_reason: session_status_reason(&row.status, metadata, &approval_mode),
+        next_task_reason: session_next_task_reason(&row.status, metadata),
+        resume_hint: session_resume_hint(&row.status, metadata),
         kind: row.kind,
         channel_ref: row.channel_ref,
         parent_session_id,
