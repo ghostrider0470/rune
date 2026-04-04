@@ -135,6 +135,13 @@ pub trait HookHandler: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// Handler map: event → ordered list of handlers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookRegistrationRecord {
+    pub event: String,
+    pub plugin: String,
+    pub order: usize,
+}
+
 type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,13 +191,49 @@ impl HookRegistry {
     /// Register a handler for a specific event.
     pub async fn register(&self, event: HookEvent, handler: Box<dyn HookHandler>) {
         let plugin = handler.plugin_name().to_string();
+        let mut handlers = self.handlers.write().await;
+        let event_handlers = handlers.entry(event.clone()).or_default();
+        let order = event_handlers.len();
+        event_handlers.push(handler);
+        debug!(event = %event.as_str(), plugin = %plugin, order, "hook handler registered");
+    }
+
+    /// Registration order metadata for a specific event.
+    pub async fn registrations_for_event(&self, event: &HookEvent) -> Vec<HookRegistrationRecord> {
         self.handlers
-            .write()
+            .read()
             .await
-            .entry(event.clone())
-            .or_default()
-            .push(handler);
-        debug!(event = %event.as_str(), plugin = %plugin, "hook handler registered");
+            .get(event)
+            .map(|handlers| {
+                handlers
+                    .iter()
+                    .enumerate()
+                    .map(|(order, handler)| HookRegistrationRecord {
+                        event: event.as_str().to_string(),
+                        plugin: handler.plugin_name().to_string(),
+                        order,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Registration order metadata across all events in canonical event order.
+    pub async fn registrations(&self) -> Vec<HookRegistrationRecord> {
+        let handlers = self.handlers.read().await;
+        let mut records = Vec::new();
+        for event in HookEvent::all() {
+            if let Some(event_handlers) = handlers.get(event) {
+                records.extend(event_handlers.iter().enumerate().map(|(order, handler)| {
+                    HookRegistrationRecord {
+                        event: event.as_str().to_string(),
+                        plugin: handler.plugin_name().to_string(),
+                        order,
+                    }
+                }));
+            }
+        }
+        records
     }
 
     /// Emit a hook event, calling all registered handlers in order.
@@ -455,6 +498,55 @@ mod tests {
     fn hook_event_unknown_returns_none() {
         assert!(HookEvent::from_str("unknown_event").is_none());
         assert!(HookEvent::from_str("").is_none());
+    }
+
+    #[tokio::test]
+    async fn registration_metadata_preserves_insertion_order_per_event() {
+        let registry = HookRegistry::new();
+        let count = Arc::new(AtomicU32::new(0));
+
+        registry
+            .register(
+                HookEvent::PreToolCall,
+                Box::new(TestHandler {
+                    name: "alpha".into(),
+                    call_count: count.clone(),
+                }),
+            )
+            .await;
+        registry
+            .register(
+                HookEvent::PreToolCall,
+                Box::new(TestHandler {
+                    name: "beta".into(),
+                    call_count: count.clone(),
+                }),
+            )
+            .await;
+        registry
+            .register(
+                HookEvent::PostToolCall,
+                Box::new(TestHandler {
+                    name: "gamma".into(),
+                    call_count: count,
+                }),
+            )
+            .await;
+
+        let pre = registry.registrations_for_event(&HookEvent::PreToolCall).await;
+        assert_eq!(pre.len(), 2);
+        assert_eq!(pre[0].plugin, "alpha");
+        assert_eq!(pre[0].order, 0);
+        assert_eq!(pre[1].plugin, "beta");
+        assert_eq!(pre[1].order, 1);
+
+        let all = registry.registrations().await;
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].event, "pre_tool_call");
+        assert_eq!(all[0].plugin, "alpha");
+        assert_eq!(all[1].plugin, "beta");
+        assert_eq!(all[2].event, "post_tool_call");
+        assert_eq!(all[2].plugin, "gamma");
     }
 
     #[tokio::test]
