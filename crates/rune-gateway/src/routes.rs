@@ -2449,10 +2449,14 @@ pub struct SessionAuditSummary {
     pub transcript_items: u32,
     pub status_notes: u32,
     pub subagent_results: u32,
+    pub descendant_sessions: u32,
+    pub descendant_subagent_results: u32,
     pub last_transcript_at: Option<String>,
     pub last_operator_note: Option<String>,
     pub last_subagent_result_at: Option<String>,
     pub last_subagent_result_excerpt: Option<String>,
+    pub last_descendant_result_at: Option<String>,
+    pub last_descendant_result_excerpt: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2631,6 +2635,18 @@ pub async fn get_session_status(
         .iter()
         .filter(|item| item.kind == "subagent_result")
         .count() as u32;
+    let descendant_rows = if row.kind == "subagent" {
+        state
+            .session_repo
+            .list(500, 0)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?
+            .into_iter()
+            .filter(|candidate| candidate.requester_session_id == Some(row.id))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let last_transcript_at = transcript_items
         .last()
         .map(|item| item.created_at.to_rfc3339());
@@ -2662,15 +2678,57 @@ pub async fn get_session_status(
                 format!("{truncated}…")
             }
         });
+    let descendant_sessions = descendant_rows.len() as u32;
+    let mut descendant_subagent_results = 0u32;
+    let mut last_descendant_result_at = None;
+    let mut last_descendant_result_excerpt = None;
+    for descendant in &descendant_rows {
+        let descendant_transcript_items = state
+            .transcript_repo
+            .list_by_session(descendant.id)
+            .await
+            .map_err(|e| GatewayError::Internal(e.to_string()))?;
+        descendant_subagent_results += descendant_transcript_items
+            .iter()
+            .filter(|item| item.kind == "subagent_result")
+            .count() as u32;
+        if last_descendant_result_at.is_none() {
+            if let Some(item) = descendant_transcript_items
+                .iter()
+                .rev()
+                .find(|item| item.kind == "subagent_result")
+            {
+                last_descendant_result_at = Some(item.created_at.to_rfc3339());
+                last_descendant_result_excerpt = item
+                    .payload
+                    .get("content")
+                    .or_else(|| item.payload.get("summary"))
+                    .and_then(|value| value.as_str())
+                    .map(|text| {
+                        const MAX_CHARS: usize = 200;
+                        if text.chars().count() <= MAX_CHARS {
+                            text.to_string()
+                        } else {
+                            let truncated: String = text.chars().take(MAX_CHARS).collect();
+                            format!("{truncated}…")
+                        }
+                    });
+            }
+        }
+    }
     let audit = if row.kind == "subagent" {
         Some(SessionAuditSummary {
             transcript_items: transcript_items.len() as u32,
             status_notes,
             subagent_results,
+            descendant_sessions,
+            descendant_subagent_results,
             last_transcript_at,
             last_operator_note,
             last_subagent_result_at,
             last_subagent_result_excerpt,
+            last_descendant_result_at,
+            last_descendant_result_excerpt,
         })
     } else {
         None
