@@ -2744,6 +2744,8 @@ pub struct SessionTreeNode {
     pub kind: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_lease: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_subagent_result_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_subagent_result_excerpt: Option<String>,
@@ -2934,6 +2936,7 @@ pub async fn get_session_tree(
             id: row.id.to_string(),
             kind: row.kind.clone(),
             status: row.status.clone(),
+            goal_lease: session_goal_lease(&row.metadata),
             last_subagent_result_at,
             last_subagent_result_excerpt,
             parent_session_id: row.requester_session_id.map(|id| id.to_string()),
