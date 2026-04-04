@@ -127,7 +127,7 @@ Rune sits between messaging channels and model providers. It manages:
 ## Core features (current-state view)
 
 - **Gateway + dashboard** — health/status surfaces and an operator dashboard are live
-- **Durable storage** — SQLite, PostgreSQL (external or embedded), and Azure Cosmos DB for NoSQL backends are shipped today; Azure SQL Database config is reserved but intentionally unsupported pending issue #782
+- **Durable storage** — SQLite, PostgreSQL (external or embedded), Azure Cosmos DB for NoSQL, and Azure SQL Database backend wiring are shipped today; Azure SQL currently reuses Rune's shared SQL-family backend path rather than a dedicated SQL Server-native store
 - **Tool runtime** — built-in file, exec/process, cron, session, and memory-oriented tools are implemented
 - **Provider layer** — Azure AI Foundry, Azure OpenAI, OpenAI, and Anthropic provider paths are part of the active runtime shape
 - **Docs + execution discipline** — ADR trail, source-of-truth boundaries, and Project 2 execution model are now explicit
