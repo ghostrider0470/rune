@@ -3181,6 +3181,9 @@ pub struct AgentKillResponse {
     pub parent_session_id: Option<String>,
     pub killed: bool,
     pub detail: String,
+    pub previous_status: String,
+    pub cancelled_at: String,
+    pub can_resume: bool,
 }
 
 /// `POST /agents/{id}/steer` - inject a steering instruction into a running subagent.
@@ -3275,6 +3278,7 @@ pub async fn agent_kill(
     }
 
     let now = chrono::Utc::now();
+    let previous_status = session.status.clone();
     let parent_session_id = session
         .requester_session_id
         .map(|parent| parent.to_string());
@@ -3332,6 +3336,9 @@ pub async fn agent_kill(
         parent_session_id,
         killed: true,
         detail: format!("session {} cancelled: {reason}", id),
+        previous_status,
+        cancelled_at: now.to_rfc3339(),
+        can_resume: false,
     }))
 }
 
