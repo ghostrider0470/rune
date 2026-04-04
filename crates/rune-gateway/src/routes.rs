@@ -1373,8 +1373,20 @@ pub struct DashboardSessionItem {
     pub id: String,
     pub kind: String,
     pub status: String,
+    pub status_reason: String,
+    pub next_task_reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stall_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operator_note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_retry_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_budget_exhausted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suppression_reason: Option<String>,
     pub channel_ref: Option<String>,
     pub routing_ref: Option<String>,
     pub created_at: String,
@@ -3657,7 +3669,9 @@ pub(crate) fn session_status_reason(status: &str, metadata: &Value, approval_mod
     if let Some(reason) = metadata_string(metadata, "hook_block_reason") {
         return format!("blocked by hook policy: {reason}");
     }
-    if let Some(reason) = metadata_string(metadata, "status_reason") {
+    if let Some(reason) = metadata_string(metadata, "status_reason")
+        .or_else(|| metadata.pointer("/anti_thrash/stall_reason").and_then(|v| v.as_str()).map(str::to_string))
+    {
         return reason;
     }
     match status {
@@ -3813,11 +3827,21 @@ pub(crate) fn session_resume_hint(status: &str, metadata: &Value) -> String {
 }
 
 fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
+    let approval_mode = metadata_string(&row.metadata, "approval_mode")
+        .unwrap_or_else(|| "on-failure".to_string());
     DashboardSessionItem {
         id: row.id.to_string(),
         kind: row.kind,
-        status: row.status,
+        status: row.status.clone(),
+        status_reason: session_status_reason(&row.status, &row.metadata, &approval_mode),
+        next_task_reason: session_next_task_reason(&row.status, &row.metadata),
         mode: metadata_string(&row.metadata, "mode"),
+        stall_reason: metadata_string(&row.metadata, "stall_reason")
+            .or_else(|| row.metadata.pointer("/anti_thrash/stall_reason").and_then(|v| v.as_str()).map(str::to_string)),
+        operator_note: row.metadata.pointer("/anti_thrash/operator_note").and_then(|v| v.as_str()).map(str::to_string),
+        next_retry_at: row.metadata.pointer("/anti_thrash/next_retry_at").and_then(|v| v.as_str()).map(str::to_string),
+        retry_budget_exhausted: row.metadata.pointer("/anti_thrash/budget_exhausted").and_then(|v| v.as_bool()),
+        suppression_reason: row.metadata.pointer("/anti_thrash/suppression_reason").and_then(|v| v.as_str()).map(str::to_string),
         routing_ref: row.channel_ref.clone(),
         channel_ref: row.channel_ref,
         created_at: row.created_at.to_rfc3339(),

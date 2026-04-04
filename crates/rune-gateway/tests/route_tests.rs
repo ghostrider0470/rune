@@ -13,7 +13,7 @@ use tokio::sync::{Mutex, RwLock};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use chrono::Timelike;
+use chrono::{Timelike, Utc};
 
 use rune_config::{
     AppConfig, Capabilities, ConfiguredModel, InstanceIdentity, LaneQueueConfig,
@@ -1430,6 +1430,23 @@ fn build_test_app_parts(
     )
 }
 
+fn build_test_app_parts_with_session_repo(
+    config: AppConfig,
+    auth_token: Option<String>,
+    session_repo: Arc<MemSessionRepo>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services_and_session_repo(
+        config,
+        auth_token,
+        session_repo,
+        test_ms365_calendar_service(),
+        test_ms365_planner_service(),
+        test_ms365_todo_service(),
+        test_ms365_files_service(),
+        test_ms365_users_service(),
+    )
+}
+
 fn build_test_app_parts_with_calendar_service(
     config: AppConfig,
     auth_token: Option<String>,
@@ -1511,7 +1528,7 @@ fn build_test_app_parts_with_users_service(
 }
 
 fn build_test_app_parts_with_ms365_services(
-    mut config: AppConfig,
+    config: AppConfig,
     auth_token: Option<String>,
     ms365_calendar_service: Arc<dyn Ms365CalendarService>,
     ms365_planner_service: Arc<dyn Ms365PlannerService>,
@@ -1519,7 +1536,28 @@ fn build_test_app_parts_with_ms365_services(
     ms365_files_service: Arc<dyn Ms365FilesService>,
     ms365_users_service: Arc<dyn Ms365UsersService>,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
-    let session_repo = Arc::new(MemSessionRepo::new());
+    build_test_app_parts_with_ms365_services_and_session_repo(
+        config,
+        auth_token,
+        Arc::new(MemSessionRepo::new()),
+        ms365_calendar_service,
+        ms365_planner_service,
+        ms365_todo_service,
+        ms365_files_service,
+        ms365_users_service,
+    )
+}
+
+fn build_test_app_parts_with_ms365_services_and_session_repo(
+    mut config: AppConfig,
+    auth_token: Option<String>,
+    session_repo: Arc<MemSessionRepo>,
+    ms365_calendar_service: Arc<dyn Ms365CalendarService>,
+    ms365_planner_service: Arc<dyn Ms365PlannerService>,
+    ms365_todo_service: Arc<dyn Ms365TodoService>,
+    ms365_files_service: Arc<dyn Ms365FilesService>,
+    ms365_users_service: Arc<dyn Ms365UsersService>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
     let turn_repo = Arc::new(MemTurnRepo::new());
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
     let approval_repo = Arc::new(MemApprovalRepo::new());
@@ -5779,7 +5817,7 @@ async fn create_session_accepts_project_id_metadata() {
 }
 
 #[tokio::test]
-async fn dashboard_sessions_includes_kind_and_activity_fields() {
+async fn dashboard_sessions_includes_kind_activity_and_status_fields() {
     let app = build_test_app(None);
 
     let response = app
@@ -5811,7 +5849,75 @@ async fn dashboard_sessions_includes_kind_and_activity_fields() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["kind"], "channel");
     assert_eq!(items[0]["channel_ref"], "telegram:ops");
+    assert_eq!(items[0]["status_reason"], "session status: ready");
+    assert_eq!(items[0]["next_task_reason"], "inspect session metadata and transcript for the next action");
     assert!(items[0]["last_activity_at"].is_string());
+}
+
+#[tokio::test]
+async fn dashboard_sessions_surface_anti_thrash_stall_reason() {
+    let now = Utc::now();
+    let session_id = Uuid::now_v7();
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let (app, _device_repo) = build_test_app_parts_with_session_repo(
+        AppConfig::default(),
+        None,
+        session_repo.clone(),
+    );
+
+    let session_repo: Arc<dyn SessionRepo> = session_repo;
+
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "Direct".to_string(),
+            status: "failed".to_string(),
+            workspace_root: None,
+            channel_ref: Some("telegram:ops".to_string()),
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "anti_thrash": {
+                    "stall_reason": "retry budget exhausted for repeated failure fingerprint",
+                    "operator_note": "Previous turn failed repeatedly and the retry budget is exhausted (attempt 3). Fix the underlying failure before retrying this fingerprint.",
+                    "next_retry_at": null,
+                    "budget_exhausted": true,
+                    "suppression_reason": "retry_budget_exhausted"
+                }
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::get("/api/dashboard/sessions")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    let items = json.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["status"], "failed");
+    assert_eq!(
+        items[0]["status_reason"],
+        "retry budget exhausted for repeated failure fingerprint"
+    );
+    assert_eq!(
+        items[0]["next_task_reason"],
+        "inspect the latest error and retry once the failure cause is fixed"
+    );
+    assert_eq!(items[0]["retry_budget_exhausted"], true);
+    assert_eq!(items[0]["suppression_reason"], "retry_budget_exhausted");
 }
 
 #[tokio::test]
