@@ -3640,6 +3640,18 @@ pub(crate) fn session_next_task_reason(status: &str, metadata: &Value) -> String
 fn session_goal_lease(metadata: &Value) -> Option<Value> {
     let goal_key = metadata_string(metadata, "goal_key")?;
     let owner_agent_id = metadata_string(metadata, "goal_owner_agent_id")?;
+    let lease_expires_at = metadata_string(metadata, "goal_lease_expires_at");
+    let leased_at = metadata_string(metadata, "goal_leased_at");
+    let recovered_at = metadata_string(metadata, "goal_lease_recovered_at");
+    let recovered_from_agent_id = metadata_string(metadata, "goal_lease_recovered_from_agent_id");
+    let lease_state = match lease_expires_at.as_deref() {
+        Some(expires_at) => match chrono::DateTime::parse_from_rfc3339(expires_at) {
+            Ok(parsed) if parsed.with_timezone(&Utc) > Utc::now() => "active",
+            Ok(_) => "expired",
+            Err(_) => "unknown",
+        },
+        None => "unknown",
+    };
 
     let mut lease = Map::new();
     lease.insert("goal_key".to_string(), Value::String(goal_key));
@@ -3647,20 +3659,24 @@ fn session_goal_lease(metadata: &Value) -> Option<Value> {
         "owner_agent_id".to_string(),
         Value::String(owner_agent_id),
     );
+    lease.insert(
+        "state".to_string(),
+        Value::String(lease_state.to_string()),
+    );
 
-    if let Some(lease_expires_at) = metadata_string(metadata, "goal_lease_expires_at") {
+    if let Some(lease_expires_at) = lease_expires_at {
         lease.insert(
             "lease_expires_at".to_string(),
             Value::String(lease_expires_at),
         );
     }
-    if let Some(leased_at) = metadata_string(metadata, "goal_leased_at") {
+    if let Some(leased_at) = leased_at {
         lease.insert("leased_at".to_string(), Value::String(leased_at));
     }
-    if let Some(recovered_at) = metadata_string(metadata, "goal_lease_recovered_at") {
+    if let Some(recovered_at) = recovered_at {
         lease.insert("recovered_at".to_string(), Value::String(recovered_at));
     }
-    if let Some(recovered_from_agent_id) = metadata_string(metadata, "goal_lease_recovered_from_agent_id") {
+    if let Some(recovered_from_agent_id) = recovered_from_agent_id {
         lease.insert(
             "recovered_from_agent_id".to_string(),
             Value::String(recovered_from_agent_id),

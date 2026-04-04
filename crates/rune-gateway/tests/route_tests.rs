@@ -1566,9 +1566,9 @@ fn build_test_app_parts_with_ms365_services(
                         .record(
                             provider,
                             model,
+                            None,
                             usage.prompt_tokens,
-                            usage.cached_prompt_tokens,
-                            usage.uncached_prompt_tokens,
+                            usage.cached_prompt_tokens.unwrap_or(0),
                         )
                         .await;
                 }
@@ -1597,6 +1597,7 @@ fn build_test_app_parts_with_ms365_services(
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config,
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -1813,6 +1814,7 @@ async fn ws_rpc_status_matches_http_status_basics() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -1936,6 +1938,7 @@ enabled: true
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2055,8 +2058,10 @@ async fn status_reports_configured_lane_capacities() {
     let mut config = AppConfig::default();
     config.runtime.lanes = LaneQueueConfig {
         main_capacity: 6,
+        priority_capacity: 16,
         subagent_capacity: 9,
         cron_capacity: 128,
+        heartbeat_capacity: 1024,
         global_tool_capacity: 32,
         project_tool_capacity: 4,
     };
@@ -2065,6 +2070,7 @@ async fn status_reports_configured_lane_capacities() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(config)),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2174,6 +2180,7 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2289,6 +2296,7 @@ async fn ws_rpc_runtime_context_budget_reports_partition_usage_and_checkpoint() 
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2433,6 +2441,7 @@ async fn ws_rpc_runtime_context_budget_gc_compacts_and_returns_before_after_repo
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2553,6 +2562,7 @@ async fn ws_rpc_runtime_context_budget_gc_persists_checkpoint_when_store_path_is
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2680,6 +2690,7 @@ async fn ws_rpc_runtime_context_budget_rejects_invalid_items() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2824,6 +2835,7 @@ async fn ws_rpc_health_reports_session_count() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -2923,6 +2935,11 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
     let job_id = scheduler
         .add_job(rune_runtime::scheduler::Job {
             id: rune_core::JobId::new(),
+            max_retries: None,
+            retry_count: 0,
+            suppression_reason: None,
+            suppressed_at: None,
+            last_error: None,
             name: Some("daily-check".into()),
             schedule: rune_runtime::scheduler::Schedule::Cron {
                 expr: "0 0 9 * * *".into(),
@@ -2943,6 +2960,7 @@ async fn ws_rpc_cron_list_and_get_surface_delivery_mode() {
         .await;
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -3084,6 +3102,7 @@ async fn ws_rpc_session_status_surfaces_defaults_and_usage() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -3242,6 +3261,7 @@ async fn ws_rpc_session_get_includes_last_turn_timestamps() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -3344,6 +3364,7 @@ async fn ws_rpc_session_status_rejects_invalid_uuid() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -3442,6 +3463,7 @@ async fn ws_rpc_turns_list_and_get_return_turn_rows() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -3633,6 +3655,7 @@ async fn ws_rpc_tools_and_approvals_list_surface_state() {
         .unwrap();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -3750,6 +3773,7 @@ async fn approvals_list_route_includes_durable_resume_refs() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config,
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -3875,6 +3899,7 @@ async fn ws_handle_text_message_subscribe_unsubscribe_and_errors() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -4034,6 +4059,7 @@ async fn ws_handle_text_message_supports_event_and_global_subscriptions() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -4189,6 +4215,7 @@ async fn ws_subscribe_bumps_state_version_once_and_non_subscription_rpc_does_not
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -4309,6 +4336,7 @@ async fn ws_handle_text_message_dispatches_rpc_errors() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -7847,6 +7875,7 @@ async fn send_message_and_transcript_with_shared_state() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -8243,6 +8272,7 @@ async fn get_session_tree_surfaces_subagent_metadata_and_turn_counts() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -8419,6 +8449,7 @@ async fn get_session_status_surfaces_subagent_metadata() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -8583,6 +8614,7 @@ async fn get_session_status_surfaces_orchestration_metadata() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -8717,6 +8749,7 @@ async fn get_session_status_surfaces_control_plane_explainability() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -8820,6 +8853,7 @@ async fn get_dashboard_usage_reports_cached_tokens_and_cache_hit_ratio() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -9926,6 +9960,7 @@ async fn list_sessions_filters_by_channel_and_activity() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -10471,6 +10506,7 @@ async fn reminders_list_includes_outcome_fields() {
     reminder_store.cancel(&id).await;
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -10583,6 +10619,7 @@ async fn reminders_cancel_returns_success() {
     let id = reminder_store.add(reminder).await;
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -10712,6 +10749,7 @@ async fn agent_steer_success() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -10901,6 +10939,7 @@ async fn agent_kill_success() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -11063,6 +11102,7 @@ async fn ws_rpc_agent_steer_and_kill() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -11922,6 +11962,7 @@ async fn transcript_route_filters_entries_after_cursor() {
     let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -12375,6 +12416,7 @@ async fn ws_rpc_session_send_rate_limits_bursty_webchat_browser_tokens_across_se
     let event_tx = test_event_sender().clone();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -12511,6 +12553,7 @@ async fn ws_rpc_session_send_rate_limits_shared_webchat_browser_token_across_ses
     let event_tx = test_event_sender().clone();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -12632,6 +12675,7 @@ async fn ws_rpc_processes_log_surfaces_output() {
     let event_tx = test_event_sender().clone();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -12741,6 +12785,7 @@ async fn ws_rpc_memory_search_returns_workspace_hits() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(config)),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -12864,6 +12909,7 @@ async fn ws_rpc_doctor_run_matches_http_contract() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(config)),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -13265,6 +13311,7 @@ async fn ws_rpc_session_list_filters_by_browser_session_token() {
     let event_tx = test_event_sender().clone();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -13429,6 +13476,7 @@ async fn ws_rpc_session_resolve_updates_metadata_for_existing_channel_session() 
     let event_tx = test_event_sender().clone();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -13550,6 +13598,7 @@ async fn ws_rpc_session_resolve_merges_metadata_for_existing_channel_session() {
     let event_tx = test_event_sender().clone();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -13661,6 +13710,7 @@ async fn api_tool_execution_route_returns_persisted_execution() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config,
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -13879,6 +13929,7 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config,
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -14167,6 +14218,7 @@ async fn native_comms_send_inbox_and_ack_flow() {
     ));
 
     let app_state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine: Arc::new(SessionEngine::new(Arc::new(MemSessionRepo::new()))),
@@ -14748,6 +14800,7 @@ async fn get_session_tree_surfaces_subagent_audit_metadata() {
         .unwrap();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -15025,6 +15078,7 @@ async fn session_status_route_surfaces_subagent_audit_summary() {
         .unwrap();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -15169,6 +15223,7 @@ async fn get_session_status_surfaces_goal_lease_metadata() {
     let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -15226,6 +15281,7 @@ async fn get_session_status_surfaces_goal_lease_metadata() {
         serde_json::json!({
             "goal_key": "issue-763/explain-why-this-session-is-running",
             "owner_agent_id": "architect-1",
+            "state": "active",
             "lease_expires_at": lease_expires_at,
             "leased_at": leased_at,
             "recovered_at": "2026-03-29T11:59:00Z",
@@ -15328,6 +15384,7 @@ async fn get_session_tree_surfaces_goal_lease_metadata_for_subagents() {
         .unwrap();
 
     let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
         config: Arc::new(RwLock::new(AppConfig::default())),
         started_at: Arc::new(Instant::now()),
         session_engine,
@@ -15367,7 +15424,6 @@ async fn get_session_tree_surfaces_goal_lease_metadata_for_subagents() {
         ms365_users_service: test_ms365_users_service(),
         comms_client: None,
         token_metrics: TokenMetricsStore::new(),
-        peer_health_alert_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
 
     let app = build_router(state, None);
@@ -15388,10 +15444,133 @@ async fn get_session_tree_surfaces_goal_lease_metadata_for_subagents() {
         serde_json::json!({
             "goal_key": "issue-763/route-delegated-result",
             "owner_agent_id": "architect-2",
+            "state": "active",
             "lease_expires_at": lease_expires_at,
             "leased_at": leased_at,
             "recovered_at": "2026-03-29T12:01:00Z",
             "recovered_from_agent_id": "architect-1"
         })
     );
+}
+
+#[tokio::test]
+async fn get_session_status_marks_expired_goal_leases() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model"),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let session_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let now = chrono::Utc::now();
+    let expired_at = (now - chrono::Duration::minutes(5)).to_rfc3339();
+    session_repo
+        .create(NewSession {
+            id: session_id,
+            kind: "subagent".into(),
+            status: "running".into(),
+            workspace_root: None,
+            channel_ref: None,
+            requester_session_id: None,
+            latest_turn_id: None,
+            runtime_profile: None,
+            policy_profile: None,
+            metadata: serde_json::json!({
+                "goal_key": "issue-763/expired-lease",
+                "goal_owner_agent_id": "architect-3",
+                "goal_lease_expires_at": expired_at
+            }),
+            created_at: now,
+            updated_at: now,
+            last_activity_at: now,
+        })
+        .await
+        .unwrap();
+
+    let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
+    };
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["goal_lease"]["state"], "expired");
 }
