@@ -9,7 +9,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap};
 use tracing::info;
 use uuid::Uuid;
@@ -26,7 +26,6 @@ use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
 use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
 use rune_tools::{ToolCall, ToolExecutor};
-use serde_json::Value;
 
 use crate::error::GatewayError;
 use crate::events::{ApprovalEvent, RuntimeEvent, broadcast_runtime_event};
@@ -2464,6 +2463,8 @@ pub struct SessionStatusResponse {
     pub status_reason: String,
     pub next_task_reason: String,
     pub resume_hint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_lease: Option<Value>,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_ref: Option<String>,
@@ -2703,6 +2704,7 @@ pub async fn get_session_status(
         status_reason: session_status_reason(&row.status, metadata, &approval_mode),
         next_task_reason: session_next_task_reason(&row.status, metadata),
         resume_hint: session_resume_hint(&row.status, metadata),
+        goal_lease: session_goal_lease(metadata),
         kind: row.kind,
         channel_ref: row.channel_ref,
         parent_session_id,
@@ -3630,6 +3632,39 @@ pub(crate) fn session_next_task_reason(status: &str, metadata: &Value) -> String
         "cancelled" => "restart the session only if the task is still relevant".to_string(),
         _ => "inspect session metadata and transcript for the next action".to_string(),
     }
+}
+
+fn session_goal_lease(metadata: &Value) -> Option<Value> {
+    let goal_key = metadata_string(metadata, "goal_key")?;
+    let owner_agent_id = metadata_string(metadata, "goal_owner_agent_id")?;
+
+    let mut lease = Map::new();
+    lease.insert("goal_key".to_string(), Value::String(goal_key));
+    lease.insert(
+        "owner_agent_id".to_string(),
+        Value::String(owner_agent_id),
+    );
+
+    if let Some(lease_expires_at) = metadata_string(metadata, "goal_lease_expires_at") {
+        lease.insert(
+            "lease_expires_at".to_string(),
+            Value::String(lease_expires_at),
+        );
+    }
+    if let Some(leased_at) = metadata_string(metadata, "goal_leased_at") {
+        lease.insert("leased_at".to_string(), Value::String(leased_at));
+    }
+    if let Some(recovered_at) = metadata_string(metadata, "goal_lease_recovered_at") {
+        lease.insert("recovered_at".to_string(), Value::String(recovered_at));
+    }
+    if let Some(recovered_from_agent_id) = metadata_string(metadata, "goal_lease_recovered_from_agent_id") {
+        lease.insert(
+            "recovered_from_agent_id".to_string(),
+            Value::String(recovered_from_agent_id),
+        );
+    }
+
+    Some(Value::Object(lease))
 }
 
 pub(crate) fn session_resume_hint(status: &str, metadata: &Value) -> String {
