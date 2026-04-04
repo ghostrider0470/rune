@@ -2904,6 +2904,24 @@ pub async fn get_session_tree(
             .get(&row.id)
             .cloned()
             .unwrap_or((None, None));
+        let subagent_lifecycle = metadata_string(&row.metadata, "subagent_lifecycle")
+            .or_else(|| {
+                if row.kind == "subagent" {
+                    Some("created".to_string())
+                } else {
+                    None
+                }
+            });
+        let subagent_runtime_status = metadata_string(&row.metadata, "subagent_runtime_status")
+            .or_else(|| {
+                if row.kind == "subagent" {
+                    Some("pending".to_string())
+                } else {
+                    None
+                }
+            });
+        let subagent_runtime_attached = metadata_bool(&row.metadata, "subagent_runtime_attached")
+            .or(if row.kind == "subagent" { Some(false) } else { None });
         SessionTreeNode {
             id: row.id.to_string(),
             kind: row.kind.clone(),
@@ -2916,9 +2934,9 @@ pub async fn get_session_tree(
             orchestration_status,
             delegation_roles,
             delegation_depth,
-            subagent_lifecycle: metadata_string(&row.metadata, "subagent_lifecycle"),
-            subagent_runtime_status: metadata_string(&row.metadata, "subagent_runtime_status"),
-            subagent_runtime_attached: metadata_bool(&row.metadata, "subagent_runtime_attached"),
+            subagent_lifecycle,
+            subagent_runtime_status,
+            subagent_runtime_attached,
             subagent_status_updated_at: metadata_string(
                 &row.metadata,
                 "subagent_status_updated_at",
