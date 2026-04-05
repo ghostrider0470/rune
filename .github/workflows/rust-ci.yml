@@ -36,9 +36,6 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    # Tests are currently broken due to stale test infrastructure (#441)
-    # This job runs but failures don't block PRs
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
