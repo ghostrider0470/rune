@@ -351,7 +351,8 @@ Implementation note (2026-03-13): `completion generate <shell>` now emits real s
 - [ ] install/update/package flow
 - [ ] capability-restricted extension execution
 - [ ] isolated plugin failure handling
-- [ ] plugin/hook doctor/check flows where shipped
+- [x] plugin/hook doctor/check flows where shipped
+  - 2026-04-05: `rune plugins doctor <name>` and `rune hooks doctor <name>` both ship with explicit CLI response contracts and test coverage.
 
 ---
 
