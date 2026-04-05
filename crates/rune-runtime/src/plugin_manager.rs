@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::agent_registry::AgentRegistry;
-use crate::command_registry::CommandRegistry;
+use crate::command_registry::{Command, CommandRegistry};
 use crate::hooks::{HookRegistrationRecord, HookRegistry};
 use crate::plugin_scanner::{
     PluginDecisionKind, PluginDiscoveryDecision, PluginScanner, UnifiedScanSummary,
@@ -25,6 +25,7 @@ pub struct PluginStatus {
     pub hooks: usize,
     pub commands: usize,
     pub mcp_servers: usize,
+    pub registered_commands: Vec<Command>,
     pub hook_registrations: Vec<HookRegistrationRecord>,
     pub last_decision: String,
     pub last_detail: String,
@@ -51,6 +52,7 @@ struct PluginMeta {
     hooks: usize,
     commands: usize,
     mcp_servers: usize,
+    registered_commands: Vec<Command>,
     hook_registrations: Vec<HookRegistrationRecord>,
     last_decision: String,
     last_detail: String,
@@ -171,6 +173,7 @@ impl PluginManager {
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    registered_commands: Vec::new(),
                     hook_registrations: Vec::new(),
                     last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
                     last_detail: "registered plugin components are active".to_string(),
@@ -196,6 +199,7 @@ impl PluginManager {
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    registered_commands: Vec::new(),
                     hook_registrations: Vec::new(),
                     last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
                     last_detail: "registered plugin components are active".to_string(),
@@ -216,11 +220,13 @@ impl PluginManager {
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    registered_commands: Vec::new(),
                     hook_registrations: Vec::new(),
                     last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
                     last_detail: "registered plugin components are active".to_string(),
                 });
             entry.commands += 1;
+            entry.registered_commands.push(cmd.clone());
         }
 
         for registration in &hook_registrations {
@@ -236,6 +242,7 @@ impl PluginManager {
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    registered_commands: Vec::new(),
                     hook_registrations: Vec::new(),
                     last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
                     last_detail: "registered plugin components are active".to_string(),
@@ -257,6 +264,7 @@ impl PluginManager {
                     hooks: 0,
                     commands: 0,
                     mcp_servers: 0,
+                    registered_commands: Vec::new(),
                     hook_registrations: Vec::new(),
                     last_decision: PluginDecisionKind::Loaded.as_str().to_string(),
                     last_detail: "registered plugin components are active".to_string(),
@@ -292,6 +300,7 @@ fn plugin_status_from_meta(m: &PluginMeta) -> PluginStatus {
         hooks: m.hooks,
         commands: m.commands,
         mcp_servers: m.mcp_servers,
+        registered_commands: m.registered_commands.clone(),
         hook_registrations: m.hook_registrations.clone(),
         last_decision: m.last_decision.clone(),
         last_detail: m.last_detail.clone(),
@@ -309,6 +318,7 @@ fn plugin_meta_from_decision(decision: &PluginDiscoveryDecision) -> PluginMeta {
         hooks: 0,
         commands: 0,
         mcp_servers: 0,
+        registered_commands: Vec::new(),
         hook_registrations: Vec::new(),
         last_decision: decision.decision.as_str().to_string(),
         last_detail: decision.detail.clone(),
@@ -404,6 +414,7 @@ mod tests {
         assert_eq!(status.len(), 2);
         assert_eq!(status[0].name, "alpha");
         assert_eq!(status[0].hooks, 2);
+        assert!(status[0].registered_commands.is_empty());
         assert_eq!(status[0].hook_registrations.len(), 2);
         assert_eq!(status[0].hook_registrations[0].event, "pre_tool_call");
         assert_eq!(status[0].hook_registrations[0].order, 0);
@@ -412,8 +423,76 @@ mod tests {
 
         assert_eq!(status[1].name, "beta");
         assert_eq!(status[1].hooks, 1);
+        assert!(status[1].registered_commands.is_empty());
         assert_eq!(status[1].hook_registrations.len(), 1);
         assert_eq!(status[1].hook_registrations[0].event, "pre_tool_call");
         assert_eq!(status[1].hook_registrations[0].order, 1);
+    }
+
+    #[tokio::test]
+    async fn plugin_status_includes_registered_commands() {
+        let skill_registry = Arc::new(SkillRegistry::new());
+        let agent_registry = Arc::new(AgentRegistry::new());
+        let command_registry = Arc::new(CommandRegistry::new());
+        let hook_registry = Arc::new(HookRegistry::new());
+        command_registry
+            .register(Command {
+                name: "alpha:deploy".into(),
+                description: "Deploy alpha".into(),
+                prompt_body: "deploy".into(),
+                plugin_name: "alpha".into(),
+            })
+            .await;
+        command_registry
+            .register(Command {
+                name: "alpha:status".into(),
+                description: "Status alpha".into(),
+                prompt_body: "status".into(),
+                plugin_name: "alpha".into(),
+            })
+            .await;
+        command_registry
+            .register(Command {
+                name: "beta:plan".into(),
+                description: "Plan beta".into(),
+                prompt_body: "plan".into(),
+                plugin_name: "beta".into(),
+            })
+            .await;
+
+        let scanner = Arc::new(PluginScanner::new(
+            &rune_config::PluginsConfig {
+                scan_dirs: vec![],
+                ..Default::default()
+            },
+            Arc::new(PluginRegistry::new()),
+            skill_registry.clone(),
+            agent_registry.clone(),
+            command_registry.clone(),
+            hook_registry.clone(),
+        ));
+        let mgr = PluginManager::new(
+            scanner,
+            skill_registry,
+            agent_registry,
+            command_registry,
+            hook_registry,
+        );
+
+        mgr.rebuild_meta().await;
+        let mut status = mgr.status().await;
+        status.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(status.len(), 2);
+        assert_eq!(status[0].name, "alpha");
+        assert_eq!(status[0].commands, 2);
+        assert_eq!(status[0].registered_commands.len(), 2);
+        assert_eq!(status[0].registered_commands[0].name, "alpha:deploy");
+        assert_eq!(status[0].registered_commands[1].name, "alpha:status");
+
+        assert_eq!(status[1].name, "beta");
+        assert_eq!(status[1].commands, 1);
+        assert_eq!(status[1].registered_commands.len(), 1);
+        assert_eq!(status[1].registered_commands[0].name, "beta:plan");
     }
 }
