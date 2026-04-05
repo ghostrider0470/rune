@@ -62,6 +62,7 @@ pub use plugin::{PluginLoader, PluginManifest, PluginRegistry, PluginScanSummary
 pub use plugin_manager::PluginManager;
 pub use plugin_scanner::{PluginScanner, UnifiedScanSummary};
 pub use project::{ProjectConfig, ProjectRegistry};
+pub use rune_core::HookEventSummary;
 pub use rune_core::{HookExecutionRecord, HookMutationSummary, HookPolicyOutcome};
 pub use session_loop::TelegramFileDownloader;
 pub use spell::{Spell, SpellKind, SpellRegistry};
