@@ -3,9 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
-import type { SkillItem } from "@/lib/api-types";
+import { useSkills, useToggleSkill } from "@/hooks/use-operators";
 import { Wrench, FolderOpen } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/skills")({
@@ -13,21 +11,9 @@ export const Route = createFileRoute("/_admin/skills")({
 });
 
 function SkillsPage() {
-  const queryClient = useQueryClient();
+  const { data: skills, isLoading } = useSkills();
 
-  const { data: skills, isLoading } = useQuery({
-    queryKey: ["skills"],
-    queryFn: () => api.get<SkillItem[]>("/skills"),
-    refetchInterval: 15_000,
-  });
-
-  const toggleSkill = useMutation({
-    mutationFn: ({ name, enable }: { name: string; enable: boolean }) =>
-      api.post(`/skills/${name}/${enable ? "enable" : "disable"}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills"] });
-    },
-  });
+  const toggleSkill = useToggleSkill();
 
   return (
     <div className="space-y-8">
