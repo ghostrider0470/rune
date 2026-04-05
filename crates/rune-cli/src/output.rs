@@ -6217,7 +6217,7 @@ mod tests {
         let r = DoctorReport {
             overall: "degraded".into(),
             readiness_status: Some("slo_defined_evidence_pending".into()),
-            readiness_summary: Some("targets defined but live evidence missing".into()),
+            readiness_summary: Some("targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence".into()),
             checks: vec![
                 DoctorCheck {
                     name: "config".into(),
@@ -6256,8 +6256,8 @@ mod tests {
                 promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
                 demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
                 metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
-                readiness_status: Some("blocked".into()),
-                readiness_summary: Some("targets defined but live evidence missing".into()),
+                readiness_status: Some("slo_defined_evidence_pending".into()),
+                readiness_summary: Some("targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence".into()),
                 last_checkpoint_at: None,
                 prompt_cache_rows: 0,
                 cached_tokens: 0,
@@ -6291,7 +6291,7 @@ mod tests {
         };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("Overall: degraded"));
-        assert!(out.contains("Readiness: blocked — targets defined but live evidence missing"));
+        assert!(out.contains("Readiness: slo_defined_evidence_pending — targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence"));
         assert!(out.contains(
             "Topology: deployment=single-process, database=memory, models=local, search=embedded"
         ));
