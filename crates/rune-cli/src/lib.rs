@@ -35,6 +35,7 @@ use cli::{
     CompletionAction, CompletionShell, ConfigAction, CronAction, CronDeliveryMode, DoctorAction,
     GatewayAction, GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction,
     HooksAction, LogsAction, LogsArgs, MemoryAction, MessageAction, MessageTagAction,
+    RustPatternAction,
     MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
@@ -52,7 +53,8 @@ use output::{
     ModelAliasDetail, ModelAliasesResponse, ModelAuthProviderDetail, ModelAuthResponse,
     ModelFallbackChainDetail, ModelFallbacksResponse, ModelListResponse, ModelProviderDetail,
     ModelScanResponse, ModelSetImageResponse, ModelSetResponse, ModelStatusResponse, OutputFormat,
-    SpellSearchResponse, TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
+    RustPatternValidateFinding, RustPatternValidateResponse, SpellSearchResponse,
+    TemplateListResponse, TemplateStartResponse, TemplateSummary, render,
 };
 use service::{ServiceInstallOptions, install_service_definition, print_service_definition};
 
@@ -3249,6 +3251,29 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             MemoryAction::Get { path, from, lines } => {
                 let result = memory::get(&path, from, lines).await?;
+                println!("{}", render(&result, format));
+            }
+        },
+        Command::RustPattern { action } => match action {
+            RustPatternAction::Validate { path } => {
+                let root = path
+                    .as_deref()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+                let report = rune_spells_rust_patterns::validate_rune_codebase(&root);
+                let result = RustPatternValidateResponse {
+                    scanned_files: report.scanned_files,
+                    findings: report
+                        .findings
+                        .into_iter()
+                        .map(|finding| RustPatternValidateFinding {
+                            file: finding.file,
+                            line: finding.line,
+                            issue: finding.issue,
+                            recommendation: finding.recommendation,
+                        })
+                        .collect(),
+                };
                 println!("{}", render(&result, format));
             }
         },

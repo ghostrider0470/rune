@@ -2913,6 +2913,20 @@ pub struct MemoryGetResponse {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustPatternValidateFinding {
+    pub file: String,
+    pub line: usize,
+    pub issue: String,
+    pub recommendation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustPatternValidateResponse {
+    pub scanned_files: usize,
+    pub findings: Vec<RustPatternValidateFinding>,
+}
+
 impl fmt::Display for MemoryGetResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
@@ -2921,6 +2935,26 @@ impl fmt::Display for MemoryGetResponse {
             self.path, self.from, self.lines
         )?;
         write!(f, "{}", self.content)
+    }
+}
+
+impl fmt::Display for RustPatternValidateResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Scanned Rust files: {}", self.scanned_files)?;
+        if self.findings.is_empty() {
+            write!(f, "No anti-pattern findings.")
+        } else {
+            writeln!(f, "Findings: {}", self.findings.len())?;
+            for (idx, finding) in self.findings.iter().enumerate() {
+                if idx > 0 {
+                    writeln!(f)?;
+                }
+                writeln!(f, "{}:{}", finding.file, finding.line)?;
+                writeln!(f, "Issue: {}", finding.issue)?;
+                write!(f, "Recommendation: {}", finding.recommendation)?;
+            }
+            Ok(())
+        }
     }
 }
 
