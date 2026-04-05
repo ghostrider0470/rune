@@ -378,9 +378,11 @@ impl TurnExecutor {
             let session_kind = parse_session_kind(&session.kind)?;
             let lane = match trigger_kind {
                 TriggerKind::Heartbeat => Lane::Heartbeat,
-                TriggerKind::UserMessage
-                | TriggerKind::SystemWake
-                | TriggerKind::SubagentRequest => Lane::Priority,
+                TriggerKind::UserMessage => match session_kind {
+                    SessionKind::Direct | SessionKind::Channel => Lane::Main,
+                    _ => Lane::Priority,
+                },
+                TriggerKind::SystemWake | TriggerKind::SubagentRequest => Lane::Priority,
                 TriggerKind::CronJob | TriggerKind::Reminder => {
                     Lane::from_session_kind(&session_kind)
                 }
@@ -1611,4 +1613,40 @@ fn rand_jitter_ms() -> u64 {
     std::time::Instant::now().hash(&mut hasher);
     std::thread::current().id().hash(&mut hasher);
     hasher.finish() % 500
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rune_core::SessionKind;
+
+    fn lane_for(trigger_kind: TriggerKind, session_kind: SessionKind) -> Lane {
+        match trigger_kind {
+            TriggerKind::Heartbeat => Lane::Heartbeat,
+            TriggerKind::UserMessage => match session_kind {
+                SessionKind::Direct | SessionKind::Channel => Lane::Main,
+                _ => Lane::Priority,
+            },
+            TriggerKind::SystemWake | TriggerKind::SubagentRequest => Lane::Priority,
+            TriggerKind::CronJob | TriggerKind::Reminder => Lane::from_session_kind(&session_kind),
+        }
+    }
+
+    #[test]
+    fn interactive_user_messages_stay_on_main_lane() {
+        assert_eq!(lane_for(TriggerKind::UserMessage, SessionKind::Direct), Lane::Main);
+        assert_eq!(lane_for(TriggerKind::UserMessage, SessionKind::Channel), Lane::Main);
+    }
+
+    #[test]
+    fn control_plane_triggers_use_priority_lane() {
+        assert_eq!(lane_for(TriggerKind::SystemWake, SessionKind::Direct), Lane::Priority);
+        assert_eq!(lane_for(TriggerKind::SubagentRequest, SessionKind::Channel), Lane::Priority);
+    }
+
+    #[test]
+    fn scheduled_work_stays_on_background_lanes() {
+        assert_eq!(lane_for(TriggerKind::CronJob, SessionKind::Scheduled), Lane::Cron);
+        assert_eq!(lane_for(TriggerKind::Reminder, SessionKind::Subagent), Lane::Subagent);
+    }
 }
