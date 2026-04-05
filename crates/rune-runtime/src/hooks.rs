@@ -145,27 +145,42 @@ pub struct HookRegistrationRecord {
 
 type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
 
+fn mutation_status(
+    before: Option<&serde_json::Value>,
+    after: Option<&serde_json::Value>,
+) -> Option<&'static str> {
+    match (before, after) {
+        (None, Some(_)) => Some("added"),
+        (Some(_), None) => Some("removed"),
+        (Some(before), Some(after)) if before != after => Some("modified"),
+        _ => None,
+    }
+}
+
+fn push_mutation(
+    mutations: &mut Vec<HookMutationSummary>,
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    field: &str,
+    detail: Option<String>,
+) {
+    if let Some(status) = mutation_status(before.get(field), after.get(field)) {
+        mutations.push(HookMutationSummary {
+            field: field.to_string(),
+            status: status.to_string(),
+            detail,
+        });
+    }
+}
+
 fn diff_context_mutations(
     before: &serde_json::Value,
     after: &serde_json::Value,
 ) -> Vec<HookMutationSummary> {
     let mut mutations = Vec::new();
 
-    if before.get("arguments") != after.get("arguments") {
-        mutations.push(HookMutationSummary {
-            field: "arguments".to_string(),
-            status: "modified".to_string(),
-            detail: None,
-        });
-    }
-
-    if before.get("output") != after.get("output") {
-        mutations.push(HookMutationSummary {
-            field: "output".to_string(),
-            status: "modified".to_string(),
-            detail: None,
-        });
-    }
+    push_mutation(&mut mutations, before, after, "arguments", None);
+    push_mutation(&mut mutations, before, after, "output", None);
 
     if before.get("hook_blocked") != after.get("hook_blocked") {
         let status = if after
@@ -175,7 +190,8 @@ fn diff_context_mutations(
         {
             "set_true"
         } else {
-            "modified"
+            mutation_status(before.get("hook_blocked"), after.get("hook_blocked"))
+                .unwrap_or("modified")
         };
         mutations.push(HookMutationSummary {
             field: "hook_blocked".to_string(),
@@ -184,25 +200,19 @@ fn diff_context_mutations(
         });
     }
 
-    if before.get("hook_block_reason") != after.get("hook_block_reason") {
-        mutations.push(HookMutationSummary {
-            field: "hook_block_reason".to_string(),
-            status: "modified".to_string(),
-            detail: after
-                .get("hook_block_reason")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string),
-        });
-    }
+    push_mutation(
+        &mut mutations,
+        before,
+        after,
+        "hook_block_reason",
+        after
+            .get("hook_block_reason")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+    );
 
     for field in ["approval_required", "approval_mode"] {
-        if before.get(field) != after.get(field) {
-            mutations.push(HookMutationSummary {
-                field: field.to_string(),
-                status: "modified".to_string(),
-                detail: None,
-            });
-        }
+        push_mutation(&mut mutations, before, after, field, None);
     }
 
     mutations
@@ -851,5 +861,36 @@ mod tests {
             ctx["hook_block_reason"],
             "hook `mutating-fail-closed-plugin` failed: must block after mutation"
         );
+    }
+
+    #[test]
+    fn diff_context_mutations_reports_added_removed_and_modified_fields() {
+        let before = serde_json::json!({
+            "arguments": {"command": "ls"},
+            "approval_mode": "manual",
+            "hook_block_reason": "old reason"
+        });
+        let after = serde_json::json!({
+            "arguments": {"command": "pwd"},
+            "approval_required": true,
+            "hook_block_reason": "new reason"
+        });
+
+        let mutations = diff_context_mutations(&before, &after);
+
+        assert!(mutations.iter().any(|mutation| {
+            mutation.field == "arguments" && mutation.status == "modified"
+        }));
+        assert!(mutations.iter().any(|mutation| {
+            mutation.field == "approval_required" && mutation.status == "added"
+        }));
+        assert!(mutations.iter().any(|mutation| {
+            mutation.field == "approval_mode" && mutation.status == "removed"
+        }));
+        assert!(mutations.iter().any(|mutation| {
+            mutation.field == "hook_block_reason"
+                && mutation.status == "modified"
+                && mutation.detail.as_deref() == Some("new reason")
+        }));
     }
 }
