@@ -8,7 +8,7 @@ Rune currently uses a batch-branch workflow model:
 - one active coding branch
 - one active PR
 - one coherent milestone batch
-- immediate merge when green and mergeable
+- immediate merge only after the required CI gates are green and the PR is mergeable
 
 ## Current canonical references
 
