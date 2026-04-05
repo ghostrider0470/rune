@@ -13614,7 +13614,7 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
 }
 
 #[tokio::test]
-async fn doctor_run_surfaces_readiness_slos_and_blocker_status() {
+async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
     let mut config = AppConfig::default();
     config.gateway.auth_token = Some("secret-token".into());
 
@@ -13632,7 +13632,7 @@ async fn doctor_run_surfaces_readiness_slos_and_blocker_status() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
 
-    assert_eq!(body["readiness_status"], "blocked");
+    assert_eq!(body["readiness_status"], "slo_defined_evidence_pending");
     assert!(body["readiness_summary"]
         .as_str()
         .unwrap()
@@ -13649,7 +13649,7 @@ async fn doctor_run_surfaces_readiness_slos_and_blocker_status() {
         .as_str()
         .unwrap()
         .contains("recovery_time<= 60s"));
-    assert_eq!(body["memory_hierarchy"]["readiness_status"], "blocked");
+    assert_eq!(body["memory_hierarchy"]["readiness_status"], "slo_defined_evidence_pending");
 
     let checks = body["checks"].as_array().unwrap();
     assert!(checks.iter().any(|check| {
