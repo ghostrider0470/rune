@@ -70,15 +70,17 @@ Do not run the whole universe on every tiny local change if targeted validation 
 
 ## Merge rule
 
-If the active PR is:
-- green
-- mergeable
+If the active PR has:
+- all required CI jobs green
+- mergeable status
 
 then:
 1. merge immediately
 2. sync `main` immediately
 3. create the next batch immediately
 4. continue immediately
+
+For Rune, required means the enforced merge gates for that PR are actually passing. If both `check-and-lint` and `test` are required, do not merge on a partial green state.
 
 Do not stop at a status checkpoint when the next safe execution step is obvious.
 
