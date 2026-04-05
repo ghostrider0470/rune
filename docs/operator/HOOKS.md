@@ -6,17 +6,6 @@ This runbook explains the runtime-visible behavior of Rune hooks.
 
 Rune exposes these hook phases and uses the same serialized names in manifests, diagnostics, execution records, and registration metadata:
 
-## Deterministic registration and execution order
-
-Hook ordering is deterministic. Rune preserves handler registration order per event and executes handlers in that exact order. In practice, the ordering contract is:
-
-1. plugin discovery order is deterministic from configured scan directory order
-2. duplicate plugin names are resolved with first-directory-wins semantics
-3. manifest-declared hook order is preserved when handlers are registered
-4. runtime execution order for a given event matches handler registration order exactly
-
-This means repeated startups with the same plugin directories and manifests produce the same per-event hook ordering. Registration metadata can be exported from the runtime for auditability and troubleshooting.
-
 - `pre_tool_call`
 - `post_tool_call`
 - `pre_turn`
@@ -28,6 +17,17 @@ This means repeated startups with the same plugin directories and manifests prod
 - `user_prompt_submit`
 - `pre_compact`
 - `notification`
+
+## Deterministic registration and execution order
+
+Hook ordering is deterministic. Rune preserves handler registration order per event and executes handlers in that exact order. In practice, the ordering contract is:
+
+1. plugin discovery order is deterministic from configured scan directory order
+2. duplicate plugin names are resolved with first-directory-wins semantics
+3. manifest-declared hook order is preserved when handlers are registered
+4. runtime execution order for a given event matches handler registration order exactly
+
+This means repeated startups with the same plugin directories and manifests produce the same per-event hook ordering. Registration metadata can be exported from the runtime for auditability and troubleshooting. The plugin status surfaces in both the gateway API and `rune plugins info` include zero-based per-event `order` values so operators can compare runtime registration order with manifest expectations without enabling extra debug logging.
 
 Use only these values when declaring hook handlers.
 
