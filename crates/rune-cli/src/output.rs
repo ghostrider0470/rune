@@ -9772,22 +9772,6 @@ impl fmt::Display for HookCheckResponse {
     }
 }
 
-/// Response for hook lifecycle mutations (enable/disable/install/update/doctor).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HookMutationResponse {
-    pub success: bool,
-    pub hook: String,
-    pub action: String,
-    pub detail: String,
-}
-
-impl fmt::Display for HookMutationResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let icon = if self.success { "✓" } else { "✗" };
-        writeln!(f, "{icon} Hook '{}' — {}", self.hook, self.action)?;
-        write!(f, "  {}", self.detail)
-    }
-}
 
 #[cfg(test)]
 mod plugin_reload_output_tests {

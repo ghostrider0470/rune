@@ -6892,34 +6892,6 @@ impl GatewayClient {
         }
     }
 
-    /// `POST /hooks/:action` — hook lifecycle mutation.
-    pub async fn hooks_mutate(
-        &self,
-        action: &str,
-        name_or_source: &str,
-    ) -> Result<crate::output::HookMutationResponse> {
-        let resp = self
-            .http
-            .post(self.url(&format!("/hooks/{action}")))
-            .json(&serde_json::json!({"name": name_or_source}))
-            .send()
-            .await
-            .context("failed to reach gateway")?;
-        if resp.status().is_success() {
-            let v: serde_json::Value = resp
-                .json()
-                .await
-                .context("invalid JSON from POST /hooks/:action")?;
-            Ok(crate::output::HookMutationResponse {
-                success: v["success"].as_bool().unwrap_or(true),
-                hook: v["hook"].as_str().unwrap_or(name_or_source).to_string(),
-                action: action.to_string(),
-                detail: v["detail"].as_str().unwrap_or("done").to_string(),
-            })
-        } else {
-            bail!("Gateway returned HTTP {}", resp.status());
-        }
-    }
 }
 
 fn parse_instance_load(value: &serde_json::Value) -> Option<InstanceLoadSummary> {
@@ -7323,27 +7295,6 @@ mod plugin_lifecycle_tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[tokio::test]
-    async fn hooks_doctor_posts_and_parses_response() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/hooks/doctor"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "success": true,
-                "hook": "preflight",
-                "detail": "hook manifest and handler wiring look healthy"
-            })))
-            .mount(&server)
-            .await;
-
-        let client = GatewayClient::new(&server.uri());
-        let response = client.hooks_mutate("doctor", "preflight").await.unwrap();
-
-        assert!(response.success);
-        assert_eq!(response.hook, "preflight");
-        assert_eq!(response.action, "doctor");
-        assert_eq!(response.detail, "hook manifest and handler wiring look healthy");
-    }
 
     #[tokio::test]
     async fn plugins_info_parses_registered_commands_and_hook_registrations() {
