@@ -10,9 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
-import type { AgentListItem } from "@/lib/api-types";
+import { useAgents } from "@/hooks/use-operators";
 import { Bot, Star } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/agents")({
@@ -20,11 +18,7 @@ export const Route = createFileRoute("/_admin/agents")({
 });
 
 function AgentsPage() {
-  const { data: agents, isLoading } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api.get<AgentListItem[]>("/agents"),
-    refetchInterval: 30_000,
-  });
+  const { data: agents, isLoading } = useAgents();
 
   return (
     <div className="space-y-8">
@@ -78,21 +72,23 @@ function AgentsPage() {
                       )}
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate py-3 font-mono text-xs">
-                      {agent.workspace ?? "—"}
+                      {agent.workspace ?? <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell className="max-w-[200px] truncate py-3 text-xs">
+                    <TableCell className="max-w-[320px] truncate py-3 text-sm text-muted-foreground">
                       {agent.system_prompt ? (
-                        <span title={agent.system_prompt}>
-                          {agent.system_prompt.slice(0, 80)}
-                          {agent.system_prompt.length > 80 ? "..." : ""}
-                        </span>
+                        <span title={agent.system_prompt}>{agent.system_prompt}</span>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        "—"
                       )}
                     </TableCell>
                     <TableCell className="py-3">
-                      {agent.default && (
-                        <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                      {agent.default ? (
+                        <Badge className="gap-1">
+                          <Star className="h-3 w-3" />
+                          Default
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
                   </TableRow>
