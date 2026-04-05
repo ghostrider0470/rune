@@ -142,7 +142,6 @@ pub struct HookRegistrationRecord {
     pub plugin: String,
     pub order: usize,
 }
-
 type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
 
 fn mutation_status(
@@ -150,9 +149,9 @@ fn mutation_status(
     after: Option<&serde_json::Value>,
 ) -> Option<&'static str> {
     match (before, after) {
-        (None, Some(_)) => Some("added"),
-        (Some(_), None) => Some("removed"),
         (Some(before), Some(after)) if before != after => Some("modified"),
+        (Some(_), None) => Some("removed"),
+        (None, Some(_)) => Some("modified"),
         _ => None,
     }
 }
@@ -957,7 +956,7 @@ mod tests {
                 .any(|mutation| { mutation.field == "arguments" && mutation.status == "modified" })
         );
         assert!(mutations.iter().any(|mutation| {
-            mutation.field == "approval_required" && mutation.status == "added"
+            mutation.field == "approval_required" && mutation.status == "modified"
         }));
         assert!(
             mutations.iter().any(|mutation| {
