@@ -129,6 +129,11 @@ pub enum Command {
         #[command(subcommand)]
         action: MemoryAction,
     },
+    /// Query Rust patterns guidance and validate Rust code for common anti-patterns.
+    RustPattern {
+        #[command(subcommand)]
+        action: RustPatternAction,
+    },
     /// Emit system events and inspect heartbeat presence.
     System {
         #[command(subcommand)]
@@ -1726,6 +1731,16 @@ pub enum MemoryAction {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum RustPatternAction {
+    /// Scan Rust files for common anti-patterns from the rust-patterns spell.
+    Validate {
+        /// Optional workspace-relative directory or Rust file path to validate.
+        #[arg(long)]
+        path: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum SystemAction {
     /// Inject, schedule, and list system events.
     Event {
@@ -3121,6 +3136,26 @@ mod tests {
                 assert_eq!(path, "memory/2026-03-13.md");
                 assert_eq!(from, 10);
                 assert_eq!(lines, Some(5));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rust_pattern_validate() {
+        let cli = Cli::try_parse_from([
+            "rune",
+            "rust-pattern",
+            "validate",
+            "--path",
+            "crates",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::RustPattern {
+                action: RustPatternAction::Validate { path },
+            } => {
+                assert_eq!(path.as_deref(), Some("crates"));
             }
             other => panic!("unexpected command: {other:?}"),
         }

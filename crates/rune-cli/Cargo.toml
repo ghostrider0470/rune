@@ -10,6 +10,7 @@ rune-core = { path = "../rune-core" }
 rune-config = { path = "../rune-config" }
 rune-mcp = { path = "../rune-mcp" }
 rune-runtime = { path = "../rune-runtime" }
+rune-spells-rust-patterns = { path = "../rune-spells/rust-patterns" }
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
