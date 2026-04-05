@@ -40,6 +40,8 @@ use crate::workspace::WorkspaceLoader;
 
 /// Maximum tool-call loop iterations before aborting.
 const DEFAULT_MAX_TOOL_ITERATIONS: u32 = 500;
+/// Turns older than this without a terminal status are treated as stuck and failed.
+const DEFAULT_STUCK_TURN_TIMEOUT_SECS: i64 = 300;
 
 static SESSION_ABORTS: Lazy<tokio::sync::Mutex<HashMap<Uuid, String>>> =
     Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
@@ -84,6 +86,7 @@ pub struct TurnExecutor {
     compaction: Arc<dyn CompactionStrategy>,
     default_model: Option<String>,
     max_tool_iterations: u32,
+    stuck_turn_timeout_secs: i64,
     lane_queue: Option<Arc<LaneQueue>>,
     skill_registry: Option<Arc<SkillRegistry>>,
     tool_approval_policy_repo: Option<Arc<dyn ToolApprovalPolicyRepo>>,
@@ -103,6 +106,70 @@ impl TurnExecutor {
             return Err(RuntimeError::Aborted(reason));
         }
         Ok(())
+    }
+
+    async fn recover_stuck_turn_if_needed(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<TurnRow>, RuntimeError> {
+        let session = self.session_repo.find_by_id(session_id).await?;
+        if !matches!(session.status.parse::<SessionStatus>(), Ok(SessionStatus::Running)) {
+            return Ok(None);
+        }
+
+        let now = Utc::now();
+        let turns = self.turn_repo.list_by_session(session_id).await?;
+        let Some(stuck_turn) = turns
+            .into_iter()
+            .filter(|turn| turn.ended_at.is_none())
+            .filter(|turn| {
+                !matches!(
+                    turn.status.as_str(),
+                    "completed" | "failed" | "cancelled"
+                )
+            })
+            .min_by_key(|turn| turn.started_at)
+        else {
+            return Ok(None);
+        };
+
+        let age_secs = now
+            .signed_duration_since(stuck_turn.started_at)
+            .num_seconds();
+        if age_secs < self.stuck_turn_timeout_secs {
+            return Ok(None);
+        }
+
+        warn!(
+            session_id = %session_id,
+            turn_id = %stuck_turn.id,
+            turn_status = %stuck_turn.status,
+            age_secs,
+            timeout_secs = self.stuck_turn_timeout_secs,
+            "recovering stuck turn before starting new execution"
+        );
+
+        let recovery_note = TranscriptItem::StatusNote {
+            status: SessionStatus::Failed,
+            note: format!(
+                "stuck_turn_recovered: failed stale turn {} after {}s without completion so a fresh turn can continue",
+                stuck_turn.id, age_secs
+            ),
+        };
+        self.append_transcript(session_id, Some(stuck_turn.id), &recovery_note)
+            .await?;
+
+        let failed_turn = self
+            .turn_repo
+            .update_status(stuck_turn.id, status_str(TurnStatus::Failed), Some(now))
+            .await?;
+        self.session_repo
+            .update_latest_turn(session_id, failed_turn.id, now)
+            .await?;
+        self.session_repo
+            .update_status(session_id, SessionStatus::Ready.as_str(), now)
+            .await?;
+        Ok(Some(failed_turn))
     }
 
     async fn transition_session_status(
@@ -155,6 +222,7 @@ impl TurnExecutor {
             compaction,
             default_model: None,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
+            stuck_turn_timeout_secs: DEFAULT_STUCK_TURN_TIMEOUT_SECS,
             lane_queue: None,
             skill_registry: None,
             tool_approval_policy_repo: None,
@@ -198,6 +266,12 @@ impl TurnExecutor {
     /// Override the max tool iterations limit.
     pub fn with_max_tool_iterations(mut self, max: u32) -> Self {
         self.max_tool_iterations = max;
+        self
+    }
+
+    /// Override the timeout used to detect and fail stuck turns.
+    pub fn with_stuck_turn_timeout_secs(mut self, timeout_secs: i64) -> Self {
+        self.stuck_turn_timeout_secs = timeout_secs.max(1);
         self
     }
 
@@ -365,6 +439,8 @@ impl TurnExecutor {
         trigger_kind: TriggerKind,
         chunk_tx: Option<tokio::sync::mpsc::Sender<String>>,
     ) -> Result<(TurnRow, UsageAccumulator), RuntimeError> {
+        self.recover_stuck_turn_if_needed(session_id).await?;
+
         let turn_id = TurnId::new();
         let now = Utc::now();
         let session = self.session_repo.find_by_id(session_id).await?;

@@ -3808,3 +3808,75 @@ async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_ap
             .any(|item| matches!(item, rune_core::TranscriptItem::ApprovalRequest { .. }))
     );
 }
+
+#[tokio::test]
+async fn stale_running_turn_is_failed_before_new_execution_starts() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let stale_started_at = chrono::Utc::now() - chrono::Duration::seconds(120);
+    let stale_turn = h
+        .turn_repo
+        .create(NewTurn {
+            id: Uuid::now_v7(),
+            session_id: session.id,
+            trigger_kind: "user_message".to_string(),
+            status: "tool_executing".to_string(),
+            model_ref: None,
+            started_at: stale_started_at,
+            ended_at: None,
+            usage_prompt_tokens: None,
+            usage_completion_tokens: None,
+            usage_cached_prompt_tokens: None,
+        })
+        .await
+        .unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("fresh turn completed"),
+    ]));
+    let executor = h
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )
+        .with_stuck_turn_timeout_secs(30);
+
+    let (fresh_turn, _) = executor
+        .execute(session.id, "continue after stall", None)
+        .await
+        .unwrap();
+
+    let recovered_turn = h.turn_repo.find_by_id(stale_turn.id).await.unwrap();
+    assert_eq!(recovered_turn.status, "failed");
+    assert!(recovered_turn.ended_at.is_some());
+
+    assert_eq!(fresh_turn.status, "completed");
+    assert_ne!(fresh_turn.id, stale_turn.id);
+
+    let session_row = h.session_repo.find_by_id(session.id).await.unwrap();
+    assert_eq!(session_row.latest_turn_id, Some(fresh_turn.id));
+    assert_eq!(session_row.status, "running");
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let recovery_note = transcript
+        .iter()
+        .find(|item| item.kind == "status_note")
+        .expect("expected stuck-turn recovery note");
+    assert_eq!(recovery_note.turn_id, Some(stale_turn.id));
+    let status = recovery_note.payload["status"].as_str().unwrap_or("");
+    let note = recovery_note.payload["note"].as_str().unwrap_or("");
+    assert_eq!(status, "failed");
+    assert!(note.contains("stuck_turn_recovered"));
+    assert!(note.contains("fresh turn can continue"));
+}

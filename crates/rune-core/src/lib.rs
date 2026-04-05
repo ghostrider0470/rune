@@ -567,6 +567,7 @@ impl SessionStatus {
             | (Self::Running, Self::Completed)
             | (Self::Running, Self::Failed)
             | (Self::Running, Self::Cancelled)
+            | (Self::Running, Self::Ready)
             // Waiting → back to running
             | (Self::WaitingForTool, Self::Running)
             | (Self::WaitingForApproval, Self::Running)
