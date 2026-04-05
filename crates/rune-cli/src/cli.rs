@@ -1154,6 +1154,11 @@ pub enum HooksAction {
         /// Hook name.
         name: String,
     },
+    /// Run diagnostic checks on a hook.
+    Doctor {
+        /// Hook name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Args)]
@@ -2626,6 +2631,17 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_hooks_doctor() {
+        let cli = Cli::try_parse_from(["rune", "hooks", "doctor", "preflight"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Hooks {
+                action: HooksAction::Doctor { name }
+            } if name == "preflight"
+        ));
     }
 
     #[test]

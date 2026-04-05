@@ -7324,6 +7324,28 @@ mod plugin_lifecycle_tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
+    async fn hooks_doctor_posts_and_parses_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/hooks/doctor"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": true,
+                "hook": "preflight",
+                "detail": "hook manifest and handler wiring look healthy"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let response = client.hooks_mutate("doctor", "preflight").await.unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.hook, "preflight");
+        assert_eq!(response.action, "doctor");
+        assert_eq!(response.detail, "hook manifest and handler wiring look healthy");
+    }
+
+    #[tokio::test]
     async fn plugins_info_parses_registered_commands_and_hook_registrations() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))

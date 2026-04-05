@@ -3893,6 +3893,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.hooks_mutate("update", &name).await?;
                 println!("{}", render(&result, format));
             }
+            HooksAction::Doctor { name } => {
+                let result = client.hooks_mutate("doctor", &name).await?;
+                println!("{}", render(&result, format));
+            }
         },
 
         Command::Backup { action } => match action {

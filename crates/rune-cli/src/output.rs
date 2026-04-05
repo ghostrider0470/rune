@@ -9772,7 +9772,7 @@ impl fmt::Display for HookCheckResponse {
     }
 }
 
-/// Response for hook lifecycle mutations (enable/disable/install/update).
+/// Response for hook lifecycle mutations (enable/disable/install/update/doctor).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookMutationResponse {
     pub success: bool,
