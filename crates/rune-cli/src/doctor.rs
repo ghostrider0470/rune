@@ -1279,6 +1279,22 @@ fn resolved_vector_backend(config: &AppConfig) -> String {
     }
 }
 
+
+const READINESS_INTERACTIVE_RESPONSE_SLO_MS: u64 = 2_000;
+const READINESS_QUEUE_DELAY_SLO_MS: u64 = 500;
+const READINESS_STUCK_TURN_RATE_SLO_PERCENT: f64 = 1.0;
+const READINESS_RECOVERY_TIME_SLO_SECONDS: u64 = 60;
+
+fn readiness_summary_message() -> String {
+    format!(
+        "targets: interactive_response<= {}ms, queue_delay<= {}ms, stuck_turn_rate<= {:.1}%, recovery_time<= {}s; gateway doctor currently reports blocker status until live responsiveness metrics ship",
+        READINESS_INTERACTIVE_RESPONSE_SLO_MS,
+        READINESS_QUEUE_DELAY_SLO_MS,
+        READINESS_STUCK_TURN_RATE_SLO_PERCENT,
+        READINESS_RECOVERY_TIME_SLO_SECONDS
+    )
+}
+
 fn configured_repo_count(config: &AppConfig) -> usize {
     let mut count = 4;
     if !config.channels.enabled.is_empty() {
@@ -1375,6 +1391,8 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
 
     DoctorReport {
         overall,
+        readiness_status: Some("blocked".to_string()),
+        readiness_summary: Some(readiness_summary_message()),
         checks,
         paths: Some(DoctorPathSummary {
             profile: config.paths.profile().as_str().to_string(),
@@ -1435,6 +1453,8 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     l3_ready
                 )
             },
+            readiness_status: Some("blocked".to_string()),
+            readiness_summary: Some(readiness_summary_message()),
             last_checkpoint_at: None,
             prompt_cache_rows: 0,
             cached_tokens: 0,

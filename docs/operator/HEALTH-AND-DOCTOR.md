@@ -72,3 +72,21 @@ Dashboard session anti-thrash fields:
 - `failure_fingerprint` — normalized repeated-failure key
 - `objective_fingerprint` — normalized objective key for the work that keeps failing
 - `objective_snapshot` — structured objective summary captured when suppression was recorded
+
+
+## Readiness SLO contract
+
+`/api/doctor/run`, `/api/doctor/results`, and `rune doctor` now declare the current responsiveness readiness contract explicitly.
+
+Current target SLOs:
+- interactive response latency: `<= 2000ms`
+- queue delay before execution starts: `<= 500ms`
+- stuck-turn rate: `<= 1.0%`
+- recovery time after a detected stuck turn: `<= 60s`
+
+Current readiness semantics:
+- doctor surfaces `readiness_status=blocked` until Rune exposes live evidence for queue delay, stuck-turn rate, and recovery-time compliance
+- defined targets without live evidence are **not** treated as ready
+- operators should treat `readiness_summary` as the canonical explanation for why readiness is blocked or satisfied
+
+This keeps readiness claims honest: the SLO target exists now, but replacement-readiness remains blocked until the runtime publishes those signals.

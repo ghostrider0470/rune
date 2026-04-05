@@ -7323,6 +7323,10 @@ pub struct DoctorMemoryHierarchySummary {
     pub promotion: String,
     pub demotion: String,
     pub metrics: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_summary: Option<String>,
     pub last_checkpoint_at: Option<String>,
     pub prompt_cache_rows: u64,
     pub cached_tokens: u64,
@@ -7347,6 +7351,10 @@ pub struct DoctorMemoryHierarchySummary {
 #[derive(Serialize)]
 pub struct DoctorReport {
     pub overall: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_summary: Option<String>,
     pub checks: Vec<DoctorCheck>,
     pub paths: DoctorPathSummary,
     pub topology: DoctorTopologySummary,
@@ -7420,6 +7428,21 @@ fn gateway_path_hint(
     }
 }
 
+const READINESS_INTERACTIVE_RESPONSE_SLO_MS: u64 = 2_000;
+const READINESS_QUEUE_DELAY_SLO_MS: u64 = 500;
+const READINESS_STUCK_TURN_RATE_SLO_PERCENT: f64 = 1.0;
+const READINESS_RECOVERY_TIME_SLO_SECONDS: u64 = 60;
+
+fn doctor_readiness_summary() -> String {
+    format!(
+        "targets: interactive_response<= {}ms, queue_delay<= {}ms, stuck_turn_rate<= {:.1}%, recovery_time<= {}s; current readiness is blocked because live queue-delay, stuck-turn, and recovery-time evidence is not exposed yet",
+        READINESS_INTERACTIVE_RESPONSE_SLO_MS,
+        READINESS_QUEUE_DELAY_SLO_MS,
+        READINESS_STUCK_TURN_RATE_SLO_PERCENT,
+        READINESS_RECOVERY_TIME_SLO_SECONDS
+    )
+}
+
 fn readiness_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
     let resolved_mode = config.mode.resolve(config);
@@ -7454,6 +7477,24 @@ fn readiness_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
         }
         checks.push(check);
     }
+
+    checks.push(DoctorCheck {
+        name: "readiness.responsiveness_slo".to_string(),
+        status: "pass",
+        message: format!(
+            "targets defined: interactive_response<= {}ms, queue_delay<= {}ms, stuck_turn_rate<= {:.1}%, recovery_time<= {}s",
+            READINESS_INTERACTIVE_RESPONSE_SLO_MS,
+            READINESS_QUEUE_DELAY_SLO_MS,
+            READINESS_STUCK_TURN_RATE_SLO_PERCENT,
+            READINESS_RECOVERY_TIME_SLO_SECONDS
+        ),
+    });
+
+    checks.push(DoctorCheck {
+        name: "readiness.evidence".to_string(),
+        status: "warn",
+        message: "live queue-delay, stuck-turn-rate, and recovery-time readiness evidence is not exposed yet; readiness remains blocked until those signals ship".to_string(),
+    });
 
     checks.push(DoctorCheck {
         name: "model_backend".to_string(),
@@ -7690,6 +7731,8 @@ async fn doctor_memory_hierarchy(
             l3_cold_storage_enabled,
             last_checkpoint_at.as_deref().unwrap_or("never")
         ),
+        readiness_status: Some("blocked".to_string()),
+        readiness_summary: Some(doctor_readiness_summary()),
         last_checkpoint_at,
         prompt_cache_rows: prompt_cache_rows.len() as u64,
         cached_tokens,
@@ -8045,6 +8088,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         },
     });
     checks.extend(storage_path_checks(&config));
+    checks.extend(readiness_checks(&config));
     let backend_matrix = doctor_backend_matrix(&config, &state.capabilities, provider_ok, auth_ok);
     let memory_hierarchy =
         doctor_memory_hierarchy(&state, &config, &state.capabilities, &state.token_metrics).await;
@@ -8113,9 +8157,12 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     } else {
         "healthy"
     };
+    let readiness_summary = doctor_readiness_summary();
 
     Ok(Json(DoctorReport {
         overall,
+        readiness_status: Some("blocked".to_string()),
+        readiness_summary: Some(readiness_summary),
         checks,
         paths: paths_summary,
         topology: topology_summary,
