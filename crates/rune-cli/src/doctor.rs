@@ -1453,7 +1453,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     l3_ready
                 )
             },
-            readiness_status: Some("blocked".to_string()),
+            readiness_status: Some("slo_defined_evidence_pending".to_string()),
             readiness_summary: Some(readiness_summary_message()),
             last_checkpoint_at: None,
             prompt_cache_rows: 0,
