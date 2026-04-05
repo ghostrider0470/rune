@@ -16,6 +16,7 @@
 4. Open a PR with clear title and body referencing the issue
 5. Ensure `cargo check` and `cargo clippy` pass
 6. Squash merge to main
+   - Merge only after all enforced CI jobs for that PR are green (for Rune: `check-and-lint` and `test`)
 7. Delete the branch after merge
 8. Update/close the GitHub issue
 
