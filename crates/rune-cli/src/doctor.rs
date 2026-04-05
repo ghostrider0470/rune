@@ -1287,7 +1287,7 @@ const READINESS_RECOVERY_TIME_SLO_SECONDS: u64 = 60;
 
 fn readiness_summary_message() -> String {
     format!(
-        "targets: interactive_response<= {}ms, queue_delay<= {}ms, stuck_turn_rate<= {:.1}%, recovery_time<= {}s; gateway doctor currently reports blocker status until live responsiveness metrics ship",
+        "targets: interactive_response<= {}ms, queue_delay<= {}ms, stuck_turn_rate<= {:.1}%, recovery_time<= {}s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence",
         READINESS_INTERACTIVE_RESPONSE_SLO_MS,
         READINESS_QUEUE_DELAY_SLO_MS,
         READINESS_STUCK_TURN_RATE_SLO_PERCENT,
@@ -1391,7 +1391,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
 
     DoctorReport {
         overall,
-        readiness_status: Some("blocked".to_string()),
+        readiness_status: Some("slo_defined_evidence_pending".to_string()),
         readiness_summary: Some(readiness_summary_message()),
         checks,
         paths: Some(DoctorPathSummary {

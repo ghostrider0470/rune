@@ -85,7 +85,7 @@ Current target SLOs:
 - recovery time after a detected stuck turn: `<= 60s`
 
 Current readiness semantics:
-- doctor surfaces `readiness_status=blocked` until Rune exposes live evidence for queue delay, stuck-turn rate, and recovery-time compliance
+- doctor surfaces `readiness_status=slo_defined_evidence_pending` until Rune exposes live evidence for queue delay, stuck-turn rate, and recovery-time compliance
 - defined targets without live evidence are **not** treated as ready
 - operators should treat `readiness_summary` as the canonical explanation for why readiness is blocked or satisfied
 
