@@ -11,10 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
 use rune_config::Mem0Config;
 use rune_models::ModelProvider;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -273,10 +273,12 @@ impl Mem0Engine {
             })
             .collect();
 
-        info!(stored = stored.len(), "mem0 capture: facts stored for session");
+        info!(
+            stored = stored.len(),
+            "mem0 capture: facts stored for session"
+        );
         stored
     }
-
 
     pub async fn capture_with_decisions(
         &self,
@@ -672,7 +674,8 @@ impl Mem0Engine {
             matched_fact: dedup.as_ref().map(|(_, fact, _)| fact.clone()),
             similarity: dedup.as_ref().map(|(_, _, similarity)| *similarity),
             reason: if dedup.is_some() {
-                "approximate similarity alone is not enough to overwrite an existing fact".to_string()
+                "approximate similarity alone is not enough to overwrite an existing fact"
+                    .to_string()
             } else {
                 "no similar existing memory exceeded the dedup threshold".to_string()
             },
@@ -699,30 +702,30 @@ mod tests {
         assert_eq!(s, "[0.1,-0.5,1,0]");
     }
 
-#[test]
-fn memory_capture_action_serializes_snake_case() {
-    let value = serde_json::to_value(MemoryCaptureAction::UpdatedExact).unwrap();
-    assert_eq!(value, serde_json::json!("updated_exact"));
-}
+    #[test]
+    fn memory_capture_action_serializes_snake_case() {
+        let value = serde_json::to_value(MemoryCaptureAction::UpdatedExact).unwrap();
+        assert_eq!(value, serde_json::json!("updated_exact"));
+    }
 
-#[test]
-fn memory_capture_decision_records_insert_reason() {
-    let decision = MemoryCaptureDecision {
-        action: MemoryCaptureAction::Inserted,
-        memory: None,
-        matched_memory_id: None,
-        matched_fact: None,
-        similarity: None,
-        reason: "no similar existing memory exceeded the dedup threshold".to_string(),
-    };
+    #[test]
+    fn memory_capture_decision_records_insert_reason() {
+        let decision = MemoryCaptureDecision {
+            action: MemoryCaptureAction::Inserted,
+            memory: None,
+            matched_memory_id: None,
+            matched_fact: None,
+            similarity: None,
+            reason: "no similar existing memory exceeded the dedup threshold".to_string(),
+        };
 
-    let value = serde_json::to_value(&decision).unwrap();
-    assert_eq!(value["action"], "inserted");
-    assert_eq!(
-        value["reason"],
-        "no similar existing memory exceeded the dedup threshold"
-    );
-}
+        let value = serde_json::to_value(&decision).unwrap();
+        assert_eq!(value["action"], "inserted");
+        assert_eq!(
+            value["reason"],
+            "no similar existing memory exceeded the dedup threshold"
+        );
+    }
 
     #[test]
     fn format_for_prompt_empty() {
