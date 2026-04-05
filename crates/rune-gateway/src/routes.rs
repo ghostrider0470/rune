@@ -2471,6 +2471,15 @@ pub struct SessionAuditSummary {
     pub subagent_results: u32,
     pub descendant_sessions: u32,
     pub descendant_subagent_results: u32,
+    pub active_descendants: u32,
+    pub waiting_descendants: u32,
+    pub blocked_descendants: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead_team_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_team_event_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_team_event: Option<String>,
     pub last_transcript_at: Option<String>,
     pub last_operator_note: Option<String>,
     pub last_subagent_result_at: Option<String>,
@@ -2535,6 +2544,77 @@ pub struct SessionStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audit: Option<SessionAuditSummary>,
     pub unresolved: Vec<String>,
+}
+
+fn summarize_text_excerpt(text: &str) -> Option<String> {
+    const MAX_CHARS: usize = 200;
+    Some(if text.chars().count() <= MAX_CHARS {
+        text.to_string()
+    } else {
+        let truncated: String = text.chars().take(MAX_CHARS).collect();
+        format!("{truncated}…")
+    })
+}
+
+fn summarize_transcript_text(item: &rune_store::models::TranscriptItemRow) -> Option<String> {
+    item.payload
+        .get("content")
+        .or_else(|| item.payload.get("summary"))
+        .or_else(|| item.payload.get("note"))
+        .and_then(|value: &Value| value.as_str())
+        .and_then(summarize_text_excerpt)
+}
+
+fn is_waiting_status(status: &str) -> bool {
+    matches!(
+        status,
+        "waiting_for_tool" | "waiting_for_approval" | "waiting_for_subagent"
+    )
+}
+
+fn is_active_status(status: &str) -> bool {
+    matches!(
+        status,
+        "created" | "ready" | "running" | "waiting_for_tool" | "waiting_for_approval" | "waiting_for_subagent"
+    )
+}
+
+fn is_blocked_subagent(row: &rune_store::models::SessionRow) -> bool {
+    metadata_string(&row.metadata, "subagent_lifecycle").as_deref() == Some("blocked")
+        || metadata_string(&row.metadata, "subagent_runtime_status").as_deref() == Some("blocked")
+        || metadata_string(&row.metadata, "orchestration_status").as_deref() == Some("blocked")
+        || metadata_string(&row.metadata, "status_reason")
+            .as_deref()
+            .map(|reason| reason.contains("blocked"))
+            .unwrap_or(false)
+}
+
+fn team_rollup_for_children(
+    children: &[rune_store::models::SessionRow],
+) -> (u32, u32, u32, Option<String>) {
+    let active = children
+        .iter()
+        .filter(|row| is_active_status(&row.status))
+        .count() as u32;
+    let waiting = children
+        .iter()
+        .filter(|row| is_waiting_status(&row.status))
+        .count() as u32;
+    let blocked = children.iter().filter(|row| is_blocked_subagent(row)).count() as u32;
+
+    let lead_status = if children.is_empty() {
+        None
+    } else if blocked > 0 {
+        Some("stalled".to_string())
+    } else if active == 0 {
+        Some("completed".to_string())
+    } else if waiting > 0 {
+        Some("waiting_for_subagent".to_string())
+    } else {
+        Some("synthesizing".to_string())
+    };
+
+    (active, waiting, blocked, lead_status)
 }
 
 /// `GET /sessions/{id}` - get session by ID.
@@ -2675,7 +2755,7 @@ pub async fn get_session_status(
         .rev()
         .find(|item| item.kind == "status_note")
         .and_then(|item| item.payload.get("content"))
-        .and_then(|value| value.as_str())
+        .and_then(|value: &Value| value.as_str())
         .map(ToOwned::to_owned);
     let last_subagent_result = transcript_items
         .iter()
@@ -2688,20 +2768,16 @@ pub async fn get_session_status(
                 .get("content")
                 .or_else(|| item.payload.get("summary"))
         })
-        .and_then(|value| value.as_str())
-        .map(|text| {
-            const MAX_CHARS: usize = 200;
-            if text.chars().count() <= MAX_CHARS {
-                text.to_string()
-            } else {
-                let truncated: String = text.chars().take(MAX_CHARS).collect();
-                format!("{truncated}…")
-            }
-        });
+        .and_then(|value: &Value| value.as_str())
+        .and_then(summarize_text_excerpt);
     let descendant_sessions = descendant_rows.len() as u32;
+    let (active_descendants, waiting_descendants, blocked_descendants, lead_team_status) =
+        team_rollup_for_children(&descendant_rows);
     let mut descendant_subagent_results = 0u32;
     let mut last_descendant_result_at = None;
     let mut last_descendant_result_excerpt = None;
+    let mut last_team_event_at = None;
+    let mut last_team_event = None;
     for descendant in &descendant_rows {
         let descendant_transcript_items = state
             .transcript_repo
@@ -2712,6 +2788,14 @@ pub async fn get_session_status(
             .iter()
             .filter(|item| item.kind == "subagent_result")
             .count() as u32;
+        if let Some(item) = descendant_transcript_items.last() {
+            let event_at = item.created_at.to_rfc3339();
+            if last_team_event_at.as_ref().map(|current: &String| event_at.as_str() > current.as_str()).unwrap_or(true) {
+                last_team_event_at = Some(event_at);
+                last_team_event = summarize_transcript_text(item)
+                    .or_else(|| Some(format!("{} updated to {}", descendant.id, item.kind)));
+            }
+        }
         if last_descendant_result_at.is_none() {
             if let Some(item) = descendant_transcript_items
                 .iter()
@@ -2719,20 +2803,7 @@ pub async fn get_session_status(
                 .find(|item| item.kind == "subagent_result")
             {
                 last_descendant_result_at = Some(item.created_at.to_rfc3339());
-                last_descendant_result_excerpt = item
-                    .payload
-                    .get("content")
-                    .or_else(|| item.payload.get("summary"))
-                    .and_then(|value| value.as_str())
-                    .map(|text| {
-                        const MAX_CHARS: usize = 200;
-                        if text.chars().count() <= MAX_CHARS {
-                            text.to_string()
-                        } else {
-                            let truncated: String = text.chars().take(MAX_CHARS).collect();
-                            format!("{truncated}…")
-                        }
-                    });
+                last_descendant_result_excerpt = summarize_transcript_text(item);
             }
         }
     }
@@ -2743,6 +2814,12 @@ pub async fn get_session_status(
             subagent_results,
             descendant_sessions,
             descendant_subagent_results,
+            active_descendants,
+            waiting_descendants,
+            blocked_descendants,
+            lead_team_status,
+            last_team_event_at,
+            last_team_event,
             last_transcript_at,
             last_operator_note,
             last_subagent_result_at,
@@ -2821,6 +2898,14 @@ pub struct SessionTreeNode {
     pub id: String,
     pub kind: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead_team_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_active_children: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_waiting_children: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_blocked_children: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_lease: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2926,16 +3011,8 @@ pub async fn get_session_tree(
                     .get("content")
                     .or_else(|| item.payload.get("summary"))
             })
-            .and_then(|value| value.as_str())
-            .map(|text| {
-                const MAX_CHARS: usize = 200;
-                if text.chars().count() <= MAX_CHARS {
-                    text.to_string()
-                } else {
-                    let truncated: String = text.chars().take(MAX_CHARS).collect();
-                    format!("{truncated}…")
-                }
-            });
+            .and_then(|value: &Value| value.as_str())
+            .and_then(summarize_text_excerpt);
         last_subagent_result_map.insert(
             *sid,
             (last_subagent_result_at, last_subagent_result_excerpt),
@@ -2992,6 +3069,12 @@ pub async fn get_session_tree(
             .get(&row.id)
             .cloned()
             .unwrap_or((None, None));
+        let direct_children = children_map
+            .get(&row.id)
+            .map(|children| children.iter().map(|child| (*child).clone()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let (team_active_children, team_waiting_children, team_blocked_children, lead_team_status) =
+            team_rollup_for_children(&direct_children);
         let subagent_lifecycle =
             metadata_string(&row.metadata, "subagent_lifecycle").or_else(|| {
                 if row.kind == "subagent" {
@@ -3018,6 +3101,10 @@ pub async fn get_session_tree(
             id: row.id.to_string(),
             kind: row.kind.clone(),
             status: row.status.clone(),
+            lead_team_status,
+            team_active_children: (!direct_children.is_empty()).then_some(team_active_children),
+            team_waiting_children: (!direct_children.is_empty()).then_some(team_waiting_children),
+            team_blocked_children: (!direct_children.is_empty()).then_some(team_blocked_children),
             goal_lease: session_goal_lease(&row.metadata),
             last_subagent_result_at,
             last_subagent_result_excerpt,
@@ -4119,7 +4206,7 @@ pub async fn submit_approval_decision(
 fn approval_payload_field(payload: &Value, key: &str) -> Option<String> {
     payload
         .get(key)
-        .and_then(|value| value.as_str())
+        .and_then(|value: &Value| value.as_str())
         .map(str::to_string)
 }
 
