@@ -70,6 +70,7 @@ Operational notes:
 - native manifests may optionally declare `author` and `homepage`; if present they must be non-empty
 - `/api/plugins` and `/api/plugins/{name}` return the latest discovery decision alongside component counts
 - `/api/plugins` and `/api/plugins/{name}` also return `registered_commands`, exposing each plugin-provided slash command name/description/prompt body so operators can audit the effective dynamic tool surface without rescanning plugin files
+- `/api/plugins/reload` returns the full registration summary, including `hooks` and `mcp_servers`, so operators can confirm reload outcomes for the complete plugin runtime surface in one call
 
 ## Read next
 

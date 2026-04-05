@@ -6725,7 +6725,10 @@ impl GatewayClient {
                             .iter()
                             .map(|command| crate::output::PluginCommandSummary {
                                 name: command["name"].as_str().unwrap_or("?").to_string(),
-                                description: command["description"].as_str().unwrap_or("").to_string(),
+                                description: command["description"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string(),
                                 prompt_body: command["prompt_body"]
                                     .as_str()
                                     .unwrap_or("")
@@ -6749,6 +6752,34 @@ impl GatewayClient {
             })
         } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
             bail!("Plugin '{name}' not found.");
+        } else {
+            bail!("Gateway returned HTTP {}", resp.status());
+        }
+    }
+
+    /// `POST /plugins/reload` — reload plugins and return the registration summary.
+    pub async fn plugins_reload(&self) -> Result<crate::output::PluginReloadResponse> {
+        let resp = self
+            .http
+            .post(self.url("/plugins/reload"))
+            .send()
+            .await
+            .context("failed to reach gateway")?;
+        if resp.status().is_success() {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .context("invalid JSON from POST /plugins/reload")?;
+            Ok(crate::output::PluginReloadResponse {
+                success: v["success"].as_bool().unwrap_or(false),
+                native_plugins: v["native_plugins"].as_u64().unwrap_or_default() as usize,
+                claude_plugins: v["claude_plugins"].as_u64().unwrap_or_default() as usize,
+                skills: v["skills"].as_u64().unwrap_or_default() as usize,
+                agents: v["agents"].as_u64().unwrap_or_default() as usize,
+                hooks: v["hooks"].as_u64().unwrap_or_default() as usize,
+                commands: v["commands"].as_u64().unwrap_or_default() as usize,
+                mcp_servers: v["mcp_servers"].as_u64().unwrap_or_default() as usize,
+            })
         } else {
             bail!("Gateway returned HTTP {}", resp.status());
         }
@@ -7339,5 +7370,43 @@ mod plugin_lifecycle_tests {
         assert_eq!(response.hook_registrations[0].order, 0);
         assert_eq!(response.hook_registrations[1].event, "post_tool_call");
         assert_eq!(response.hook_registrations[1].order, 1);
+    }
+}
+
+#[cfg(test)]
+mod plugin_reload_tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn plugins_reload_parses_hook_and_mcp_counts() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/plugins/reload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "success": true,
+                "native_plugins": 1,
+                "claude_plugins": 2,
+                "skills": 3,
+                "agents": 4,
+                "hooks": 5,
+                "commands": 6,
+                "mcp_servers": 7
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let response = client.plugins_reload().await.unwrap();
+
+        assert!(response.success);
+        assert_eq!(response.native_plugins, 1);
+        assert_eq!(response.claude_plugins, 2);
+        assert_eq!(response.skills, 3);
+        assert_eq!(response.agents, 4);
+        assert_eq!(response.hooks, 5);
+        assert_eq!(response.commands, 6);
+        assert_eq!(response.mcp_servers, 7);
     }
 }
