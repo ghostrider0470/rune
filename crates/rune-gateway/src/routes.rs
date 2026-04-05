@@ -7023,8 +7023,8 @@ pub async fn v1_memory_capture(
         .and_then(|s| uuid::Uuid::parse_str(s).ok())
         .unwrap_or_else(uuid::Uuid::new_v4);
 
-    let stored = mem0
-        .capture_with_metadata(
+    let decisions = mem0
+        .capture_with_decisions(
             &body.user_message,
             &body.assistant_message,
             session_id,
@@ -7035,8 +7035,28 @@ pub async fn v1_memory_capture(
         )
         .await;
 
+    let stored: Vec<_> = decisions
+        .iter()
+        .filter_map(|decision| decision.memory.as_ref())
+        .collect();
+
     Ok(Json(json!({
         "captured": stored.len(),
+        "decisions": decisions.iter().map(|decision| json!({
+            "action": decision.action,
+            "reason": decision.reason,
+            "matched_memory_id": decision.matched_memory_id.map(|id| id.to_string()),
+            "matched_fact": decision.matched_fact,
+            "similarity": decision.similarity,
+            "memory": decision.memory.as_ref().map(|m| json!({
+                "id": m.id.to_string(),
+                "fact": m.fact,
+                "category": m.category,
+                "session_id": m.source_session_id.map(|s| s.to_string()),
+                "source_agent": m.source_agent,
+                "trigger": m.trigger,
+            })),
+        })).collect::<Vec<_>>(),
         "memories": stored.iter().map(|m| json!({
             "id": m.id.to_string(),
             "fact": m.fact,
@@ -7070,8 +7090,8 @@ pub async fn v1_memory_store(
     let assistant_msg = format!("Noted. Category: {}. Fact: {}", body.category, body.fact);
 
     let sid = session_id.unwrap_or_else(uuid::Uuid::new_v4);
-    let stored = mem0
-        .capture_with_metadata(
+    let decisions = mem0
+        .capture_with_decisions(
             &user_msg,
             &assistant_msg,
             sid,
@@ -7082,8 +7102,28 @@ pub async fn v1_memory_store(
         )
         .await;
 
+    let stored: Vec<_> = decisions
+        .iter()
+        .filter_map(|decision| decision.memory.as_ref())
+        .collect();
+
     Ok(Json(json!({
         "stored": !stored.is_empty(),
+        "decisions": decisions.iter().map(|decision| json!({
+            "action": decision.action,
+            "reason": decision.reason,
+            "matched_memory_id": decision.matched_memory_id.map(|id| id.to_string()),
+            "matched_fact": decision.matched_fact,
+            "similarity": decision.similarity,
+            "memory": decision.memory.as_ref().map(|m| json!({
+                "id": m.id.to_string(),
+                "fact": m.fact,
+                "category": m.category,
+                "session_id": m.source_session_id.map(|s| s.to_string()),
+                "source_agent": m.source_agent,
+                "trigger": m.trigger,
+            })),
+        })).collect::<Vec<_>>(),
         "memories": stored.iter().map(|m| json!({
             "id": m.id.to_string(),
             "fact": m.fact,

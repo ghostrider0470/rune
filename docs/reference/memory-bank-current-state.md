@@ -46,3 +46,29 @@ When planning future work, use the Phase 25 spec as the intended end state.
 ## Source-of-truth rule
 
 If implementation and planning docs diverge, current shipped behavior is defined by the code and tests, not by the future-phase design doc.
+
+
+# Mem0 dedup/update policy
+
+Rune's mem0 capture path now uses a conservative policy:
+
+- approximate embedding similarity alone does **not** overwrite an existing fact
+- exact normalized fact matches may update the existing memory row
+- near-duplicate but text-distinct facts are preserved as new memories
+- capture/store APIs return a per-fact decision trail so operators can inspect what happened
+
+Decision actions currently exposed:
+
+- `inserted` — a new memory row was created
+- `updated_exact` — an existing memory was updated because the normalized fact text matched exactly
+- `skipped_duplicate` — reserved for future explicit duplicate suppression flows
+- `merged` — reserved for future explainable merge flows
+
+The `/api/v1/memory/capture` and `/api/v1/memory/store` endpoints now return `decisions[]` with:
+
+- `action`
+- `reason`
+- `matched_memory_id`
+- `matched_fact`
+- `similarity`
+- `memory` (when a row was inserted/updated)
