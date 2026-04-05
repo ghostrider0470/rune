@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rune_core::{HookExecutionRecord, HookMutationSummary, HookPolicyOutcome};
+use rune_core::{HookEventSummary, HookExecutionRecord, HookMutationSummary, HookPolicyOutcome};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -277,6 +277,39 @@ impl HookRegistry {
             }
         }
         records
+    }
+
+    /// Aggregate execution outcomes for the provided records in canonical event order.
+    #[must_use]
+    pub fn summarize_records(records: &[HookExecutionRecord]) -> Vec<HookEventSummary> {
+        let mut per_event: HashMap<String, HookEventSummary> = HashMap::new();
+        for record in records {
+            let entry = per_event
+                .entry(record.event.clone())
+                .or_insert_with(|| HookEventSummary {
+                    event: record.event.clone(),
+                    ..HookEventSummary::default()
+                });
+            entry.total += 1;
+            match record.outcome {
+                HookPolicyOutcome::Applied => entry.applied += 1,
+                HookPolicyOutcome::Warned => entry.warned += 1,
+                HookPolicyOutcome::Blocked => entry.blocked += 1,
+                HookPolicyOutcome::Suppressed => entry.suppressed += 1,
+                HookPolicyOutcome::Skipped => entry.skipped += 1,
+            }
+        }
+
+        let mut summaries = Vec::new();
+        for event in HookEvent::all() {
+            if let Some(summary) = per_event.remove(event.as_str()) {
+                summaries.push(summary);
+            }
+        }
+        let mut extras: Vec<_> = per_event.into_values().collect();
+        extras.sort_by(|a, b| a.event.cmp(&b.event));
+        summaries.extend(extras);
+        summaries
     }
 
     /// Emit a hook event, calling all registered handlers in order.
@@ -864,6 +897,46 @@ mod tests {
     }
 
     #[test]
+    fn summarize_records_groups_outcomes_by_event() {
+        let records = vec![
+            HookExecutionRecord {
+                plugin: "alpha".into(),
+                event: "pre_tool_call".into(),
+                order: 0,
+                outcome: HookPolicyOutcome::Applied,
+                mutations: Vec::new(),
+                reason: None,
+            },
+            HookExecutionRecord {
+                plugin: "beta".into(),
+                event: "pre_tool_call".into(),
+                order: 1,
+                outcome: HookPolicyOutcome::Blocked,
+                mutations: Vec::new(),
+                reason: Some("boom".into()),
+            },
+            HookExecutionRecord {
+                plugin: "gamma".into(),
+                event: "post_tool_call".into(),
+                order: 0,
+                outcome: HookPolicyOutcome::Suppressed,
+                mutations: Vec::new(),
+                reason: Some("suppressed".into()),
+            },
+        ];
+
+        let summary = HookRegistry::summarize_records(&records);
+        assert_eq!(summary.len(), 2);
+        assert_eq!(summary[0].event, "pre_tool_call");
+        assert_eq!(summary[0].total, 2);
+        assert_eq!(summary[0].applied, 1);
+        assert_eq!(summary[0].blocked, 1);
+        assert_eq!(summary[1].event, "post_tool_call");
+        assert_eq!(summary[1].total, 1);
+        assert_eq!(summary[1].suppressed, 1);
+    }
+
+    #[test]
     fn diff_context_mutations_reports_added_removed_and_modified_fields() {
         let before = serde_json::json!({
             "arguments": {"command": "ls"},
@@ -878,15 +951,19 @@ mod tests {
 
         let mutations = diff_context_mutations(&before, &after);
 
-        assert!(mutations.iter().any(|mutation| {
-            mutation.field == "arguments" && mutation.status == "modified"
-        }));
+        assert!(
+            mutations
+                .iter()
+                .any(|mutation| { mutation.field == "arguments" && mutation.status == "modified" })
+        );
         assert!(mutations.iter().any(|mutation| {
             mutation.field == "approval_required" && mutation.status == "added"
         }));
-        assert!(mutations.iter().any(|mutation| {
-            mutation.field == "approval_mode" && mutation.status == "removed"
-        }));
+        assert!(
+            mutations.iter().any(|mutation| {
+                mutation.field == "approval_mode" && mutation.status == "removed"
+            })
+        );
         assert!(mutations.iter().any(|mutation| {
             mutation.field == "hook_block_reason"
                 && mutation.status == "modified"
