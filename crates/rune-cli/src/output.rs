@@ -9498,6 +9498,46 @@ mod subagent_output_tests {
         };
         assert!(render(&r, OutputFormat::Human).contains("m1"));
     }
+
+    #[test]
+    fn render_plugin_info_with_registered_commands_and_hooks() {
+        let r = PluginInfoResponse {
+            name: "alpha".into(),
+            version: "1.2.3".into(),
+            enabled: true,
+            description: "Alpha plugin".into(),
+            source: "/plugins/alpha".into(),
+            manifest_valid: true,
+            registered_commands: vec![
+                PluginCommandSummary {
+                    name: "alpha:deploy".into(),
+                    description: "Deploy alpha".into(),
+                    prompt_body: "deploy".into(),
+                },
+                PluginCommandSummary {
+                    name: "alpha:status".into(),
+                    description: "Show alpha status".into(),
+                    prompt_body: "status".into(),
+                },
+            ],
+            hook_registrations: vec![
+                PluginHookRegistrationSummary {
+                    event: "pre_tool_call".into(),
+                    order: 0,
+                },
+                PluginHookRegistrationSummary {
+                    event: "post_tool_call".into(),
+                    order: 1,
+                },
+            ],
+        };
+        let out = render(&r, OutputFormat::Human);
+        assert!(out.contains("Registered commands (2):"));
+        assert!(out.contains("alpha:deploy — Deploy alpha"));
+        assert!(out.contains("Hook registrations (2):"));
+        assert!(out.contains("pre_tool_call @ order 0"));
+        assert!(out.contains("post_tool_call @ order 1"));
+    }
 }
 
 /// Response for `rune plugins list`.
@@ -9541,6 +9581,19 @@ impl fmt::Display for PluginListResponse {
 
 /// Response for `rune plugins info`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginCommandSummary {
+    pub name: String,
+    pub description: String,
+    pub prompt_body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginHookRegistrationSummary {
+    pub event: String,
+    pub order: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginInfoResponse {
     pub name: String,
     pub version: String,
@@ -9548,6 +9601,8 @@ pub struct PluginInfoResponse {
     pub description: String,
     pub source: String,
     pub manifest_valid: bool,
+    pub registered_commands: Vec<PluginCommandSummary>,
+    pub hook_registrations: Vec<PluginHookRegistrationSummary>,
 }
 
 impl fmt::Display for PluginInfoResponse {
@@ -9565,7 +9620,26 @@ impl fmt::Display for PluginInfoResponse {
                 "invalid"
             }
         )?;
-        write!(f, "  {}", self.description)
+        writeln!(f, "  Description: {}", self.description)?;
+
+        if self.registered_commands.is_empty() {
+            writeln!(f, "  Registered commands: none")?;
+        } else {
+            writeln!(f, "  Registered commands ({}):", self.registered_commands.len())?;
+            for command in &self.registered_commands {
+                writeln!(f, "    - {} — {}", command.name, command.description)?;
+            }
+        }
+
+        if self.hook_registrations.is_empty() {
+            write!(f, "  Hook registrations: none")
+        } else {
+            writeln!(f, "  Hook registrations ({}):", self.hook_registrations.len())?;
+            for hook in &self.hook_registrations {
+                writeln!(f, "    - {} @ order {}", hook.event, hook.order)?;
+            }
+            Ok(())
+        }
     }
 }
 
