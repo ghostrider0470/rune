@@ -6718,6 +6718,34 @@ impl GatewayClient {
                 description: v["description"].as_str().unwrap_or("").to_string(),
                 source: v["source"].as_str().unwrap_or("unknown").to_string(),
                 manifest_valid: v["manifest_valid"].as_bool().unwrap_or(true),
+                registered_commands: v["registered_commands"]
+                    .as_array()
+                    .map(|commands| {
+                        commands
+                            .iter()
+                            .map(|command| crate::output::PluginCommandSummary {
+                                name: command["name"].as_str().unwrap_or("?").to_string(),
+                                description: command["description"].as_str().unwrap_or("").to_string(),
+                                prompt_body: command["prompt_body"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                hook_registrations: v["hook_registrations"]
+                    .as_array()
+                    .map(|hooks| {
+                        hooks
+                            .iter()
+                            .map(|hook| crate::output::PluginHookRegistrationSummary {
+                                event: hook["event"].as_str().unwrap_or("?").to_string(),
+                                order: hook["order"].as_u64().unwrap_or_default() as usize,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             })
         } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
             bail!("Plugin '{name}' not found.");
@@ -7254,5 +7282,62 @@ mod delegation_plan_parse_tests {
             "started_at"
         );
         assert_eq!(parsed.result.as_ref().unwrap().task_id_field, "task_id");
+    }
+}
+
+#[cfg(test)]
+mod plugin_lifecycle_tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn plugins_info_parses_registered_commands_and_hook_registrations() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/plugins/alpha"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "name": "alpha",
+                "version": "1.2.3",
+                "enabled": true,
+                "description": "Alpha plugin",
+                "source": "/plugins/alpha",
+                "manifest_valid": true,
+                "registered_commands": [
+                    {
+                        "name": "alpha:deploy",
+                        "description": "Deploy alpha",
+                        "prompt_body": "deploy now"
+                    }
+                ],
+                "hook_registrations": [
+                    {
+                        "event": "pre_tool_call",
+                        "plugin": "alpha",
+                        "order": 0
+                    },
+                    {
+                        "event": "post_tool_call",
+                        "plugin": "alpha",
+                        "order": 1
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = GatewayClient::new(&server.uri());
+        let response = client.plugins_info("alpha").await.unwrap();
+
+        assert_eq!(response.registered_commands.len(), 1);
+        assert_eq!(response.registered_commands[0].name, "alpha:deploy");
+        assert_eq!(response.registered_commands[0].description, "Deploy alpha");
+        assert_eq!(response.registered_commands[0].prompt_body, "deploy now");
+        assert_eq!(response.hook_registrations.len(), 2);
+        assert_eq!(response.hook_registrations[0].event, "pre_tool_call");
+        assert_eq!(response.hook_registrations[0].order, 0);
+        assert_eq!(response.hook_registrations[1].event, "post_tool_call");
+        assert_eq!(response.hook_registrations[1].order, 1);
     }
 }
