@@ -3859,6 +3859,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.plugins_mutate("doctor", &name).await?;
                 println!("{}", render(&result, format));
             }
+            PluginsAction::Reload => {
+                let result = client.plugins_reload().await?;
+                println!("{}", render(&result, format));
+            }
         },
         Command::Hooks { action } => match action {
             HooksAction::List => {

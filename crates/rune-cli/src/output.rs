@@ -9625,7 +9625,11 @@ impl fmt::Display for PluginInfoResponse {
         if self.registered_commands.is_empty() {
             writeln!(f, "  Registered commands: none")?;
         } else {
-            writeln!(f, "  Registered commands ({}):", self.registered_commands.len())?;
+            writeln!(
+                f,
+                "  Registered commands ({}):",
+                self.registered_commands.len()
+            )?;
             for command in &self.registered_commands {
                 writeln!(f, "    - {} — {}", command.name, command.description)?;
             }
@@ -9634,7 +9638,11 @@ impl fmt::Display for PluginInfoResponse {
         if self.hook_registrations.is_empty() {
             write!(f, "  Hook registrations: none")
         } else {
-            writeln!(f, "  Hook registrations ({}):", self.hook_registrations.len())?;
+            writeln!(
+                f,
+                "  Hook registrations ({}):",
+                self.hook_registrations.len()
+            )?;
             for hook in &self.hook_registrations {
                 writeln!(f, "    - {} @ order {}", hook.event, hook.order)?;
             }
@@ -9643,7 +9651,32 @@ impl fmt::Display for PluginInfoResponse {
     }
 }
 
-/// Response for plugin lifecycle mutations (install/uninstall/enable/disable/update/doctor).
+/// Response for `rune plugins reload`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginReloadResponse {
+    pub success: bool,
+    pub native_plugins: usize,
+    pub claude_plugins: usize,
+    pub skills: usize,
+    pub agents: usize,
+    pub hooks: usize,
+    pub commands: usize,
+    pub mcp_servers: usize,
+}
+
+impl fmt::Display for PluginReloadResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "✓ Plugins reloaded")?;
+        writeln!(f, "  Native plugins: {}", self.native_plugins)?;
+        writeln!(f, "  Claude plugins: {}", self.claude_plugins)?;
+        writeln!(f, "  Skills: {}", self.skills)?;
+        writeln!(f, "  Agents: {}", self.agents)?;
+        writeln!(f, "  Hooks: {}", self.hooks)?;
+        writeln!(f, "  Commands: {}", self.commands)?;
+        write!(f, "  MCP servers: {}", self.mcp_servers)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginMutationResponse {
     pub success: bool,
@@ -9753,5 +9786,29 @@ impl fmt::Display for HookMutationResponse {
         let icon = if self.success { "✓" } else { "✗" };
         writeln!(f, "{icon} Hook '{}' — {}", self.hook, self.action)?;
         write!(f, "  {}", self.detail)
+    }
+}
+
+#[cfg(test)]
+mod plugin_reload_output_tests {
+    use super::*;
+
+    #[test]
+    fn render_plugin_reload_response_with_hooks_and_mcp_servers() {
+        let response = PluginReloadResponse {
+            success: true,
+            native_plugins: 1,
+            claude_plugins: 2,
+            skills: 3,
+            agents: 4,
+            hooks: 5,
+            commands: 6,
+            mcp_servers: 7,
+        };
+
+        let rendered = format!("{response}");
+        assert!(rendered.contains("✓ Plugins reloaded"));
+        assert!(rendered.contains("Hooks: 5"));
+        assert!(rendered.contains("MCP servers: 7"));
     }
 }

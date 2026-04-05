@@ -8471,7 +8471,9 @@ pub async fn plugins_reload(
         "claude_plugins": summary.claude_plugins,
         "skills": summary.skills_registered,
         "agents": summary.agents_registered,
+        "hooks": summary.hooks_registered,
         "commands": summary.commands_registered,
+        "mcp_servers": summary.mcp_servers_found,
     })))
 }
 

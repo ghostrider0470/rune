@@ -1118,6 +1118,8 @@ pub enum PluginsAction {
         /// Plugin name.
         name: String,
     },
+    /// Reload plugins and show the registration summary.
+    Reload,
 }
 
 /// Hook lifecycle actions.
