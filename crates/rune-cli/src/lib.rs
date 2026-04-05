@@ -3877,26 +3877,6 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let result = client.hooks_check().await?;
                 println!("{}", render(&result, format));
             }
-            HooksAction::Enable { name } => {
-                let result = client.hooks_mutate("enable", &name).await?;
-                println!("{}", render(&result, format));
-            }
-            HooksAction::Disable { name } => {
-                let result = client.hooks_mutate("disable", &name).await?;
-                println!("{}", render(&result, format));
-            }
-            HooksAction::Install { source } => {
-                let result = client.hooks_mutate("install", &source).await?;
-                println!("{}", render(&result, format));
-            }
-            HooksAction::Update { name } => {
-                let result = client.hooks_mutate("update", &name).await?;
-                println!("{}", render(&result, format));
-            }
-            HooksAction::Doctor { name } => {
-                let result = client.hooks_mutate("doctor", &name).await?;
-                println!("{}", render(&result, format));
-            }
         },
 
         Command::Backup { action } => match action {
