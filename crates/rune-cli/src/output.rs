@@ -6216,7 +6216,7 @@ mod tests {
     fn render_doctor_report() {
         let r = DoctorReport {
             overall: "degraded".into(),
-            readiness_status: Some("blocked".into()),
+            readiness_status: Some("slo_defined_evidence_pending".into()),
             readiness_summary: Some("targets defined but live evidence missing".into()),
             checks: vec![
                 DoctorCheck {
