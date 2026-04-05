@@ -7818,7 +7818,7 @@ async fn doctor_memory_hierarchy(
             l3_cold_storage_enabled,
             last_checkpoint_at.as_deref().unwrap_or("never")
         ),
-        readiness_status: Some("blocked".to_string()),
+        readiness_status: Some("slo_defined_evidence_pending".to_string()),
         readiness_summary: Some(doctor_readiness_summary()),
         last_checkpoint_at,
         prompt_cache_rows: prompt_cache_rows.len() as u64,
@@ -8248,7 +8248,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
 
     Ok(Json(DoctorReport {
         overall,
-        readiness_status: Some("blocked".to_string()),
+        readiness_status: Some("slo_defined_evidence_pending".to_string()),
         readiness_summary: Some(readiness_summary),
         checks,
         paths: paths_summary,
