@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use rune_config::{ConfiguredModel, ModelFallbackChainConfig, ModelProviderConfig, ModelsConfig};
 use rune_models::{
     ChatMessage, CompletionRequest, CompletionResponse, FinishReason, ModelError, ModelProvider,
-    Role, RoutedModelProvider, Usage,
+    Role, RoutedModelProvider, StreamEvent, Usage,
 };
 
 #[derive(Debug)]
@@ -193,4 +193,114 @@ fn ollama_provider_kind_is_supported_in_config_inventory() {
     assert_eq!(cfg.kind, "ollama");
     assert!(cfg.supports_model("llama3.2"));
     assert!(!cfg.supports_model("qwen2.5"));
+}
+
+#[tokio::test]
+async fn routed_provider_uses_fallback_chain_for_streaming_requests() {
+    let primary_seen = Arc::new(Mutex::new(Vec::new()));
+    let fallback_seen = Arc::new(Mutex::new(Vec::new()));
+
+    let models = ModelsConfig {
+        default_model: None,
+        default_image_model: None,
+        fallbacks: vec![ModelFallbackChainConfig {
+            name: "chat".into(),
+            chain: vec!["cloud/gpt-4o-mini".into(), "local/llama3.2".into()],
+        }],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![
+            provider_config("cloud", "openai", "gpt-4o-mini"),
+            provider_config("local", "ollama", "llama3.2"),
+        ],
+    };
+
+    let mut provider = RoutedModelProvider::from_models_config(&models).unwrap();
+    provider.register_provider(
+        "cloud",
+        Arc::new(StubProvider {
+            result: StubResult::Err(ModelError::Transient("upstream 503".into())),
+            seen_models: Arc::clone(&primary_seen),
+        }),
+    );
+    provider.register_provider(
+        "local",
+        Arc::new(StubProvider {
+            result: StubResult::Ok(ok_response("fallback stream ok")),
+            seen_models: Arc::clone(&fallback_seen),
+        }),
+    );
+
+    let mut rx = provider
+        .complete_stream(&request("cloud/gpt-4o-mini"))
+        .await
+        .unwrap();
+
+    let mut deltas = Vec::new();
+    let mut done = None;
+    while let Some(event) = rx.recv().await {
+        match event {
+            StreamEvent::TextDelta(delta) => deltas.push(delta),
+            StreamEvent::Done(response) => done = Some(response),
+        }
+    }
+
+    assert_eq!(deltas, vec!["fallback stream ok"]);
+    assert_eq!(done.unwrap().content.as_deref(), Some("fallback stream ok"));
+    assert_eq!(
+        primary_seen.lock().unwrap().as_slice(),
+        &[Some("gpt-4o-mini".into())]
+    );
+    assert_eq!(
+        fallback_seen.lock().unwrap().as_slice(),
+        &[Some("llama3.2".into())]
+    );
+}
+
+#[tokio::test]
+async fn routed_provider_stream_stops_on_non_retriable_primary_error() {
+    let primary_seen = Arc::new(Mutex::new(Vec::new()));
+    let fallback_seen = Arc::new(Mutex::new(Vec::new()));
+
+    let models = ModelsConfig {
+        default_model: None,
+        default_image_model: None,
+        fallbacks: vec![ModelFallbackChainConfig {
+            name: "chat".into(),
+            chain: vec!["cloud/gpt-4o-mini".into(), "local/llama3.2".into()],
+        }],
+        image_fallbacks: vec![],
+        auth_orders: vec![],
+        providers: vec![
+            provider_config("cloud", "openai", "gpt-4o-mini"),
+            provider_config("local", "ollama", "llama3.2"),
+        ],
+    };
+
+    let mut provider = RoutedModelProvider::from_models_config(&models).unwrap();
+    provider.register_provider(
+        "cloud",
+        Arc::new(StubProvider {
+            result: StubResult::Err(ModelError::Auth("bad key".into())),
+            seen_models: Arc::clone(&primary_seen),
+        }),
+    );
+    provider.register_provider(
+        "local",
+        Arc::new(StubProvider {
+            result: StubResult::Ok(ok_response("should not run")),
+            seen_models: Arc::clone(&fallback_seen),
+        }),
+    );
+
+    let err = provider
+        .complete_stream(&request("cloud/gpt-4o-mini"))
+        .await
+        .expect_err("non-retriable stream error should stop fallback chain");
+    assert!(matches!(err, ModelError::Auth(_)));
+    assert_eq!(
+        primary_seen.lock().unwrap().as_slice(),
+        &[Some("gpt-4o-mini".into())]
+    );
+    assert!(fallback_seen.lock().unwrap().is_empty());
 }

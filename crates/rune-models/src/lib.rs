@@ -283,6 +283,27 @@ impl RoutedModelProvider {
     pub fn register_provider(&mut self, name: &str, provider: Arc<dyn ModelProvider>) {
         self.providers.insert(name.to_string(), provider);
     }
+
+    async fn dispatch_single_stream(
+        &self,
+        model_ref: &str,
+        request: &CompletionRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ModelError> {
+        let resolved = self
+            .models
+            .resolve_model(model_ref)
+            .map_err(map_resolution_error)?;
+        let provider = self.providers.get(&resolved.provider.name).ok_or_else(|| {
+            ModelError::Configuration(format!(
+                "provider '{}' is configured in the model inventory but not available",
+                resolved.provider.name
+            ))
+        })?;
+
+        let mut routed_request = request.clone();
+        routed_request.model = Some(resolved.raw_model.to_string());
+        provider.complete_stream(&routed_request).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -363,20 +384,42 @@ impl ModelProvider for RoutedModelProvider {
             ));
         };
 
-        let resolved = self
-            .models
-            .resolve_model(model_ref)
-            .map_err(map_resolution_error)?;
-        let provider = self.providers.get(&resolved.provider.name).ok_or_else(|| {
-            ModelError::Configuration(format!(
-                "provider '{}' is configured in the model inventory but not available",
-                resolved.provider.name
-            ))
-        })?;
+        let primary_result = self.dispatch_single_stream(model_ref, request).await;
 
-        let mut routed_request = request.clone();
-        routed_request.model = Some(resolved.raw_model.to_string());
-        provider.complete_stream(&routed_request).await
+        let primary_err = match primary_result {
+            Ok(stream) => return Ok(stream),
+            Err(e) if !e.is_retriable() => return Err(e),
+            Err(e) => e,
+        };
+
+        let Some(fallbacks) = self.models.fallback_chain_for(model_ref) else {
+            return Err(primary_err);
+        };
+
+        warn!(
+            primary = model_ref,
+            error = %primary_err,
+            fallback_count = fallbacks.len(),
+            "primary streaming provider failed with retriable error, trying fallback chain"
+        );
+
+        let mut last_err = primary_err;
+        for fallback_ref in fallbacks {
+            match self.dispatch_single_stream(fallback_ref, request).await {
+                Ok(stream) => return Ok(stream),
+                Err(e) if e.is_retriable() => {
+                    warn!(
+                        fallback = fallback_ref.as_str(),
+                        error = %e,
+                        "streaming fallback provider also failed, continuing chain"
+                    );
+                    last_err = e;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(last_err)
     }
 }
 
