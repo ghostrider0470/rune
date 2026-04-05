@@ -13614,6 +13614,63 @@ async fn doctor_run_reports_memory_hierarchy_summary() {
 }
 
 #[tokio::test]
+async fn doctor_run_surfaces_readiness_slos_and_blocker_status() {
+    let mut config = AppConfig::default();
+    config.gateway.auth_token = Some("secret-token".into());
+
+    let (app, _) = build_test_app_parts(config, Some("secret-token".into()));
+
+    let response = app
+        .oneshot(
+            Request::post("/api/doctor/run")
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+
+    assert_eq!(body["readiness_status"], "blocked");
+    assert!(body["readiness_summary"]
+        .as_str()
+        .unwrap()
+        .contains("interactive_response<= 2000ms"));
+    assert!(body["readiness_summary"]
+        .as_str()
+        .unwrap()
+        .contains("queue_delay<= 500ms"));
+    assert!(body["readiness_summary"]
+        .as_str()
+        .unwrap()
+        .contains("stuck_turn_rate<= 1.0%"));
+    assert!(body["readiness_summary"]
+        .as_str()
+        .unwrap()
+        .contains("recovery_time<= 60s"));
+    assert_eq!(body["memory_hierarchy"]["readiness_status"], "blocked");
+
+    let checks = body["checks"].as_array().unwrap();
+    assert!(checks.iter().any(|check| {
+        check["name"] == "readiness.responsiveness_slo"
+            && check["status"] == "pass"
+            && check["message"]
+                .as_str()
+                .unwrap()
+                .contains("interactive_response<= 2000ms")
+    }));
+    assert!(checks.iter().any(|check| {
+        check["name"] == "readiness.evidence"
+            && check["status"] == "warn"
+            && check["message"]
+                .as_str()
+                .unwrap()
+                .contains("readiness remains blocked")
+    }));
+}
+
+#[tokio::test]
 async fn api_gateway_parity_auth_and_memory_routes_are_registered() {
     let app = build_test_app(None);
 

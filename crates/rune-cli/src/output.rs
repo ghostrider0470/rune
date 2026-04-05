@@ -793,6 +793,10 @@ pub struct DoctorMemoryHierarchySummary {
     pub demotion: String,
     pub metrics: String,
     #[serde(default)]
+    pub readiness_status: Option<String>,
+    #[serde(default)]
+    pub readiness_summary: Option<String>,
+    #[serde(default)]
     pub last_checkpoint_at: Option<String>,
     #[serde(default)]
     pub prompt_cache_rows: u64,
@@ -848,6 +852,10 @@ pub struct DoctorReport {
     pub overall: String,
     pub checks: Vec<DoctorCheck>,
     #[serde(default)]
+    pub readiness_status: Option<String>,
+    #[serde(default)]
+    pub readiness_summary: Option<String>,
+    #[serde(default)]
     pub paths: Option<DoctorPathSummary>,
     #[serde(default)]
     pub topology: Option<DoctorTopologySummary>,
@@ -863,6 +871,17 @@ impl fmt::Display for DoctorReport {
         writeln!(f, "Doctor Report")?;
         writeln!(f, "─────────────")?;
         writeln!(f, "Overall: {}", self.overall)?;
+        if let Some(status) = &self.readiness_status {
+            writeln!(
+                f,
+                "Readiness: {}{}",
+                status,
+                self.readiness_summary
+                    .as_ref()
+                    .map(|summary| format!(" — {summary}"))
+                    .unwrap_or_default()
+            )?;
+        }
         if let Some(topology) = &self.topology {
             writeln!(
                 f,
@@ -904,6 +923,18 @@ impl fmt::Display for DoctorReport {
             writeln!(f, "  Promotion: {}", memory_hierarchy.promotion)?;
             writeln!(f, "  Demotion: {}", memory_hierarchy.demotion)?;
             writeln!(f, "  Metrics: {}", memory_hierarchy.metrics)?;
+            if let Some(status) = &memory_hierarchy.readiness_status {
+                writeln!(
+                    f,
+                    "  Readiness: {}{}",
+                    status,
+                    memory_hierarchy
+                        .readiness_summary
+                        .as_ref()
+                        .map(|summary| format!(" — {summary}"))
+                        .unwrap_or_default()
+                )?;
+            }
             writeln!(
                 f,
                 "  L1 Counters: prompt_cache_rows={}, cached_tokens={}, total_input_tokens={}, cache_hit_ratio_percent={:.1}",
@@ -6185,6 +6216,8 @@ mod tests {
     fn render_doctor_report() {
         let r = DoctorReport {
             overall: "degraded".into(),
+            readiness_status: Some("blocked".into()),
+            readiness_summary: Some("targets defined but live evidence missing".into()),
             checks: vec![
                 DoctorCheck {
                     name: "config".into(),
@@ -6223,6 +6256,8 @@ mod tests {
                 promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
                 demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
                 metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
+                readiness_status: Some("blocked".into()),
+                readiness_summary: Some("targets defined but live evidence missing".into()),
                 last_checkpoint_at: None,
                 prompt_cache_rows: 0,
                 cached_tokens: 0,
@@ -6256,6 +6291,7 @@ mod tests {
         };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("Overall: degraded"));
+        assert!(out.contains("Readiness: blocked — targets defined but live evidence missing"));
         assert!(out.contains(
             "Topology: deployment=single-process, database=memory, models=local, search=embedded"
         ));
