@@ -8867,7 +8867,10 @@ async fn get_session_status_prefers_explicit_resume_and_task_metadata_for_subage
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["runtime"], "kind=subagent | channel=webchat:test | status=running");
+    assert_eq!(
+        json["runtime"],
+        "kind=subagent | channel=webchat:test | status=running"
+    );
     assert_eq!(json["status_reason"], "session actively processing work");
     assert_eq!(
         json["next_task_reason"],
@@ -8879,7 +8882,10 @@ async fn get_session_status_prefers_explicit_resume_and_task_metadata_for_subage
     );
     assert_eq!(json["session_mode"], "planner");
     assert_eq!(json["orchestration_status"], "delegated");
-    assert_eq!(json["delegation_roles"], serde_json::json!(["planner", "reviewer"]));
+    assert_eq!(
+        json["delegation_roles"],
+        serde_json::json!(["planner", "reviewer"])
+    );
     assert_eq!(json["delegation_depth"], 2);
     assert_eq!(json["subagent_runtime_attached"], true);
     assert_eq!(json["audit"]["transcript_items"], 2);
@@ -8899,7 +8905,10 @@ async fn get_session_status_prefers_explicit_resume_and_task_metadata_for_subage
         json["audit"]["last_descendant_result_excerpt"],
         "Grandchild shipped the focused diff for the stalled-turn detector"
     );
-    assert_eq!(json["goal_lease"]["goal_key"], "runtime:stalled-turn-recovery");
+    assert_eq!(
+        json["goal_lease"]["goal_key"],
+        "runtime:stalled-turn-recovery"
+    );
     assert_eq!(json["goal_lease"]["owner_agent_id"], "agent-parent");
     assert_eq!(json["goal_lease"]["state"], "active");
 }
@@ -13633,23 +13642,34 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
     let body = body_json(response).await;
 
     assert_eq!(body["readiness_status"], "slo_defined_evidence_pending");
-    assert!(body["readiness_summary"]
-        .as_str()
-        .unwrap()
-        .contains("interactive_response<= 2000ms"));
-    assert!(body["readiness_summary"]
-        .as_str()
-        .unwrap()
-        .contains("queue_delay<= 500ms"));
-    assert!(body["readiness_summary"]
-        .as_str()
-        .unwrap()
-        .contains("stuck_turn_rate<= 1.0%"));
-    assert!(body["readiness_summary"]
-        .as_str()
-        .unwrap()
-        .contains("recovery_time<= 60s"));
-    assert_eq!(body["memory_hierarchy"]["readiness_status"], "slo_defined_evidence_pending");
+    assert!(
+        body["readiness_summary"]
+            .as_str()
+            .unwrap()
+            .contains("interactive_response<= 2000ms")
+    );
+    assert!(
+        body["readiness_summary"]
+            .as_str()
+            .unwrap()
+            .contains("queue_delay<= 500ms")
+    );
+    assert!(
+        body["readiness_summary"]
+            .as_str()
+            .unwrap()
+            .contains("stuck_turn_rate<= 1.0%")
+    );
+    assert!(
+        body["readiness_summary"]
+            .as_str()
+            .unwrap()
+            .contains("recovery_time<= 60s")
+    );
+    assert_eq!(
+        body["memory_hierarchy"]["readiness_status"],
+        "slo_defined_evidence_pending"
+    );
 
     let checks = body["checks"].as_array().unwrap();
     assert!(checks.iter().any(|check| {

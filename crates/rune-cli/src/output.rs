@@ -9842,7 +9842,6 @@ impl fmt::Display for HookCheckResponse {
     }
 }
 
-
 #[cfg(test)]
 mod plugin_reload_output_tests {
     use super::*;

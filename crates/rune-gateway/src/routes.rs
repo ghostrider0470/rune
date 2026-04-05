@@ -2575,7 +2575,12 @@ fn is_waiting_status(status: &str) -> bool {
 fn is_active_status(status: &str) -> bool {
     matches!(
         status,
-        "created" | "ready" | "running" | "waiting_for_tool" | "waiting_for_approval" | "waiting_for_subagent"
+        "created"
+            | "ready"
+            | "running"
+            | "waiting_for_tool"
+            | "waiting_for_approval"
+            | "waiting_for_subagent"
     )
 }
 
@@ -2600,7 +2605,10 @@ fn team_rollup_for_children(
         .iter()
         .filter(|row| is_waiting_status(&row.status))
         .count() as u32;
-    let blocked = children.iter().filter(|row| is_blocked_subagent(row)).count() as u32;
+    let blocked = children
+        .iter()
+        .filter(|row| is_blocked_subagent(row))
+        .count() as u32;
 
     let lead_status = if children.is_empty() {
         None
@@ -2790,7 +2798,11 @@ pub async fn get_session_status(
             .count() as u32;
         if let Some(item) = descendant_transcript_items.last() {
             let event_at = item.created_at.to_rfc3339();
-            if last_team_event_at.as_ref().map(|current: &String| event_at.as_str() > current.as_str()).unwrap_or(true) {
+            if last_team_event_at
+                .as_ref()
+                .map(|current: &String| event_at.as_str() > current.as_str())
+                .unwrap_or(true)
+            {
                 last_team_event_at = Some(event_at);
                 last_team_event = summarize_transcript_text(item)
                     .or_else(|| Some(format!("{} updated to {}", descendant.id, item.kind)));
@@ -3071,7 +3083,12 @@ pub async fn get_session_tree(
             .unwrap_or((None, None));
         let direct_children = children_map
             .get(&row.id)
-            .map(|children| children.iter().map(|child| (*child).clone()).collect::<Vec<_>>())
+            .map(|children| {
+                children
+                    .iter()
+                    .map(|child| (*child).clone())
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let (team_active_children, team_waiting_children, team_blocked_children, lead_team_status) =
             team_rollup_for_children(&direct_children);

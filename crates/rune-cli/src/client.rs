@@ -6891,7 +6891,6 @@ impl GatewayClient {
             bail!("Gateway returned HTTP {}", resp.status());
         }
     }
-
 }
 
 fn parse_instance_load(value: &serde_json::Value) -> Option<InstanceLoadSummary> {
@@ -7294,7 +7293,6 @@ mod plugin_lifecycle_tests {
     use serde_json::json;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-
 
     #[tokio::test]
     async fn plugins_info_parses_registered_commands_and_hook_registrations() {

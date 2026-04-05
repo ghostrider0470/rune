@@ -1279,7 +1279,6 @@ fn resolved_vector_backend(config: &AppConfig) -> String {
     }
 }
 
-
 const READINESS_INTERACTIVE_RESPONSE_SLO_MS: u64 = 2_000;
 const READINESS_QUEUE_DELAY_SLO_MS: u64 = 500;
 const READINESS_STUCK_TURN_RATE_SLO_PERCENT: f64 = 1.0;

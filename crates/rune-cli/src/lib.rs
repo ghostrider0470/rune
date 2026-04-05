@@ -35,13 +35,12 @@ use cli::{
     CompletionAction, CompletionShell, ConfigAction, CronAction, CronDeliveryMode, DoctorAction,
     GatewayAction, GatewayConfigAction, GatewayRuntimeAction, GatewayRuntimeHeartbeatAction,
     HooksAction, LogsAction, LogsArgs, MemoryAction, MessageAction, MessageTagAction,
-    RustPatternAction,
     MessageThreadAction, MessageVoiceAction, ModelsAction, Ms365Action, Ms365AuthAction,
     Ms365CalendarAction, Ms365FilesAction, Ms365MailAction, Ms365PlannerAction, Ms365SitesAction,
     Ms365TeamsAction, Ms365TodoAction, Ms365UsersAction, PluginsAction, ProcessAction,
-    ProjectAddArgs, ProjectsAction, RemindersAction, SandboxAction, SecretsAction, SecurityAction,
-    ServiceAction, ServiceTarget, SessionsAction, SkillsAction, SpellsAction, SystemAction,
-    SystemEventAction, SystemHeartbeatAction, UpdateAction,
+    ProjectAddArgs, ProjectsAction, RemindersAction, RustPatternAction, SandboxAction,
+    SecretsAction, SecurityAction, ServiceAction, ServiceTarget, SessionsAction, SkillsAction,
+    SpellsAction, SystemAction, SystemEventAction, SystemHeartbeatAction, UpdateAction,
 };
 use client::{
     GatewayClient, config_file, config_get, config_set, config_unset, show_config, validate_config,
@@ -3259,7 +3258,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let root = path
                     .as_deref()
                     .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    });
                 let report = rune_spells_rust_patterns::validate_rune_codebase(&root);
                 let result = RustPatternValidateResponse {
                     scanned_files: report.scanned_files,

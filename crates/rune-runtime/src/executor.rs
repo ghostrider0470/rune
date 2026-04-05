@@ -113,7 +113,10 @@ impl TurnExecutor {
         session_id: Uuid,
     ) -> Result<Option<TurnRow>, RuntimeError> {
         let session = self.session_repo.find_by_id(session_id).await?;
-        if !matches!(session.status.parse::<SessionStatus>(), Ok(SessionStatus::Running)) {
+        if !matches!(
+            session.status.parse::<SessionStatus>(),
+            Ok(SessionStatus::Running)
+        ) {
             return Ok(None);
         }
 
@@ -122,12 +125,7 @@ impl TurnExecutor {
         let Some(stuck_turn) = turns
             .into_iter()
             .filter(|turn| turn.ended_at.is_none())
-            .filter(|turn| {
-                !matches!(
-                    turn.status.as_str(),
-                    "completed" | "failed" | "cancelled"
-                )
-            })
+            .filter(|turn| !matches!(turn.status.as_str(), "completed" | "failed" | "cancelled"))
             .min_by_key(|turn| turn.started_at)
         else {
             return Ok(None);
@@ -1710,19 +1708,37 @@ mod tests {
 
     #[test]
     fn interactive_user_messages_stay_on_main_lane() {
-        assert_eq!(lane_for(TriggerKind::UserMessage, SessionKind::Direct), Lane::Main);
-        assert_eq!(lane_for(TriggerKind::UserMessage, SessionKind::Channel), Lane::Main);
+        assert_eq!(
+            lane_for(TriggerKind::UserMessage, SessionKind::Direct),
+            Lane::Main
+        );
+        assert_eq!(
+            lane_for(TriggerKind::UserMessage, SessionKind::Channel),
+            Lane::Main
+        );
     }
 
     #[test]
     fn control_plane_triggers_use_priority_lane() {
-        assert_eq!(lane_for(TriggerKind::SystemWake, SessionKind::Direct), Lane::Priority);
-        assert_eq!(lane_for(TriggerKind::SubagentRequest, SessionKind::Channel), Lane::Priority);
+        assert_eq!(
+            lane_for(TriggerKind::SystemWake, SessionKind::Direct),
+            Lane::Priority
+        );
+        assert_eq!(
+            lane_for(TriggerKind::SubagentRequest, SessionKind::Channel),
+            Lane::Priority
+        );
     }
 
     #[test]
     fn scheduled_work_stays_on_background_lanes() {
-        assert_eq!(lane_for(TriggerKind::CronJob, SessionKind::Scheduled), Lane::Cron);
-        assert_eq!(lane_for(TriggerKind::Reminder, SessionKind::Subagent), Lane::Subagent);
+        assert_eq!(
+            lane_for(TriggerKind::CronJob, SessionKind::Scheduled),
+            Lane::Cron
+        );
+        assert_eq!(
+            lane_for(TriggerKind::Reminder, SessionKind::Subagent),
+            Lane::Subagent
+        );
     }
 }
