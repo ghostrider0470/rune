@@ -919,7 +919,7 @@ impl TurnExecutor {
                 skill_prompt_fragment.into_iter().collect();
             extra_system_sections.extend(
                 self.context_assembler
-                    .session_metadata_sections(session_kind.clone(), &session.metadata),
+                    .session_metadata_sections(session_kind, &session.metadata),
             );
 
             // Inject recalled mem0 memories into the system prompt
