@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use std::collections::BTreeMap;
 use rune_config::Mem0Config;
 use rune_models::ModelProvider;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,25 @@ pub struct Memory {
 pub struct MemoryCaptureMetadata {
     pub source_agent: Option<String>,
     pub trigger: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryCaptureAction {
+    Inserted,
+    SkippedDuplicate,
+    UpdatedExact,
+    Merged,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MemoryCaptureDecision {
+    pub action: MemoryCaptureAction,
+    pub memory: Option<Memory>,
+    pub matched_memory_id: Option<Uuid>,
+    pub matched_fact: Option<String>,
+    pub similarity: Option<f64>,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -237,8 +257,34 @@ impl Mem0Engine {
         user_msg: &str,
         assistant_msg: &str,
         session_id: Uuid,
-        _metadata: MemoryCaptureMetadata,
+        metadata: MemoryCaptureMetadata,
     ) -> Vec<Memory> {
+        let decisions = self
+            .capture_with_decisions(user_msg, assistant_msg, session_id, metadata)
+            .await;
+
+        let stored: Vec<Memory> = decisions
+            .into_iter()
+            .filter_map(|decision| match decision.action {
+                MemoryCaptureAction::Inserted
+                | MemoryCaptureAction::UpdatedExact
+                | MemoryCaptureAction::Merged => decision.memory,
+                MemoryCaptureAction::SkippedDuplicate => None,
+            })
+            .collect();
+
+        info!(stored = stored.len(), "mem0 capture: facts stored for session");
+        stored
+    }
+
+
+    pub async fn capture_with_decisions(
+        &self,
+        user_msg: &str,
+        assistant_msg: &str,
+        session_id: Uuid,
+        _metadata: MemoryCaptureMetadata,
+    ) -> Vec<MemoryCaptureDecision> {
         let facts = match self.extract_facts(user_msg, assistant_msg).await {
             Ok(f) => f,
             Err(e) => {
@@ -252,13 +298,20 @@ impl Mem0Engine {
             return Vec::new();
         }
 
-        let mut stored = Vec::new();
+        let mut decisions = Vec::new();
+        let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
 
         for fact in facts {
             match self.store_fact(&fact, session_id).await {
-                Ok(Some(mem)) => stored.push(mem),
-                Ok(None) => {
-                    debug!(fact = %fact.fact, "mem0: deduplicated (already exists)");
+                Ok(decision) => {
+                    let key = match decision.action {
+                        MemoryCaptureAction::Inserted => "inserted",
+                        MemoryCaptureAction::SkippedDuplicate => "skipped_duplicate",
+                        MemoryCaptureAction::UpdatedExact => "updated_exact",
+                        MemoryCaptureAction::Merged => "merged",
+                    };
+                    *counts.entry(key).or_default() += 1;
+                    decisions.push(decision);
                 }
                 Err(e) => {
                     warn!(error = %e, fact = %fact.fact, "mem0: failed to store fact");
@@ -267,10 +320,14 @@ impl Mem0Engine {
         }
 
         info!(
-            stored = stored.len(),
-            "mem0 capture: facts stored for session"
+            inserted = counts.get("inserted").copied().unwrap_or(0),
+            skipped_duplicate = counts.get("skipped_duplicate").copied().unwrap_or(0),
+            updated_exact = counts.get("updated_exact").copied().unwrap_or(0),
+            merged = counts.get("merged").copied().unwrap_or(0),
+            "mem0 capture: decisions recorded for session"
         );
-        stored
+
+        decisions
     }
 
     /// Delete a memory by its ID.
@@ -509,15 +566,12 @@ impl Mem0Engine {
         Ok(facts)
     }
 
-    /// Store a single fact, deduplicating against existing memories.
-    ///
-    /// Returns `Some(Memory)` if inserted, `None` if an existing
-    /// memory was close enough to be considered a duplicate (and was updated).
+    /// Store a single fact using a conservative dedup/update policy.
     async fn store_fact(
         &self,
         fact: &ExtractedFact,
         session_id: Uuid,
-    ) -> Result<Option<Memory>, String> {
+    ) -> Result<MemoryCaptureDecision, String> {
         let embedding = self.embed(&fact.fact).await?;
         let embedding_str = format_vector(&embedding);
 
@@ -527,18 +581,19 @@ impl Mem0Engine {
             .await
             .map_err(|e| format!("dedup check failed: {e}"))?;
 
-        if let Some((existing_id, _, _)) = dedup {
-            let now = Utc::now();
-            self.repo
-                .update(existing_id, &fact.fact, &fact.category, &embedding_str, now)
-                .await
-                .map_err(|e| format!("memory update failed: {e}"))?;
-            debug!(id = %existing_id, "mem0: updated existing memory (dedup)");
+        if let Some((existing_id, existing_fact, similarity)) = dedup.clone() {
+            let normalized_existing = existing_fact.trim().to_ascii_lowercase();
+            let normalized_new = fact.fact.trim().to_ascii_lowercase();
 
-            // Background vault sync (fire-and-forget, never blocks LLM).
-            if let Some(ref vault) = self.vault {
-                let vault = vault.clone();
-                let mem = Memory {
+            if normalized_existing == normalized_new {
+                let now = Utc::now();
+                self.repo
+                    .update(existing_id, &fact.fact, &fact.category, &embedding_str, now)
+                    .await
+                    .map_err(|e| format!("memory update failed: {e}"))?;
+                debug!(id = %existing_id, similarity, "mem0: updated exact memory match");
+
+                let memory = Memory {
                     id: existing_id,
                     fact: fact.fact.clone(),
                     category: fact.category.clone(),
@@ -549,14 +604,28 @@ impl Mem0Engine {
                     updated_at: now,
                     access_count: 0,
                 };
-                tokio::spawn(async move {
-                    if let Err(e) = vault.sync_fact_simple(&mem).await {
-                        warn!(error = %e, "vault sync failed for dedup-updated fact");
-                    }
+
+                if let Some(ref vault) = self.vault {
+                    let vault = vault.clone();
+                    let mem = memory.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = vault.sync_fact_simple(&mem).await {
+                            warn!(error = %e, "vault sync failed for exact-match updated fact");
+                        }
+                    });
+                }
+
+                return Ok(MemoryCaptureDecision {
+                    action: MemoryCaptureAction::UpdatedExact,
+                    memory: Some(memory),
+                    matched_memory_id: Some(existing_id),
+                    matched_fact: Some(existing_fact),
+                    similarity: Some(similarity),
+                    reason: "exact normalized fact match updated existing memory".to_string(),
                 });
             }
 
-            return Ok(None);
+            debug!(id = %existing_id, similarity, existing_fact = %existing_fact, new_fact = %fact.fact, "mem0: preserving distinct fact despite approximate similarity");
         }
 
         let id = Uuid::now_v7();
@@ -596,7 +665,18 @@ impl Mem0Engine {
             });
         }
 
-        Ok(Some(memory))
+        Ok(MemoryCaptureDecision {
+            action: MemoryCaptureAction::Inserted,
+            memory: Some(memory),
+            matched_memory_id: dedup.as_ref().map(|(id, _, _)| *id),
+            matched_fact: dedup.as_ref().map(|(_, fact, _)| fact.clone()),
+            similarity: dedup.as_ref().map(|(_, _, similarity)| *similarity),
+            reason: if dedup.is_some() {
+                "approximate similarity alone is not enough to overwrite an existing fact".to_string()
+            } else {
+                "no similar existing memory exceeded the dedup threshold".to_string()
+            },
+        })
     }
 }
 
@@ -618,6 +698,31 @@ mod tests {
         let s = format_vector(&v);
         assert_eq!(s, "[0.1,-0.5,1,0]");
     }
+
+#[test]
+fn memory_capture_action_serializes_snake_case() {
+    let value = serde_json::to_value(MemoryCaptureAction::UpdatedExact).unwrap();
+    assert_eq!(value, serde_json::json!("updated_exact"));
+}
+
+#[test]
+fn memory_capture_decision_records_insert_reason() {
+    let decision = MemoryCaptureDecision {
+        action: MemoryCaptureAction::Inserted,
+        memory: None,
+        matched_memory_id: None,
+        matched_fact: None,
+        similarity: None,
+        reason: "no similar existing memory exceeded the dedup threshold".to_string(),
+    };
+
+    let value = serde_json::to_value(&decision).unwrap();
+    assert_eq!(value["action"], "inserted");
+    assert_eq!(
+        value["reason"],
+        "no similar existing memory exceeded the dedup threshold"
+    );
+}
 
     #[test]
     fn format_for_prompt_empty() {
