@@ -551,12 +551,24 @@ impl TurnExecutor {
             .await?;
 
         // 5. Finalize turn status
+        let context_assembly_error = match &result {
+            Err(RuntimeError::ContextAssembly(message)) => Some(message.clone()),
+            _ => None,
+        };
         let (final_status, ended_at) = match &result {
             Ok(TurnLoopOutcome::Completed) => (TurnStatus::Completed, Some(Utc::now())),
             Ok(TurnLoopOutcome::WaitingForApproval) => (TurnStatus::ToolExecuting, None),
             Err(RuntimeError::Aborted(_)) => (TurnStatus::Cancelled, Some(Utc::now())),
             Err(_) => (TurnStatus::Failed, Some(Utc::now())),
         };
+
+        if let Some(message) = context_assembly_error {
+            let note = TranscriptItem::StatusNote {
+                status: SessionStatus::Failed,
+                note: format!("context_budget_guardrail: {message}"),
+            };
+            self.append_transcript(session_id, Some(turn.id), &note).await?;
+        }
 
         let final_turn = self
             .turn_repo
