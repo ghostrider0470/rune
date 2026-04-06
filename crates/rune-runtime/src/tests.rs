@@ -853,7 +853,7 @@ async fn full_turn_cycle_no_tools() {
 #[tokio::test]
 async fn tool_loop_with_multi_step_calls() {
     let h = TestHarness::new();
-    let engine = h.session_engine();
+    let engine = Arc::new(h.session_engine());
     let session = engine
         .create_session(
             SessionKind::Direct,
@@ -916,7 +916,7 @@ async fn tool_loop_with_multi_step_calls() {
 #[tokio::test]
 async fn failed_model_call_sets_turn_failed() {
     let h = TestHarness::new();
-    let engine = h.session_engine();
+    let engine = Arc::new(h.session_engine());
     let session = engine
         .create_session(
             SessionKind::Direct,
@@ -4024,4 +4024,64 @@ async fn prompt_budget_guardrail_aborts_before_model_call() {
         .as_str()
         .unwrap_or("")
         .contains("context_budget_guardrail: prompt budget exceeded before model call"));
+}
+
+#[tokio::test]
+async fn prompt_budget_guardrail_persists_live_context_budget_diagnostics() {
+    let h = TestHarness::new();
+    let engine = Arc::new(h.session_engine());
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("This should not be called."),
+    ]));
+    let executor = h
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )
+        .with_session_engine(engine.clone())
+        .with_prompt_budget_guardrails(32, 16, 24);
+
+    let err = executor
+        .execute(
+            session.id,
+            "This user message is intentionally long enough to blow past the tiny test prompt budget guardrail.",
+            None,
+        )
+        .await
+        .expect_err("turn should fail before calling the model");
+
+    assert!(matches!(
+        err,
+        RuntimeError::ContextAssembly(message)
+            if message.contains("prompt budget exceeded before model call")
+    ));
+
+    let refreshed = engine.get_session(session.id).await.unwrap();
+    let usage = refreshed
+        .metadata
+        .get("context_token_usage")
+        .cloned()
+        .expect("context token usage persisted");
+    assert_eq!(usage["total_budget"], 44_000);
+    assert_eq!(usage["compaction_trigger_tokens"], 24);
+    assert_eq!(usage["over_budget"], false);
+    assert_eq!(usage["compaction_required"], true);
+    assert!(usage["total_estimated_tokens"].as_u64().unwrap() > 32);
+    let tiers = refreshed
+        .metadata
+        .get("context_tiers")
+        .and_then(|value| value.as_array())
+        .expect("context tiers persisted");
+    assert!(!tiers.is_empty());
 }

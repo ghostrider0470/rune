@@ -20,7 +20,7 @@ use rune_store::repos::{
 use rune_tools::{ToolCall, ToolExecutor, ToolRegistry, ToolResult};
 
 use crate::compaction::CompactionStrategy;
-use crate::context::ContextAssembler;
+use crate::context::{ContextAssembler, ContextAssemblyReport};
 
 /// Callback type for recording model usage after completions.
 type UsageRecorderFn = Arc<
@@ -84,6 +84,7 @@ pub struct TurnExecutor {
     tool_registry: Arc<ToolRegistry>,
     context_assembler: ContextAssembler,
     compaction: Arc<dyn CompactionStrategy>,
+    session_engine: Option<Arc<crate::engine::SessionEngine>>,
     default_model: Option<String>,
     max_tool_iterations: u32,
     max_prompt_tokens: Option<u32>,
@@ -109,6 +110,30 @@ impl TurnExecutor {
             return Err(RuntimeError::Aborted(reason));
         }
         Ok(())
+    }
+
+
+    async fn persist_context_budget_report(
+        &self,
+        session_id: Uuid,
+        report: &ContextAssemblyReport,
+    ) {
+        if let Some(engine) = &self.session_engine {
+            let patch = serde_json::json!({
+                "context_tiers": report.snapshots(),
+                "context_token_usage": {
+                    "total_estimated_tokens": report.total_estimated_tokens,
+                    "total_budget": report.total_budget,
+                    "compaction_trigger_tokens": report.compaction_trigger_tokens,
+                    "over_budget": report.over_budget,
+                    "over_compaction_threshold": report.over_compaction_threshold,
+                    "compaction_required": report.compaction_required,
+                }
+            });
+            if let Err(error) = engine.patch_metadata(session_id, patch).await {
+                warn!(session_id = %session_id, ?error, "failed to persist context budget diagnostics");
+            }
+        }
     }
 
     async fn recover_stuck_turn_if_needed(
@@ -221,6 +246,7 @@ impl TurnExecutor {
             tool_registry,
             context_assembler,
             compaction,
+            session_engine: None,
             default_model: None,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
             max_prompt_tokens: None,
@@ -270,6 +296,12 @@ impl TurnExecutor {
     /// Override the max tool iterations limit.
     pub fn with_max_tool_iterations(mut self, max: u32) -> Self {
         self.max_tool_iterations = max;
+        self
+    }
+
+    /// Attach a session engine so turn execution can persist live budget diagnostics.
+    pub fn with_session_engine(mut self, engine: Arc<crate::engine::SessionEngine>) -> Self {
+        self.session_engine = Some(engine);
         self
     }
 
@@ -1052,6 +1084,16 @@ impl TurnExecutor {
                     extra_system_sections.push(fragment);
                 }
             }
+
+            let context_report = self.context_assembler.analyze_context_usage(
+                Some(&workspace_context),
+                Some(&memory_context),
+                &extra_system_sections,
+                self.context_compact_at_tokens.unwrap_or_default(),
+                mem0_prompt_section.is_some(),
+            );
+            self.persist_context_budget_report(session_id, &context_report)
+                .await;
 
             let messages = self.context_assembler.assemble(
                 &transcript_rows,
