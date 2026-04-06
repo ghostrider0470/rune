@@ -143,7 +143,7 @@ impl LaneSemaphore {
     fn queued(&self) -> usize {
         self.waiters
             .try_lock()
-            .map(|queue| queue.len())
+            .map(|queue| queue.iter().filter(|waiter| !waiter.is_closed()).count())
             .unwrap_or(0)
     }
 }
@@ -702,6 +702,54 @@ mod tests {
             .await
             .expect("same-project waiter should be released")
             .expect("join should succeed");
+    }
+
+    #[tokio::test]
+    async fn stats_ignore_cancelled_lane_waiters() {
+        let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
+        let blocker = queue.acquire(Lane::Main).await;
+
+        let cancelled = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Main).await;
+            })
+        };
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        cancelled.abort();
+        let _ = cancelled.await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let stats = queue.stats();
+        assert_eq!(stats.main_active, 1);
+        assert_eq!(stats.main_queued, 0);
+
+        drop(blocker);
+    }
+
+    #[tokio::test]
+    async fn stats_ignore_cancelled_tool_waiters() {
+        let queue = Arc::new(LaneQueue::with_limits(1, 1, 1, 1, 1));
+        let blocker = queue.acquire_tool(Some("alpha")).await;
+
+        let cancelled = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire_tool(Some("beta")).await;
+            })
+        };
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        cancelled.abort();
+        let _ = cancelled.await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let stats = queue.stats();
+        assert_eq!(stats.tool_active, 1);
+        assert_eq!(stats.tool_queued, 0);
+
+        drop(blocker);
     }
 
     #[tokio::test]
