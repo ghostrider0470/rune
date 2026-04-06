@@ -1014,6 +1014,7 @@ impl RpcDispatcher {
                     "capacity": stats.tool_capacity,
                     "queued": stats.tool_queued,
                     "per_project_capacity": stats.project_tool_capacity,
+                    "projects": stats.tool_project_stats,
                 },
             })
         });
@@ -1668,22 +1669,29 @@ impl RpcDispatcher {
                 "main_active": stats.main_active,
                 "main_available": stats.main_available,
                 "main_capacity": stats.main_capacity,
+                "main_queued": stats.main_queued,
                 "priority_active": stats.priority_active,
                 "priority_available": stats.priority_available,
                 "priority_capacity": stats.priority_capacity,
+                "priority_queued": stats.priority_queued,
                 "subagent_active": stats.subagent_active,
                 "subagent_available": stats.subagent_available,
                 "subagent_capacity": stats.subagent_capacity,
+                "subagent_queued": stats.subagent_queued,
                 "cron_active": stats.cron_active,
                 "cron_available": stats.cron_available,
                 "cron_capacity": stats.cron_capacity,
+                "cron_queued": stats.cron_queued,
                 "heartbeat_active": stats.heartbeat_active,
                 "heartbeat_available": stats.heartbeat_available,
                 "heartbeat_capacity": stats.heartbeat_capacity,
+                "heartbeat_queued": stats.heartbeat_queued,
                 "tool_active": stats.tool_active,
                 "tool_available": stats.tool_available,
                 "tool_capacity": stats.tool_capacity,
+                "tool_queued": stats.tool_queued,
                 "project_tool_capacity": stats.project_tool_capacity,
+                "tool_projects": stats.tool_project_stats,
             })
         });
 

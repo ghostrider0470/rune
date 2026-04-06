@@ -56,7 +56,7 @@ pub use engine::SessionEngine;
 pub use error::RuntimeError;
 pub use executor::{TurnExecutor, clear_session_abort, request_session_abort};
 pub use hooks::{HookEvent, HookHandler, HookRegistrationRecord, HookRegistry};
-pub use lane_queue::{Lane, LanePermit, LaneQueue, LaneStats, ToolPermit};
+pub use lane_queue::{Lane, LanePermit, LaneQueue, LaneStats, ProjectToolStats, ToolPermit};
 pub use mem0::Mem0Engine;
 pub use plugin::{PluginLoader, PluginManifest, PluginRegistry, PluginScanSummary};
 pub use plugin_manager::PluginManager;

@@ -1929,10 +1929,10 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["heartbeat_queued"], 0);
     assert_eq!(payload["lane_stats"]["tool_active"], 0);
     assert_eq!(payload["lane_stats"]["tool_available"], 32);
-    assert_eq!(payload["lane_stats"]["tool_available"], 32);
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["tool_queued"], 0);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
+    assert!(payload["lane_stats"]["tool_projects"].as_object().unwrap().is_empty());
 
     drop(main_permit);
 }
@@ -2087,7 +2087,7 @@ async fn status_reports_configured_lane_capacities() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
-    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_capacities(6, 9, 128));
+    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_all_limits(6, 3, 9, 128, 1024, 32, 4));
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
@@ -2113,7 +2113,7 @@ async fn status_reports_configured_lane_capacities() {
     let mut config = AppConfig::default();
     config.runtime.lanes = LaneQueueConfig {
         main_capacity: 6,
-        priority_capacity: 16,
+        priority_capacity: 3,
         subagent_capacity: 9,
         cron_capacity: 128,
         heartbeat_capacity: 1024,
@@ -2323,6 +2323,10 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
     assert_eq!(payload["lanes"]["tools"]["queued"], 0);
     assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
+    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["active"], 1);
+    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["available"], 3);
+    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["queued"], 0);
 
     drop(main_permit);
     drop(subagent_permit);
