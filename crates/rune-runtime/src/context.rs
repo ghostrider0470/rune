@@ -206,7 +206,7 @@ fn parse_staleness_policy(value: &str) -> Option<ContextStalenessPolicy> {
     }
 }
 
-fn estimate_tokens(text: &str) -> usize {
+pub(crate) fn estimate_tokens(text: &str) -> usize {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         0
