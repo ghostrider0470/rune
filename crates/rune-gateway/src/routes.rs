@@ -101,6 +101,8 @@ pub struct DelegationTaskRequest {
     pub protocol_version: u32,
     pub submitted_at: String,
     pub sender: DelegationEndpointResponse,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_at: Option<String>,
     pub task: DelegationTaskPayload,
 }
 
@@ -116,6 +118,7 @@ pub struct DelegationTaskResultResponse {
     pub status: String,
     pub accepted_at: String,
     pub started_at: Option<String>,
+    pub deadline_at: Option<String>,
     pub output: Option<String>,
     #[serde(default)]
     pub artifacts: Vec<DelegationArtifactResponse>,
@@ -613,6 +616,7 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
         protocol_version: 1,
         submitted_at: "2026-03-29T00:00:00Z".to_string(),
         sender: sender.clone(),
+        deadline_at: Some("2026-03-29T00:30:00Z".to_string()),
         task: DelegationTaskPayload {
             task: "Implement issue #421 acceptance-test shim".to_string(),
             constraints: vec![
@@ -642,6 +646,7 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
         status: "completed".to_string(),
         accepted_at: "2026-03-29T00:00:05Z".to_string(),
         started_at: Some("2026-03-29T00:00:10Z".to_string()),
+        deadline_at: Some("2026-03-29T00:30:00Z".to_string()),
         output: Some(
             "Committed agent/rune/delegation-421 at abc1234 and uploaded verification log"
                 .to_string(),
@@ -680,6 +685,7 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
         ],
         required_fields: vec!["task", "constraints", "expected_output", "timeout_secs"],
         optional_fields: vec![
+            "deadline_at",
             "target_peer_id",
             "branch_reservation",
             "file_locks",
@@ -690,6 +696,7 @@ fn delegation_task_contract() -> DelegationTaskContractResponse {
             "status",
             "accepted_at",
             "started_at",
+            "deadline_at",
             "output",
             "artifacts",
             "error",
@@ -9145,6 +9152,57 @@ mod tests {
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
     }
+
+    #[test]
+    fn delegation_prompt_includes_deadline_and_conflict_guards() {
+        let request = DelegationTaskRequest {
+            task_id: "delegation-421".to_string(),
+            protocol_version: 1,
+            submitted_at: "2026-03-29T00:00:00Z".to_string(),
+            sender: DelegationEndpointResponse {
+                instance_id: "sender-a".to_string(),
+                instance_name: "Sender A".to_string(),
+                transport: "http".to_string(),
+                capabilities_version: 1,
+                capability_hash: "cap-1".to_string(),
+                health_url: None,
+                submit_url: None,
+                result_url: None,
+            },
+            deadline_at: Some("2026-03-29T00:30:00Z".to_string()),
+            task: DelegationTaskPayload {
+                task: "Implement issue #421".to_string(),
+                constraints: vec!["Run cargo check".to_string()],
+                expected_output: "Commit SHA".to_string(),
+                timeout_secs: 1800,
+                target_peer_id: Some("peer-b".to_string()),
+                branch_reservation: Some("agent/rune/delegation-421".to_string()),
+                file_locks: vec!["crates/rune-gateway/src/routes.rs".to_string()],
+                artifacts: Vec::new(),
+            },
+        };
+
+        let prompt = delegation_prompt(&request);
+        assert!(prompt.contains("Delegation deadline: 2026-03-29T00:30:00Z"));
+        assert!(prompt.contains("Reserved branch: agent/rune/delegation-421"));
+        assert!(prompt.contains("Required file locks:
+- crates/rune-gateway/src/routes.rs"));
+    }
+
+    #[test]
+    fn delegation_task_contract_advertises_deadline_fields() {
+        let contract = delegation_task_contract();
+        assert!(contract.optional_fields.contains(&"deadline_at"));
+        assert!(contract.result_fields.contains(&"deadline_at"));
+        assert_eq!(
+            contract.example_request.deadline_at.as_deref(),
+            Some("2026-03-29T00:30:00Z")
+        );
+        assert_eq!(
+            contract.example_result.deadline_at.as_deref(),
+            Some("2026-03-29T00:30:00Z")
+        );
+    }
 }
 
 pub fn storage_path_checks_for_tests(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
@@ -9170,6 +9228,9 @@ fn delegation_prompt(request: &DelegationTaskRequest) -> String {
             "Constraints:\n- {}",
             request.task.constraints.join("\n- ")
         ));
+    }
+    if let Some(deadline_at) = &request.deadline_at {
+        sections.push(format!("Delegation deadline: {deadline_at}"));
     }
     if let Some(branch) = &request.task.branch_reservation {
         sections.push(format!("Reserved branch: {branch}"));
@@ -9317,6 +9378,7 @@ async fn delegation_status_envelope(
                 .unwrap_or_else(|| row.created_at.to_rfc3339()),
             started_at: metadata_string(&row.metadata, "delegation_started_at")
                 .or_else(|| aggregate.last_turn_started_at.clone()),
+            deadline_at: metadata_string(&row.metadata, "delegation_deadline_at"),
             output,
             artifacts: delegation_artifacts(&row.metadata),
             error: delegation_error(&row.metadata),
@@ -9487,6 +9549,7 @@ pub async fn submit_delegation_task(
                 "protocol_version": request.protocol_version,
                 "submitted_at": request.submitted_at,
                 "sender": request.sender,
+                "deadline_at": request.deadline_at,
                 "task": request.task,
             }),
             None,
@@ -9502,6 +9565,7 @@ pub async fn submit_delegation_task(
                 "delegation_task_id": request.task_id,
                 "delegation_protocol_version": request.protocol_version,
                 "delegation_sender": request.sender,
+                "delegation_deadline_at": request.deadline_at,
                 "delegation_payload": request.task,
                 "delegation_artifacts": request.task.artifacts,
                 "delegation_status": "accepted",
@@ -9549,6 +9613,7 @@ pub async fn submit_delegation_task(
                 status: "accepted".to_string(),
                 accepted_at,
                 started_at: None,
+                deadline_at: request.deadline_at,
                 output: None,
                 artifacts: request.task.artifacts,
                 error: None,
