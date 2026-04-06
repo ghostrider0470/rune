@@ -1741,4 +1741,37 @@ mod tests {
             Lane::Subagent
         );
     }
+
+    #[test]
+    fn provider_and_model_for_log_uses_explicit_model_when_present() {
+        let request = CompletionRequest {
+            stable_prefix_messages: None,
+            stable_prefix_tools: None,
+            messages: vec![],
+            model: Some("anthropic/claude-3-7-sonnet".to_string()),
+            temperature: None,
+            max_tokens: None,
+            tools: None,
+        };
+
+        assert_eq!(
+            provider_and_model_for_log(&request),
+            ("anthropic", "anthropic/claude-3-7-sonnet")
+        );
+    }
+
+    #[test]
+    fn provider_and_model_for_log_falls_back_to_default_when_model_missing() {
+        let request = CompletionRequest {
+            stable_prefix_messages: None,
+            stable_prefix_tools: None,
+            messages: vec![],
+            model: None,
+            temperature: None,
+            max_tokens: None,
+            tools: None,
+        };
+
+        assert_eq!(provider_and_model_for_log(&request), ("configured-provider", "default"));
+    }
 }
