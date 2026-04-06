@@ -1595,6 +1595,12 @@ fn build_test_app_parts_with_ms365_services_and_session_repo(
             context_assembler,
             compaction,
         )
+        .with_session_engine(session_engine.clone())
+        .with_prompt_budget_guardrails(
+            config.runtime.compaction.usable_prompt_budget(),
+            config.runtime.compaction.effective_warn_at_tokens(),
+            config.runtime.compaction.effective_compress_after(),
+        )
         .with_usage_recorder({
             let token_metrics = token_metrics.clone();
             move |provider, model, usage| {
