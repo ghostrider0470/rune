@@ -678,6 +678,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn saturated_priority_lane_does_not_starve_main_lane() {
+        let queue = Arc::new(LaneQueue::with_all_capacities(1, 1, 1, 1, 1));
+        let _priority = queue.acquire(Lane::Priority).await;
+
+        let main = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Main)).await;
+        assert!(
+            main.is_ok(),
+            "main lane should remain available while priority lane is saturated"
+        );
+    }
+
+    #[tokio::test]
+    async fn saturated_main_lane_does_not_starve_heartbeat_lane() {
+        let queue = Arc::new(LaneQueue::with_all_capacities(1, 1, 1, 1, 1));
+        let _main = queue.acquire(Lane::Main).await;
+
+        let heartbeat =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Heartbeat)).await;
+        assert!(
+            heartbeat.is_ok(),
+            "heartbeat lane should remain available while main lane is saturated"
+        );
+    }
+
+    #[tokio::test]
     async fn cancelled_waiter_does_not_block_next_waiter() {
         let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
 
