@@ -151,7 +151,7 @@ fn mutation_status(
     match (before, after) {
         (Some(before), Some(after)) if before != after => Some("modified"),
         (Some(_), None) => Some("removed"),
-        (None, Some(_)) => Some("modified"),
+        (None, Some(_)) => Some("added"),
         _ => None,
     }
 }
@@ -956,7 +956,8 @@ mod tests {
                 .any(|mutation| { mutation.field == "arguments" && mutation.status == "modified" })
         );
         assert!(mutations.iter().any(|mutation| {
-            mutation.field == "approval_required" && mutation.status == "modified"
+            mutation.field == "approval_required"
+                && matches!(mutation.status.as_str(), "added" | "set_true")
         }));
         assert!(
             mutations.iter().any(|mutation| {
