@@ -9156,71 +9156,419 @@ pub struct DelegationTaskStatusPath {
     pub task_id: String,
 }
 
-pub async fn submit_delegation_task(
-    State(_state): State<AppState>,
-    Json(request): Json<DelegationTaskRequest>,
-) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
-    let now = Utc::now().to_rfc3339();
-    let result = DelegationTaskResultResponse {
-        task_id: request.task_id.clone(),
-        status: "accepted".to_string(),
-        accepted_at: now,
-        started_at: None,
-        output: None,
-        artifacts: request.task.artifacts.clone(),
-        error: None,
-        finished_at: None,
+const DELEGATION_TASK_SCAN_LIMIT: i64 = 10_000;
+
+fn delegation_prompt(request: &DelegationTaskRequest) -> String {
+    let mut sections = vec![
+        format!("Delegated task ID: {}", request.task_id),
+        format!("Task:\n{}", request.task.task),
+        format!("Expected output:\n{}", request.task.expected_output),
+    ];
+
+    if !request.task.constraints.is_empty() {
+        sections.push(format!(
+            "Constraints:\n- {}",
+            request.task.constraints.join("\n- ")
+        ));
+    }
+    if let Some(branch) = &request.task.branch_reservation {
+        sections.push(format!("Reserved branch: {branch}"));
+    }
+    if !request.task.file_locks.is_empty() {
+        sections.push(format!(
+            "Required file locks:\n- {}",
+            request.task.file_locks.join("\n- ")
+        ));
+    }
+    sections.push(format!(
+        "Sender instance: {} ({})",
+        request.sender.instance_name, request.sender.instance_id
+    ));
+
+    sections.join("\n\n")
+}
+
+async fn local_delegation_receiver(
+    state: &AppState,
+    task_id: Option<&str>,
+) -> DelegationEndpointResponse {
+    let advertised_addr = state.config.read().await.instance.advertised_addr.clone();
+    let base = advertised_addr.map(|addr| addr.trim_end_matches('/').to_string());
+    let result_url = match (base.as_deref(), task_id) {
+        (Some(base), Some(task_id)) => {
+            Some(format!("{base}/api/v1/instance/delegations/{task_id}"))
+        }
+        (None, Some(task_id)) => Some(format!("/api/v1/instance/delegations/{task_id}")),
+        _ => None,
     };
 
-    let receiver = DelegationEndpointResponse {
-        instance_id: request
-            .task
-            .target_peer_id
-            .clone()
-            .unwrap_or_else(|| "local-instance".to_string()),
-        instance_name: request
-            .task
-            .target_peer_id
-            .clone()
-            .unwrap_or_else(|| "Local Instance".to_string()),
-        transport: request.sender.transport.clone(),
-        capabilities_version: request.sender.capabilities_version,
-        capability_hash: request.sender.capability_hash.clone(),
-        health_url: None,
-        submit_url: None,
-        result_url: request.sender.result_url.clone(),
+    DelegationEndpointResponse {
+        instance_id: state.capabilities.identity.id.clone(),
+        instance_name: state.capabilities.identity.name.clone(),
+        transport: state.capabilities.comms_transport.clone(),
+        capabilities_version: state.capabilities.identity.capabilities_version,
+        capability_hash: state.capabilities.identity.capability_hash.clone(),
+        health_url: base
+            .as_ref()
+            .map(|addr| format!("{addr}/api/v1/instance/health")),
+        submit_url: base
+            .as_ref()
+            .map(|addr| format!("{addr}/api/v1/instance/delegations")),
+        result_url,
+    }
+}
+
+async fn lookup_delegation_session(
+    state: &AppState,
+    task_id: &str,
+) -> Result<Option<SessionRow>, GatewayError> {
+    let sessions = state
+        .session_repo
+        .list(DELEGATION_TASK_SCAN_LIMIT, 0)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    Ok(sessions.into_iter().find(|row| {
+        metadata_string(&row.metadata, "delegation_task_id").as_deref() == Some(task_id)
+    }))
+}
+
+fn delegation_artifacts(metadata: &Value) -> Vec<DelegationArtifactResponse> {
+    metadata
+        .get("delegation_artifacts")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+fn delegation_error(metadata: &Value) -> Option<DelegationErrorResponse> {
+    metadata
+        .get("delegation_error")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .or_else(|| {
+            metadata_string(metadata, "last_error").map(|message| DelegationErrorResponse {
+                code: "execution_failed".to_string(),
+                message,
+            })
+        })
+}
+
+fn delegation_result_status(row: &SessionRow) -> String {
+    if metadata_string(&row.metadata, "delegation_status").as_deref() == Some("timeout") {
+        return "timeout".to_string();
+    }
+
+    match row.status.as_str() {
+        "completed" => "completed".to_string(),
+        "failed" | "cancelled" => metadata_string(&row.metadata, "delegation_status")
+            .unwrap_or_else(|| "failed".to_string()),
+        "running" | "waiting_for_tool" | "waiting_for_approval" | "waiting_for_subagent" => {
+            "running".to_string()
+        }
+        "created" | "ready" | "suspended" => metadata_string(&row.metadata, "delegation_status")
+            .unwrap_or_else(|| "accepted".to_string()),
+        other => {
+            metadata_string(&row.metadata, "delegation_status").unwrap_or_else(|| other.to_string())
+        }
+    }
+}
+
+async fn delegation_status_envelope(
+    state: &AppState,
+    row: &SessionRow,
+    task_id: &str,
+) -> Result<DelegationTaskStatusEnvelope, GatewayError> {
+    let turns = state
+        .turn_repo
+        .list_by_session(row.id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+    let aggregate = aggregate_turns(&turns);
+    let transcript = state
+        .transcript_repo
+        .list_by_session(row.id)
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let output = metadata_string(&row.metadata, "delegation_output").or_else(|| {
+        transcript
+            .iter()
+            .rev()
+            .find(|item| item.kind == "assistant_message")
+            .and_then(|item| item.payload.get("content"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+    let status = delegation_result_status(row);
+    let finished_at = if matches!(status.as_str(), "completed" | "failed" | "timeout") {
+        metadata_string(&row.metadata, "delegation_finished_at")
+            .or_else(|| aggregate.last_turn_ended_at.clone())
+    } else {
+        None
     };
+
+    Ok(DelegationTaskStatusEnvelope {
+        receiver: local_delegation_receiver(state, Some(task_id)).await,
+        result: DelegationTaskResultResponse {
+            task_id: task_id.to_string(),
+            status,
+            accepted_at: metadata_string(&row.metadata, "delegation_accepted_at")
+                .unwrap_or_else(|| row.created_at.to_rfc3339()),
+            started_at: metadata_string(&row.metadata, "delegation_started_at")
+                .or_else(|| aggregate.last_turn_started_at.clone()),
+            output,
+            artifacts: delegation_artifacts(&row.metadata),
+            error: delegation_error(&row.metadata),
+            finished_at,
+        },
+    })
+}
+
+async fn run_delegation_task(state: AppState, session_id: Uuid, request: DelegationTaskRequest) {
+    let started_at = Utc::now().to_rfc3339();
+    let started_patch = json!({
+        "delegation_status": "running",
+        "delegation_started_at": started_at,
+        "subagent_lifecycle": "running",
+        "subagent_runtime_status": "running",
+        "subagent_runtime_attached": true,
+        "subagent_status_updated_at": started_at,
+        "subagent_last_note": format!("Delegation {} is executing", request.task_id),
+        "status_reason": "delegated task actively processing work",
+    });
+
+    if state.session_engine.mark_running(session_id).await.is_err()
+        || state
+            .session_engine
+            .patch_metadata(session_id, started_patch)
+            .await
+            .is_err()
+    {
+        return;
+    }
+
+    let prompt = delegation_prompt(&request);
+    let timeout = std::time::Duration::from_secs(request.task.timeout_secs.max(1));
+    let outcome = tokio::time::timeout(
+        timeout,
+        state.turn_executor.execute(session_id, &prompt, None),
+    )
+    .await;
+
+    match outcome {
+        Ok(Ok((_turn, _usage))) => {
+            let output = state
+                .transcript_repo
+                .list_by_session(session_id)
+                .await
+                .ok()
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .rev()
+                        .find(|item| item.kind == "assistant_message")
+                        .and_then(|item| item.payload.get("content"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                });
+            let finished_at = Utc::now().to_rfc3339();
+            let _ = state.session_engine.mark_completed(session_id).await;
+            let _ = state
+                .session_engine
+                .patch_metadata(
+                    session_id,
+                    json!({
+                        "delegation_status": "completed",
+                        "delegation_finished_at": finished_at,
+                        "delegation_output": output,
+                        "delegation_error": Value::Null,
+                        "last_error": Value::Null,
+                        "subagent_lifecycle": "completed",
+                        "subagent_runtime_status": "completed",
+                        "subagent_runtime_attached": false,
+                        "subagent_status_updated_at": finished_at,
+                        "subagent_last_note": format!("Delegation {} completed", request.task_id),
+                        "status_reason": "session completed successfully",
+                    }),
+                )
+                .await;
+            let _ = state.event_tx.send(SessionEvent {
+                session_id: session_id.to_string(),
+                kind: "delegation_completed".to_string(),
+                payload: json!({
+                    "task_id": request.task_id,
+                    "session_id": session_id,
+                }),
+                state_changed: true,
+            });
+        }
+        Ok(Err(err)) => {
+            let finished_at = Utc::now().to_rfc3339();
+            let message = err.to_string();
+            let _ = state.session_engine.mark_failed(session_id).await;
+            let _ = state
+                .session_engine
+                .patch_metadata(
+                    session_id,
+                    json!({
+                        "delegation_status": "failed",
+                        "delegation_finished_at": finished_at,
+                        "delegation_error": {
+                            "code": "execution_failed",
+                            "message": message,
+                        },
+                        "last_error": message,
+                        "subagent_lifecycle": "failed",
+                        "subagent_runtime_status": "failed",
+                        "subagent_runtime_attached": false,
+                        "subagent_status_updated_at": finished_at,
+                        "subagent_last_note": format!("Delegation {} failed", request.task_id),
+                    }),
+                )
+                .await;
+        }
+        Err(_) => {
+            let finished_at = Utc::now().to_rfc3339();
+            let message = format!(
+                "delegated task exceeded {}s timeout",
+                request.task.timeout_secs.max(1)
+            );
+            let _ = state.session_engine.mark_failed(session_id).await;
+            let _ = state
+                .session_engine
+                .patch_metadata(
+                    session_id,
+                    json!({
+                        "delegation_status": "timeout",
+                        "delegation_finished_at": finished_at,
+                        "delegation_error": {
+                            "code": "timeout",
+                            "message": message,
+                        },
+                        "last_error": message,
+                        "subagent_lifecycle": "timeout",
+                        "subagent_runtime_status": "timeout",
+                        "subagent_runtime_attached": false,
+                        "subagent_status_updated_at": finished_at,
+                        "subagent_last_note": format!("Delegation {} timed out", request.task_id),
+                    }),
+                )
+                .await;
+        }
+    }
+}
+
+pub async fn submit_delegation_task(
+    State(state): State<AppState>,
+    Json(request): Json<DelegationTaskRequest>,
+) -> Result<(StatusCode, Json<DelegationTaskStatusEnvelope>), GatewayError> {
+    if lookup_delegation_session(&state, &request.task_id)
+        .await?
+        .is_some()
+    {
+        return Err(GatewayError::BadRequest(format!(
+            "delegation task {} already exists",
+            request.task_id
+        )));
+    }
+
+    let accepted_at = Utc::now().to_rfc3339();
+    let workspace_root = state.config.read().await.agents.defaults.workspace.clone();
+    let session = state
+        .session_engine
+        .create_subagent_session_with_context(
+            workspace_root,
+            None,
+            None,
+            Some("run".to_string()),
+            json!({
+                "task_id": request.task_id,
+                "protocol_version": request.protocol_version,
+                "submitted_at": request.submitted_at,
+                "sender": request.sender,
+                "task": request.task,
+            }),
+            None,
+        )
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    state
+        .session_engine
+        .patch_metadata(
+            session.id,
+            json!({
+                "delegation_task_id": request.task_id,
+                "delegation_protocol_version": request.protocol_version,
+                "delegation_sender": request.sender,
+                "delegation_payload": request.task,
+                "delegation_artifacts": request.task.artifacts,
+                "delegation_status": "accepted",
+                "delegation_accepted_at": accepted_at,
+                "orchestration_status": "delegated",
+                "delegation_roles": ["remote_delegate"],
+                "delegation_depth": 1,
+                "subagent_lifecycle": "accepted",
+                "subagent_runtime_status": "accepted",
+                "subagent_runtime_attached": false,
+                "subagent_status_updated_at": accepted_at,
+                "subagent_last_note": format!(
+                    "Delegation {} accepted from {}",
+                    request.task_id, request.sender.instance_id
+                ),
+                "status_reason": "delegated task accepted for remote execution",
+            }),
+        )
+        .await
+        .map_err(|e| GatewayError::Internal(e.to_string()))?;
+
+    let _ = state.event_tx.send(SessionEvent {
+        session_id: session.id.to_string(),
+        kind: "delegation_submitted".to_string(),
+        payload: json!({
+            "task_id": request.task_id,
+            "session_id": session.id,
+            "sender": request.sender.instance_id,
+        }),
+        state_changed: true,
+    });
+
+    let task = request.clone();
+    let runner_state = state.clone();
+    tokio::spawn(async move {
+        run_delegation_task(runner_state, session.id, task).await;
+    });
 
     Ok((
         StatusCode::CREATED,
-        Json(DelegationTaskStatusEnvelope { receiver, result }),
+        Json(DelegationTaskStatusEnvelope {
+            receiver: local_delegation_receiver(&state, Some(&request.task_id)).await,
+            result: DelegationTaskResultResponse {
+                task_id: request.task_id,
+                status: "accepted".to_string(),
+                accepted_at,
+                started_at: None,
+                output: None,
+                artifacts: request.task.artifacts,
+                error: None,
+                finished_at: None,
+            },
+        }),
     ))
 }
 
 pub async fn delegation_task_status(
+    State(state): State<AppState>,
     Path(path): Path<DelegationTaskStatusPath>,
 ) -> Result<Json<DelegationTaskStatusEnvelope>, GatewayError> {
-    let now = Utc::now().to_rfc3339();
-    Ok(Json(DelegationTaskStatusEnvelope {
-        receiver: DelegationEndpointResponse {
-            instance_id: "local-instance".to_string(),
-            instance_name: "Local Instance".to_string(),
-            transport: "http".to_string(),
-            capabilities_version: 1,
-            capability_hash: "local-dev".to_string(),
-            health_url: None,
-            submit_url: None,
-            result_url: Some(format!("/api/v1/instance/delegations/{}", path.task_id)),
-        },
-        result: DelegationTaskResultResponse {
-            task_id: path.task_id,
-            status: "accepted".to_string(),
-            accepted_at: now,
-            started_at: None,
-            output: None,
-            artifacts: Vec::new(),
-            error: None,
-            finished_at: None,
-        },
-    }))
+    let row = lookup_delegation_session(&state, &path.task_id)
+        .await?
+        .ok_or_else(|| {
+            GatewayError::SessionNotFound(format!("delegation task {} not found", path.task_id))
+        })?;
+
+    Ok(Json(
+        delegation_status_envelope(&state, &row, &path.task_id).await?,
+    ))
 }

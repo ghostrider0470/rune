@@ -1932,7 +1932,12 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["tool_queued"], 0);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
-    assert!(payload["lane_stats"]["tool_projects"].as_object().unwrap().is_empty());
+    assert!(
+        payload["lane_stats"]["tool_projects"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
 
     drop(main_permit);
 }
@@ -2087,7 +2092,9 @@ async fn status_reports_configured_lane_capacities() {
     let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
     let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
     let tool_registry = Arc::new(ToolRegistry::new());
-    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_all_limits(6, 3, 9, 128, 1024, 32, 4));
+    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_all_limits(
+        6, 3, 9, 128, 1024, 32, 4,
+    ));
     let turn_executor = Arc::new(
         TurnExecutor::new(
             session_repo.clone() as Arc<dyn SessionRepo>,
@@ -2323,10 +2330,22 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
     assert_eq!(payload["lanes"]["tools"]["queued"], 0);
     assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
-    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["active"], 1);
-    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["available"], 3);
-    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["capacity"], 4);
-    assert_eq!(payload["lanes"]["tools"]["projects"]["project-a"]["queued"], 0);
+    assert_eq!(
+        payload["lanes"]["tools"]["projects"]["project-a"]["active"],
+        1
+    );
+    assert_eq!(
+        payload["lanes"]["tools"]["projects"]["project-a"]["available"],
+        3
+    );
+    assert_eq!(
+        payload["lanes"]["tools"]["projects"]["project-a"]["capacity"],
+        4
+    );
+    assert_eq!(
+        payload["lanes"]["tools"]["projects"]["project-a"]["queued"],
+        0
+    );
 
     drop(main_permit);
     drop(subagent_permit);
@@ -15369,11 +15388,13 @@ async fn doctor_run_reports_instance_topology_summary() {
 }
 
 #[tokio::test]
-async fn delegation_submission_accepts_structured_task_and_returns_status_envelope() {
+async fn delegation_submission_creates_real_subagent_session_and_tracks_completion() {
     let mut config = AppConfig::default();
-    config.instance.id = "sender-a".to_string();
-    config.instance.name = "Sender A".to_string();
-    let app = build_test_app_parts(config, None).0;
+    config.instance.id = "receiver-a".to_string();
+    config.instance.name = "Receiver A".to_string();
+    config.instance.advertised_addr = Some("http://127.0.0.1:8787".to_string());
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let app = build_test_app_parts_with_session_repo(config, None, session_repo.clone()).0;
 
     let payload = serde_json::json!({
         "task_id": "delegation-421",
@@ -15383,6 +15404,8 @@ async fn delegation_submission_accepts_structured_task_and_returns_status_envelo
             "instance_id": "sender-a",
             "instance_name": "Sender A",
             "transport": "http",
+            "capabilities_version": 1,
+            "capability_hash": "cap-sender-a",
             "submit_url": "http://sender-a/api/v1/instance/delegations",
             "result_url": "http://sender-a/api/v1/instance/delegations/{task_id}"
         },
@@ -15406,6 +15429,7 @@ async fn delegation_submission_accepts_structured_task_and_returns_status_envelo
     });
 
     let response = app
+        .clone()
         .oneshot(
             Request::post("/api/v1/instance/delegations")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -15417,16 +15441,58 @@ async fn delegation_submission_accepts_structured_task_and_returns_status_envelo
     assert_eq!(response.status(), StatusCode::CREATED);
 
     let json = body_json(response).await;
-    assert_eq!(json["receiver"]["instance_id"], "peer-b");
+    assert_eq!(json["receiver"]["instance_id"], "receiver-a");
+    assert_eq!(
+        json["receiver"]["result_url"],
+        "http://127.0.0.1:8787/api/v1/instance/delegations/delegation-421"
+    );
     assert_eq!(json["result"]["task_id"], "delegation-421");
     assert_eq!(json["result"]["status"], "accepted");
     assert_eq!(json["result"]["started_at"], serde_json::Value::Null);
     assert_eq!(json["result"]["finished_at"], serde_json::Value::Null);
     assert_eq!(json["result"]["artifacts"].as_array().unwrap().len(), 1);
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let sessions = session_repo.list(20, 0).await.unwrap();
+    let delegated = sessions
+        .iter()
+        .find(|row| row.metadata["delegation_task_id"] == "delegation-421")
+        .expect("delegation session should be persisted");
+    assert_eq!(delegated.kind, "subagent");
+    assert_eq!(delegated.status, "completed");
+    assert_eq!(delegated.metadata["delegation_status"], "completed");
+    assert_eq!(delegated.metadata["orchestration_status"], "delegated");
+    assert_eq!(
+        delegated.metadata["delegation_output"],
+        "Hello from fake model!"
+    );
+
+    let status_response = app
+        .oneshot(
+            Request::get("/api/v1/instance/delegations/delegation-421")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status_response.status(), StatusCode::OK);
+
+    let status_json = body_json(status_response).await;
+    assert_eq!(status_json["result"]["task_id"], "delegation-421");
+    assert_eq!(status_json["result"]["status"], "completed");
+    assert_eq!(status_json["result"]["output"], "Hello from fake model!");
+    assert!(status_json["result"]["started_at"].is_string());
+    assert!(status_json["result"]["finished_at"].is_string());
+    assert_eq!(
+        status_json["result"]["artifacts"][0]["name"],
+        "cargo-check.log"
+    );
+    assert_eq!(status_json["receiver"]["instance_id"], "receiver-a");
 }
 
 #[tokio::test]
-async fn delegation_status_route_returns_trackable_task_status() {
+async fn delegation_status_route_returns_not_found_for_unknown_task() {
     let app = build_test_app(None);
 
     let response = app
@@ -15437,15 +15503,15 @@ async fn delegation_status_route_returns_trackable_task_status() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     let json = body_json(response).await;
-    assert_eq!(json["result"]["task_id"], "delegation-421");
-    assert_eq!(json["result"]["status"], "accepted");
-    assert_eq!(json["receiver"]["instance_id"], "local-instance");
-    assert_eq!(
-        json["receiver"]["result_url"],
-        "/api/v1/instance/delegations/delegation-421"
+    assert_eq!(json["code"], "session_not_found");
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("delegation task delegation-421 not found")
     );
 }
 
