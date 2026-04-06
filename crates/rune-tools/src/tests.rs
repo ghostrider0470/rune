@@ -1,6 +1,7 @@
 use rune_core::{ToolCallId, ToolCategory};
 
 use crate::approval::PolicyBasedApproval;
+use crate::circuit_breaker::CircuitBreakerRegistry;
 use crate::definition::{ToolCall, ToolDefinition};
 use crate::executor::{AlwaysAllow, ApprovalCheck, ToolExecutor};
 use crate::registry::ToolRegistry;
@@ -258,4 +259,37 @@ fn memory_bank_tool_definitions_are_registered() {
 
     assert!(reg.lookup("memory_bank_list").is_ok());
     assert!(reg.lookup("memory_bank_get").is_ok());
+}
+
+
+#[test]
+fn circuit_breaker_opens_and_resets_after_non_retriable_failure() {
+    let registry = CircuitBreakerRegistry::new(2, std::time::Duration::from_secs(60));
+
+    assert!(registry.allow("exec").is_ok());
+    assert_eq!(registry.record_retriable_failure("exec"), None);
+    assert_eq!(registry.record_retriable_failure("exec"), Some(2));
+
+    let snap = registry.snapshot("exec").expect("snapshot should exist");
+    assert_eq!(snap.failures, 2);
+    assert!(snap.is_open);
+    assert!(registry.allow("exec").is_err());
+
+    registry.record_non_retriable_failure("exec");
+    let snap = registry.snapshot("exec").expect("snapshot should exist");
+    assert_eq!(snap.failures, 0);
+    assert!(!snap.is_open);
+    assert!(registry.allow("exec").is_ok());
+}
+
+#[test]
+fn tool_circuit_open_error_formats_tool_name() {
+    let err = crate::ToolError::CircuitOpen {
+        tool: "exec".into(),
+        message: "cooldown 30s remaining".into(),
+    };
+
+    let rendered = err.to_string();
+    assert!(rendered.contains("exec"));
+    assert!(rendered.contains("cooldown 30s remaining"));
 }

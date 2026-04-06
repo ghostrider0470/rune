@@ -1352,6 +1352,15 @@ impl TurnExecutor {
                                 return Ok(TurnLoopOutcome::WaitingForApproval);
                             }
                         }
+                        Err(rune_tools::ToolError::CircuitOpen { tool, message }) => {
+                            warn!(tool = %tool, message = %message, "tool circuit breaker blocked execution; degraded-mode fallback remains active");
+                            ToolResult {
+                                tool_call_id,
+                                output: format!("Tool circuit open: {message}"),
+                                is_error: true,
+                                tool_execution_id: None,
+                            }
+                        }
                         Err(e) => {
                             warn!(error = %e, tool = %tc.function.name, "tool execution failed");
                             ToolResult {
