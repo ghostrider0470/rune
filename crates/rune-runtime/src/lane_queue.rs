@@ -653,6 +653,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn saturated_subagent_lane_does_not_starve_main_lane() {
+        let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
+        let _subagent = queue.acquire(Lane::Subagent).await;
+
+        let main = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Main)).await;
+        assert!(
+            main.is_ok(),
+            "main lane should remain available while subagent lane is saturated"
+        );
+    }
+
+    #[tokio::test]
+    async fn saturated_cron_lane_does_not_starve_subagent_lane() {
+        let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
+        let _cron = queue.acquire(Lane::Cron).await;
+
+        let subagent =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
+        assert!(
+            subagent.is_ok(),
+            "subagent lane should remain available while cron lane is saturated"
+        );
+    }
+
+    #[tokio::test]
     async fn cancelled_waiter_does_not_block_next_waiter() {
         let queue = Arc::new(LaneQueue::with_capacities(1, 1, 1));
 
