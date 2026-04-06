@@ -766,9 +766,17 @@ async fn build_services(
         config.runtime.max_tool_iterations
     };
     turn_executor = turn_executor.with_max_tool_iterations(max_iters);
+    turn_executor = turn_executor.with_prompt_budget_guardrails(
+        config.runtime.compaction.effective_max_tokens(),
+        config.runtime.compaction.effective_warn_at_tokens(),
+        config.runtime.compaction.effective_compress_after(),
+    );
     info!(
         max_tool_iterations = max_iters,
-        "tool iteration limit configured"
+        max_prompt_tokens = config.runtime.compaction.effective_max_tokens(),
+        warn_at_tokens = config.runtime.compaction.effective_warn_at_tokens(),
+        compact_at_tokens = config.runtime.compaction.effective_compress_after(),
+        "turn budget guardrails configured"
     );
     info!(stats = %lane_queue.stats(), "lane queue configured for turn execution");
 

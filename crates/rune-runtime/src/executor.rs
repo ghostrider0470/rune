@@ -86,6 +86,9 @@ pub struct TurnExecutor {
     compaction: Arc<dyn CompactionStrategy>,
     default_model: Option<String>,
     max_tool_iterations: u32,
+    max_prompt_tokens: Option<u32>,
+    context_warn_at_tokens: Option<usize>,
+    context_compact_at_tokens: Option<usize>,
     stuck_turn_timeout_secs: i64,
     lane_queue: Option<Arc<LaneQueue>>,
     skill_registry: Option<Arc<SkillRegistry>>,
@@ -220,6 +223,9 @@ impl TurnExecutor {
             compaction,
             default_model: None,
             max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
+            max_prompt_tokens: None,
+            context_warn_at_tokens: None,
+            context_compact_at_tokens: None,
             stuck_turn_timeout_secs: DEFAULT_STUCK_TURN_TIMEOUT_SECS,
             lane_queue: None,
             skill_registry: None,
@@ -264,6 +270,19 @@ impl TurnExecutor {
     /// Override the max tool iterations limit.
     pub fn with_max_tool_iterations(mut self, max: u32) -> Self {
         self.max_tool_iterations = max;
+        self
+    }
+
+    /// Configure prompt-budget guardrails for model calls.
+    pub fn with_prompt_budget_guardrails(
+        mut self,
+        max_prompt_tokens: usize,
+        warn_at_tokens: usize,
+        compact_at_tokens: usize,
+    ) -> Self {
+        self.max_prompt_tokens = u32::try_from(max_prompt_tokens).ok().filter(|v| *v > 0);
+        self.context_warn_at_tokens = Some(warn_at_tokens);
+        self.context_compact_at_tokens = Some(compact_at_tokens);
         self
     }
 
@@ -1026,6 +1045,101 @@ impl TurnExecutor {
                 Some(&memory_context),
                 &extra_system_sections,
             );
+            let prompt_token_estimate: usize = messages
+                .iter()
+                .map(|message| {
+                    let content_tokens = message
+                        .content
+                        .as_deref()
+                        .map(crate::context::estimate_tokens)
+                        .unwrap_or(0);
+                    let content_part_tokens = message
+                        .content_parts
+                        .as_ref()
+                        .map(|parts| {
+                            parts
+                                .iter()
+                                .map(|part| match part {
+                                    rune_models::MessagePart::Text { text } => {
+                                        crate::context::estimate_tokens(text)
+                                    }
+                                    rune_models::MessagePart::ImageUrl { image_url } => {
+                                        crate::context::estimate_tokens(&image_url.url)
+                                    }
+                                                                    })
+                                .sum::<usize>()
+                        })
+                        .unwrap_or(0);
+                    let name_tokens = message
+                        .name
+                        .as_deref()
+                        .map(crate::context::estimate_tokens)
+                        .unwrap_or(0);
+                    let tool_result_tokens = message
+                        .tool_call_id
+                        .as_deref()
+                        .map(crate::context::estimate_tokens)
+                        .unwrap_or(0);
+                    let tool_call_tokens = message
+                        .tool_calls
+                        .as_ref()
+                        .map(|calls| {
+                            calls
+                                .iter()
+                                .map(|call| {
+                                    crate::context::estimate_tokens(&call.id)
+                                        + crate::context::estimate_tokens(&call.function.name)
+                                        + crate::context::estimate_tokens(&call.function.arguments)
+                                })
+                                .sum::<usize>()
+                        })
+                        .unwrap_or(0);
+                    content_tokens
+                        + content_part_tokens
+                        + name_tokens
+                        + tool_result_tokens
+                        + tool_call_tokens
+                        + 8
+                })
+                .sum();
+            if let Some(warn_at) = self.context_warn_at_tokens {
+                if prompt_token_estimate >= warn_at {
+                    let mode = if self
+                        .context_compact_at_tokens
+                        .is_some_and(|compact_at| prompt_token_estimate >= compact_at)
+                    {
+                        "degraded"
+                    } else {
+                        "warning"
+                    };
+                    warn!(
+                        session_id = %session_id,
+                        turn_id = %turn_id,
+                        estimated_prompt_tokens = prompt_token_estimate,
+                        warn_at_tokens = warn_at,
+                        compact_at_tokens = self.context_compact_at_tokens,
+                        mode,
+                        "prompt budget guardrail engaged"
+                    );
+                }
+            }
+            if let Some(max_prompt_tokens) = self.max_prompt_tokens {
+                let prompt_token_estimate_u32 =
+                    u32::try_from(prompt_token_estimate).unwrap_or(u32::MAX);
+                if prompt_token_estimate_u32 > max_prompt_tokens {
+                    warn!(
+                        session_id = %session_id,
+                        turn_id = %turn_id,
+                        estimated_prompt_tokens = prompt_token_estimate,
+                        max_prompt_tokens,
+                        "aborting turn before model call because prompt budget was exceeded"
+                    );
+                    return Err(RuntimeError::ContextAssembly(format!(
+                        "prompt budget exceeded before model call: estimated {} tokens > limit {}",
+                        prompt_token_estimate, max_prompt_tokens
+                    )));
+                }
+            }
 
             // Build tool definitions for the request
             let mut tool_defs: Vec<rune_models::ToolDefinition> = self
@@ -1062,7 +1176,7 @@ impl TurnExecutor {
                 messages: messages.into_iter().skip(2).collect(),
                 model: model_ref.map(str::to_owned),
                 temperature: None,
-                max_tokens: None,
+                max_tokens: self.max_prompt_tokens,
                 tools: None,
             };
 

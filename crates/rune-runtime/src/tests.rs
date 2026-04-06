@@ -24,6 +24,7 @@ use crate::compaction::NoOpCompaction;
 use crate::context::ContextAssembler;
 use crate::engine::SessionEngine;
 use crate::executor::TurnExecutor;
+use crate::RuntimeError;
 use crate::hooks::{HookEvent, HookHandler, HookRegistry};
 use crate::skill::{Skill, SkillRegistry};
 
@@ -3966,4 +3967,49 @@ async fn post_tool_hooks_can_mutate_persisted_tool_results() {
         rune_core::TranscriptItem::ToolResult { output, is_error, .. }
         if !*is_error && output == "sanitized tool output"
     )));
+}
+
+#[tokio::test]
+async fn prompt_budget_guardrail_aborts_before_model_call() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
+        "This should not be called.",
+    )]));
+    let model_handle = model.clone();
+    let executor = h
+        .turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new())
+        .with_prompt_budget_guardrails(32, 16, 24);
+
+    let err = executor
+        .execute(
+            session.id,
+            "This user message is intentionally long enough to blow past the tiny test prompt budget guardrail.",
+            None,
+        )
+        .await
+        .expect_err("turn should fail before calling the model");
+
+    assert!(matches!(err, RuntimeError::ContextAssembly(message) if message.contains("prompt budget exceeded before model call")));
+    assert!(model_handle.requests().await.is_empty());
+
+    let turns = h.turn_repo.list_by_session(session.id).await.unwrap();
+    assert_eq!(turns.len(), 1);
+    let turn = &turns[0];
+    assert_eq!(turn.status, "failed");
+    assert!(turn.ended_at.is_some());
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    assert_eq!(transcript.len(), 1);
+    assert_eq!(transcript[0].kind, "user_message");
 }
