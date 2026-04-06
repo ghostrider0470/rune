@@ -66,7 +66,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | WebSocket Gateway | ✅ 2026-03-28 | Req/res/event framing, sequence numbering, gap detection, stateVersion tracking, and RPC dispatch landed; broader parity work remains |
 | Multi-channel Routing | ✅ 2026-03-16 | Telegram plus Discord/Slack/WhatsApp/Signal adapters landed with factory wiring, inbound normalization, outbound delivery flows, and adapter test coverage |
 | Device Pairing | ✅ 2026-03-16 | Ed25519 challenge-response pairing, PostgreSQL-backed device/request persistence, SHA-256 token storage, supervisor pruning, and route/integration coverage landed |
-| LaneQueue Concurrency | ✅ 2026-03-29 | LaneQueue implemented with priority-aware per-lane caps, dedicated heartbeat/tool isolation, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
+| LaneQueue Concurrency | ✅ 2026-04-06 | LaneQueue implemented with priority-aware per-lane caps, dedicated heartbeat/tool isolation, starvation-prevention/readiness bookkeeping cleanup, TurnExecutor integration, runtime.lanes visibility, and FIFO/cancellation coverage |
 | File-based Identity | ✅ Done | SOUL.md, USER.md, AGENTS.md, TOOLS.md, IDENTITY.md |
 | Session History | ✅ Done | PostgreSQL-based (not JSONL) |
 | Hybrid Memory Search | ✅ 2026-03-16 | Persisted pgvector + tsvector hybrid search landed with MemoryEmbeddingRepo, RRF retrieval, startup bootstrap indexing, and change-driven workspace reindexing |
