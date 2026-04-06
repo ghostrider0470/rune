@@ -261,7 +261,6 @@ fn memory_bank_tool_definitions_are_registered() {
     assert!(reg.lookup("memory_bank_get").is_ok());
 }
 
-
 #[test]
 fn circuit_breaker_opens_and_resets_after_non_retriable_failure() {
     let registry = CircuitBreakerRegistry::new(2, std::time::Duration::from_secs(60));

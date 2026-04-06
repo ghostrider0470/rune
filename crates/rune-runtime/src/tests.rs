@@ -20,11 +20,11 @@ use rune_tools::{
     approval::{ApprovalRequest, ApprovalScope, RiskLevel},
 };
 
+use crate::RuntimeError;
 use crate::compaction::NoOpCompaction;
 use crate::context::ContextAssembler;
 use crate::engine::SessionEngine;
 use crate::executor::TurnExecutor;
-use crate::RuntimeError;
 use crate::hooks::{HookEvent, HookHandler, HookRegistry};
 use crate::skill::{Skill, SkillRegistry};
 
@@ -3626,7 +3626,6 @@ impl HookHandler for BlockingHookHandler {
     }
 }
 
-
 struct PostToolMutationHookHandler;
 
 #[async_trait]
@@ -3983,12 +3982,16 @@ async fn prompt_budget_guardrail_aborts_before_model_call() {
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
-    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
-        "This should not be called.",
-    )]));
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("This should not be called."),
+    ]));
     let model_handle = model.clone();
     let executor = h
-        .turn_executor(model, Arc::new(FakeToolExecutor::new(vec![])), ToolRegistry::new())
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )
         .with_prompt_budget_guardrails(32, 16, 24);
 
     let err = executor
@@ -4000,7 +4003,9 @@ async fn prompt_budget_guardrail_aborts_before_model_call() {
         .await
         .expect_err("turn should fail before calling the model");
 
-    assert!(matches!(err, RuntimeError::ContextAssembly(message) if message.contains("prompt budget exceeded before model call")));
+    assert!(
+        matches!(err, RuntimeError::ContextAssembly(message) if message.contains("prompt budget exceeded before model call"))
+    );
     assert!(model_handle.requests().await.is_empty());
 
     let turns = h.turn_repo.list_by_session(session.id).await.unwrap();

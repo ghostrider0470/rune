@@ -2274,14 +2274,19 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["enabled"], true);
     assert_eq!(payload["lanes"]["main"]["active"], 1);
     assert_eq!(payload["lanes"]["main"]["capacity"], 2);
+    assert_eq!(payload["lanes"]["main"]["queued"], 0);
     assert_eq!(payload["lanes"]["subagent"]["active"], 1);
     assert_eq!(payload["lanes"]["subagent"]["capacity"], 3);
+    assert_eq!(payload["lanes"]["subagent"]["queued"], 0);
     assert_eq!(payload["lanes"]["cron"]["active"], 0);
     assert_eq!(payload["lanes"]["cron"]["capacity"], 4);
+    assert_eq!(payload["lanes"]["cron"]["queued"], 0);
     assert_eq!(payload["lanes"]["heartbeat"]["active"], 1);
     assert_eq!(payload["lanes"]["heartbeat"]["capacity"], 1024);
+    assert_eq!(payload["lanes"]["heartbeat"]["queued"], 0);
     assert_eq!(payload["lanes"]["tools"]["active"], 1);
     assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
+    assert_eq!(payload["lanes"]["tools"]["queued"], 0);
     assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
 
     drop(main_permit);
@@ -13686,8 +13691,7 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
             && blocker["issue"] == "#905"
     }));
     assert!(blockers.iter().any(|blocker| {
-        blocker["category"] == "product-surface"
-            && blocker["issue"] == "#901, #902"
+        blocker["category"] == "product-surface" && blocker["issue"] == "#901, #902"
     }));
     assert!(blockers.iter().any(|blocker| {
         blocker["category"] == "runtime-resilience"

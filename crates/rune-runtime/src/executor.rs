@@ -651,7 +651,10 @@ impl TurnExecutor {
         let _lane_permit = if let Some(ref lq) = self.lane_queue {
             let session = self.session_repo.find_by_id(session_id).await?;
             let session_kind = parse_session_kind(&session.kind)?;
-            let lane = Lane::from_session_kind(&session_kind);
+            let lane = match session_kind {
+                SessionKind::Direct | SessionKind::Channel => Lane::Priority,
+                _ => Lane::from_session_kind(&session_kind),
+            };
             debug!(
                 approval_id = %approval_id,
                 lane = %lane,
@@ -1066,7 +1069,7 @@ impl TurnExecutor {
                                     rune_models::MessagePart::ImageUrl { image_url } => {
                                         crate::context::estimate_tokens(&image_url.url)
                                     }
-                                                                    })
+                                })
                                 .sum::<usize>()
                         })
                         .unwrap_or(0);
@@ -1500,10 +1503,15 @@ impl TurnExecutor {
                             "session_kind": format!("{:?}", session_kind),
                         });
                         let records = hook_reg.emit(&HookEvent::PostToolCall, &mut hook_ctx).await;
-                        if let Some(output) = hook_ctx.get("output").and_then(serde_json::Value::as_str) {
+                        if let Some(output) =
+                            hook_ctx.get("output").and_then(serde_json::Value::as_str)
+                        {
                             tool_result.output = output.to_string();
                         }
-                        if let Some(is_error) = hook_ctx.get("is_error").and_then(serde_json::Value::as_bool) {
+                        if let Some(is_error) = hook_ctx
+                            .get("is_error")
+                            .and_then(serde_json::Value::as_bool)
+                        {
                             tool_result.is_error = is_error;
                         }
                         if !records.is_empty() {
@@ -1838,6 +1846,13 @@ mod tests {
         }
     }
 
+    fn resume_lane_for(session_kind: SessionKind) -> Lane {
+        match session_kind {
+            SessionKind::Direct | SessionKind::Channel => Lane::Priority,
+            _ => Lane::from_session_kind(&session_kind),
+        }
+    }
+
     #[test]
     fn interactive_user_messages_stay_on_main_lane() {
         assert_eq!(
@@ -1860,6 +1875,12 @@ mod tests {
             lane_for(TriggerKind::SubagentRequest, SessionKind::Channel),
             Lane::Priority
         );
+    }
+
+    #[test]
+    fn approval_resumes_for_interactive_sessions_use_priority_lane() {
+        assert_eq!(resume_lane_for(SessionKind::Direct), Lane::Priority);
+        assert_eq!(resume_lane_for(SessionKind::Channel), Lane::Priority);
     }
 
     #[test]
