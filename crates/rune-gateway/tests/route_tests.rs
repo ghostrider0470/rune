@@ -13671,20 +13671,25 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
         "slo_defined_evidence_pending"
     );
     assert_eq!(body["replacement_readiness"]["verdict"], "not_ready");
-    assert!(body["replacement_readiness"]["summary"]
-        .as_str()
-        .unwrap()
-        .contains("not yet an honest OpenClaw replacement"));
-    let blockers = body["replacement_readiness"]["blockers"].as_array().unwrap();
+    assert!(
+        body["replacement_readiness"]["summary"]
+            .as_str()
+            .unwrap()
+            .contains("not yet an honest OpenClaw replacement")
+    );
+    let blockers = body["replacement_readiness"]["blockers"]
+        .as_array()
+        .unwrap();
     assert!(blockers.iter().any(|blocker| {
         blocker["category"] == "operational"
             && blocker["status"] == "blocked"
             && blocker["issue"] == "#905"
     }));
-    assert!(blockers.iter().any(|blocker| {
-        blocker["category"] == "documentation"
-            && blocker["issue"] == "#896"
-    }));
+    assert!(
+        blockers.iter().any(|blocker| {
+            blocker["category"] == "documentation" && blocker["issue"] == "#896"
+        })
+    );
 
     let checks = body["checks"].as_array().unwrap();
     assert!(checks.iter().any(|check| {
