@@ -1312,8 +1312,8 @@ fn replacement_readiness_report() -> ReplacementReadinessReport {
         ReplacementReadinessBlocker {
             category: "runtime-resilience".to_string(),
             status: "blocked".to_string(),
-            detail: "provider/tool circuit breakers and trustworthy log replay surfaces remain open readiness blockers".to_string(),
-            issue: Some("#903, #894".to_string()),
+            detail: "trustworthy log replay/backfill surfaces remain an open readiness blocker; provider/tool circuit breakers are already shipped".to_string(),
+            issue: Some("#894".to_string()),
         },
         ReplacementReadinessBlocker {
             category: "documentation".to_string(),
