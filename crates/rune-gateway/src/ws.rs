@@ -121,18 +121,35 @@ pub async fn logs_ws_handler(
     State(state): State<AppState>,
 ) -> Response {
     let rx = state.log_store.subscribe();
-    ws.on_upgrade(move |socket| handle_logs_socket(socket, rx, params.source))
+    let log_store = state.log_store.clone();
+    ws.on_upgrade(move |socket| handle_logs_socket(socket, rx, log_store, params.source))
 }
 
 async fn handle_logs_socket(
     mut socket: WebSocket,
     mut rx: broadcast::Receiver<crate::logging::LogEntry>,
+    log_store: crate::logging::LogStore,
     source_filter: Option<String>,
 ) {
     let _connection_guard = ActiveConnectionGuard::new();
     let source_filter = source_filter
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty());
+
+    let snapshot = log_store.snapshot().await;
+    for entry in snapshot {
+        if let Some(source) = source_filter.as_deref()
+            && !entry.target.to_ascii_lowercase().contains(source) {
+            continue;
+        }
+        let payload = match serde_json::to_string(&entry) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if socket.send(Message::Text(payload.into())).await.is_err() {
+            return;
+        }
+    }
 
     loop {
         tokio::select! {
