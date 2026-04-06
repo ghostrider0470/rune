@@ -98,6 +98,28 @@ Due jobs and reminders are claimed atomically before execution via a `claimed_at
 ---
 
 
+## Plugin inspection and reload endpoints
+
+Rune exposes operator-facing plugin inspection surfaces for discovery decisions and runtime registration state.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET /api/plugins` | | List plugin status with component counts, hook registration metadata, dynamic commands, and latest discovery decision/detail |
+| `GET /api/plugins/{name}` | | Inspect one plugin with the same runtime status fields as the list view |
+| `POST /api/plugins/reload` | | Rescan plugin directories and return a registration summary for skills, agents, commands, hooks, and MCP servers |
+
+### Plugin status response highlights
+
+Current plugin status responses expose these operator-relevant fields:
+- `kind` — plugin type (`native` or `claude`)
+- `enabled` — whether the plugin is currently active after the latest scan decision
+- `hook_registrations[]` — per-event registration metadata including deterministic zero-based `order`
+- `registered_commands[]` — plugin-provided dynamic command inventory
+- `last_decision` — latest discovery/load outcome such as `loaded`, `disabled_by_override`, `skipped_duplicate`, `rejected_incompatible`, or `parse_failed`
+- `last_detail` — concise human-readable reason attached to that decision
+
+These endpoints expose current runtime state only. They do not retain a historical failure timeline across prior reloads; use gateway logs when you need historical fault analysis.
+
 ## Session creation and subagent delegation handoff
 
 `POST /sessions` supports first-class subagent handoff fields so orchestrators can preload relevant context instead of forcing delegated agents to rediscover it.
