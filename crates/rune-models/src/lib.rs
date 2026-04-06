@@ -25,7 +25,8 @@ pub use types::{
 use rune_config::ModelProviderConfig;
 use rune_config::{ModelResolutionError, ModelsConfig};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tracing::warn;
 
 fn validate_azure_api_version(version: &str) -> Result<(), ModelError> {
@@ -260,6 +261,30 @@ pub fn provider_from_config(
 pub struct RoutedModelProvider {
     models: ModelsConfig,
     providers: HashMap<String, Arc<dyn ModelProvider>>,
+    circuit_breakers: Mutex<HashMap<String, CircuitBreakerState>>,
+    circuit_breaker_threshold: u32,
+    circuit_breaker_cooldown: Duration,
+}
+
+#[derive(Debug, Clone)]
+struct CircuitBreakerState {
+    failures: u32,
+    opened_at: Option<Instant>,
+}
+
+impl CircuitBreakerState {
+    fn new() -> Self {
+        Self {
+            failures: 0,
+            opened_at: None,
+        }
+    }
+
+    fn is_open(&self, now: Instant, cooldown: Duration) -> bool {
+        self.opened_at
+            .map(|opened_at| now.duration_since(opened_at) < cooldown)
+            .unwrap_or(false)
+    }
 }
 
 impl RoutedModelProvider {
@@ -276,12 +301,82 @@ impl RoutedModelProvider {
         Ok(Self {
             models: models.clone(),
             providers,
+            circuit_breakers: Mutex::new(HashMap::new()),
+            circuit_breaker_threshold: 3,
+            circuit_breaker_cooldown: Duration::from_secs(30),
         })
     }
 
     #[doc(hidden)]
     pub fn register_provider(&mut self, name: &str, provider: Arc<dyn ModelProvider>) {
         self.providers.insert(name.to_string(), provider);
+    }
+
+    #[doc(hidden)]
+    pub fn with_circuit_breaker_settings(mut self, threshold: u32, cooldown: Duration) -> Self {
+        self.circuit_breaker_threshold = threshold.max(1);
+        self.circuit_breaker_cooldown = cooldown;
+        self
+    }
+
+    fn circuit_allows(&self, provider_name: &str, model_ref: &str) -> Result<(), ModelError> {
+        let now = Instant::now();
+        let mut breakers = self.circuit_breakers.lock().expect("circuit breakers poisoned");
+        let state = breakers
+            .entry(provider_name.to_string())
+            .or_insert_with(CircuitBreakerState::new);
+
+        if state.is_open(now, self.circuit_breaker_cooldown) {
+            return Err(ModelError::Transient(format!(
+                "circuit breaker open for provider '{provider_name}' while routing model '{model_ref}' (cooldown {:?})",
+                self.circuit_breaker_cooldown
+            )));
+        }
+
+        if state.opened_at.is_some() {
+            state.opened_at = None;
+            state.failures = 0;
+        }
+
+        Ok(())
+    }
+
+    fn record_provider_result(
+        &self,
+        provider_name: &str,
+        model_ref: &str,
+        result: &Result<(), &ModelError>,
+    ) {
+        let mut breakers = self.circuit_breakers.lock().expect("circuit breakers poisoned");
+        let state = breakers
+            .entry(provider_name.to_string())
+            .or_insert_with(CircuitBreakerState::new);
+
+        match result {
+            Ok(()) => {
+                state.failures = 0;
+                state.opened_at = None;
+            }
+            Err(error) if error.is_retriable() => {
+                state.failures = state.failures.saturating_add(1);
+                if state.failures >= self.circuit_breaker_threshold {
+                    state.opened_at = Some(Instant::now());
+                    warn!(
+                        provider = provider_name,
+                        model = model_ref,
+                        failures = state.failures,
+                        threshold = self.circuit_breaker_threshold,
+                        cooldown_secs = self.circuit_breaker_cooldown.as_secs(),
+                        error = %error,
+                        "provider circuit breaker opened; degraded-mode fallback is now active"
+                    );
+                }
+            }
+            Err(_) => {
+                state.failures = 0;
+                state.opened_at = None;
+            }
+        }
     }
 }
 
@@ -367,6 +462,7 @@ impl ModelProvider for RoutedModelProvider {
             .models
             .resolve_model(model_ref)
             .map_err(map_resolution_error)?;
+        self.circuit_allows(&resolved.provider.name, model_ref)?;
         let provider = self.providers.get(&resolved.provider.name).ok_or_else(|| {
             ModelError::Configuration(format!(
                 "provider '{}' is configured in the model inventory but not available",
@@ -376,7 +472,13 @@ impl ModelProvider for RoutedModelProvider {
 
         let mut routed_request = request.clone();
         routed_request.model = Some(resolved.raw_model.to_string());
-        provider.complete_stream(&routed_request).await
+        let result = provider.complete_stream(&routed_request).await;
+        self.record_provider_result(
+            &resolved.provider.name,
+            model_ref,
+            &result.as_ref().map(|_| ()).map_err(|err| err),
+        );
+        result
     }
 }
 
@@ -390,6 +492,7 @@ impl RoutedModelProvider {
             .models
             .resolve_model(model_ref)
             .map_err(map_resolution_error)?;
+        self.circuit_allows(&resolved.provider.name, model_ref)?;
         let provider = self.providers.get(&resolved.provider.name).ok_or_else(|| {
             ModelError::Configuration(format!(
                 "provider '{}' is configured in the model inventory but not available",
@@ -399,7 +502,13 @@ impl RoutedModelProvider {
 
         let mut routed_request = request.clone();
         routed_request.model = Some(resolved.raw_model.to_string());
-        provider.complete(&routed_request).await
+        let result = provider.complete(&routed_request).await;
+        self.record_provider_result(
+            &resolved.provider.name,
+            model_ref,
+            &result.as_ref().map(|_| ()).map_err(|err| err),
+        );
+        result
     }
 }
 
@@ -464,6 +573,9 @@ fn map_resolution_error(error: ModelResolutionError) -> ModelError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rune_config::ConfiguredModel;
+    use std::sync::Mutex as StdMutex;
+    use tokio::sync::mpsc;
 
     fn provider_cfg(name: &str, kind: &str) -> ModelProviderConfig {
         ModelProviderConfig {
@@ -508,5 +620,215 @@ mod tests {
         let perplexity = provider_from_config(&provider_cfg("perplexity", "perplexity"))
             .expect("perplexity kind should construct openai-compatible provider");
         assert!(format!("{perplexity:?}").contains("OpenAiProvider"));
+    }
+
+    #[derive(Debug)]
+    struct SequenceProvider {
+        completions: StdMutex<Vec<Result<CompletionResponse, ModelError>>>,
+        stream_results: StdMutex<Vec<Result<String, ModelError>>>,
+    }
+
+    impl SequenceProvider {
+        fn from_completion_results(results: Vec<Result<CompletionResponse, ModelError>>) -> Self {
+            Self {
+                completions: StdMutex::new(results.into_iter().rev().collect()),
+                stream_results: StdMutex::new(Vec::new()),
+            }
+        }
+
+        fn from_stream_results(results: Vec<Result<String, ModelError>>) -> Self {
+            Self {
+                completions: StdMutex::new(Vec::new()),
+                stream_results: StdMutex::new(results.into_iter().rev().collect()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ModelProvider for SequenceProvider {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> Result<CompletionResponse, ModelError> {
+            self.completions
+                .lock()
+                .expect("completions lock poisoned")
+                .pop()
+                .expect("completion result should exist")
+        }
+
+        async fn complete_stream(
+            &self,
+            _request: &CompletionRequest,
+        ) -> Result<mpsc::Receiver<StreamEvent>, ModelError> {
+            let next = self
+                .stream_results
+                .lock()
+                .expect("stream lock poisoned")
+                .pop()
+                .expect("stream result should exist");
+            match next {
+                Ok(text) => {
+                    let (tx, rx) = mpsc::channel(2);
+                    let response = CompletionResponse {
+                        content: Some(text.clone()),
+                        finish_reason: Some(FinishReason::Stop),
+                        usage: Usage::default(),
+                        tool_calls: vec![],
+                    };
+                    tx.send(StreamEvent::TextDelta(text))
+                        .await
+                        .expect("delta send should succeed");
+                    tx.send(StreamEvent::Done(response))
+                        .await
+                        .expect("done send should succeed");
+                    Ok(rx)
+                }
+                Err(err) => Err(err),
+            }
+        }
+    }
+
+    fn routed_provider_with_fallback() -> RoutedModelProvider {
+        let models = ModelsConfig {
+            fallbacks: vec![rune_config::ModelFallbackChainConfig {
+                name: "default-chat".into(),
+                chain: vec!["primary".into(), "secondary".into()],
+            }],
+            providers: vec![
+                ModelProviderConfig {
+                    name: "primary".into(),
+                    kind: "openai".into(),
+                    base_url: String::new(),
+                    api_key: Some("test-key".into()),
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: None,
+                    model_alias: None,
+                    models: vec![ConfiguredModel::Id("primary".into())],
+                },
+                ModelProviderConfig {
+                    name: "secondary".into(),
+                    kind: "openai".into(),
+                    base_url: String::new(),
+                    api_key: Some("test-key".into()),
+                    deployment_name: None,
+                    api_version: None,
+                    api_key_env: None,
+                    model_alias: None,
+                    models: vec![ConfiguredModel::Id("secondary".into())],
+                },
+            ],
+            ..Default::default()
+        };
+
+        RoutedModelProvider::from_models_config(&models)
+            .expect("routed provider should build")
+            .with_circuit_breaker_settings(2, Duration::from_secs(60))
+    }
+
+    fn request_for(model: &str) -> CompletionRequest {
+        CompletionRequest {
+            stable_prefix_messages: None,
+            stable_prefix_tools: None,
+            model: Some(model.to_string()),
+            messages: vec![ChatMessage {
+                role: Role::User,
+                content: Some("ping".to_string()),
+                content_parts: None,
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+            temperature: None,
+            max_tokens: None,
+            tools: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn retriable_failures_open_circuit_and_fallback_succeeds() {
+        let mut routed = routed_provider_with_fallback();
+        routed.register_provider(
+            "primary",
+            Arc::new(SequenceProvider::from_completion_results(vec![
+                Err(ModelError::Transient("first".into())),
+                Err(ModelError::Transient("second".into())),
+            ])),
+        );
+        routed.register_provider(
+            "secondary",
+            Arc::new(SequenceProvider::from_completion_results(vec![
+                Ok(CompletionResponse {
+                    content: Some("fallback-ok".into()),
+                    finish_reason: Some(FinishReason::Stop),
+                    usage: Usage::default(),
+                    tool_calls: vec![],
+                }),
+                Ok(CompletionResponse {
+                    content: Some("fallback-open-circuit".into()),
+                    finish_reason: Some(FinishReason::Stop),
+                    usage: Usage::default(),
+                    tool_calls: vec![],
+                }),
+            ])),
+        );
+
+        let first = routed
+            .complete(&request_for("primary"))
+            .await
+            .expect("fallback should succeed after first failure");
+        assert_eq!(first.content.as_deref(), Some("fallback-ok"));
+
+        let second = routed
+            .complete(&request_for("primary"))
+            .await
+            .expect("fallback should succeed after circuit opens");
+        assert_eq!(second.content.as_deref(), Some("fallback-open-circuit"));
+
+        let state = routed
+            .circuit_breakers
+            .lock()
+            .expect("circuit breaker lock poisoned");
+        let primary = state.get("primary").expect("primary breaker should exist");
+        assert_eq!(primary.failures, 2);
+        assert!(primary.opened_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn stream_calls_obey_open_circuit() {
+        let mut routed = routed_provider_with_fallback();
+        routed.register_provider(
+            "primary",
+            Arc::new(SequenceProvider::from_stream_results(vec![
+                Err(ModelError::Transient("stream fail".into())),
+                Ok("should-not-run".into()),
+            ])),
+        );
+        routed.register_provider(
+            "secondary",
+            Arc::new(SequenceProvider::from_stream_results(vec![Ok(
+                "secondary-stream".into(),
+            )])),
+        );
+        routed.circuit_breaker_threshold = 1;
+
+        let err = routed
+            .complete_stream(&request_for("primary"))
+            .await
+            .expect_err("first stream call should fail and open circuit");
+        assert!(err.is_retriable());
+
+        let err = routed
+            .complete_stream(&request_for("primary"))
+            .await
+            .expect_err("second stream call should be blocked by open circuit");
+        match err {
+            ModelError::Transient(message) => {
+                assert!(message.contains("circuit breaker open"));
+                assert!(message.contains("primary"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
