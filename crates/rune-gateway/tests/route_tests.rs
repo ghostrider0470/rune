@@ -4694,6 +4694,7 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
                     "ws_connections": ws_connections
                 },
                 "capabilities": {
+                    "schema_version": 2,
                     "mode": "standalone",
                     "updated_at": "2026-03-29T00:00:00Z",
                     "storage_backend": "sqlite",
@@ -4712,8 +4713,10 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
                         "advertised_addr": null,
                         "roles": ["gateway"],
                         "capabilities_version": 2,
-                    "capability_hash": "cap-peer-a"
+                        "capability_hash": format!("cap-{}", id)
                     },
+                    "roles": ["gateway"],
+                    "peer_ids": [],
                     "instance_id": id,
                     "instance_name": id,
                     "peer_count": 0,
@@ -4772,9 +4775,9 @@ async fn delegation_plan_selects_least_busy_healthy_peer() {
     assert_eq!(json["selected_peer"]["id"], "peer-b");
     assert_eq!(json["receiver"]["instance_id"], "peer-b");
     assert_eq!(json["receiver"]["instance_name"], "peer-b");
-    assert_eq!(json["receiver"]["transport"], "http");
-    assert_eq!(json["selected_peer"]["capabilities_version"], 1);
-    assert_eq!(json["selected_peer"]["capability_hash"], "cap-peer-a");
+    assert_eq!(json["receiver"]["transport"], "filesystem");
+    assert_eq!(json["selected_peer"]["capabilities_version"], 2);
+    assert_eq!(json["selected_peer"]["capability_hash"], "cap-peer-b");
     assert_eq!(json["selected_peer"]["comms_transport"], "filesystem");
     assert_eq!(
         json["receiver"]["submit_url"],
@@ -5383,7 +5386,7 @@ async fn instance_health_preserves_last_seen_and_observed_status_from_peer_paylo
             "/api/v1/instance/health",
             axum::routing::get(|| async {
                 axum::Json(serde_json::json!({
-                    "status": "healthy",
+                    "status": "ok",
                     "service": "rune-gateway",
                     "version": "0.1.0",
                     "uptime_seconds": 42,
@@ -5393,6 +5396,7 @@ async fn instance_health_preserves_last_seen_and_observed_status_from_peer_paylo
                         "ws_connections": 3
                     },
                     "capabilities": {
+                        "schema_version": 1,
                         "mode": "direct",
                         "updated_at": "2026-03-29T10:00:00Z",
                         "storage_backend": "sqlite",
@@ -5413,6 +5417,8 @@ async fn instance_health_preserves_last_seen_and_observed_status_from_peer_paylo
                             "capabilities_version": 1,
                             "capability_hash": "cap-peer-a"
                         },
+                        "roles": ["gateway"],
+                        "peer_ids": [],
                         "instance_id": "peer-a",
                         "instance_name": "Peer A",
                         "peer_count": 0,
@@ -5448,10 +5454,113 @@ async fn instance_health_preserves_last_seen_and_observed_status_from_peer_paylo
     let peer = json["peers"].as_array().unwrap().first().unwrap();
     assert_eq!(peer["id"], "peer-a");
     assert_eq!(peer["status"], "healthy");
-    assert_eq!(peer["observed_status"], "healthy");
+    assert_eq!(peer["observed_status"], "ok");
     assert!(peer["last_seen_at"].is_string());
     assert_eq!(peer["name"], "Peer A");
     assert_eq!(peer["capability_hash"], "cap-peer-a");
+}
+
+#[tokio::test]
+async fn instance_health_include_peers_false_breaks_same_host_recursion() {
+    async fn spawn_peer_with_target(id: &'static str, target_url: String) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut config = AppConfig::default();
+            config.instance.id = id.to_string();
+            config.instance.name = id.to_string();
+            config.instance.peers = vec![rune_config::PeerConfig {
+                id: format!("target-for-{id}"),
+                health_url: target_url,
+            }];
+            let (app, _state) = build_test_app_parts(config, None);
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}/api/v1/instance/health")
+    }
+
+    let final_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let final_addr = final_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let payload = serde_json::json!({
+            "status": "ok",
+            "service": "rune-gateway",
+            "version": "0.1.0",
+            "uptime_seconds": 7,
+            "load": {
+                "session_count": 1,
+                "ws_subscribers": 0,
+                "ws_connections": 0
+            },
+            "capabilities": {
+                "schema_version": 2,
+                "mode": "standalone",
+                "updated_at": "2026-03-29T00:00:00Z",
+                "storage_backend": "sqlite",
+                "pgvector": false,
+                "memory_mode": "semantic",
+                "browser": false,
+                "mcp_servers": 0,
+                "tts": false,
+                "stt": false,
+                "channels": [],
+                "approval_mode": "manual",
+                "security_posture": "standard",
+                "identity": {
+                    "id": "terminal-peer",
+                    "name": "terminal-peer",
+                    "advertised_addr": null,
+                    "roles": ["gateway"],
+                    "capabilities_version": 2,
+                    "capability_hash": "cap-terminal-peer"
+                },
+                "roles": ["gateway"],
+                "peer_ids": [],
+                "instance_id": "terminal-peer",
+                "instance_name": "terminal-peer",
+                "peer_count": 0,
+                "configured_models": [],
+                "active_projects": [],
+                "comms_transport": "filesystem"
+            },
+            "peers": []
+        });
+        let app = axum::Router::new().route(
+            "/api/v1/instance/health",
+            axum::routing::get(move || {
+                let payload = payload.clone();
+                async move { axum::Json(payload) }
+            }),
+        );
+        axum::serve(final_listener, app).await.unwrap();
+    });
+
+    let final_url = format!("http://{final_addr}/api/v1/instance/health");
+    let middle_url = spawn_peer_with_target("middle-peer", final_url).await;
+
+    let mut config = AppConfig::default();
+    config.instance.peers = vec![rune_config::PeerConfig {
+        id: "middle-peer".to_string(),
+        health_url: middle_url,
+    }];
+
+    let (app, _state) = build_test_app_parts(config, None);
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/instance/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json = body_json(response).await;
+    let peer = json["peers"].as_array().unwrap().first().unwrap();
+    assert_eq!(peer["id"], "middle-peer");
+    assert_eq!(peer["status"], "healthy");
+    assert_eq!(peer["observed_status"], "ok");
+    assert!(peer["last_seen_at"].is_string());
 }
 
 #[tokio::test]

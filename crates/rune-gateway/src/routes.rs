@@ -299,8 +299,14 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
     }))
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct InstanceHealthQuery {
+    pub include_peers: Option<bool>,
+}
+
 pub async fn instance_health(
     State(state): State<AppState>,
+    Query(query): Query<InstanceHealthQuery>,
 ) -> Result<Json<InstanceHealthResponse>, GatewayError> {
     let sessions = state
         .session_repo
@@ -308,7 +314,11 @@ pub async fn instance_health(
         .await
         .map_err(|e| GatewayError::Internal(e.to_string()))?;
 
-    let peers = collect_peer_health(state.capabilities.peers.clone()).await;
+    let peers = if query.include_peers.unwrap_or(true) {
+        collect_peer_health(state.capabilities.peers.clone()).await
+    } else {
+        Vec::new()
+    };
 
     Ok(Json(InstanceHealthResponse {
         status: "ok".to_string(),
@@ -760,26 +770,36 @@ async fn collect_peer_health(
     for peer in peers {
         let started = Instant::now();
         let checked_at = Utc::now().to_rfc3339();
-        let item = match client.get(&peer.health_url).send().await {
+        let separator = if peer.health_url.contains('?') { '&' } else { '?' };
+        let probe_url = format!("{}{}include_peers=false", peer.health_url, separator);
+        let item = match client.get(&probe_url).send().await {
             Ok(response) => {
                 let latency_ms = Some(started.elapsed().as_millis());
                 let status_code = response.status();
                 let payload = response.json::<InstanceHealthResponse>().await;
                 match payload {
-                    Ok(payload) => PeerHealthResponse {
+                    Ok(payload) => {
+                        let observed_status = payload.status.clone();
+                        PeerHealthResponse {
                         id: peer.id,
                         name: payload.capabilities.identity.name.clone(),
                         health_url: peer.health_url,
-                        status: if status_code.is_success() {
+                        status: if status_code.is_success() && observed_status == "ok" {
                             "healthy".to_string()
                         } else {
                             "degraded".to_string()
                         },
-                        detail: status_code.to_string(),
+                        detail: if status_code.is_success() && observed_status == "ok" {
+                            status_code.to_string()
+                        } else if status_code.is_success() {
+                            format!("{} (peer reported status={observed_status})", status_code)
+                        } else {
+                            status_code.to_string()
+                        },
                         checked_at: checked_at.clone(),
                         latency_ms,
                         last_seen_at: Some(checked_at.clone()),
-                        observed_status: payload.status.clone(),
+                        observed_status,
                         load: Some(payload.load),
                         advertised_addr: payload.capabilities.identity.advertised_addr,
                         roles: payload.capabilities.identity.roles,
@@ -790,6 +810,7 @@ async fn collect_peer_health(
                         comms_transport: Some(payload.capabilities.comms_transport),
                         configured_models: payload.capabilities.configured_models,
                         active_projects: payload.capabilities.active_projects,
+                    }
                     },
                     Err(error) => PeerHealthResponse {
                         id: peer.id.clone(),
