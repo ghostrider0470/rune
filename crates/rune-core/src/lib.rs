@@ -293,6 +293,17 @@ pub struct HookExecutionRecord {
     pub reason: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookEventSummary {
+    pub event: String,
+    pub total: usize,
+    pub applied: usize,
+    pub warned: usize,
+    pub blocked: usize,
+    pub suppressed: usize,
+    pub skipped: usize,
+}
+
 /// Transcript entries persisted during session execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

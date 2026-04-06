@@ -3143,14 +3143,8 @@ mod tests {
 
     #[test]
     fn parse_rust_pattern_validate() {
-        let cli = Cli::try_parse_from([
-            "rune",
-            "rust-pattern",
-            "validate",
-            "--path",
-            "crates",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["rune", "rust-pattern", "validate", "--path", "crates"]).unwrap();
         match cli.command {
             Command::RustPattern {
                 action: RustPatternAction::Validate { path },

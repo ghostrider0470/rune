@@ -42,6 +42,7 @@ For a single emitted event:
 - suppression rules may suppress handlers before execution
 - the runtime emits one structured execution record per handler attempt or pre-execution disposition
 - pre-tool and post-tool execution records are appended to the session transcript as structured `hook_execution_note` items with the event name (`pre_tool_call` or `post_tool_call`) plus a JSON array of execution records, each carrying deterministic `order` metadata
+- mutation summaries now distinguish `added`, `removed`, and `modified` fields so operators can see whether a hook introduced, deleted, or rewrote execution context state
 - fail-closed pre-tool handlers stop the tool call before execution and the recorded block reason is surfaced as the tool result error text
 
 Hook context is event-scoped working state, not a durable plugin state store.

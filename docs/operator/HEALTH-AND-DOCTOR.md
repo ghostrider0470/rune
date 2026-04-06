@@ -85,8 +85,25 @@ Current target SLOs:
 - recovery time after a detected stuck turn: `<= 60s`
 
 Current readiness semantics:
-- doctor surfaces `readiness_status=blocked` until Rune exposes live evidence for queue delay, stuck-turn rate, and recovery-time compliance
+- doctor surfaces `readiness_status=slo_defined_evidence_pending` until Rune exposes live evidence for queue delay, stuck-turn rate, and recovery-time compliance
 - defined targets without live evidence are **not** treated as ready
 - operators should treat `readiness_summary` as the canonical explanation for why readiness is blocked or satisfied
+- doctor also emits a `replacement_readiness` section with a direct `verdict`, concise `summary`, and explicit blocker categories (`operational`, `product-surface`, `runtime-resilience`, `documentation`) mapped to canonical GitHub issues
 
 This keeps readiness claims honest: the SLO target exists now, but replacement-readiness remains blocked until the runtime publishes those signals.
+
+## Replacement-readiness verdict
+
+`/api/doctor/run`, `/api/doctor/results`, and `rune doctor` now answer the operator question directly: is Rune an honest OpenClaw replacement yet?
+
+Current contract:
+- `replacement_readiness.verdict=not_ready` means Rune must not be presented as a full replacement yet
+- `replacement_readiness.summary` is the short operator-facing verdict sentence
+- `replacement_readiness.blockers[]` is the machine-readable blocker list for automation and dashboards
+- each blocker includes a category, normalized status, concise detail, and canonical issue reference when the blocker maps to tracked roadmap work
+
+Current blocker mapping:
+- `operational` → missing live readiness evidence (`#905`)
+- `product-surface` → queue isolation / starvation prevention and turn-budget guardrails (`#901`, `#902`)
+- `runtime-resilience` → circuit breakers and trustworthy log replay/backfill (`#903`, `#894`)
+- `documentation` → parity/operator evidence reconciliation (`#896`)

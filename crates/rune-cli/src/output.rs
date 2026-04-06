@@ -856,6 +856,8 @@ pub struct DoctorReport {
     #[serde(default)]
     pub readiness_summary: Option<String>,
     #[serde(default)]
+    pub replacement_readiness: Option<ReplacementReadinessReport>,
+    #[serde(default)]
     pub paths: Option<DoctorPathSummary>,
     #[serde(default)]
     pub topology: Option<DoctorTopologySummary>,
@@ -864,6 +866,22 @@ pub struct DoctorReport {
     #[serde(default)]
     pub memory_hierarchy: Option<DoctorMemoryHierarchySummary>,
     pub run_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplacementReadinessReport {
+    pub verdict: String,
+    pub summary: String,
+    pub blockers: Vec<ReplacementReadinessBlocker>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplacementReadinessBlocker {
+    pub category: String,
+    pub status: String,
+    pub detail: String,
+    #[serde(default)]
+    pub issue: Option<String>,
 }
 
 impl fmt::Display for DoctorReport {
@@ -881,6 +899,30 @@ impl fmt::Display for DoctorReport {
                     .map(|summary| format!(" — {summary}"))
                     .unwrap_or_default()
             )?;
+        }
+        if let Some(replacement) = &self.replacement_readiness {
+            writeln!(
+                f,
+                "Replacement readiness: {} — {}",
+                replacement.verdict, replacement.summary
+            )?;
+            if !replacement.blockers.is_empty() {
+                writeln!(f, "Replacement blockers:")?;
+                for blocker in &replacement.blockers {
+                    writeln!(
+                        f,
+                        "  {}: {} — {}{}",
+                        blocker.category,
+                        blocker.status,
+                        blocker.detail,
+                        blocker
+                            .issue
+                            .as_ref()
+                            .map(|issue| format!(" [issue: {issue}]"))
+                            .unwrap_or_default()
+                    )?;
+                }
+            }
         }
         if let Some(topology) = &self.topology {
             writeln!(
@@ -6216,8 +6258,18 @@ mod tests {
     fn render_doctor_report() {
         let r = DoctorReport {
             overall: "degraded".into(),
-            readiness_status: Some("blocked".into()),
-            readiness_summary: Some("targets defined but live evidence missing".into()),
+            readiness_status: Some("slo_defined_evidence_pending".into()),
+            readiness_summary: Some("targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence".into()),
+            replacement_readiness: Some(ReplacementReadinessReport {
+                verdict: "not_ready".into(),
+                summary: "Rune is not yet an honest OpenClaw replacement; 4 blocker categories remain open".into(),
+                blockers: vec![ReplacementReadinessBlocker {
+                    category: "operational".into(),
+                    status: "blocked".into(),
+                    detail: "live queue-delay, stuck-turn-rate, and recovery-time readiness evidence is not exposed yet".into(),
+                    issue: Some("#905".into()),
+                }],
+            }),
             checks: vec![
                 DoctorCheck {
                     name: "config".into(),
@@ -6256,8 +6308,8 @@ mod tests {
                 promotion: "L2 hits become L1 candidates when reused through stable prompt prefixes on later turns/sessions".into(),
                 demotion: "compaction checkpoints persist stale L0 context to warm/cold memory after 96000 tokens".into(),
                 metrics: "offline doctor report has no live cache metrics; run doctor against the gateway for prompt_cache_rows/cached_tokens totals".into(),
-                readiness_status: Some("blocked".into()),
-                readiness_summary: Some("targets defined but live evidence missing".into()),
+                readiness_status: Some("slo_defined_evidence_pending".into()),
+                readiness_summary: Some("targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence".into()),
                 last_checkpoint_at: None,
                 prompt_cache_rows: 0,
                 cached_tokens: 0,
@@ -6291,7 +6343,10 @@ mod tests {
         };
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("Overall: degraded"));
-        assert!(out.contains("Readiness: blocked — targets defined but live evidence missing"));
+        assert!(out.contains("Readiness: slo_defined_evidence_pending — targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence"));
+        assert!(out.contains("Replacement readiness: not_ready — Rune is not yet an honest OpenClaw replacement; 4 blocker categories remain open"));
+        assert!(out.contains("Replacement blockers:"));
+        assert!(out.contains("operational: blocked — live queue-delay, stuck-turn-rate, and recovery-time readiness evidence is not exposed yet [issue: #905]"));
         assert!(out.contains(
             "Topology: deployment=single-process, database=memory, models=local, search=embedded"
         ));
@@ -9841,7 +9896,6 @@ impl fmt::Display for HookCheckResponse {
         write!(f, "  {}", self.detail)
     }
 }
-
 
 #[cfg(test)]
 mod plugin_reload_output_tests {

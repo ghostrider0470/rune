@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rune_core::{HookExecutionRecord, HookMutationSummary, HookPolicyOutcome};
+use rune_core::{HookEventSummary, HookExecutionRecord, HookMutationSummary, HookPolicyOutcome};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
@@ -142,8 +142,35 @@ pub struct HookRegistrationRecord {
     pub plugin: String,
     pub order: usize,
 }
-
 type HandlerMap = HashMap<HookEvent, Vec<Box<dyn HookHandler>>>;
+
+fn mutation_status(
+    before: Option<&serde_json::Value>,
+    after: Option<&serde_json::Value>,
+) -> Option<&'static str> {
+    match (before, after) {
+        (Some(before), Some(after)) if before != after => Some("modified"),
+        (Some(_), None) => Some("removed"),
+        (None, Some(_)) => Some("modified"),
+        _ => None,
+    }
+}
+
+fn push_mutation(
+    mutations: &mut Vec<HookMutationSummary>,
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    field: &str,
+    detail: Option<String>,
+) {
+    if let Some(status) = mutation_status(before.get(field), after.get(field)) {
+        mutations.push(HookMutationSummary {
+            field: field.to_string(),
+            status: status.to_string(),
+            detail,
+        });
+    }
+}
 
 fn diff_context_mutations(
     before: &serde_json::Value,
@@ -151,21 +178,8 @@ fn diff_context_mutations(
 ) -> Vec<HookMutationSummary> {
     let mut mutations = Vec::new();
 
-    if before.get("arguments") != after.get("arguments") {
-        mutations.push(HookMutationSummary {
-            field: "arguments".to_string(),
-            status: "modified".to_string(),
-            detail: None,
-        });
-    }
-
-    if before.get("output") != after.get("output") {
-        mutations.push(HookMutationSummary {
-            field: "output".to_string(),
-            status: "modified".to_string(),
-            detail: None,
-        });
-    }
+    push_mutation(&mut mutations, before, after, "arguments", None);
+    push_mutation(&mut mutations, before, after, "output", None);
 
     if before.get("hook_blocked") != after.get("hook_blocked") {
         let status = if after
@@ -175,7 +189,8 @@ fn diff_context_mutations(
         {
             "set_true"
         } else {
-            "modified"
+            mutation_status(before.get("hook_blocked"), after.get("hook_blocked"))
+                .unwrap_or("modified")
         };
         mutations.push(HookMutationSummary {
             field: "hook_blocked".to_string(),
@@ -184,25 +199,19 @@ fn diff_context_mutations(
         });
     }
 
-    if before.get("hook_block_reason") != after.get("hook_block_reason") {
-        mutations.push(HookMutationSummary {
-            field: "hook_block_reason".to_string(),
-            status: "modified".to_string(),
-            detail: after
-                .get("hook_block_reason")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string),
-        });
-    }
+    push_mutation(
+        &mut mutations,
+        before,
+        after,
+        "hook_block_reason",
+        after
+            .get("hook_block_reason")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+    );
 
     for field in ["approval_required", "approval_mode"] {
-        if before.get(field) != after.get(field) {
-            mutations.push(HookMutationSummary {
-                field: field.to_string(),
-                status: "modified".to_string(),
-                detail: None,
-            });
-        }
+        push_mutation(&mut mutations, before, after, field, None);
     }
 
     mutations
@@ -267,6 +276,39 @@ impl HookRegistry {
             }
         }
         records
+    }
+
+    /// Aggregate execution outcomes for the provided records in canonical event order.
+    #[must_use]
+    pub fn summarize_records(records: &[HookExecutionRecord]) -> Vec<HookEventSummary> {
+        let mut per_event: HashMap<String, HookEventSummary> = HashMap::new();
+        for record in records {
+            let entry = per_event
+                .entry(record.event.clone())
+                .or_insert_with(|| HookEventSummary {
+                    event: record.event.clone(),
+                    ..HookEventSummary::default()
+                });
+            entry.total += 1;
+            match record.outcome {
+                HookPolicyOutcome::Applied => entry.applied += 1,
+                HookPolicyOutcome::Warned => entry.warned += 1,
+                HookPolicyOutcome::Blocked => entry.blocked += 1,
+                HookPolicyOutcome::Suppressed => entry.suppressed += 1,
+                HookPolicyOutcome::Skipped => entry.skipped += 1,
+            }
+        }
+
+        let mut summaries = Vec::new();
+        for event in HookEvent::all() {
+            if let Some(summary) = per_event.remove(event.as_str()) {
+                summaries.push(summary);
+            }
+        }
+        let mut extras: Vec<_> = per_event.into_values().collect();
+        extras.sort_by(|a, b| a.event.cmp(&b.event));
+        summaries.extend(extras);
+        summaries
     }
 
     /// Emit a hook event, calling all registered handlers in order.
@@ -851,5 +893,80 @@ mod tests {
             ctx["hook_block_reason"],
             "hook `mutating-fail-closed-plugin` failed: must block after mutation"
         );
+    }
+
+    #[test]
+    fn summarize_records_groups_outcomes_by_event() {
+        let records = vec![
+            HookExecutionRecord {
+                plugin: "alpha".into(),
+                event: "pre_tool_call".into(),
+                order: 0,
+                outcome: HookPolicyOutcome::Applied,
+                mutations: Vec::new(),
+                reason: None,
+            },
+            HookExecutionRecord {
+                plugin: "beta".into(),
+                event: "pre_tool_call".into(),
+                order: 1,
+                outcome: HookPolicyOutcome::Blocked,
+                mutations: Vec::new(),
+                reason: Some("boom".into()),
+            },
+            HookExecutionRecord {
+                plugin: "gamma".into(),
+                event: "post_tool_call".into(),
+                order: 0,
+                outcome: HookPolicyOutcome::Suppressed,
+                mutations: Vec::new(),
+                reason: Some("suppressed".into()),
+            },
+        ];
+
+        let summary = HookRegistry::summarize_records(&records);
+        assert_eq!(summary.len(), 2);
+        assert_eq!(summary[0].event, "pre_tool_call");
+        assert_eq!(summary[0].total, 2);
+        assert_eq!(summary[0].applied, 1);
+        assert_eq!(summary[0].blocked, 1);
+        assert_eq!(summary[1].event, "post_tool_call");
+        assert_eq!(summary[1].total, 1);
+        assert_eq!(summary[1].suppressed, 1);
+    }
+
+    #[test]
+    fn diff_context_mutations_reports_added_removed_and_modified_fields() {
+        let before = serde_json::json!({
+            "arguments": {"command": "ls"},
+            "approval_mode": "manual",
+            "hook_block_reason": "old reason"
+        });
+        let after = serde_json::json!({
+            "arguments": {"command": "pwd"},
+            "approval_required": true,
+            "hook_block_reason": "new reason"
+        });
+
+        let mutations = diff_context_mutations(&before, &after);
+
+        assert!(
+            mutations
+                .iter()
+                .any(|mutation| { mutation.field == "arguments" && mutation.status == "modified" })
+        );
+        assert!(mutations.iter().any(|mutation| {
+            mutation.field == "approval_required" && mutation.status == "modified"
+        }));
+        assert!(
+            mutations.iter().any(|mutation| {
+                mutation.field == "approval_mode" && mutation.status == "removed"
+            })
+        );
+        assert!(mutations.iter().any(|mutation| {
+            mutation.field == "hook_block_reason"
+                && mutation.status == "modified"
+                && mutation.detail.as_deref() == Some("new reason")
+        }));
     }
 }

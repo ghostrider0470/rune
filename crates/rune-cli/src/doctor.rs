@@ -17,6 +17,7 @@ use std::time::Duration;
 use crate::output::{
     DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorContextTierCounter,
     DoctorMemoryHierarchySummary, DoctorPathSummary, DoctorReport, DoctorTopologySummary,
+    ReplacementReadinessBlocker, ReplacementReadinessReport,
 };
 use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
@@ -1279,7 +1280,6 @@ fn resolved_vector_backend(config: &AppConfig) -> String {
     }
 }
 
-
 const READINESS_INTERACTIVE_RESPONSE_SLO_MS: u64 = 2_000;
 const READINESS_QUEUE_DELAY_SLO_MS: u64 = 500;
 const READINESS_STUCK_TURN_RATE_SLO_PERCENT: f64 = 1.0;
@@ -1287,12 +1287,49 @@ const READINESS_RECOVERY_TIME_SLO_SECONDS: u64 = 60;
 
 fn readiness_summary_message() -> String {
     format!(
-        "targets: interactive_response<= {}ms, queue_delay<= {}ms, stuck_turn_rate<= {:.1}%, recovery_time<= {}s; gateway doctor currently reports blocker status until live responsiveness metrics ship",
+        "targets: interactive_response<= {}ms, queue_delay<= {}ms, stuck_turn_rate<= {:.1}%, recovery_time<= {}s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence",
         READINESS_INTERACTIVE_RESPONSE_SLO_MS,
         READINESS_QUEUE_DELAY_SLO_MS,
         READINESS_STUCK_TURN_RATE_SLO_PERCENT,
         READINESS_RECOVERY_TIME_SLO_SECONDS
     )
+}
+
+fn replacement_readiness_report() -> ReplacementReadinessReport {
+    let blockers = vec![
+        ReplacementReadinessBlocker {
+            category: "operational".to_string(),
+            status: "blocked".to_string(),
+            detail: "live queue-delay, stuck-turn-rate, and recovery-time readiness evidence is not exposed yet".to_string(),
+            issue: Some("#905".to_string()),
+        },
+        ReplacementReadinessBlocker {
+            category: "product-surface".to_string(),
+            status: "blocked".to_string(),
+            detail: "lane starvation prevention and turn-budget guardrails are still open readiness blockers".to_string(),
+            issue: Some("#901, #902".to_string()),
+        },
+        ReplacementReadinessBlocker {
+            category: "runtime-resilience".to_string(),
+            status: "blocked".to_string(),
+            detail: "provider/tool circuit breakers and trustworthy log replay surfaces remain open readiness blockers".to_string(),
+            issue: Some("#903, #894".to_string()),
+        },
+        ReplacementReadinessBlocker {
+            category: "documentation".to_string(),
+            status: "blocked".to_string(),
+            detail: "parity and operator docs still need reconciliation with shipped replacement evidence".to_string(),
+            issue: Some("#896".to_string()),
+        },
+    ];
+    ReplacementReadinessReport {
+        verdict: "not_ready".to_string(),
+        summary: format!(
+            "Rune is not yet an honest OpenClaw replacement; {} blocker categories remain open",
+            blockers.len()
+        ),
+        blockers,
+    }
 }
 
 fn configured_repo_count(config: &AppConfig) -> usize {
@@ -1391,8 +1428,9 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
 
     DoctorReport {
         overall,
-        readiness_status: Some("blocked".to_string()),
+        readiness_status: Some("slo_defined_evidence_pending".to_string()),
         readiness_summary: Some(readiness_summary_message()),
+        replacement_readiness: Some(replacement_readiness_report()),
         checks,
         paths: Some(DoctorPathSummary {
             profile: config.paths.profile().as_str().to_string(),
@@ -1453,7 +1491,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
                     l3_ready
                 )
             },
-            readiness_status: Some("blocked".to_string()),
+            readiness_status: Some("slo_defined_evidence_pending".to_string()),
             readiness_summary: Some(readiness_summary_message()),
             last_checkpoint_at: None,
             prompt_cache_rows: 0,
