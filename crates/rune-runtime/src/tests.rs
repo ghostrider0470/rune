@@ -3625,6 +3625,25 @@ impl HookHandler for BlockingHookHandler {
     }
 }
 
+
+struct PostToolMutationHookHandler;
+
+#[async_trait]
+impl HookHandler for PostToolMutationHookHandler {
+    async fn handle(
+        &self,
+        _event: &HookEvent,
+        context: &mut serde_json::Value,
+    ) -> Result<(), String> {
+        context["output"] = serde_json::Value::String("sanitized tool output".to_string());
+        Ok(())
+    }
+
+    fn plugin_name(&self) -> &str {
+        "post-tool-mutation-hook"
+    }
+}
+
 struct ApprovalMetadataHookHandler;
 
 #[async_trait]
@@ -3879,4 +3898,72 @@ async fn stale_running_turn_is_failed_before_new_execution_starts() {
     assert_eq!(status, "failed");
     assert!(note.contains("stuck_turn_recovered"));
     assert!(note.contains("fresh turn can continue"));
+}
+
+#[tokio::test]
+async fn post_tool_hooks_can_mutate_persisted_tool_results() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::tool_call_response("exec", r#"{"command":"echo hi"}"#),
+        FakeModelProvider::text_response("done"),
+    ]));
+
+    let mut registry = ToolRegistry::new();
+    registry.register(RtToolDefinition {
+        name: "exec".to_string(),
+        description: "Execute a shell command".to_string(),
+        parameters: serde_json::json!({"type": "object"}),
+        category: ToolCategory::ProcessExec,
+        requires_approval: false,
+    });
+
+    let hook_registry = Arc::new(HookRegistry::new());
+    hook_registry
+        .register(
+            HookEvent::PostToolCall,
+            Box::new(PostToolMutationHookHandler),
+        )
+        .await;
+
+    let executor = h
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::new(vec!["raw tool output".to_string()])),
+            registry,
+        )
+        .with_hook_registry(hook_registry);
+
+    let (turn, _) = executor.execute(session.id, "Run it", None).await.unwrap();
+    assert_eq!(turn.status, "completed");
+
+    let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
+    let items: Vec<rune_core::TranscriptItem> = transcript
+        .iter()
+        .map(|row| serde_json::from_value(row.payload.clone()).unwrap())
+        .collect();
+
+    assert!(items.iter().any(|item| matches!(item,
+        rune_core::TranscriptItem::HookExecutionNote { event, records }
+        if event == "post_tool_call" && records.iter().any(|record|
+            record.outcome == rune_core::HookPolicyOutcome::Applied
+                && record.mutations.iter().any(|mutation|
+                    mutation.field == "output" && mutation.status == "modified"
+                )
+        )
+    )));
+
+    assert!(items.iter().any(|item| matches!(item,
+        rune_core::TranscriptItem::ToolResult { output, is_error, .. }
+        if !*is_error && output == "sanitized tool output"
+    )));
 }

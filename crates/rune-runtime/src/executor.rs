@@ -1363,27 +1363,26 @@ impl TurnExecutor {
                         }
                     };
 
-                    // Persist tool result
-                    let result_item = TranscriptItem::ToolResult {
-                        tool_call_id: tool_result.tool_call_id,
-                        output: tool_result.output.clone(),
-                        is_error: tool_result.is_error,
-                        tool_execution_id: tool_result.tool_execution_id,
-                    };
-                    self.append_transcript(session_id, Some(turn_id.into_uuid()), &result_item)
-                        .await?;
+                    let mut tool_result = tool_result;
 
-                    // Emit PostToolCall hook
+                    // Emit PostToolCall hook before persisting the final transcript item so hooks can
+                    // deterministically sanitize/annotate outputs while preserving observability notes.
                     if let Some(ref hook_reg) = self.hook_registry {
                         let mut hook_ctx = serde_json::json!({
                             "tool_name": tc.function.name,
                             "session_id": session_id.to_string(),
                             "turn_id": turn_id.into_uuid().to_string(),
-                            "output": tool_result.output,
+                            "output": tool_result.output.clone(),
                             "is_error": tool_result.is_error,
                             "session_kind": format!("{:?}", session_kind),
                         });
                         let records = hook_reg.emit(&HookEvent::PostToolCall, &mut hook_ctx).await;
+                        if let Some(output) = hook_ctx.get("output").and_then(serde_json::Value::as_str) {
+                            tool_result.output = output.to_string();
+                        }
+                        if let Some(is_error) = hook_ctx.get("is_error").and_then(serde_json::Value::as_bool) {
+                            tool_result.is_error = is_error;
+                        }
                         if !records.is_empty() {
                             let note = TranscriptItem::HookExecutionNote {
                                 event: HookEvent::PostToolCall.as_str().to_string(),
@@ -1393,6 +1392,16 @@ impl TurnExecutor {
                                 .await?;
                         }
                     }
+
+                    // Persist tool result
+                    let result_item = TranscriptItem::ToolResult {
+                        tool_call_id: tool_result.tool_call_id,
+                        output: tool_result.output.clone(),
+                        is_error: tool_result.is_error,
+                        tool_execution_id: tool_result.tool_execution_id,
+                    };
+                    self.append_transcript(session_id, Some(turn_id.into_uuid()), &result_item)
+                        .await?;
                 }
 
                 // Loop back to model
