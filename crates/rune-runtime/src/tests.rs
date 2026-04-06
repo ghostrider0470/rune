@@ -3817,7 +3817,7 @@ async fn pre_tool_hooks_can_mark_approval_relevant_metadata_without_bypassing_ap
         if event == "pre_tool_call" && records.iter().any(|record|
             record.outcome == rune_core::HookPolicyOutcome::Applied
                 && record.mutations.iter().any(|mutation|
-                    mutation.field == "approval_required" && mutation.status == "modified"
+                    mutation.field == "approval_required" && matches!(mutation.status.as_str(), "added" | "set_true" | "modified")
                 )
         )
     )));
