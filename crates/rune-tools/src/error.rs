@@ -26,4 +26,7 @@ pub enum ToolError {
 
     #[error("approval denied for tool {tool}")]
     ApprovalDenied { tool: String },
+
+    #[error("tool circuit breaker open for {tool}: {message}")]
+    CircuitOpen { tool: String, message: String },
 }
