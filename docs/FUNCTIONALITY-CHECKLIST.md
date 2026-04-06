@@ -183,7 +183,8 @@ Implementation note (2026-03-13): the current executable control-plane slice is 
 - [x] transcript attribution of tool/approval/subagent events
 - [ ] transcript compaction/pruning
 - [x] usage/cost tracking
-- [ ] model failover / fallback behavior
+- [x] model failover / fallback behavior
+  - 2026-04-06: `RoutedModelProvider` now ships bounded provider circuit breakers plus deterministic fallback routing for retriable failures only. Coverage in `crates/rune-models` proves circuit-open behavior, degraded-mode fallback, stream parity, and recovery after cooldown under #903.
 - [x] session status surface (`/status` + first-class `session_status` equivalent with model/usage/timing/flags)
   - 2026-03-14 overnight: `SessionStatusCard` is now wired end-to-end across gateway route (`GET /sessions/{id}/status`), gateway client, CLI rendering (`rune sessions status <id>`), and tool-layer JSON validation for `session_status`.
   - 2026-03-14 watchdog: unresolved-note wording was tightened so the card no longer falsely claims approval durability is absent; it now correctly narrows the remaining gap to restart-safe continuation for mid-resume approval flows plus broader security/PTY fidelity and cost quality.
