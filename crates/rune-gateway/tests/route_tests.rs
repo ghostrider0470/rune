@@ -13686,6 +13686,10 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
             && blocker["issue"] == "#905"
     }));
     assert!(blockers.iter().any(|blocker| {
+        blocker["category"] == "product-surface"
+            && blocker["issue"] == "#901, #902"
+    }));
+    assert!(blockers.iter().any(|blocker| {
         blocker["category"] == "runtime-resilience"
             && blocker["issue"] == "#894"
             && blocker["detail"]

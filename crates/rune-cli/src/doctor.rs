@@ -1306,7 +1306,7 @@ fn replacement_readiness_report() -> ReplacementReadinessReport {
         ReplacementReadinessBlocker {
             category: "product-surface".to_string(),
             status: "blocked".to_string(),
-            detail: "lane starvation prevention and turn-budget guardrails are still open readiness blockers".to_string(),
+            detail: "turn-budget guardrails are still open readiness blockers; lane starvation prevention shipped separately".to_string(),
             issue: Some("#901, #902".to_string()),
         },
         ReplacementReadinessBlocker {
