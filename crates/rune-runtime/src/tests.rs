@@ -4015,6 +4015,13 @@ async fn prompt_budget_guardrail_aborts_before_model_call() {
     assert!(turn.ended_at.is_some());
 
     let transcript = h.transcript_repo.list_by_session(session.id).await.unwrap();
-    assert_eq!(transcript.len(), 1);
+    assert_eq!(transcript.len(), 2);
     assert_eq!(transcript[0].kind, "user_message");
+    assert_eq!(transcript[1].kind, "status_note");
+    let note = &transcript[1].payload;
+    assert_eq!(note["status"], "failed");
+    assert!(note["note"]
+        .as_str()
+        .unwrap_or("")
+        .contains("context_budget_guardrail: prompt budget exceeded before model call"));
 }
