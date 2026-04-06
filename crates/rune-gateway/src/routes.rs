@@ -7459,12 +7459,30 @@ pub struct DoctorReport {
     pub readiness_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub readiness_summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replacement_readiness: Option<ReplacementReadinessReport>,
     pub checks: Vec<DoctorCheck>,
     pub paths: DoctorPathSummary,
     pub topology: DoctorTopologySummary,
     pub backend_matrix: Vec<DoctorBackendMatrixEntry>,
     pub memory_hierarchy: DoctorMemoryHierarchySummary,
     pub run_at: String,
+}
+
+#[derive(Serialize)]
+pub struct ReplacementReadinessReport {
+    pub verdict: &'static str,
+    pub summary: String,
+    pub blockers: Vec<ReplacementReadinessBlocker>,
+}
+
+#[derive(Serialize)]
+pub struct ReplacementReadinessBlocker {
+    pub category: &'static str,
+    pub status: &'static str,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issue: Option<&'static str>,
 }
 
 fn probe_writable(dir: &std::path::Path) -> bool {
@@ -7545,6 +7563,43 @@ fn doctor_readiness_summary() -> String {
         READINESS_STUCK_TURN_RATE_SLO_PERCENT,
         READINESS_RECOVERY_TIME_SLO_SECONDS
     )
+}
+
+fn replacement_readiness_report() -> ReplacementReadinessReport {
+    let blockers = vec![
+        ReplacementReadinessBlocker {
+            category: "operational",
+            status: "blocked",
+            detail: "live queue-delay, stuck-turn-rate, and recovery-time readiness evidence is not exposed yet".to_string(),
+            issue: Some("#905"),
+        },
+        ReplacementReadinessBlocker {
+            category: "product-surface",
+            status: "blocked",
+            detail: "lane starvation prevention and turn-budget guardrails are still open readiness blockers".to_string(),
+            issue: Some("#901, #902"),
+        },
+        ReplacementReadinessBlocker {
+            category: "runtime-resilience",
+            status: "blocked",
+            detail: "provider/tool circuit breakers and trustworthy log replay surfaces remain open readiness blockers".to_string(),
+            issue: Some("#903, #894"),
+        },
+        ReplacementReadinessBlocker {
+            category: "documentation",
+            status: "blocked",
+            detail: "parity and operator docs still need reconciliation with shipped replacement evidence".to_string(),
+            issue: Some("#896"),
+        },
+    ];
+    ReplacementReadinessReport {
+        verdict: "not_ready",
+        summary: format!(
+            "Rune is not yet an honest OpenClaw replacement; {} blocker categories remain open",
+            blockers.len()
+        ),
+        blockers,
+    }
 }
 
 fn readiness_checks(config: &rune_config::AppConfig) -> Vec<DoctorCheck> {
@@ -8262,11 +8317,13 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
         "healthy"
     };
     let readiness_summary = doctor_readiness_summary();
+    let replacement_readiness = replacement_readiness_report();
 
     Ok(Json(DoctorReport {
         overall,
         readiness_status: Some("slo_defined_evidence_pending".to_string()),
         readiness_summary: Some(readiness_summary),
+        replacement_readiness: Some(replacement_readiness),
         checks,
         paths: paths_summary,
         topology: topology_summary,

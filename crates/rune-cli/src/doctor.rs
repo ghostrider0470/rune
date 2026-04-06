@@ -17,6 +17,7 @@ use std::time::Duration;
 use crate::output::{
     DoctorBackendMatrixEntry, DoctorCheck as OutputDoctorCheck, DoctorContextTierCounter,
     DoctorMemoryHierarchySummary, DoctorPathSummary, DoctorReport, DoctorTopologySummary,
+    ReplacementReadinessBlocker, ReplacementReadinessReport,
 };
 use rune_config::{AppConfig, RuntimeMode};
 use serde::Serialize;
@@ -1294,6 +1295,43 @@ fn readiness_summary_message() -> String {
     )
 }
 
+fn replacement_readiness_report() -> ReplacementReadinessReport {
+    let blockers = vec![
+        ReplacementReadinessBlocker {
+            category: "operational".to_string(),
+            status: "blocked".to_string(),
+            detail: "live queue-delay, stuck-turn-rate, and recovery-time readiness evidence is not exposed yet".to_string(),
+            issue: Some("#905".to_string()),
+        },
+        ReplacementReadinessBlocker {
+            category: "product-surface".to_string(),
+            status: "blocked".to_string(),
+            detail: "lane starvation prevention and turn-budget guardrails are still open readiness blockers".to_string(),
+            issue: Some("#901, #902".to_string()),
+        },
+        ReplacementReadinessBlocker {
+            category: "runtime-resilience".to_string(),
+            status: "blocked".to_string(),
+            detail: "provider/tool circuit breakers and trustworthy log replay surfaces remain open readiness blockers".to_string(),
+            issue: Some("#903, #894".to_string()),
+        },
+        ReplacementReadinessBlocker {
+            category: "documentation".to_string(),
+            status: "blocked".to_string(),
+            detail: "parity and operator docs still need reconciliation with shipped replacement evidence".to_string(),
+            issue: Some("#896".to_string()),
+        },
+    ];
+    ReplacementReadinessReport {
+        verdict: "not_ready".to_string(),
+        summary: format!(
+            "Rune is not yet an honest OpenClaw replacement; {} blocker categories remain open",
+            blockers.len()
+        ),
+        blockers,
+    }
+}
+
 fn configured_repo_count(config: &AppConfig) -> usize {
     let mut count = 4;
     if !config.channels.enabled.is_empty() {
@@ -1392,6 +1430,7 @@ pub fn build_doctor_report(results: &[CheckResult], config: &AppConfig) -> Docto
         overall,
         readiness_status: Some("slo_defined_evidence_pending".to_string()),
         readiness_summary: Some(readiness_summary_message()),
+        replacement_readiness: Some(replacement_readiness_report()),
         checks,
         paths: Some(DoctorPathSummary {
             profile: config.paths.profile().as_str().to_string(),
