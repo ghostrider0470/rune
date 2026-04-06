@@ -13685,6 +13685,14 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
             && blocker["status"] == "blocked"
             && blocker["issue"] == "#905"
     }));
+    assert!(blockers.iter().any(|blocker| {
+        blocker["category"] == "runtime-resilience"
+            && blocker["issue"] == "#894"
+            && blocker["detail"]
+                .as_str()
+                .unwrap()
+                .contains("circuit breakers are already shipped")
+    }));
     assert!(
         blockers.iter().any(|blocker| {
             blocker["category"] == "documentation" && blocker["issue"] == "#896"

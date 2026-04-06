@@ -105,5 +105,5 @@ Current contract:
 Current blocker mapping:
 - `operational` → missing live readiness evidence (`#905`)
 - `product-surface` → queue isolation / starvation prevention and turn-budget guardrails (`#901`, `#902`)
-- `runtime-resilience` → circuit breakers and trustworthy log replay/backfill (`#903`, `#894`)
+- `runtime-resilience` → trustworthy log replay/backfill only (`#894`); provider/tool circuit breakers from `#903` are already shipped and no longer block readiness on their own
 - `documentation` → parity/operator evidence reconciliation (`#896`)
