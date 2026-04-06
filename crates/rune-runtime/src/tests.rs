@@ -4085,3 +4085,39 @@ async fn prompt_budget_guardrail_persists_live_context_budget_diagnostics() {
         .expect("context tiers persisted");
     assert!(!tiers.is_empty());
 }
+
+#[tokio::test]
+async fn prompt_budget_guardrail_forwards_completion_max_tokens() {
+    let h = TestHarness::new();
+    let engine = h.session_engine();
+    let session = engine
+        .create_session(
+            SessionKind::Direct,
+            Some(h.workspace_root.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+    engine.mark_ready(session.id).await.unwrap();
+    engine.mark_running(session.id).await.unwrap();
+
+    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
+        "Short answer.",
+    )]));
+    let model_handle = model.clone();
+    let executor = h
+        .turn_executor(
+            model,
+            Arc::new(FakeToolExecutor::new(vec![])),
+            ToolRegistry::new(),
+        )
+        .with_prompt_budget_guardrails(4_096, 2_048, 3_072);
+
+    executor
+        .execute(session.id, "Reply briefly.", None)
+        .await
+        .expect("turn should succeed within prompt guardrail");
+
+    let requests = model_handle.requests().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].max_tokens, Some(4_096));
+}
