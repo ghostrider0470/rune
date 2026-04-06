@@ -21,7 +21,7 @@ use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
     SessionTarget, compute_initial_next_run,
 };
-use rune_runtime::{LaneStats, Skill, SkillScanSummary};
+use rune_runtime::{LaneStats, ProjectToolStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
 use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
@@ -993,6 +993,7 @@ pub struct StatusPaths {
 
 #[derive(Serialize)]
 pub struct LaneStatsResponse {
+    pub tool_projects: std::collections::BTreeMap<String, ProjectToolStatsResponse>,
     pub main_active: usize,
     pub main_available: usize,
     pub main_capacity: usize,
@@ -1018,6 +1019,14 @@ pub struct LaneStatsResponse {
     pub tool_capacity: usize,
     pub tool_queued: usize,
     pub project_tool_capacity: usize,
+}
+
+#[derive(Serialize)]
+pub struct ProjectToolStatsResponse {
+    pub active: usize,
+    pub available: usize,
+    pub capacity: usize,
+    pub queued: usize,
 }
 
 #[derive(Serialize)]
@@ -4148,6 +4157,11 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
 
 fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
     LaneStatsResponse {
+        tool_projects: stats
+            .tool_project_stats
+            .into_iter()
+            .map(|(project, stats)| (project, project_tool_stats_response(stats)))
+            .collect(),
         main_active: stats.main_active,
         main_available: stats.main_available,
         main_capacity: stats.main_capacity,
@@ -4173,6 +4187,15 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
         tool_capacity: stats.tool_capacity,
         tool_queued: stats.tool_queued,
         project_tool_capacity: stats.project_tool_capacity,
+    }
+}
+
+fn project_tool_stats_response(stats: ProjectToolStats) -> ProjectToolStatsResponse {
+    ProjectToolStatsResponse {
+        active: stats.active,
+        available: stats.available,
+        capacity: stats.capacity,
+        queued: stats.queued,
     }
 }
 

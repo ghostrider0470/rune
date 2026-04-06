@@ -5,7 +5,7 @@
 //! ensuring that (for example) a burst of subagent work cannot starve
 //! interactive user sessions.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 
@@ -276,8 +276,10 @@ impl LaneQueue {
         let tool_capacity = self.tool_limits.global_capacity();
         let tool_queued = self.tool_limits.queued();
         let project_tool_capacity = self.tool_limits.project_capacity();
+        let tool_project_stats = self.tool_limits.project_stats();
 
         LaneStats {
+            tool_project_stats,
             main_active: self.main.active(),
             main_available: self.main.semaphore.available_permits(),
             main_capacity: self.main.capacity,
@@ -376,6 +378,28 @@ impl ToolConcurrencyQueue {
         self.project_capacity
     }
 
+    fn project_stats(&self) -> BTreeMap<String, ProjectToolStats> {
+        self.projects
+            .try_lock()
+            .map(|projects| {
+                projects
+                    .iter()
+                    .map(|(project_key, semaphore)| {
+                        (
+                            project_key.clone(),
+                            ProjectToolStats {
+                                active: semaphore.active(),
+                                available: semaphore.semaphore.available_permits(),
+                                capacity: semaphore.capacity,
+                                queued: semaphore.queued(),
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     async fn release(&self, project_key: &str) {
         let project = {
             let projects = self.projects.lock().await;
@@ -438,6 +462,7 @@ impl Drop for ToolPermit {
 /// Snapshot of lane utilisation returned by [`LaneQueue::stats`].
 #[derive(Clone, Debug)]
 pub struct LaneStats {
+    pub tool_project_stats: BTreeMap<String, ProjectToolStats>,
     pub main_available: usize,
     pub main_active: usize,
     pub main_capacity: usize,
@@ -463,6 +488,14 @@ pub struct LaneStats {
     pub tool_capacity: usize,
     pub tool_queued: usize,
     pub project_tool_capacity: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ProjectToolStats {
+    pub active: usize,
+    pub available: usize,
+    pub capacity: usize,
+    pub queued: usize,
 }
 
 impl fmt::Display for LaneStats {
@@ -774,6 +807,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_project_stats_reflect_per_project_usage_and_queue_depth() {
+        let queue = Arc::new(LaneQueue::with_limits(1, 1, 1, 8, 1));
+
+        let blocker = queue.acquire_tool(Some("alpha")).await;
+
+        let queue_for_waiter = Arc::clone(&queue);
+        let waiter = tokio::spawn(async move {
+            let _permit = queue_for_waiter.acquire_tool(Some("alpha")).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let _beta = queue.acquire_tool(Some("beta")).await;
+
+        let stats = queue.stats();
+        let alpha = stats.tool_project_stats.get("alpha").expect("alpha project stats");
+        assert_eq!(alpha.active, 1);
+        assert_eq!(alpha.available, 0);
+        assert_eq!(alpha.capacity, 1);
+        assert_eq!(alpha.queued, 1);
+
+        let beta = stats.tool_project_stats.get("beta").expect("beta project stats");
+        assert_eq!(beta.active, 1);
+        assert_eq!(beta.available, 0);
+        assert_eq!(beta.capacity, 1);
+        assert_eq!(beta.queued, 0);
+
+        drop(blocker);
+        tokio::time::timeout(Duration::from_millis(200), waiter)
+            .await
+            .expect("same-project waiter should be released")
+            .expect("join should succeed");
+    }
+
+    #[tokio::test]
     async fn stats_reflect_utilisation() {
         let queue = Arc::new(LaneQueue::new());
         let stats = queue.stats();
@@ -802,6 +870,7 @@ mod tests {
         assert_eq!(stats.tool_available, 32);
         assert_eq!(stats.tool_queued, 0);
         assert_eq!(stats.project_tool_capacity, 4);
+        assert!(stats.tool_project_stats.is_empty());
     }
 
     #[test]
@@ -816,6 +885,7 @@ mod tests {
     #[test]
     fn stats_display() {
         let stats = LaneStats {
+            tool_project_stats: BTreeMap::new(),
             main_active: 2,
             main_available: 2,
             main_capacity: 4,
