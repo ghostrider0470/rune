@@ -70,7 +70,9 @@ Operational notes:
 - native manifests may optionally declare `author` and `homepage`; if present they must be non-empty
 - `/api/plugins` and `/api/plugins/{name}` return the latest discovery decision alongside component counts
 - `/api/plugins` and `/api/plugins/{name}` also return `registered_commands`, exposing each plugin-provided slash command name/description/prompt body so operators can audit the effective dynamic tool surface without rescanning plugin files
-- `/api/plugins/reload` returns the full registration summary, including `hooks` and `mcp_servers`, so operators can confirm reload outcomes for the complete plugin runtime surface in one call
+- `/api/plugins` and `/api/plugins/{name}` also return `last_decision` and `last_detail`, making the most recent load/skip/reject outcome visible even for plugins that ended up disabled or inactive after reload
+- `/api/plugins/reload` returns the full registration summary, including `skills`, `agents`, `commands`, `hooks`, and `mcp_servers`, so operators can confirm reload outcomes for the complete plugin runtime surface in one call
+- current plugin status is a point-in-time summary, not a retained incident ledger; operators should use gateway logs alongside `last_decision`/`last_detail` when investigating historical reload failures or transient startup faults
 
 ## Read next
 
