@@ -1781,6 +1781,9 @@ mod tests {
             tools: None,
         };
 
-        assert_eq!(provider_and_model_for_log(&request), ("configured-provider", "default"));
+        assert_eq!(
+            provider_and_model_for_log(&request),
+            ("configured-provider", "default")
+        );
     }
 }
