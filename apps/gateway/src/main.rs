@@ -758,6 +758,7 @@ async fn build_services(
         );
     }
 
+    turn_executor = turn_executor.with_session_engine(session_engine.clone());
     turn_executor = turn_executor.with_lane_queue(lane_queue.clone());
     turn_executor = turn_executor.with_approval_mode(config.approval.mode.as_str());
     let max_iters = if config.runtime.max_tool_iterations == 0 {
