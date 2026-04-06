@@ -2905,6 +2905,21 @@ pub async fn get_session_status(
 }
 
 /// A single node in a session delegation tree.
+#[derive(Serialize, Clone)]
+pub struct SessionTreeAuditSummary {
+    pub descendant_sessions: u32,
+    pub descendant_subagent_results: u32,
+    pub active_descendants: u32,
+    pub waiting_descendants: u32,
+    pub blocked_descendants: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead_team_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_descendant_result_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_descendant_result_excerpt: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct SessionTreeNode {
     pub id: String,
@@ -2920,6 +2935,8 @@ pub struct SessionTreeNode {
     pub team_blocked_children: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_lease: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audit: Option<SessionTreeAuditSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_subagent_result_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3031,6 +3048,99 @@ pub async fn get_session_tree(
         );
     }
 
+    fn build_descendant_audit_map(
+        session_id: Uuid,
+        children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
+        last_subagent_result_map: &std::collections::HashMap<
+            Uuid,
+            (Option<String>, Option<String>),
+        >,
+        out: &mut std::collections::HashMap<Uuid, SessionTreeAuditSummary>,
+    ) {
+        let direct_children = children_map.get(&session_id).cloned().unwrap_or_default();
+
+        let mut descendant_sessions = 0u32;
+        let mut descendant_subagent_results = 0u32;
+        let mut active_descendants = 0u32;
+        let mut waiting_descendants = 0u32;
+        let mut blocked_descendants = 0u32;
+        let mut last_descendant_result_at = None;
+        let mut last_descendant_result_excerpt = None;
+
+        for child in &direct_children {
+            build_descendant_audit_map(child.id, children_map, last_subagent_result_map, out);
+
+            descendant_sessions += 1;
+            if let Some(child_summary) = out.get(&child.id) {
+                descendant_sessions += child_summary.descendant_sessions;
+                descendant_subagent_results += child_summary.descendant_subagent_results;
+                active_descendants += child_summary.active_descendants;
+                waiting_descendants += child_summary.waiting_descendants;
+                blocked_descendants += child_summary.blocked_descendants;
+
+                if let Some(candidate_at) = child_summary.last_descendant_result_at.as_ref() {
+                    let should_replace = last_descendant_result_at
+                        .as_ref()
+                        .map(|current: &String| candidate_at > current)
+                        .unwrap_or(true);
+                    if should_replace {
+                        last_descendant_result_at = Some(candidate_at.clone());
+                        last_descendant_result_excerpt = child_summary.last_descendant_result_excerpt.clone();
+                    }
+                }
+            }
+
+            if let Some((candidate_at, candidate_excerpt)) = last_subagent_result_map.get(&child.id) {
+                if let Some(candidate_at) = candidate_at.as_ref() {
+                    descendant_subagent_results += 1;
+                    let should_replace = last_descendant_result_at
+                        .as_ref()
+                        .map(|current: &String| candidate_at > current)
+                        .unwrap_or(true);
+                    if should_replace {
+                        last_descendant_result_at = Some(candidate_at.clone());
+                        last_descendant_result_excerpt = candidate_excerpt.clone();
+                    }
+                }
+            }
+
+            if is_active_status(&child.status) {
+                active_descendants += 1;
+            }
+            if is_waiting_status(&child.status) {
+                waiting_descendants += 1;
+            }
+            if is_blocked_subagent(child) {
+                blocked_descendants += 1;
+            }
+        }
+
+        let direct_children_owned = direct_children.iter().map(|row| (*row).clone()).collect::<Vec<_>>();
+        let (_, _, _, lead_team_status) = team_rollup_for_children(&direct_children_owned);
+
+        out.insert(
+            session_id,
+            SessionTreeAuditSummary {
+                descendant_sessions,
+                descendant_subagent_results,
+                active_descendants,
+                waiting_descendants,
+                blocked_descendants,
+                lead_team_status: if descendant_sessions > 0 { lead_team_status } else { None },
+                last_descendant_result_at,
+                last_descendant_result_excerpt,
+            },
+        );
+    }
+
+    let mut descendant_audit_map = std::collections::HashMap::new();
+    build_descendant_audit_map(
+        root.id,
+        &children_map,
+        &last_subagent_result_map,
+        &mut descendant_audit_map,
+    );
+
     fn build_node(
         row: &rune_store::models::SessionRow,
         children_map: &std::collections::HashMap<Uuid, Vec<&rune_store::models::SessionRow>>,
@@ -3039,13 +3149,14 @@ pub async fn get_session_tree(
             Uuid,
             (Option<String>, Option<String>),
         >,
+        descendant_audit_map: &std::collections::HashMap<Uuid, SessionTreeAuditSummary>,
     ) -> SessionTreeNode {
         let children = children_map
             .get(&row.id)
             .map(|kids| {
                 kids.iter()
                     .map(|child| {
-                        build_node(child, children_map, turn_counts, last_subagent_result_map)
+                        build_node(child, children_map, turn_counts, last_subagent_result_map, descendant_audit_map)
                     })
                     .collect()
             })
@@ -3081,6 +3192,10 @@ pub async fn get_session_tree(
             .get(&row.id)
             .cloned()
             .unwrap_or((None, None));
+        let audit = descendant_audit_map
+            .get(&row.id)
+            .cloned()
+            .and_then(|summary| (summary.descendant_sessions > 0).then_some(summary));
         let direct_children = children_map
             .get(&row.id)
             .map(|children| {
@@ -3123,6 +3238,7 @@ pub async fn get_session_tree(
             team_waiting_children: (!direct_children.is_empty()).then_some(team_waiting_children),
             team_blocked_children: (!direct_children.is_empty()).then_some(team_blocked_children),
             goal_lease: session_goal_lease(&row.metadata),
+            audit,
             last_subagent_result_at,
             last_subagent_result_excerpt,
             parent_session_id: row.requester_session_id.map(|id| id.to_string()),
@@ -3150,6 +3266,7 @@ pub async fn get_session_tree(
         &children_map,
         &turn_counts,
         &last_subagent_result_map,
+        &descendant_audit_map,
     );
     Ok(Json(tree))
 }
