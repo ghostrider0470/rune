@@ -845,22 +845,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_calls_obey_open_circuit() {
+    async fn stream_failures_fallback_then_open_circuit() {
         let mut routed = routed_provider_with_fallback();
         routed.register_provider(
             "primary",
             Arc::new(SequenceProvider::from_stream_results(vec![
                 Err(ModelError::Transient("stream fail".into())),
-                Ok("should-not-run".into()),
+                Err(ModelError::Transient("stream fail again".into())),
             ])),
         );
         routed.register_provider(
             "secondary",
-            Arc::new(SequenceProvider::from_stream_results(vec![Ok(
-                "secondary-stream".into(),
+            Arc::new(SequenceProvider::from_stream_results(vec![
+                Ok("secondary-stream-one".into()),
+                Ok("secondary-stream-two".into()),
+            ])),
+        );
+
+        let first = routed
+            .complete_stream(&request_for("primary"))
+            .await
+            .expect("fallback stream should succeed after first failure");
+        let events: Vec<_> = collect_stream_events(first).await;
+        assert_eq!(text_deltas(&events), vec!["secondary-stream-one".to_string()]);
+
+        let second = routed
+            .complete_stream(&request_for("primary"))
+            .await
+            .expect("fallback stream should succeed after circuit opens");
+        let events: Vec<_> = collect_stream_events(second).await;
+        assert_eq!(text_deltas(&events), vec!["secondary-stream-two".to_string()]);
+
+        let state = routed
+            .circuit_breakers
+            .lock()
+            .expect("circuit breaker lock poisoned");
+        let primary = state.get("primary").expect("primary breaker should exist");
+        assert_eq!(primary.failures, 2);
+        assert!(primary.opened_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn stream_open_circuit_blocks_without_fallbacks() {
+        let models = ModelsConfig {
+            providers: vec![ModelProviderConfig {
+                name: "primary".into(),
+                kind: "openai".into(),
+                base_url: String::new(),
+                api_key: Some("test-key".into()),
+                deployment_name: None,
+                api_version: None,
+                api_key_env: None,
+                model_alias: None,
+                models: vec![ConfiguredModel::Id("primary".into())],
+            }],
+            ..Default::default()
+        };
+
+        let mut routed = RoutedModelProvider::from_models_config(&models)
+            .expect("routed provider should build")
+            .with_circuit_breaker_settings(1, Duration::from_secs(60));
+        routed.register_provider(
+            "primary",
+            Arc::new(SequenceProvider::from_stream_results(vec![Err(
+                ModelError::Transient("stream fail".into()),
             )])),
         );
-        routed.circuit_breaker_threshold = 1;
 
         let err = routed
             .complete_stream(&request_for("primary"))
@@ -879,5 +929,23 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    async fn collect_stream_events(mut rx: mpsc::Receiver<StreamEvent>) -> Vec<StreamEvent> {
+        let mut events = Vec::new();
+        while let Some(event) = rx.recv().await {
+            events.push(event);
+        }
+        events
+    }
+
+    fn text_deltas(events: &[StreamEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                StreamEvent::TextDelta(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
     }
 }
