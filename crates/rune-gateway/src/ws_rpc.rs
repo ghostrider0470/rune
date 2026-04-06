@@ -981,26 +981,32 @@ impl RpcDispatcher {
                 "main": {
                     "active": stats.main_active,
                     "capacity": stats.main_capacity,
+                    "queued": stats.main_queued,
                 },
                 "priority": {
                     "active": stats.priority_active,
                     "capacity": stats.priority_capacity,
+                    "queued": stats.priority_queued,
                 },
                 "subagent": {
                     "active": stats.subagent_active,
                     "capacity": stats.subagent_capacity,
+                    "queued": stats.subagent_queued,
                 },
                 "cron": {
                     "active": stats.cron_active,
                     "capacity": stats.cron_capacity,
+                    "queued": stats.cron_queued,
                 },
                 "heartbeat": {
                     "active": stats.heartbeat_active,
                     "capacity": stats.heartbeat_capacity,
+                    "queued": stats.heartbeat_queued,
                 },
                 "tools": {
                     "active": stats.tool_active,
                     "capacity": stats.tool_capacity,
+                    "queued": stats.tool_queued,
                     "per_project_capacity": stats.project_tool_capacity,
                 },
             })

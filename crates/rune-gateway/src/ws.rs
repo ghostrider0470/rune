@@ -139,7 +139,8 @@ async fn handle_logs_socket(
     let snapshot = log_store.snapshot().await;
     for entry in snapshot {
         if let Some(source) = source_filter.as_deref()
-            && !entry.target.to_ascii_lowercase().contains(source) {
+            && !entry.target.to_ascii_lowercase().contains(source)
+        {
             continue;
         }
         let payload = match serde_json::to_string(&entry) {

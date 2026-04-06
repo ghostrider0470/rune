@@ -867,14 +867,20 @@ mod tests {
             .await
             .expect("fallback stream should succeed after first failure");
         let events: Vec<_> = collect_stream_events(first).await;
-        assert_eq!(text_deltas(&events), vec!["secondary-stream-one".to_string()]);
+        assert_eq!(
+            text_deltas(&events),
+            vec!["secondary-stream-one".to_string()]
+        );
 
         let second = routed
             .complete_stream(&request_for("primary"))
             .await
             .expect("fallback stream should succeed after circuit opens");
         let events: Vec<_> = collect_stream_events(second).await;
-        assert_eq!(text_deltas(&events), vec!["secondary-stream-two".to_string()]);
+        assert_eq!(
+            text_deltas(&events),
+            vec!["secondary-stream-two".to_string()]
+        );
 
         let state = routed
             .circuit_breakers

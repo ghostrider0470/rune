@@ -139,6 +139,13 @@ impl LaneSemaphore {
     fn active(&self) -> usize {
         self.capacity - self.semaphore.available_permits()
     }
+
+    fn queued(&self) -> usize {
+        self.waiters
+            .try_lock()
+            .map(|queue| queue.len())
+            .unwrap_or(0)
+    }
 }
 
 /// Central lane-based concurrency controller.
@@ -265,20 +272,31 @@ impl LaneQueue {
 
     /// Current utilisation snapshot across all lanes.
     pub fn stats(&self) -> LaneStats {
+        let tool_active = self.tool_limits.active();
+        let tool_capacity = self.tool_limits.global_capacity();
+        let tool_queued = self.tool_limits.queued();
+        let project_tool_capacity = self.tool_limits.project_capacity();
+
         LaneStats {
             main_active: self.main.active(),
             main_capacity: self.main.capacity,
+            main_queued: self.main.queued(),
             priority_active: self.priority.active(),
             priority_capacity: self.priority.capacity,
+            priority_queued: self.priority.queued(),
             subagent_active: self.subagent.active(),
             subagent_capacity: self.subagent.capacity,
+            subagent_queued: self.subagent.queued(),
             cron_active: self.cron.active(),
             cron_capacity: self.cron.capacity,
+            cron_queued: self.cron.queued(),
             heartbeat_active: self.heartbeat.active(),
             heartbeat_capacity: self.heartbeat.capacity,
-            tool_active: self.tool_limits.active(),
-            tool_capacity: self.tool_limits.global_capacity(),
-            project_tool_capacity: self.tool_limits.project_capacity(),
+            heartbeat_queued: self.heartbeat.queued(),
+            tool_active,
+            tool_capacity,
+            tool_queued,
+            project_tool_capacity,
         }
     }
 
@@ -342,6 +360,10 @@ impl ToolConcurrencyQueue {
 
     fn global_capacity(&self) -> usize {
         self.global.capacity
+    }
+
+    fn queued(&self) -> usize {
+        self.global.queued()
     }
 
     fn project_capacity(&self) -> usize {
@@ -412,16 +434,22 @@ impl Drop for ToolPermit {
 pub struct LaneStats {
     pub main_active: usize,
     pub main_capacity: usize,
+    pub main_queued: usize,
     pub priority_active: usize,
     pub priority_capacity: usize,
+    pub priority_queued: usize,
     pub subagent_active: usize,
     pub subagent_capacity: usize,
+    pub subagent_queued: usize,
     pub cron_active: usize,
     pub cron_capacity: usize,
+    pub cron_queued: usize,
     pub heartbeat_active: usize,
     pub heartbeat_capacity: usize,
+    pub heartbeat_queued: usize,
     pub tool_active: usize,
     pub tool_capacity: usize,
+    pub tool_queued: usize,
     pub project_tool_capacity: usize,
 }
 
@@ -429,19 +457,25 @@ impl fmt::Display for LaneStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "main={}/{} priority={}/{} subagent={}/{} cron={}/{} heartbeat={}/{} tools={}/{} per_project={}",
+            "main={}/{} queued={} priority={}/{} queued={} subagent={}/{} queued={} cron={}/{} queued={} heartbeat={}/{} queued={} tools={}/{} queued={} per_project={}",
             self.main_active,
             self.main_capacity,
+            self.main_queued,
             self.priority_active,
             self.priority_capacity,
+            self.priority_queued,
             self.subagent_active,
             self.subagent_capacity,
+            self.subagent_queued,
             self.cron_active,
             self.cron_capacity,
+            self.cron_queued,
             self.heartbeat_active,
             self.heartbeat_capacity,
+            self.heartbeat_queued,
             self.tool_active,
             self.tool_capacity,
+            self.tool_queued,
             self.project_tool_capacity,
         )
     }
@@ -676,16 +710,22 @@ mod tests {
         let stats = queue.stats();
         assert_eq!(stats.main_active, 0);
         assert_eq!(stats.main_capacity, 4);
+        assert_eq!(stats.main_queued, 0);
         assert_eq!(stats.priority_active, 0);
         assert_eq!(stats.priority_capacity, 16);
+        assert_eq!(stats.priority_queued, 0);
         assert_eq!(stats.subagent_active, 0);
         assert_eq!(stats.subagent_capacity, 8);
+        assert_eq!(stats.subagent_queued, 0);
         assert_eq!(stats.cron_active, 0);
         assert_eq!(stats.cron_capacity, 1024);
+        assert_eq!(stats.cron_queued, 0);
         assert_eq!(stats.heartbeat_active, 0);
         assert_eq!(stats.heartbeat_capacity, 1024);
+        assert_eq!(stats.heartbeat_queued, 0);
         assert_eq!(stats.tool_active, 0);
         assert_eq!(stats.tool_capacity, 32);
+        assert_eq!(stats.tool_queued, 0);
         assert_eq!(stats.project_tool_capacity, 4);
     }
 
@@ -703,21 +743,27 @@ mod tests {
         let stats = LaneStats {
             main_active: 2,
             main_capacity: 4,
+            main_queued: 3,
             priority_active: 1,
             priority_capacity: 16,
+            priority_queued: 2,
             subagent_active: 1,
             subagent_capacity: 8,
+            subagent_queued: 1,
             cron_active: 0,
             cron_capacity: 1024,
+            cron_queued: 0,
             heartbeat_active: 1,
             heartbeat_capacity: 1024,
+            heartbeat_queued: 4,
             tool_active: 0,
             tool_capacity: 32,
+            tool_queued: 5,
             project_tool_capacity: 4,
         };
         assert_eq!(
             stats.to_string(),
-            "main=2/4 priority=1/16 subagent=1/8 cron=0/1024 heartbeat=1/1024 tools=0/32 per_project=4"
+            "main=2/4 queued=3 priority=1/16 queued=2 subagent=1/8 queued=1 cron=0/1024 queued=0 heartbeat=1/1024 queued=4 tools=0/32 queued=5 per_project=4"
         );
     }
 }

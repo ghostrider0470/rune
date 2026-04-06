@@ -3085,12 +3085,14 @@ pub async fn get_session_tree(
                         .unwrap_or(true);
                     if should_replace {
                         last_descendant_result_at = Some(candidate_at.clone());
-                        last_descendant_result_excerpt = child_summary.last_descendant_result_excerpt.clone();
+                        last_descendant_result_excerpt =
+                            child_summary.last_descendant_result_excerpt.clone();
                     }
                 }
             }
 
-            if let Some((candidate_at, candidate_excerpt)) = last_subagent_result_map.get(&child.id) {
+            if let Some((candidate_at, candidate_excerpt)) = last_subagent_result_map.get(&child.id)
+            {
                 if let Some(candidate_at) = candidate_at.as_ref() {
                     descendant_subagent_results += 1;
                     let should_replace = last_descendant_result_at
@@ -3115,7 +3117,10 @@ pub async fn get_session_tree(
             }
         }
 
-        let direct_children_owned = direct_children.iter().map(|row| (*row).clone()).collect::<Vec<_>>();
+        let direct_children_owned = direct_children
+            .iter()
+            .map(|row| (*row).clone())
+            .collect::<Vec<_>>();
         let (_, _, _, lead_team_status) = team_rollup_for_children(&direct_children_owned);
 
         out.insert(
@@ -3126,7 +3131,11 @@ pub async fn get_session_tree(
                 active_descendants,
                 waiting_descendants,
                 blocked_descendants,
-                lead_team_status: if descendant_sessions > 0 { lead_team_status } else { None },
+                lead_team_status: if descendant_sessions > 0 {
+                    lead_team_status
+                } else {
+                    None
+                },
                 last_descendant_result_at,
                 last_descendant_result_excerpt,
             },
@@ -3156,7 +3165,13 @@ pub async fn get_session_tree(
             .map(|kids| {
                 kids.iter()
                     .map(|child| {
-                        build_node(child, children_map, turn_counts, last_subagent_result_map, descendant_audit_map)
+                        build_node(
+                            child,
+                            children_map,
+                            turn_counts,
+                            last_subagent_result_map,
+                            descendant_audit_map,
+                        )
                     })
                     .collect()
             })
