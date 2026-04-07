@@ -15,7 +15,7 @@ Use it to find the right source of truth by audience and concern.
 | Runtime orchestration rules | [`AGENT-ORCHESTRATION.md`](AGENT-ORCHESTRATION.md) | agent workflow and execution guardrails |
 | Parity docs front door | [`OPENCLAW-COVERAGE-MAP.md`](OPENCLAW-COVERAGE-MAP.md) | where to start for OpenClaw-surface coverage and parity navigation |
 | Parity contracts | [`PARITY-SPEC.md`](parity/PARITY-SPEC.md), [`PARITY-CONTRACTS.md`](parity/PARITY-CONTRACTS.md), [`PROTOCOLS.md`](parity/PROTOCOLS.md) | observable runtime behavior and subsystem invariants |
-| Operator deployment/runtime docs | [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md), [`operator/DATABASES.md`](operator/DATABASES.md), [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md) | deployment, storage, health, operational rules |
+| Operator deployment/runtime docs | [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md), [`operator/DATABASES.md`](operator/DATABASES.md), [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md), [`operator/REPLACEMENT-READINESS.md`](operator/REPLACEMENT-READINESS.md) | deployment, storage, health, operational rules, and honest replacement-readiness |
 | Contributor/reference docs | [`reference/README.md`](reference/README.md), [`reference/ARCHITECTURE.md`](reference/ARCHITECTURE.md), [`reference/API.md`](reference/API.md), [`reference/CLI.md`](reference/CLI.md), [`reference/CRATE-LAYOUT.md`](reference/CRATE-LAYOUT.md), [`reference/SUBSYSTEMS.md`](reference/SUBSYSTEMS.md), [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md) | implementation reference and verification detail |
 | Long-form strategy / rationale | [`strategy/COMPETITIVE-RESEARCH.md`](strategy/COMPETITIVE-RESEARCH.md), [`strategy/AZURE-DATA-OPTIONS.md`](strategy/AZURE-DATA-OPTIONS.md), [`DOCS-README-PLAN-REORG.md`](DOCS-README-PLAN-REORG.md) | design rationale and planning context |
 
@@ -44,8 +44,9 @@ These folders are now valid first-stop entrypoints rather than placeholder-only 
 ### If you are operating Rune
 1. Start with [`operator/README.md`](operator/README.md) for the operator docs hub.
 2. Use [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md) and [`operator/DATABASES.md`](operator/DATABASES.md) for runtime/storage/deployment shape.
-3. Use [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md) for operating rules.
-4. Use [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) when parity-phase context matters.
+3. Use [`operator/HEALTH-AND-DOCTOR.md`](operator/HEALTH-AND-DOCTOR.md) and [`operator/REPLACEMENT-READINESS.md`](operator/REPLACEMENT-READINESS.md) for diagnostics and the canonical readiness verdict.
+4. Use [`operator/OPERATOR-POLICY.md`](operator/OPERATOR-POLICY.md) for operating rules.
+5. Use [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) when parity-phase context matters.
 
 ### If you are building Rune
 1. Start with [`contributor/README.md`](contributor/README.md) for the contributor docs hub.

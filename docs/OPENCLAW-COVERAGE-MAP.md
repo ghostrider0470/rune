@@ -34,6 +34,7 @@
 | Media / browser / OCR / TTS / STT | [`PARITY-INVENTORY.md`](parity/PARITY-INVENTORY.md), [`IMPLEMENTATION-PHASES.md`](IMPLEMENTATION-PHASES.md) | adjacent parity surfaces and phase placement |
 | Config / secrets / precedence | [`PROTOCOLS.md`](parity/PROTOCOLS.md), [`PARITY-CONTRACTS.md`](parity/PARITY-CONTRACTS.md), operator docs | runtime config behavior and operator-facing expectations |
 | Deployment / Docker / persistence | [`operator/DEPLOYMENT.md`](operator/DEPLOYMENT.md), [`operator/DATABASES.md`](operator/DATABASES.md), [`PARITY-SPEC.md`](parity/PARITY-SPEC.md) | persistent storage model and deployment contract |
+| Honest replacement-readiness verdict | [`operator/REPLACEMENT-READINESS.md`](operator/REPLACEMENT-READINESS.md), [`operator/HEALTH-AND-DOCTOR.md`](operator/HEALTH-AND-DOCTOR.md), [`parity/PARITY-SPEC.md`](parity/PARITY-SPEC.md) | whether Rune can be presented as an OpenClaw replacement today |
 | Admin UI / operator visibility | [`FUNCTIONALITY-CHECKLIST.md`](FUNCTIONALITY-CHECKLIST.md), [`operator/README.md`](operator/README.md), [`reference/ARCHITECTURE.md`](reference/ARCHITECTURE.md) | visibility, diagnostics, and UI-facing evidence |
 
 ## How to use this file
@@ -42,6 +43,7 @@
 2. Jump to the primary coverage doc for that surface.
 3. Use GitHub Project 2 and issue comments to find the current active implementation slice.
 4. Use `FUNCTIONALITY-CHECKLIST.md` when you need the implementation/evidence view rather than the planning view.
+5. Use `operator/REPLACEMENT-READINESS.md` when the question is not "what exists?" but "can Rune honestly replace OpenClaw yet?"
 
 ## Non-goal
 
