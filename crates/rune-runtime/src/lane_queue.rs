@@ -63,6 +63,7 @@ const HEARTBEAT_CAPACITY: usize = 1024;
 const DEFAULT_GLOBAL_TOOL_CAPACITY: usize = 32;
 const DEFAULT_PROJECT_TOOL_CAPACITY: usize = 4;
 const DEFAULT_STARVATION_ESCALATION_AFTER: usize = 3;
+const DEFAULT_ESCALATED_LANE_CAPACITY_WEIGHT: usize = 1;
 
 // ── Internal: a single lane's semaphore + FIFO waiters ───────────────
 
@@ -158,6 +159,7 @@ pub struct LaneQueue {
     heartbeat: LaneSemaphore,
     tool_limits: ToolConcurrencyQueue,
     starvation_escalation_after: usize,
+    escalated_lane_capacity_weight: usize,
 }
 
 impl LaneQueue {
@@ -174,6 +176,7 @@ impl LaneQueue {
                 DEFAULT_PROJECT_TOOL_CAPACITY,
             ),
             starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
+            escalated_lane_capacity_weight: DEFAULT_ESCALATED_LANE_CAPACITY_WEIGHT,
         }
     }
 
@@ -201,6 +204,7 @@ impl LaneQueue {
                 DEFAULT_PROJECT_TOOL_CAPACITY,
             ),
             starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
+            escalated_lane_capacity_weight: DEFAULT_ESCALATED_LANE_CAPACITY_WEIGHT,
         }
     }
 
@@ -241,6 +245,7 @@ impl LaneQueue {
             heartbeat: LaneSemaphore::new(heartbeat),
             tool_limits: ToolConcurrencyQueue::new(global_tool_capacity, project_tool_capacity),
             starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
+            escalated_lane_capacity_weight: DEFAULT_ESCALATED_LANE_CAPACITY_WEIGHT,
         }
     }
 
@@ -286,6 +291,7 @@ impl LaneQueue {
 
         LaneStats {
             starvation_escalation_after: self.starvation_escalation_after,
+            escalated_lane_capacity_weight: self.escalated_lane_capacity_weight,
             tool_project_stats,
             main_active: self.main.active(),
             main_available: self.main.semaphore.available_permits(),
@@ -325,7 +331,12 @@ impl LaneQueue {
         }
 
         let queue_depth = self.lane_semaphore(&requested).queued();
-        if queue_depth >= self.starvation_escalation_after {
+        let priority_capacity = self.priority.capacity;
+        let priority_active = self.priority.active();
+        let priority_headroom = priority_capacity.saturating_sub(priority_active);
+        let reserve = self.escalated_lane_capacity_weight.max(1);
+        let required_headroom = reserve.min(priority_capacity.max(1));
+        if queue_depth >= self.starvation_escalation_after && priority_headroom >= required_headroom {
             return Lane::Priority;
         }
 
@@ -487,6 +498,7 @@ impl Drop for ToolPermit {
 #[derive(Clone, Debug)]
 pub struct LaneStats {
     pub starvation_escalation_after: usize,
+    pub escalated_lane_capacity_weight: usize,
     pub tool_project_stats: BTreeMap<String, ProjectToolStats>,
     pub main_available: usize,
     pub main_active: usize,
@@ -527,7 +539,7 @@ impl fmt::Display for LaneStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "main={}/{} avail={} queued={} priority={}/{} avail={} queued={} subagent={}/{} avail={} queued={} cron={}/{} avail={} queued={} heartbeat={}/{} avail={} queued={} tools={}/{} avail={} queued={} per_project={} starvation_escalation_after={}",
+            "main={}/{} avail={} queued={} priority={}/{} avail={} queued={} subagent={}/{} avail={} queued={} cron={}/{} avail={} queued={} heartbeat={}/{} avail={} queued={} tools={}/{} avail={} queued={} per_project={} starvation_escalation_after={} escalated_lane_capacity_weight={}",
             self.main_active,
             self.main_capacity,
             self.main_available,
@@ -554,6 +566,7 @@ impl fmt::Display for LaneStats {
             self.tool_queued,
             self.project_tool_capacity,
             self.starvation_escalation_after,
+            self.escalated_lane_capacity_weight,
         )
     }
 }
@@ -825,9 +838,14 @@ mod tests {
         assert_eq!(stats.subagent_queued, 3);
         assert_eq!(stats.priority_active, 0);
         assert_eq!(stats.starvation_escalation_after, 3);
+        assert_eq!(stats.escalated_lane_capacity_weight, 1);
 
         let escalated = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
         assert!(escalated.is_ok(), "deep subagent backlog should escalate into priority capacity");
+
+        let escalated = escalated.unwrap();
+        assert_eq!(escalated.lane(), Lane::Priority);
+        drop(escalated);
 
         waiter_one.abort();
         waiter_two.abort();
@@ -862,6 +880,45 @@ mod tests {
 
         let escalated = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Cron)).await;
         assert!(escalated.is_ok(), "deep cron backlog should escalate into priority capacity");
+
+        let escalated = escalated.unwrap();
+        assert_eq!(escalated.lane(), Lane::Priority);
+        drop(escalated);
+
+        waiter_one.abort();
+        waiter_two.abort();
+        waiter_three.abort();
+    }
+
+    #[tokio::test]
+    async fn escalation_respects_priority_headroom() {
+        let queue = Arc::new(LaneQueue::with_all_capacities(1, 1, 1, 1, 1));
+        let _priority = queue.acquire(Lane::Priority).await;
+        let _subagent = queue.acquire(Lane::Subagent).await;
+
+        let waiter_one = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Subagent).await;
+            })
+        };
+        let waiter_two = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Subagent).await;
+            })
+        };
+        let waiter_three = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Subagent).await;
+            })
+        };
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let pending = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
+        assert!(pending.is_err(), "escalation should not steal the last busy priority slot");
 
         waiter_one.abort();
         waiter_two.abort();
@@ -1020,6 +1077,7 @@ mod tests {
         assert_eq!(stats.tool_queued, 0);
         assert_eq!(stats.project_tool_capacity, 4);
         assert!(stats.tool_project_stats.is_empty());
+        assert_eq!(stats.escalated_lane_capacity_weight, 1);
     }
 
     #[test]
@@ -1035,6 +1093,7 @@ mod tests {
     fn stats_display() {
         let stats = LaneStats {
             starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
+            escalated_lane_capacity_weight: DEFAULT_ESCALATED_LANE_CAPACITY_WEIGHT,
             tool_project_stats: BTreeMap::new(),
             main_active: 2,
             main_available: 2,
@@ -1064,7 +1123,7 @@ mod tests {
         };
         assert_eq!(
             stats.to_string(),
-            "main=2/4 avail=2 queued=3 priority=1/16 avail=15 queued=2 subagent=1/8 avail=7 queued=1 cron=0/1024 avail=1024 queued=0 heartbeat=1/1024 avail=1023 queued=4 tools=0/32 avail=32 queued=5 per_project=4 starvation_escalation_after=3"
+            "main=2/4 avail=2 queued=3 priority=1/16 avail=15 queued=2 subagent=1/8 avail=7 queued=1 cron=0/1024 avail=1024 queued=0 heartbeat=1/1024 avail=1023 queued=4 tools=0/32 avail=32 queued=5 per_project=4 starvation_escalation_after=3 escalated_lane_capacity_weight=1"
         );
     }
 }

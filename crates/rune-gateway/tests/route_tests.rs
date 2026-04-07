@@ -2261,6 +2261,8 @@ async fn status_reports_configured_lane_capacities() {
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["tool_queued"], 0);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
+    assert_eq!(payload["lane_stats"]["starvation_escalation_after"], 3);
+    assert_eq!(payload["lane_stats"]["escalated_lane_capacity_weight"], 1);
 }
 
 #[tokio::test]
@@ -2384,6 +2386,8 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     assert_eq!(payload["lanes"]["tools"]["available"], 31);
     assert_eq!(payload["lanes"]["tools"]["capacity"], 32);
     assert_eq!(payload["lanes"]["tools"]["queued"], 0);
+    assert_eq!(payload["lanes"]["starvation_escalation_after"], 3);
+    assert_eq!(payload["lanes"]["escalated_lane_capacity_weight"], 1);
     assert_eq!(payload["lanes"]["tools"]["per_project_capacity"], 4);
     assert_eq!(
         payload["lanes"]["tools"]["projects"]["project-a"]["active"],

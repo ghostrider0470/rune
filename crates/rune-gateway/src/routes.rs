@@ -1021,6 +1021,8 @@ pub struct StatusPaths {
 
 #[derive(Serialize)]
 pub struct LaneStatsResponse {
+    pub starvation_escalation_after: usize,
+    pub escalated_lane_capacity_weight: usize,
     pub tool_projects: std::collections::BTreeMap<String, ProjectToolStatsResponse>,
     pub main_active: usize,
     pub main_available: usize,
@@ -4188,6 +4190,8 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
 
 fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
     LaneStatsResponse {
+        starvation_escalation_after: stats.starvation_escalation_after,
+        escalated_lane_capacity_weight: stats.escalated_lane_capacity_weight,
         tool_projects: stats
             .tool_project_stats
             .into_iter()
