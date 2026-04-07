@@ -13945,11 +13945,11 @@ async fn session_status_unresolved_reuses_replacement_readiness_blockers() {
     }));
     assert!(unresolved.iter().any(|item| {
         item.as_str()
-            == Some("replacement readiness [product-surface]: operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere")
+            == Some("replacement readiness [product-surface]: operator-facing readiness wording is now aligned to canonical docs, but full replacement claims remain blocked until the remaining readiness-proof surfaces are evidenced")
     }));
     assert!(unresolved.iter().any(|item| {
         item.as_str()
-            == Some("replacement readiness [runtime-resilience]: circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure")
+            == Some("replacement readiness [runtime-resilience]: circuit breakers are already shipped, but broader runtime-resilience proof for an honest replacement claim still needs tracked operational evidence and closure")
     }));
 }
 

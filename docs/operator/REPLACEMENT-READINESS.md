@@ -6,6 +6,8 @@ This is the canonical operator-facing answer to one question:
 
 Current answer: **not yet**.
 
+As of 2026-04-07, the remaining scoped child issues under epic #893 (#896, #898, #899) are closed. The remaining blocker categories below are evidence/truthfulness gates tracked directly in the readiness surfaces, not open roadmap tickets.
+
 Rune already ships substantial OpenClaw-facing parity work, but replacement claims must stay narrower than feature existence. A feature can be implemented and still not be sufficient evidence for an honest replacement claim.
 
 ## Canonical verdict
@@ -49,7 +51,7 @@ These shipped capabilities are necessary, but they do not by themselves justify 
 
 State: **not replacement-ready**
 
-Tracked by: **#898**
+Tracked by: **readiness surfaces and canonical docs**
 
 Current shipped truth:
 - Rune distinguishes provider authenticity from sender trust policy
@@ -66,7 +68,7 @@ You may say the following today:
 - Rune is a parity-targeted OpenClaw replacement
 - large portions of the product surface are already implemented
 - doctor/status surfaces expose an explicit replacement-readiness verdict
-- Rune is **not yet** an honest full replacement claim while #898 remains open and readiness evidence remains bounded to the current documented surfaces
+- Rune is **not yet** an honest full replacement claim while readiness evidence remains bounded to the current documented surfaces and the doctor/status blocker categories below remain unresolved
 
 You should **not** say the following today:
 - Rune is already a full OpenClaw replacement

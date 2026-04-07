@@ -7705,13 +7705,13 @@ fn canonical_replacement_readiness_blockers() -> Vec<ReplacementReadinessBlocker
         ReplacementReadinessBlocker {
             category: "product-surface",
             status: "blocked",
-            detail: "operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere".to_string(),
+            detail: "operator-facing readiness wording is now aligned to canonical docs, but full replacement claims remain blocked until the remaining readiness-proof surfaces are evidenced".to_string(),
             issue: None,
         },
         ReplacementReadinessBlocker {
             category: "runtime-resilience",
             status: "partial",
-            detail: "circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure".to_string(),
+            detail: "circuit breakers are already shipped, but broader runtime-resilience proof for an honest replacement claim still needs tracked operational evidence and closure".to_string(),
             issue: None,
         },
     ]

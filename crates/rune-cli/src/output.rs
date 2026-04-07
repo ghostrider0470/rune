@@ -6262,7 +6262,7 @@ mod tests {
             readiness_summary: Some("targets: interactive_response<= 2000ms, queue_delay<= 500ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence".into()),
             replacement_readiness: Some(ReplacementReadinessReport {
                 verdict: "not_ready".into(),
-                summary: "Rune is not yet an honest OpenClaw replacement; 3 blocker categories remain open".into(),
+                summary: "Rune is not yet an honest OpenClaw replacement; 3 readiness-proof categories remain open".into(),
                 blockers: vec![
                     ReplacementReadinessBlocker {
                         category: "operational".into(),
@@ -6273,13 +6273,13 @@ mod tests {
                     ReplacementReadinessBlocker {
                         category: "product-surface".into(),
                         status: "blocked".into(),
-                        detail: "operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere".into(),
+                        detail: "operator-facing readiness wording is now aligned to canonical docs, but full replacement claims remain blocked until the remaining readiness-proof surfaces are evidenced".into(),
                         issue: None,
                     },
                     ReplacementReadinessBlocker {
                         category: "runtime-resilience".into(),
                         status: "partial".into(),
-                        detail: "circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure".into(),
+                        detail: "circuit breakers are already shipped, but broader runtime-resilience proof for an honest replacement claim still needs tracked operational evidence and closure".into(),
                         issue: None,
                     },
                 ],
@@ -6358,11 +6358,11 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("Overall: degraded"));
         assert!(out.contains("Readiness: slo_defined_evidence_pending — targets: interactive_response<= 2000ms, queue_delay<= 500ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence"));
-        assert!(out.contains("Replacement readiness: not_ready — Rune is not yet an honest OpenClaw replacement; 3 blocker categories remain open"));
+        assert!(out.contains("Replacement readiness: not_ready — Rune is not yet an honest OpenClaw replacement; 3 readiness-proof categories remain open"));
         assert!(out.contains("Replacement blockers:"));
         assert!(out.contains("operational: blocked — readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces"));
-        assert!(out.contains("product-surface: blocked — operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere"));
-        assert!(out.contains("runtime-resilience: partial — circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure"));
+        assert!(out.contains("product-surface: blocked — operator-facing readiness wording is now aligned to canonical docs, but full replacement claims remain blocked until the remaining readiness-proof surfaces are evidenced"));
+        assert!(out.contains("runtime-resilience: partial — circuit breakers are already shipped, but broader runtime-resilience proof for an honest replacement claim still needs tracked operational evidence and closure"));
         assert!(out.contains(
             "Topology: deployment=single-process, database=memory, models=local, search=embedded"
         ));
