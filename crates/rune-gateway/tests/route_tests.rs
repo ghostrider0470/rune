@@ -5970,13 +5970,35 @@ async fn dashboard_diagnostics_falls_back_to_status_notes() {
     assert_eq!(context_tier_counters[0]["kind"], "identity");
     assert_eq!(context_tier_counters[0]["token_budget"], 1000);
     assert_eq!(context_tier_counters[0]["loaded"], true);
+    assert_eq!(context_tier_counters[0]["over_budget"], false);
     assert_eq!(context_tier_counters[4]["kind"], "historical");
     assert_eq!(context_tier_counters[4]["loaded"], true);
+    assert_eq!(context_tier_counters[4]["over_budget"], false);
     assert!(
         items
             .iter()
             .any(|item| item["source"] == "memory_hierarchy")
     );
+}
+
+#[tokio::test]
+async fn context_assembly_report_marks_individual_tiers_over_budget() {
+    let assembler = ContextAssembler::new("Identity block").with_tier_budgets(1, 1_000, 1_000, 1_000);
+    let report = assembler.analyze_context_usage(
+        None,
+        None,
+        &["This identity/task payload is deliberately long enough to exceed the tiny identity budget.".into()],
+        10_000,
+        false,
+    );
+
+    let identity = report
+        .tiers
+        .iter()
+        .find(|tier| tier.kind == ContextTierKind::Identity)
+        .expect("identity tier present");
+    assert!(identity.over_budget);
+    assert!(report.tiers.iter().any(|tier| tier.over_budget));
 }
 
 #[tokio::test]

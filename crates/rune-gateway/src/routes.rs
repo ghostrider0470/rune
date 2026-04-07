@@ -1502,6 +1502,7 @@ pub struct DoctorContextTierCounter {
     pub loaded: bool,
     pub refresh_required: bool,
     pub source: String,
+    pub over_budget: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -8046,6 +8047,7 @@ async fn doctor_memory_hierarchy(
             loaded: tier.loaded,
             refresh_required: tier.refresh_required,
             source: tier.source.to_string(),
+            over_budget: tier.over_budget,
         })
         .collect::<Vec<_>>();
 
