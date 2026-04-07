@@ -1489,6 +1489,7 @@ pub struct ContextTierDiagnostics {
     pub task: usize,
     pub project: usize,
     pub shared: usize,
+    pub historical: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1763,6 +1764,7 @@ pub async fn dashboard_diagnostics(
         task: config.context.task,
         project: config.context.project,
         shared: config.context.shared,
+        historical: config.context.historical,
     };
 
     let memory_hierarchy_summary =
