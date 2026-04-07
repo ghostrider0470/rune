@@ -546,7 +546,7 @@ Not recommended as default deployment targets for the parity-first container arc
 
 Container deployment must make backup/restore straightforward.
 The shipped operator-facing slice today is the documented workflow below plus filesystem- and database-native tooling.
-The dedicated `rune backup` command family remains a parity target rather than a shipped requirement; see [PROTOCOLS.md §15.4](../parity/PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the full workflow and target CLI contract.
+The dedicated `rune backup` command family is now shipped for gateway-backed backup lifecycle operations. Use the documented operator workflow below to decide what to capture in each deployment mode, and use [PROTOCOLS.md §15.4](../parity/PROTOCOLS.md#154-backup-and-restore-workflow-contract) for the detailed behavioral contract.
 
 ## 12.1 What must be backup-friendly
 
