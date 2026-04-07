@@ -2855,6 +2855,17 @@ pub async fn get_session_status(
     };
 
     let mut unresolved = Vec::new();
+    if aggregate.turn_count == 0 {
+        unresolved.push(
+            "session has no recorded turns yet; usage/cost data is empty until first execution"
+                .to_string(),
+        );
+    }
+    if aggregate.latest_model.is_none() && model_override.is_none() {
+        unresolved.push(
+            "current model is unknown until a turn records provider/model selection".to_string(),
+        );
+    }
     unresolved.push("cost posture is estimate-only; provider pricing is not wired yet".to_string());
     if approval_mode == "on-miss" {
         unresolved.push(rune_runtime::restart_continuity::RESTART_CONTINUITY_SUMMARY.to_string());
@@ -4855,7 +4866,11 @@ pub async fn telegram_webhook(
     // Validate the webhook token matches the configured bot token and that the
     // telegram channel is explicitly enabled.
     let config = state.config.read().await;
-    let telegram_enabled = config.channels.enabled.iter().any(|channel| channel == "telegram");
+    let telegram_enabled = config
+        .channels
+        .enabled
+        .iter()
+        .any(|channel| channel == "telegram");
     let expected_token = config.channels.telegram_token.clone().unwrap_or_default();
     drop(config);
 
