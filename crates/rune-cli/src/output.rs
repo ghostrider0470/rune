@@ -6268,19 +6268,19 @@ mod tests {
                         category: "operational".into(),
                         status: "blocked".into(),
                         detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".into(),
-                        issue: Some("#905".into()),
+                        issue: None,
                     },
                     ReplacementReadinessBlocker {
                         category: "product-surface".into(),
                         status: "blocked".into(),
                         detail: "operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere".into(),
-                        issue: Some("#901, #902".into()),
+                        issue: None,
                     },
                     ReplacementReadinessBlocker {
                         category: "runtime-resilience".into(),
                         status: "partial".into(),
                         detail: "circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure".into(),
-                        issue: Some("#894".into()),
+                        issue: None,
                     },
                 ],
             }),
@@ -6360,9 +6360,9 @@ mod tests {
         assert!(out.contains("Readiness: slo_defined_evidence_pending — targets: interactive_response<= 2000ms, queue_delay<= 500ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence"));
         assert!(out.contains("Replacement readiness: not_ready — Rune is not yet an honest OpenClaw replacement; 3 blocker categories remain open"));
         assert!(out.contains("Replacement blockers:"));
-        assert!(out.contains("operational: blocked — readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces [issue: #905]"));
-        assert!(out.contains("product-surface: blocked — operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere [issue: #901, #902]"));
-        assert!(out.contains("runtime-resilience: partial — circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure [issue: #894]"));
+        assert!(out.contains("operational: blocked — readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces"));
+        assert!(out.contains("product-surface: blocked — operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere"));
+        assert!(out.contains("runtime-resilience: partial — circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure"));
         assert!(out.contains(
             "Topology: deployment=single-process, database=memory, models=local, search=embedded"
         ));
